@@ -1,51 +1,44 @@
 #!/usr/bin/env bash
 # ==============================================================================
-# Sage Life OS - Raspberry Pi 5 Automated Setup Script
+# Sage Life OS - Fast Setup Script (No system updates)
 # ==============================================================================
 set -e
 
-export DEBIAN_FRONTEND=noninteractive
-
-echo "=== 1. Updating System Package Repositories ==="
-sudo apt-get update -y
-sudo apt-get install -y --no-install-recommends curl git ufw sqlite3 jq
-
-echo "=== 2. Installing Docker & Docker Compose on Pi 5 ==="
+echo "=== 1. Checking Docker on Pi 5 ==="
 if ! command -v docker &> /dev/null; then
+    echo "Installing Docker..."
     curl -fsSL https://get.docker.com -o get-docker.sh
     sudo sh get-docker.sh
     sudo usermod -aG docker $USER
-    echo "Docker installed successfully."
+    rm get-docker.sh
 fi
 
-echo "=== 3. Installing Ollama for Local AI (Qwen 2.5 1.5B) ==="
+echo "=== 2. Checking Ollama for Local AI (Qwen 2.5 1.5B) ==="
 if ! command -v ollama &> /dev/null; then
+    echo "Installing Ollama..."
     curl -fsSL https://ollama.com/install.sh | sh
-    echo "Ollama installed."
 fi
 
-echo "Starting Ollama service and pulling Qwen 2.5 1.5B model..."
-sudo systemctl enable ollama
+echo "Starting Ollama and pulling Qwen 2.5 1.5B..."
+sudo systemctl enable ollama || true
 sudo systemctl start ollama || true
-ollama pull qwen2.5:1.5b || echo "Ollama pull queued or model already present."
+ollama pull qwen2.5:1.5b || echo "Ollama ready."
 
-echo "=== 4. Installing Cloudflare Tunnel (cloudflared) ==="
+echo "=== 3. Checking Cloudflare Tunnel (cloudflared) ==="
 if ! command -v cloudflared &> /dev/null; then
     curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
     sudo dpkg -i cloudflared.deb
     rm cloudflared.deb
-    echo "cloudflared installed."
 fi
 
-echo "=== 5. Creating Local Data Directory for SQLite ==="
+echo "=== 4. Setting Up Storage Directory ==="
 mkdir -p data/backups
 chmod -R 775 data
 
-echo "=== 6. Launching Sage Life OS Containers ==="
+echo "=== 5. Launching Sage Life OS Containers ==="
 docker compose up -d --build
 
 echo "=============================================================================="
-echo "🎉 Setup Complete! Sage Life OS is running on your Raspberry Pi 5."
-echo "Local Network URL: http://$(hostname -I | awk '{print $1}')"
-echo "See CLOUDFLARE_TUNNEL_GUIDE.md for 100% free public HTTPS setup for iOS/PC."
+echo "🎉 Sage Life OS is running!"
+echo "Open in your browser: http://$(hostname -I | awk '{print $1}')"
 echo "=============================================================================="
