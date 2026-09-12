@@ -9,6 +9,7 @@ services:
     volumes:
       - ./data:/data
       - ./backend/app:/app/app
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
     environment:
       - DATA_DIR=/data
       - OLLAMA_HOST=http://host.docker.internal:11434
