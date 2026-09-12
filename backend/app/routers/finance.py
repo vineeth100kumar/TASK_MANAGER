@@ -6,7 +6,7 @@ from typing import List, Dict, Any, Optional
 
 from ..database import get_db
 from ..models import (
-    FinanceAccountCreate, FinanceAccountResponse,
+    FinanceAccountCreate, FinanceAccountResponse, FinanceAccountUpdate,
     FinanceCategoryCreate, FinanceCategoryResponse,
     TransactionCreate, TransactionResponse
 )
