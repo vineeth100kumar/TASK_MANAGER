@@ -1,26 +1,57 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 # ==============================================================================
-# Sage Life OS - Auto-Sync Daemon for Raspberry Pi 5
+# Sage Life OS - Auto-Sync Daemon for Raspberry Pi 5 (Native Mode)
+# ==============================================================================
 # Automatically polls GitHub every 10 seconds.
-# When new code is detected, it pulls it immediately and hot-reloads!
-# Zero Docker rebuilds needed!
+# When new code is detected on origin/main:
+# 1. Resets hard to the latest commit
+# 2. Re-runs pip install if requirements.txt changed
+# 3. Restarts the systemd backend service in <1 second
+# 4. Frontend is served live immediately by Nginx (no builds required)
 # ==============================================================================
 
-REPO_DIR="$HOME/sage-os"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$REPO_DIR"
 
-echo "🚀 Sage OS Auto-Sync Daemon Started..."
-echo "Monitoring GitHub repository for updates every 10 seconds..."
+echo "=============================================================================="
+echo "🚀 Sage OS Auto-Sync Daemon Active"
+echo "Watching: origin/main every 10 seconds"
+echo "Working directory: $REPO_DIR"
+echo "=============================================================================="
 
 while true; do
-    git fetch origin main >/dev/null 2>&1
-    LOCAL=$(git rev-parse HEAD)
-    REMOTE=$(git rev-parse origin/main)
+    # Fetch latest remote changes silently
+    git fetch origin main >/dev/null 2>&1 || true
 
-    if [ "$LOCAL" != "$REMOTE" ]; then
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚡ New update detected on GitHub! Syncing..."
+    LOCAL=$(git rev-parse HEAD 2>/dev/null || echo "local")
+    REMOTE=$(git rev-parse origin/main 2>/dev/null || echo "remote")
+
+    if [ "$LOCAL" != "$REMOTE" ] && [ "$REMOTE" != "remote" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ⚡ New update detected on GitHub ($REMOTE)! Syncing..."
+        
+        # Check if python dependencies changed in incoming commit(s)
+        REQ_CHANGED=$(git diff HEAD origin/main -- backend/requirements.txt 2>/dev/null || true)
+
+        # Pull latest code
         git reset --hard origin/main
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Code synced! Live immediately."
+
+        # Ensure permissions on dist folder for Nginx
+        chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
+
+        # Update dependencies if requirements changed
+        if [ -n "$REQ_CHANGED" ] && [ -d "$REPO_DIR/.venv" ]; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Dependencies changed, updating virtualenv..."
+            "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/backend/requirements.txt" --quiet || true
+        fi
+
+        # Restart backend service
+        if command -v systemctl >/dev/null 2>&1; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Restarting sage-backend service..."
+            sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
+        fi
+
+        COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "latest")
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Synced successfully: \"$COMMIT_MSG\""
     fi
 
     sleep 10
