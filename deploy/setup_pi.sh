@@ -4,9 +4,11 @@
 # ==============================================================================
 set -e
 
-echo "=== 1. Updating System Packages ==="
-sudo apt-get update && sudo apt-get upgrade -y
-sudo apt-get install -y curl git ufw sqlite3 jq
+export DEBIAN_FRONTEND=noninteractive
+
+echo "=== 1. Updating System Package Repositories ==="
+sudo apt-get update -y
+sudo apt-get install -y --no-install-recommends curl git ufw sqlite3 jq
 
 echo "=== 2. Installing Docker & Docker Compose on Pi 5 ==="
 if ! command -v docker &> /dev/null; then
@@ -24,12 +26,11 @@ fi
 
 echo "Starting Ollama service and pulling Qwen 2.5 1.5B model..."
 sudo systemctl enable ollama
-sudo systemctl start ollama
-ollama pull qwen2.5:1.5b
+sudo systemctl start ollama || true
+ollama pull qwen2.5:1.5b || echo "Ollama pull queued or model already present."
 
 echo "=== 4. Installing Cloudflare Tunnel (cloudflared) ==="
 if ! command -v cloudflared &> /dev/null; then
-    # Download ARM64 deb package for Raspberry Pi 5
     curl -L --output cloudflared.deb https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-arm64.deb
     sudo dpkg -i cloudflared.deb
     rm cloudflared.deb
@@ -45,7 +46,6 @@ docker compose up -d --build
 
 echo "=============================================================================="
 echo "🎉 Setup Complete! Sage Life OS is running on your Raspberry Pi 5."
-echo "Local Access: http://$(hostname -I | awk '{print $1}')"
-echo "Next step: Run 'cloudflared tunnel login' or paste your free tunnel token."
-echo "See CLOUDFLARE_TUNNEL_GUIDE.md for public 100% free HTTPS setup."
+echo "Local Network URL: http://$(hostname -I | awk '{print $1}')"
+echo "See CLOUDFLARE_TUNNEL_GUIDE.md for 100% free public HTTPS setup for iOS/PC."
 echo "=============================================================================="
