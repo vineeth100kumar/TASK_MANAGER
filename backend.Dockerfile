@@ -2,15 +2,10 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    sqlite3 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
+# Upgrade pip and install wheels directly without apt dependency overhead
 COPY backend/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt
 
 COPY backend/app ./app
 
