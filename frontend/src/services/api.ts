@@ -86,10 +86,19 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/transactions/${id}`, {
       method: 'DELETE',
     }),
+  createAccount: (acc: { name: string; account_type: string; balance: number; currency?: string }) =>
+    fetchJson<FinanceAccount>('/api/v1/finance/accounts', {
+      method: 'POST',
+      body: JSON.stringify(acc),
+    }),
   updateAccount: (id: string, updates: Partial<{ name: string; balance: number; account_type: string }>) =>
     fetchJson<FinanceAccount>(`/api/v1/finance/accounts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(updates),
+    }),
+  deleteAccount: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/accounts/${id}`, {
+      method: 'DELETE',
     }),
 
   // Live Weather (Direct & Fast)
