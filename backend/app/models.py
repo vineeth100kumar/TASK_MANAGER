@@ -128,6 +128,12 @@ class FinanceAccountCreate(BaseModel):
     balance: float
     currency: str = "INR"
 
+class FinanceAccountUpdate(BaseModel):
+    name: Optional[str] = None
+    account_type: Optional[AccountType] = None
+    balance: Optional[float] = None
+    currency: Optional[str] = None
+
 class FinanceAccountResponse(BaseModel):
     id: str
     name: str

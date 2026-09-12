@@ -126,9 +126,57 @@ async def create_account(acc: FinanceAccountCreate, db: aiosqlite.Connection = D
         (acc_id, acc.name, acc.account_type, acc.balance, acc.currency, now_iso)
     )
     await db.commit()
-    return FinanceAccountResponse(
+    res = FinanceAccountResponse(
         id=acc_id, name=acc.name, account_type=acc.account_type, balance=acc.balance, currency=acc.currency, updated_at=now_iso
     )
+    await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_UPDATED", "data": res.model_dump()})
+    return res
+
+@router.patch("/accounts/{account_id}", response_model=FinanceAccountResponse)
+async def update_account(account_id: str, updates: FinanceAccountUpdate, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT * FROM finance_accounts WHERE id = ?", (account_id,)) as cursor:
+        existing = await cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Account not found")
+
+    now_iso = datetime.datetime.now().isoformat()
+    fields = []
+    values = []
+
+    update_dict = updates.model_dump(exclude_unset=True)
+    for k, v in update_dict.items():
+        fields.append(f"{k} = ?")
+        values.append(v)
+
+    if fields:
+        fields.append("updated_at = ?")
+        values.append(now_iso)
+        values.append(account_id)
+        sql = f"UPDATE finance_accounts SET {', '.join(fields)} WHERE id = ?"
+        await db.execute(sql, values)
+        await db.commit()
+
+    async with db.execute("SELECT * FROM finance_accounts WHERE id = ?", (account_id,)) as cursor:
+        updated = await cursor.fetchone()
+
+    res = FinanceAccountResponse(
+        id=updated["id"],
+        name=updated["name"],
+        account_type=updated["account_type"],
+        balance=updated["balance"],
+        currency=updated["currency"],
+        updated_at=updated["updated_at"]
+    )
+    await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_UPDATED", "data": res.model_dump()})
+    return res
+
+@router.delete("/accounts/{account_id}")
+async def delete_account(account_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    await db.execute("DELETE FROM finance_accounts WHERE id = ?", (account_id,))
+    await db.commit()
+    await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_DELETED", "data": {"id": account_id}})
+    return {"success": True, "id": account_id}
+
 
 @router.get("/transactions", response_model=List[TransactionResponse])
 async def list_transactions(limit: int = 50, db: aiosqlite.Connection = Depends(get_db)):

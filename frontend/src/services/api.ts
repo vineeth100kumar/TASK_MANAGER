@@ -1,6 +1,7 @@
 import {
   WorkItem, Milestone, Project, DailyPerformance,
-  FinanceSummary, Transaction, AiGreetingResponse
+  FinanceSummary, Transaction, AiGreetingResponse,
+  FinanceAccount, WeatherData
 } from '../types';
 
 const BASE_URL = '';
@@ -85,6 +86,15 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/transactions/${id}`, {
       method: 'DELETE',
     }),
+  updateAccount: (id: string, updates: Partial<{ name: string; balance: number; account_type: string }>) =>
+    fetchJson<FinanceAccount>(`/api/v1/finance/accounts/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
+
+  // Live Weather (Direct & Fast)
+  getWeather: (lat = 28.6139, lon = 77.2090) =>
+    fetchJson<WeatherData>(`/api/v1/weather?lat=${lat}&lon=${lon}`),
 
   // Local AI Services
   getAiGreeting: (name = 'Chief') =>

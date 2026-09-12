@@ -9,9 +9,11 @@ import {
   RefreshCw, 
   Trash2, 
   TrendingDown, 
-  AlertTriangle 
+  AlertTriangle,
+  Pencil,
+  X
 } from 'lucide-react';
-import { FinanceSummary, Transaction, PaymentMode, TransactionType } from '../../types';
+import { FinanceSummary, FinanceAccount, Transaction, PaymentMode, TransactionType } from '../../types';
 import { api } from '../../services/api';
 
 interface FinanceViewProps {
@@ -26,6 +28,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   onRefresh,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<FinanceAccount | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editBalance, setEditBalance] = useState('');
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<TransactionType>('expense');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('upi');
@@ -36,6 +41,24 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
   const accounts = summary?.accounts || [];
   const categories = summary?.categories || [];
+
+  const handleOpenEdit = (acc: FinanceAccount) => {
+    setEditingAccount(acc);
+    setEditName(acc.name);
+    setEditBalance(acc.balance.toString());
+  };
+
+  const handleSaveAccount = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingAccount) return;
+    const val = parseFloat(editBalance);
+    await api.updateAccount(editingAccount.id, {
+      name: editName,
+      balance: isNaN(val) ? 0 : val,
+    });
+    setEditingAccount(null);
+    onRefresh();
+  };
 
   const handleCreateTx = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -90,49 +113,45 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         </button>
       </div>
 
-      {/* 1. Account Cards (Bank, Cash, Wallet) */}
+      {/* 1. Account Cards (Bank, Cash, Wallet) with Real Balance Edit */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        {/* Bank Account */}
-        <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 p-5 rounded-2xl relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-semibold uppercase tracking-wider">Bank Accounts</span>
-            <CreditCard className="w-4 h-4 text-blue-400" />
+        {accounts.map((acc) => (
+          <div key={acc.id} className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 p-5 rounded-2xl relative overflow-hidden group">
+            <div className="flex items-center justify-between text-xs text-zinc-400">
+              <span className="font-semibold uppercase tracking-wider">{acc.name}</span>
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={() => handleOpenEdit(acc)}
+                  className="p-1 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                  title="Edit Balance"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                </button>
+                {acc.account_type === 'bank' ? (
+                  <CreditCard className="w-4 h-4 text-blue-400" />
+                ) : acc.account_type === 'cash' ? (
+                  <Coins className="w-4 h-4 text-amber-400" />
+                ) : (
+                  <Wallet className="w-4 h-4 text-emerald-400" />
+                )}
+              </div>
+            </div>
+            <div className="mt-3">
+              <p className="text-2xl font-bold text-zinc-100">
+                ₹{acc.balance.toLocaleString('en-IN')}
+              </p>
+              <div className="flex items-center justify-between mt-1">
+                <p className="text-[11px] text-zinc-400 capitalize">{acc.account_type} Balance</p>
+                <button
+                  onClick={() => handleOpenEdit(acc)}
+                  className="text-[11px] text-blue-400 hover:text-blue-300 font-medium opacity-80 hover:opacity-100"
+                >
+                  Set Balance
+                </button>
+              </div>
+            </div>
           </div>
-          <div className="mt-3">
-            <p className="text-2xl font-bold text-zinc-100">
-              ₹{(summary?.total_bank ?? 0).toLocaleString('en-IN')}
-            </p>
-            <p className="text-[11px] text-zinc-400 mt-1">Primary Savings & Checking</p>
-          </div>
-        </div>
-
-        {/* Cash in Hand */}
-        <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 p-5 rounded-2xl relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-semibold uppercase tracking-wider">Cash in Hand</span>
-            <Coins className="w-4 h-4 text-amber-400" />
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-bold text-zinc-100">
-              ₹{(summary?.total_cash ?? 0).toLocaleString('en-IN')}
-            </p>
-            <p className="text-[11px] text-zinc-400 mt-1">Physical Currency Tracker</p>
-          </div>
-        </div>
-
-        {/* Digital Wallets / UPI Reserves */}
-        <div className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 p-5 rounded-2xl relative overflow-hidden">
-          <div className="flex items-center justify-between text-xs text-zinc-400">
-            <span className="font-semibold uppercase tracking-wider">Digital Wallets</span>
-            <Wallet className="w-4 h-4 text-emerald-400" />
-          </div>
-          <div className="mt-3">
-            <p className="text-2xl font-bold text-zinc-100">
-              ₹{(summary?.total_wallet ?? 0).toLocaleString('en-IN')}
-            </p>
-            <p className="text-[11px] text-zinc-400 mt-1">Paytm / GPay Reserve</p>
-          </div>
-        </div>
+        ))}
       </div>
 
       {/* 2. Today's Breakdown by Payment Mode (UPI vs Debit vs Cash) */}
@@ -377,6 +396,62 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
                 >
                   Confirm & Save
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* Edit Account Modal */}
+      {editingAccount && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-zinc-100">Edit Account & Balance</h3>
+              <button onClick={() => setEditingAccount(null)} className="text-zinc-500 hover:text-zinc-300">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveAccount} className="space-y-4">
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Account Name</label>
+                <input
+                  type="text"
+                  value={editName}
+                  onChange={(e) => setEditName(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Current Balance (₹)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  value={editBalance}
+                  onChange={(e) => setEditBalance(e.target.value)}
+                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                  placeholder="0.00"
+                  required
+                />
+              </div>
+
+              <div className="flex justify-end space-x-2 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setEditingAccount(null)}
+                  className="px-4 py-2 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+                >
+                  Update Account
                 </button>
               </div>
             </form>

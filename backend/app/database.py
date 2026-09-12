@@ -158,14 +158,20 @@ async def init_database():
             count = (await cursor.fetchone())[0]
             if count == 0:
                 accounts = [
-                    ("acc_bank_1", "Primary Bank Account", "bank", 25000.0, "INR"),
-                    ("acc_cash_1", "Cash in Hand", "cash", 3500.0, "INR"),
-                    ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 1200.0, "INR"),
+                    ("acc_bank_1", "Primary Bank Account", "bank", 0.0, "INR"),
+                    ("acc_cash_1", "Cash in Hand", "cash", 0.0, "INR"),
+                    ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 0.0, "INR"),
                 ]
                 await db.executemany(
                     "INSERT INTO finance_accounts (id, name, account_type, balance, currency) VALUES (?, ?, ?, ?, ?)",
                     accounts,
                 )
+
+        # Automatically wipe legacy mock placeholder balances (25000 / 3500) if no transactions have been logged
+        async with db.execute("SELECT COUNT(*) FROM finance_transactions") as tx_cursor:
+            tx_count = (await tx_cursor.fetchone())[0]
+            if tx_count == 0:
+                await db.execute("UPDATE finance_accounts SET balance = 0.0 WHERE balance IN (25000.0, 3500.0, 1200.0)")
 
         # Seed default financial categories with budgets if none exist
         async with db.execute("SELECT COUNT(*) FROM finance_categories") as cursor:

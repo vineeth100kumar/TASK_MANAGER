@@ -13,7 +13,8 @@ import {
   DailyPerformance, 
   FinanceSummary, 
   Transaction, 
-  AiGreetingResponse 
+  AiGreetingResponse,
+  WeatherData
 } from './types';
 
 export const App: React.FC = () => {
@@ -27,17 +28,19 @@ export const App: React.FC = () => {
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [greetingData, setGreetingData] = useState<AiGreetingResponse | null>(null);
+  const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
 
   // Load all data
   const loadData = useCallback(async () => {
     try {
-      const [fetchedItems, fetchedMilestones, fetchedPerf, fetchedFin, fetchedTx, fetchedGreet] = await Promise.all([
+      const [fetchedItems, fetchedMilestones, fetchedPerf, fetchedFin, fetchedTx, fetchedGreet, fetchedWeather] = await Promise.all([
         api.getItems().catch(() => []),
         api.getMilestones().catch(() => []),
         api.getTodayDashboard().catch(() => null),
         api.getFinanceSummary().catch(() => null),
         api.getTransactions().catch(() => []),
         api.getAiGreeting().catch(() => null),
+        api.getWeather().catch(() => null),
       ]);
 
       setItems(fetchedItems);
@@ -46,6 +49,7 @@ export const App: React.FC = () => {
       setFinanceSummary(fetchedFin);
       setTransactions(fetchedTx);
       setGreetingData(fetchedGreet);
+      setWeatherData(fetchedWeather);
     } catch (e) {
       console.error('Failed to load Sage OS data', e);
     }
@@ -100,6 +104,7 @@ export const App: React.FC = () => {
           <DashboardView
             performance={dailyPerformance}
             greetingData={greetingData}
+            weatherData={weatherData}
             financeSummary={financeSummary}
             todayTasks={todayTasks}
             onToggleTask={handleToggleComplete}

@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import init_database, DB_PATH
-from .routers import items, finance, dashboard, ai, shortcuts, push
+from .routers import items, finance, dashboard, ai, shortcuts, push, weather
 from .services.ws_manager import ws_manager
 from .services.push_service import check_due_reminders
 
@@ -54,6 +54,7 @@ app.include_router(items.router)
 app.include_router(finance.router)
 app.include_router(dashboard.router)
 app.include_router(ai.router)
+app.include_router(weather.router)
 app.include_router(shortcuts.router)
 app.include_router(push.router)
 

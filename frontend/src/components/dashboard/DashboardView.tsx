@@ -12,11 +12,12 @@ import {
   CreditCard, 
   Coins 
 } from 'lucide-react';
-import { DailyPerformance, AiGreetingResponse, FinanceSummary, WorkItem } from '../../types';
+import { DailyPerformance, AiGreetingResponse, FinanceSummary, WorkItem, WeatherData } from '../../types';
 
 interface DashboardViewProps {
   performance: DailyPerformance | null;
   greetingData: AiGreetingResponse | null;
+  weatherData?: WeatherData | null;
   financeSummary: FinanceSummary | null;
   todayTasks: WorkItem[];
   onToggleTask: (task: WorkItem) => void;
@@ -26,17 +27,28 @@ interface DashboardViewProps {
 export const DashboardView: React.FC<DashboardViewProps> = ({
   performance,
   greetingData,
+  weatherData,
   financeSummary,
   todayTasks,
   onToggleTask,
   onNavigateToTab
 }) => {
-  const score = performance?.productivity_score ?? 85;
-  const streak = performance?.streak_days ?? 1;
-  const focusMinutes = performance?.focus_minutes_logged ?? 0;
-  const tasksCompleted = performance?.tasks_completed ?? 0;
   const tasksPlanned = performance?.tasks_planned ?? 0;
-  const weather = greetingData?.weather;
+  const tasksCompleted = performance?.tasks_completed ?? 0;
+  const score = tasksPlanned > 0 ? Math.round((tasksCompleted / tasksPlanned) * 100) : (tasksCompleted > 0 ? 100 : 0);
+  const streak = performance?.streak_days ?? 0;
+  const focusMinutes = performance?.focus_minutes_logged ?? 0;
+  const weather = weatherData || greetingData?.weather;
+
+  // Real-time dynamic greeting fallback
+  const getFallbackGreeting = () => {
+    const hr = new Date().getHours();
+    const period = hr < 12 ? 'morning' : hr < 17 ? 'afternoon' : hr < 21 ? 'evening' : 'night';
+    if (tasksPlanned === 0) {
+      return `Good ${period}! Your schedule is clear. Use the AI Brain Dump (Ctrl+K) to plan your priorities.`;
+    }
+    return `Good ${period}! You have ${tasksPlanned - tasksCompleted} tasks remaining today. Maintain your momentum.`;
+  };
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
@@ -51,12 +63,12 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               <span>Sage Executive Intelligence</span>
             </div>
             <h1 className="text-xl md:text-2xl font-semibold text-zinc-100 leading-snug">
-              {greetingData?.greeting || "Good day! Your system is tuned and ready. Review your priorities for peak performance."}
+              {greetingData?.greeting || getFallbackGreeting()}
             </h1>
           </div>
 
-          {/* Weather Widget (Open-Meteo) */}
-          {weather && (
+          {/* Live Weather Widget (Open-Meteo) */}
+          {weather ? (
             <div className="flex items-center space-x-4 bg-zinc-800/50 backdrop-blur-md px-4 py-3 rounded-xl border border-zinc-700/50 shrink-0">
               <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
                 {weather.rain_probability > 30 ? (
@@ -78,6 +90,11 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
                 </div>
               </div>
             </div>
+          ) : (
+            <div className="flex items-center space-x-3 bg-zinc-800/30 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs shrink-0">
+              <Sun className="w-4 h-4 text-zinc-500 animate-spin" />
+              <span>Connecting weather...</span>
+            </div>
           )}
         </div>
       </div>
@@ -88,12 +105,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
             <span>Today's Score</span>
-            <TrendingUp className="w-4 h-4 text-emerald-400" />
+            <TrendingUp className={`w-4 h-4 ${score > 0 ? 'text-emerald-400' : 'text-zinc-500'}`} />
           </div>
           <div className="my-3 flex items-baseline space-x-2">
-            <span className="text-3xl font-bold text-zinc-100">{score}%</span>
-            <span className="text-xs text-emerald-400 font-medium">
-              {score >= 80 ? 'Optimal' : 'In Progress'}
+            <span className="text-3xl font-bold text-zinc-100">
+              {tasksPlanned > 0 ? `${score}%` : '--'}
+            </span>
+            <span className={`text-xs font-medium ${score >= 80 ? 'text-emerald-400' : 'text-zinc-400'}`}>
+              {tasksPlanned === 0 ? 'No tasks yet' : score >= 80 ? 'Optimal' : 'In Progress'}
             </span>
           </div>
           <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
@@ -108,14 +127,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
             <span>Tasks Done</span>
-            <CheckCircle2 className="w-4 h-4 text-blue-400" />
+            <CheckCircle2 className={`w-4 h-4 ${tasksCompleted > 0 ? 'text-blue-400' : 'text-zinc-500'}`} />
           </div>
           <div className="my-3 flex items-baseline space-x-2">
             <span className="text-3xl font-bold text-zinc-100">{tasksCompleted}</span>
             <span className="text-xs text-zinc-400">/ {tasksPlanned} planned</span>
           </div>
           <p className="text-xs text-zinc-400">
-            {tasksPlanned - tasksCompleted > 0 ? `${tasksPlanned - tasksCompleted} remaining today` : 'All tasks cleared!'}
+            {tasksPlanned === 0 ? 'No tasks for today' : tasksPlanned - tasksCompleted > 0 ? `${tasksPlanned - tasksCompleted} remaining today` : 'All tasks cleared!'}
           </p>
         </div>
 
@@ -123,15 +142,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
           <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
             <span>Focus Time</span>
-            <Clock className="w-4 h-4 text-purple-400" />
+            <Clock className={`w-4 h-4 ${focusMinutes > 0 ? 'text-purple-400' : 'text-zinc-500'}`} />
           </div>
           <div className="my-3 flex items-baseline space-x-2">
             <span className="text-3xl font-bold text-zinc-100">{focusMinutes}m</span>
-            <span className="text-xs text-purple-400 font-medium">Logged</span>
+            <span className="text-xs text-purple-400 font-medium">{focusMinutes > 0 ? 'Logged' : 'Ready'}</span>
           </div>
-          <div className="flex items-center space-x-1.5 text-xs text-amber-400 font-medium">
-            <Flame className="w-3.5 h-3.5 fill-amber-400" />
-            <span>{streak} Day Streak</span>
+          <div className="flex items-center space-x-1.5 text-xs text-zinc-400 font-medium">
+            <Flame className={`w-3.5 h-3.5 ${streak > 0 ? 'fill-amber-400 text-amber-400' : 'text-zinc-600'}`} />
+            <span className={streak > 0 ? 'text-amber-400' : 'text-zinc-500'}>
+              {streak > 0 ? `${streak} Day Streak` : 'Complete task to start streak'}
+            </span>
           </div>
         </div>
 
@@ -146,17 +167,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
           <div className="my-3">
             <span className="text-2xl font-bold text-zinc-100">
-              ₹{(financeSummary?.net_worth ?? 28500).toLocaleString('en-IN')}
+              ₹{(financeSummary?.net_worth ?? 0).toLocaleString('en-IN')}
             </span>
             <div className="text-[11px] text-zinc-400 mt-0.5 flex space-x-2">
-              <span>Bank: ₹{(financeSummary?.total_bank ?? 25000).toLocaleString('en-IN')}</span>
+              <span>Bank: ₹{(financeSummary?.total_bank ?? 0).toLocaleString('en-IN')}</span>
               <span>•</span>
-              <span>Cash: ₹{(financeSummary?.total_cash ?? 3500).toLocaleString('en-IN')}</span>
+              <span>Cash: ₹{(financeSummary?.total_cash ?? 0).toLocaleString('en-IN')}</span>
             </div>
           </div>
           <div className="text-xs text-zinc-400 flex items-center justify-between">
             <span>Today's Spend:</span>
-            <span className="text-amber-400 font-semibold">₹{financeSummary?.today_spend ?? 0}</span>
+            <span className="font-semibold text-zinc-200">₹{(financeSummary?.today_spend ?? 0).toLocaleString('en-IN')}</span>
           </div>
         </div>
       </div>

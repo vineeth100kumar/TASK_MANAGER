@@ -10,12 +10,12 @@ router = APIRouter(prefix="/api/v1/dashboard", tags=["Daily Dashboard & Performa
 @router.get("/today")
 async def get_today_dashboard(db: aiosqlite.Connection = Depends(get_db)):
     """
-    Returns today's comprehensive performance metrics, accomplishment timeline,
-    streak count, and tasks summary.
+    Returns today's real performance metrics, accomplishment timeline,
+    streak count, and tasks summary. Zero fake or dummy data.
     """
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
-    # 1. Tasks scheduled or completed today
+    # 1. Real tasks scheduled or completed today
     query_today_tasks = """
         SELECT * FROM work_items 
         WHERE (due_date = ? OR (completed_at IS NOT NULL AND completed_at LIKE ?))
@@ -46,39 +46,36 @@ async def get_today_dashboard(db: aiosqlite.Connection = Depends(get_db)):
                     "entity_type": row["entity_type"]
                 })
 
-    # Sort timeline by completed_at desc
     timeline.sort(key=lambda x: x.get("completed_at") or "", reverse=True)
 
-    # 2. Performance score calculation
+    # 2. Real performance score calculation (NO hardcoded fake 85%)
     if tasks_planned == 0:
-        score = 100 if tasks_completed > 0 else 85
+        score = 100 if tasks_completed > 0 else 0
     else:
-        base_rate = (tasks_completed / tasks_planned) * 100
-        # Boost for focus minutes
-        focus_boost = min(15, (focus_minutes_logged // 30) * 5)
-        score = min(100, int(base_rate + focus_boost))
+        score = int((tasks_completed / tasks_planned) * 100)
 
-    # 3. Consecutive active streak calculation
-    streak = 1
-    # Check past 30 days
-    current_date = datetime.datetime.now()
-    for i in range(1, 30):
-        prev_date_str = (current_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
-        async with db.execute(
-            "SELECT COUNT(*) FROM work_items WHERE completed_at LIKE ?",
-            (f"{prev_date_str}%",)
-        ) as prev_cursor:
-            cnt = (await prev_cursor.fetchone())[0]
-            if cnt > 0:
-                streak += 1
-            else:
-                break
+    # 3. Real streak calculation (NO hardcoded streak = 1)
+    streak = 0
+    if tasks_completed > 0:
+        streak = 1
+        current_date = datetime.datetime.now()
+        for i in range(1, 30):
+            prev_date_str = (current_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            async with db.execute(
+                "SELECT COUNT(*) FROM work_items WHERE completed_at LIKE ?",
+                (f"{prev_date_str}%",)
+            ) as prev_cursor:
+                cnt = (await prev_cursor.fetchone())[0]
+                if cnt > 0:
+                    streak += 1
+                else:
+                    break
 
     return {
         "date": today_str,
         "tasks_planned": tasks_planned,
         "tasks_completed": tasks_completed,
-        "completion_rate": int((tasks_completed / tasks_planned) * 100) if tasks_planned > 0 else (100 if tasks_completed > 0 else 0),
+        "completion_rate": score,
         "focus_minutes_logged": focus_minutes_logged,
         "productivity_score": score,
         "urgent_task_count": urgent_count,
