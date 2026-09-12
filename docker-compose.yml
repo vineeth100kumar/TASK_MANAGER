@@ -8,6 +8,7 @@ services:
       - "8000:8000"
     volumes:
       - ./data:/data
+      - ./backend/app:/app/app
     environment:
       - DATA_DIR=/data
       - OLLAMA_HOST=http://host.docker.internal:11434
@@ -22,6 +23,8 @@ services:
     restart: unless-stopped
     ports:
       - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       - backend
 
