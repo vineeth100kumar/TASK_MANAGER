@@ -6,13 +6,15 @@ import {
   Sparkles, 
   Smartphone, 
   Wifi, 
-  WifiOff 
+  WifiOff,
+  RefreshCw
 } from 'lucide-react';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'tasks' | 'finance' | 'shortcuts';
   setActiveTab: (tab: 'dashboard' | 'tasks' | 'finance' | 'shortcuts') => void;
   isLiveConnected: boolean;
+  isSyncing?: boolean;
   onOpenQuickCapture: () => void;
 }
 
@@ -20,6 +22,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
   isLiveConnected,
+  isSyncing = false,
   onOpenQuickCapture
 }) => {
   return (
@@ -98,17 +101,27 @@ export const Navbar: React.FC<NavbarProps> = ({
             <kbd className="hidden lg:inline text-[10px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded ml-1">Ctrl+K</kbd>
           </button>
 
-          <div 
-            title={isLiveConnected ? "Connected live to Raspberry Pi 5" : "Reconnecting to Pi 5..."}
-            className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border ${
-              isLiveConnected 
-                ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
-                : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
-            }`}
-          >
-            {isLiveConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3 animate-pulse" />}
-            <span>{isLiveConnected ? 'RPi5 Live' : 'Connecting'}</span>
-          </div>
+          {isSyncing ? (
+            <div 
+              title="Saving changes in background to Raspberry Pi..."
+              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-sm shadow-blue-500/10"
+            >
+              <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+              <span>Saving to Pi...</span>
+            </div>
+          ) : (
+            <div 
+              title={isLiveConnected ? "Connected live to Raspberry Pi 5" : "Reconnecting to Pi 5..."}
+              className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border ${
+                isLiveConnected 
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              }`}
+            >
+              {isLiveConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3 animate-pulse" />}
+              <span>{isLiveConnected ? 'RPi5 Live' : 'Connecting'}</span>
+            </div>
+          )}
         </div>
       </header>
 

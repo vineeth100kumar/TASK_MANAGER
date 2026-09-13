@@ -108,6 +108,7 @@ export interface Transaction {
   payment_mode: PaymentMode;
   description?: string | null;
   transfer_to_account_id?: string | null;
+  transfer_to_account_name?: string | null;
   date: string;
   created_at: string;
 }

@@ -133,23 +133,42 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     device_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- High Performance Indexes for Raspberry Pi 5
+CREATE INDEX IF NOT EXISTS idx_work_items_due_completed ON work_items(due_date, is_completed);
+CREATE INDEX IF NOT EXISTS idx_work_items_entity_status ON work_items(entity_type, status);
+CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
+CREATE INDEX IF NOT EXISTS idx_work_items_milestone ON work_items(milestone_id);
+CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_subtasks_work_item ON subtasks(work_item_id);
+CREATE INDEX IF NOT EXISTS idx_subtasks_pos ON subtasks(position);
+CREATE INDEX IF NOT EXISTS idx_finance_tx_account ON finance_transactions(account_id);
+CREATE INDEX IF NOT EXISTS idx_finance_tx_date ON finance_transactions(date);
+CREATE INDEX IF NOT EXISTS idx_finance_tx_category ON finance_transactions(category_id);
+CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type, date);
 """
 
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
-    """Dependency that provides an async SQLite connection with WAL mode."""
+    """Dependency that provides an async SQLite connection optimized for Raspberry Pi 5."""
     async with aiosqlite.connect(DB_PATH) as db:
         db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA journal_mode = WAL;")
-        await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute("PRAGMA synchronous = NORMAL;")
+        await db.execute("PRAGMA busy_timeout = 10000;")
+        await db.execute("PRAGMA foreign_keys = ON;")
+        await db.execute("PRAGMA cache_size = -64000;")
         yield db
 
 async def init_database():
-    """Run migrations and seed initial default data if empty."""
+    """Run migrations, tune database pragmas, create indexes, and seed initial data."""
     async with aiosqlite.connect(DB_PATH) as db:
+        # WAL mode & memory optimizations for Pi
         await db.execute("PRAGMA journal_mode = WAL;")
-        await db.execute("PRAGMA foreign_keys = ON;")
         await db.execute("PRAGMA synchronous = NORMAL;")
+        await db.execute("PRAGMA busy_timeout = 10000;")
+        await db.execute("PRAGMA foreign_keys = ON;")
+        await db.execute("PRAGMA temp_store = MEMORY;")
+        await db.execute("PRAGMA mmap_size = 268435456;")
+        await db.execute("PRAGMA cache_size = -64000;")
         await db.executescript(SCHEMA_SQL)
         await db.commit()
 

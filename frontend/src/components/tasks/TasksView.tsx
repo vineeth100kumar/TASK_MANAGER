@@ -21,13 +21,21 @@ interface TasksViewProps {
   milestones: Milestone[];
   onRefresh: () => void;
   onToggleComplete: (item: WorkItem) => void;
+  onCreateItem?: (item: Partial<WorkItem> & { subtasks?: string[] }) => void;
+  onDeleteItem?: (id: string) => void;
+  onUpdateItem?: (id: string, updates: Partial<WorkItem>) => void;
+  onToggleSubtask?: (itemId: string, subtaskId: string) => void;
 }
 
 export const TasksView: React.FC<TasksViewProps> = ({
   items,
   milestones,
   onRefresh,
-  onToggleComplete
+  onToggleComplete,
+  onCreateItem,
+  onDeleteItem,
+  onUpdateItem,
+  onToggleSubtask
 }) => {
   const [filterType, setFilterType] = useState<string>('all');
   const [viewMode, setViewMode] = useState<'list' | 'kanban'>('list');
@@ -52,26 +60,31 @@ export const TasksView: React.FC<TasksViewProps> = ({
     return true;
   });
 
-  const handleCreate = async (e: React.FormEvent) => {
+  const handleCreate = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTitle.trim()) return;
 
-    await api.createItem({
-      title: newTitle,
+    const itemData = {
+      title: newTitle.trim(),
       entity_type: newType,
       priority: newPriority,
       due_date: newDueDate || undefined,
       repeat_rule: newRepeatRule || undefined,
       description: newDescription || undefined,
-      status: 'todo',
-    });
+      status: 'todo' as TaskStatus,
+    };
+
+    if (onCreateItem) {
+      onCreateItem(itemData);
+    } else {
+      api.createItem(itemData).then(() => onRefresh());
+    }
 
     setNewTitle('');
     setNewDescription('');
     setNewDueDate('');
     setNewRepeatRule('');
     setIsCreating(false);
-    onRefresh();
   };
 
   const handleAiAutoFill = async (item: WorkItem) => {
@@ -79,14 +92,18 @@ export const TasksView: React.FC<TasksViewProps> = ({
     try {
       const res = await api.autoFillTask(item.title, item.description || undefined);
       if (res.success && res.data) {
-        // Update item with generated description & subtasks
-        const updated = await api.updateItem(item.id, {
+        const updates: Partial<WorkItem> = {
           description: res.data.description,
           priority: (res.data.priority as TaskPriority) || item.priority,
           estimated_minutes: res.data.estimated_minutes || item.estimated_minutes
-        });
-        setSelectedItem(updated);
-        onRefresh();
+        };
+        setSelectedItem({ ...item, ...updates });
+        if (onUpdateItem) {
+          onUpdateItem(item.id, updates);
+        } else {
+          await api.updateItem(item.id, updates);
+          onRefresh();
+        }
       }
     } catch (e) {
       console.error(e);
@@ -95,20 +112,26 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
-  const handleDelete = async (id: string) => {
-    await api.deleteItem(id);
+  const handleDelete = (id: string) => {
     if (selectedItem?.id === id) setSelectedItem(null);
-    onRefresh();
+    if (onDeleteItem) {
+      onDeleteItem(id);
+    } else {
+      api.deleteItem(id).then(() => onRefresh());
+    }
   };
 
-  const handleToggleSubtask = async (subtaskId: string) => {
-    await api.toggleSubtask(subtaskId);
-    onRefresh();
+  const handleToggleSubtask = (subtaskId: string) => {
     if (selectedItem) {
       const updatedSubtasks = selectedItem.subtasks.map(s => 
         s.id === subtaskId ? { ...s, is_completed: !s.is_completed } : s
       );
       setSelectedItem({ ...selectedItem, subtasks: updatedSubtasks });
+      if (onToggleSubtask) {
+        onToggleSubtask(selectedItem.id, subtaskId);
+      } else {
+        api.toggleSubtask(subtaskId).then(() => onRefresh());
+      }
     }
   };
 

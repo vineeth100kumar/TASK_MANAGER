@@ -20,12 +20,31 @@ interface FinanceViewProps {
   summary: FinanceSummary | null;
   transactions: Transaction[];
   onRefresh: () => void;
+  onCreateAccount?: (acc: { name: string; account_type: string; balance: number; currency?: string }) => void;
+  onUpdateAccount?: (id: string, updates: { name?: string; balance?: number }) => void;
+  onDeleteAccount?: (id: string) => void;
+  onCreateTransaction?: (tx: {
+    account_id: string;
+    category_id?: string;
+    type: TransactionType;
+    amount: number;
+    payment_mode: PaymentMode;
+    description?: string;
+    transfer_to_account_id?: string;
+    date: string;
+  }) => void;
+  onDeleteTransaction?: (id: string) => void;
 }
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
   summary,
   transactions,
   onRefresh,
+  onCreateAccount,
+  onUpdateAccount,
+  onDeleteAccount,
+  onCreateTransaction,
+  onDeleteTransaction,
 }) => {
   const [isAdding, setIsAdding] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | null>(null);
@@ -52,42 +71,54 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setEditBalance(acc.balance.toString());
   };
 
-  const handleSaveAccount = async (e: React.FormEvent) => {
+  const handleSaveAccount = (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingAccount) return;
     const val = parseFloat(editBalance);
-    await api.updateAccount(editingAccount.id, {
-      name: editName,
-      balance: isNaN(val) ? 0 : val,
-    });
+    const balanceVal = isNaN(val) ? 0 : val;
+    const updates = { name: editName.trim(), balance: balanceVal };
+    const accId = editingAccount.id;
     setEditingAccount(null);
-    onRefresh();
+
+    if (onUpdateAccount) {
+      onUpdateAccount(accId, updates);
+    } else {
+      api.updateAccount(accId, updates).then(() => onRefresh());
+    }
   };
 
-  const handleDeleteAccount = async (id: string) => {
+  const handleDeleteAccount = (id: string) => {
     if (!confirm('Are you sure you want to delete this account?')) return;
-    await api.deleteAccount(id);
     setEditingAccount(null);
-    onRefresh();
+    if (onDeleteAccount) {
+      onDeleteAccount(id);
+    } else {
+      api.deleteAccount(id).then(() => onRefresh());
+    }
   };
 
-  const handleCreateAccount = async (e: React.FormEvent) => {
+  const handleCreateAccount = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newAccName.trim()) return;
     const val = parseFloat(newAccBalance);
-    await api.createAccount({
+    const accData = {
       name: newAccName.trim(),
       account_type: newAccType,
       balance: isNaN(val) ? 0 : val,
       currency: 'INR',
-    });
+    };
     setNewAccName('');
     setNewAccBalance('');
     setIsCreatingAccount(false);
-    onRefresh();
+
+    if (onCreateAccount) {
+      onCreateAccount(accData);
+    } else {
+      api.createAccount(accData).then(() => onRefresh());
+    }
   };
 
-  const handleCreateTx = async (e: React.FormEvent) => {
+  const handleCreateTx = (e: React.FormEvent) => {
     e.preventDefault();
     const parsedAmount = parseFloat(amount);
     if (!parsedAmount || parsedAmount <= 0) return;
@@ -97,8 +128,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     if (!chosenAccount) return;
 
     const todayStr = new Date().toISOString().split('T')[0];
-
-    await api.createTransaction({
+    const txData = {
       account_id: chosenAccount,
       category_id: categoryId || undefined,
       type,
@@ -107,17 +137,25 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       description: description || undefined,
       transfer_to_account_id: type === 'transfer' ? transferToAccountId : undefined,
       date: todayStr,
-    });
+    };
 
     setAmount('');
     setDescription('');
     setIsAdding(false);
-    onRefresh();
+
+    if (onCreateTransaction) {
+      onCreateTransaction(txData);
+    } else {
+      api.createTransaction(txData).then(() => onRefresh());
+    }
   };
 
-  const handleDeleteTx = async (id: string) => {
-    await api.deleteTransaction(id);
-    onRefresh();
+  const handleDeleteTx = (id: string) => {
+    if (onDeleteTransaction) {
+      onDeleteTransaction(id);
+    } else {
+      api.deleteTransaction(id).then(() => onRefresh());
+    }
   };
 
   return (
