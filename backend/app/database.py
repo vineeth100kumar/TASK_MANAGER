@@ -66,6 +66,7 @@ CREATE TABLE IF NOT EXISTS work_items (
     estimated_minutes INTEGER DEFAULT 30,
     actual_minutes INTEGER DEFAULT 0,
     depends_on TEXT DEFAULT '[]',
+    context_tags TEXT DEFAULT '',
     
     is_completed INTEGER DEFAULT 0,
     completed_at TEXT,
@@ -92,6 +93,20 @@ CREATE TABLE IF NOT EXISTS daily_reviews (
     reflection_notes TEXT,
     ai_summary TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- Morning/Evening Wizard Reflections
+CREATE TABLE IF NOT EXISTS daily_reflections (
+    id TEXT PRIMARY KEY,
+    date TEXT UNIQUE NOT NULL,
+    big_rocks TEXT DEFAULT '[]',
+    reflection TEXT DEFAULT '',
+    mood TEXT DEFAULT '',
+    completed_count INTEGER DEFAULT 0,
+    planned_count INTEGER DEFAULT 0,
+    migrated_tasks_count INTEGER DEFAULT 0,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 -- Finance Accounts, Categories, & Transactions
@@ -125,6 +140,31 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Finance Budget Guardrails (per category, per month)
+CREATE TABLE IF NOT EXISTS finance_budgets (
+    id TEXT PRIMARY KEY,
+    category_id TEXT NOT NULL REFERENCES finance_categories(id) ON DELETE CASCADE,
+    monthly_limit REAL NOT NULL DEFAULT 0.0,
+    period_year INTEGER NOT NULL,
+    period_month INTEGER NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(category_id, period_year, period_month)
+);
+
+-- Recurring Bills & Subscription Radar
+CREATE TABLE IF NOT EXISTS recurring_bills (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    amount REAL NOT NULL,
+    due_day_of_month INTEGER NOT NULL CHECK(due_day_of_month BETWEEN 1 AND 31),
+    account_id TEXT REFERENCES finance_accounts(id) ON DELETE SET NULL,
+    category TEXT DEFAULT 'Utilities & Bills',
+    icon TEXT DEFAULT 'Receipt',
+    color TEXT DEFAULT '#6366f1',
+    is_active INTEGER DEFAULT 1,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
 -- Push Subscriptions (iOS & PC Web Push)
 CREATE TABLE IF NOT EXISTS push_subscriptions (
     id TEXT PRIMARY KEY,
@@ -141,12 +181,15 @@ CREATE INDEX IF NOT EXISTS idx_work_items_entity_status ON work_items(entity_typ
 CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
 CREATE INDEX IF NOT EXISTS idx_work_items_milestone ON work_items(milestone_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id);
+CREATE INDEX IF NOT EXISTS idx_work_items_context_tags ON work_items(context_tags);
 CREATE INDEX IF NOT EXISTS idx_subtasks_work_item ON subtasks(work_item_id);
 CREATE INDEX IF NOT EXISTS idx_subtasks_pos ON subtasks(position);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_account ON finance_transactions(account_id);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_date ON finance_transactions(date);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_category ON finance_transactions(category_id);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type, date);
+CREATE INDEX IF NOT EXISTS idx_recurring_bills_active ON recurring_bills(is_active, due_day_of_month);
+CREATE INDEX IF NOT EXISTS idx_daily_reflections_date ON daily_reflections(date);
 """
 
 class SQLitePool:
@@ -212,6 +255,16 @@ async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
     finally:
         await db_pool.release(conn)
 
+async def _run_migrations(db: aiosqlite.Connection):
+    """Safe ALTER TABLE migrations for columns added after initial schema creation."""
+    # v2.3.0: Add context_tags column to work_items if it doesn't exist
+    async with db.execute("PRAGMA table_info(work_items)") as cursor:
+        columns = {row["name"] for row in await cursor.fetchall()}
+    if "context_tags" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN context_tags TEXT DEFAULT ''")
+        print("Migration: added context_tags column to work_items")
+    await db.commit()
+
 async def init_database():
     """Run migrations, tune database pragmas, create indexes, and seed initial data."""
     async with aiosqlite.connect(DB_PATH) as db:
@@ -226,6 +279,8 @@ async def init_database():
         await db.execute("PRAGMA cache_size = -64000;")
         await db.executescript(SCHEMA_SQL)
         await db.commit()
+        # Run safe column migrations for existing databases
+        await _run_migrations(db)
 
         # Seed default financial accounts if none exist
         async with db.execute("SELECT COUNT(*) FROM finance_accounts") as cursor:

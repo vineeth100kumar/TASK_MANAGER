@@ -30,6 +30,7 @@ export interface WorkItem {
   estimated_minutes: number;
   actual_minutes: number;
   depends_on: string[];
+  context_tags?: string;
   is_completed: boolean;
   completed_at?: string | null;
   created_at: string;
@@ -57,6 +58,9 @@ export interface Project {
   color: string;
   description?: string | null;
   created_at: string;
+  total_task_count?: number;
+  completed_task_count?: number;
+  progress_percentage?: number;
 }
 
 export interface DailyPerformance {
@@ -155,3 +159,63 @@ export interface AiGreetingResponse {
     urgent: number;
   };
 }
+
+export interface DailyReflection {
+  id?: string;
+  date: string;
+  big_rocks: string[];
+  reflection: string;
+  mood?: string;
+  completed_count?: number;
+  planned_count?: number;
+  migrated_tasks_count?: number;
+  created_at?: string;
+}
+
+export interface KickoffData {
+  date: string;
+  active_tasks: WorkItem[];
+  big_rock_suggestions: { id: string; title: string; priority: TaskPriority; due_date?: string }[];
+  today_events: { id: string; title: string; start_at?: string; end_at?: string; estimated_minutes: number }[];
+  existing_reflection?: DailyReflection | null;
+  streak_days: number;
+  total_active_tasks: number;
+}
+
+export interface DebriefResult {
+  success: boolean;
+  date: string;
+  completed_today: number;
+  planned: number;
+  migrated_to_tomorrow: number;
+  reflection_id: string;
+}
+
+export interface RecurringBill {
+  id: string;
+  name: string;
+  amount: number;
+  due_day_of_month: number;
+  account_id?: string | null;
+  category: string;
+  icon: string;
+  color: string;
+  is_active: boolean;
+  days_until_due: number;
+  is_overdue: boolean;
+  created_at: string;
+}
+
+export interface BudgetGuardrail {
+  id: string;
+  category_id: string;
+  category_name?: string;
+  monthly_limit: number;
+  period_year: number;
+  period_month: number;
+  spent_this_month: number;
+  budget_percentage: number;
+  status: 'ok' | 'warning' | 'danger' | 'exceeded';
+  created_at: string;
+}
+

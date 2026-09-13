@@ -97,6 +97,7 @@ async def list_items(
             estimated_minutes=row["estimated_minutes"],
             actual_minutes=row["actual_minutes"],
             depends_on=depends_on,
+            context_tags=row["context_tags"] or "" if "context_tags" in row.keys() else "",
             is_completed=bool(row["is_completed"]),
             completed_at=row["completed_at"],
             created_at=row["created_at"],
@@ -122,14 +123,14 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
             id, title, description, entity_type, status, priority, energy,
             due_date, start_at, end_at, remind_at, repeat_rule, next_occurrence,
             project_id, milestone_id, estimated_minutes, actual_minutes,
-            depends_on, is_completed, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+            depends_on, context_tags, is_completed, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     """
     await db.execute(query, (
         item_id, item.title, item.description, item.entity_type, item.status, item.priority, item.energy,
         item.due_date, item.start_at, item.end_at, item.remind_at, item.repeat_rule, next_occurrence,
         item.project_id, item.milestone_id, item.estimated_minutes, item.actual_minutes,
-        json.dumps(item.depends_on), now_iso, now_iso
+        json.dumps(item.depends_on), item.context_tags or "", now_iso, now_iso
     ))
     
     subtask_responses = []
@@ -165,6 +166,7 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
         estimated_minutes=item.estimated_minutes,
         actual_minutes=item.actual_minutes,
         depends_on=item.depends_on,
+        context_tags=item.context_tags or "",
         is_completed=False,
         completed_at=None,
         created_at=now_iso,
@@ -286,6 +288,7 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
         estimated_minutes=updated_row["estimated_minutes"],
         actual_minutes=updated_row["actual_minutes"],
         depends_on=json.loads(updated_row["depends_on"]) if updated_row["depends_on"] else [],
+        context_tags=updated_row["context_tags"] or "" if "context_tags" in updated_row.keys() else "",
         is_completed=bool(updated_row["is_completed"]),
         completed_at=updated_row["completed_at"],
         created_at=updated_row["created_at"],
@@ -320,12 +323,37 @@ async def toggle_subtask(subtask_id: str, db: aiosqlite.Connection = Depends(get
 # Projects & Milestones
 @router.get("/projects", response_model=List[ProjectResponse])
 async def list_projects(db: aiosqlite.Connection = Depends(get_db)):
+    """Lists projects with linked task counts and progress percentage in 2 fast queries."""
     projects = []
     async with db.execute("SELECT * FROM projects ORDER BY created_at DESC") as cursor:
-        for row in await cursor.fetchall():
-            projects.append(ProjectResponse(
-                id=row["id"], name=row["name"], color=row["color"], description=row["description"], created_at=row["created_at"]
-            ))
+        p_rows = await cursor.fetchall()
+
+    if not p_rows:
+        return []
+
+    # Batch count linked tasks per project
+    counts_by_project: Dict[str, tuple] = {}
+    async with db.execute(
+        "SELECT project_id, COUNT(*) as total, SUM(is_completed) as completed FROM work_items WHERE project_id IS NOT NULL GROUP BY project_id"
+    ) as count_cursor:
+        for c in await count_cursor.fetchall():
+            pid = c["project_id"]
+            counts_by_project[pid] = (c["total"] or 0, c["completed"] or 0)
+
+    for row in p_rows:
+        p_id = row["id"]
+        total, completed = counts_by_project.get(p_id, (0, 0))
+        pct = int((completed / total) * 100) if total > 0 else 0
+        projects.append(ProjectResponse(
+            id=p_id,
+            name=row["name"],
+            color=row["color"],
+            description=row["description"],
+            created_at=row["created_at"],
+            total_task_count=total,
+            completed_task_count=completed,
+            progress_percentage=pct
+        ))
     return projects
 
 @router.post("/projects", response_model=ProjectResponse)
@@ -337,7 +365,16 @@ async def create_project(proj: ProjectCreate, db: aiosqlite.Connection = Depends
         (p_id, proj.name, proj.color, proj.description, now_iso)
     )
     await db.commit()
-    return ProjectResponse(id=p_id, name=proj.name, color=proj.color, description=proj.description, created_at=now_iso)
+    return ProjectResponse(
+        id=p_id, name=proj.name, color=proj.color, description=proj.description,
+        created_at=now_iso, total_task_count=0, completed_task_count=0, progress_percentage=0
+    )
+
+@router.delete("/projects/{project_id}")
+async def delete_project(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    await db.commit()
+    return {"success": True, "id": project_id}
 
 @router.get("/milestones", response_model=List[MilestoneResponse])
 async def list_milestones(db: aiosqlite.Connection = Depends(get_db)):
@@ -395,3 +432,9 @@ async def create_milestone(m: MilestoneCreate, db: aiosqlite.Connection = Depend
         completed_task_count=0,
         progress_percentage=0
     )
+
+@router.delete("/milestones/{milestone_id}")
+async def delete_milestone(milestone_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    await db.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
+    await db.commit()
+    return {"success": True, "id": milestone_id}

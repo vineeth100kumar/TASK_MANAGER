@@ -51,5 +51,23 @@ class TestSageBackend(unittest.TestCase):
         self.assertTrue("payment" in bill_res["description"].lower() or "receipt" in bill_res["description"].lower())
         self.assertGreaterEqual(len(bill_res["subtasks"]), 3)
 
+    def test_big_rock_picker(self):
+        from app.services.planner_service import compute_big_rock_suggestions
+        tasks = [
+            {"id": "t1", "title": "Low task", "priority": "low", "energy": "low", "status": "todo", "due_date": "2099-01-01"},
+            {"id": "t2", "title": "Urgent bug", "priority": "urgent", "energy": "high", "status": "in_progress", "due_date": "2020-01-01"},
+            {"id": "t3", "title": "Medium task", "priority": "medium", "energy": "medium", "status": "todo", "due_date": "2026-09-13"},
+        ]
+        res = compute_big_rock_suggestions(tasks, limit=2)
+        self.assertEqual(len(res), 2)
+        self.assertEqual(res[0]["id"], "t2") # Urgent bug should rank first
+
+    def test_recurring_bill_calc(self):
+        from app.services.finance_service import calc_days_until_due
+        # Check calculation returns tuple of (int, bool)
+        days, is_overdue = calc_days_until_due(15)
+        self.assertIsInstance(days, int)
+        self.assertIsInstance(is_overdue, bool)
+
 if __name__ == "__main__":
     unittest.main()

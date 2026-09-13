@@ -8,9 +8,12 @@ from ..database import get_db
 from ..models import (
     FinanceAccountCreate, FinanceAccountResponse, FinanceAccountUpdate,
     FinanceCategoryCreate, FinanceCategoryResponse,
-    TransactionCreate, TransactionResponse
+    TransactionCreate, TransactionResponse,
+    BudgetCreate, BudgetResponse,
+    RecurringBillCreate, RecurringBillResponse
 )
 from ..services.ws_manager import ws_manager
+from ..services.finance_service import calc_days_until_due
 
 router = APIRouter(prefix="/api/v1/finance", tags=["Finance Tracker"])
 
@@ -301,3 +304,209 @@ async def delete_transaction(tx_id: str, db: aiosqlite.Connection = Depends(get_
     await db.commit()
     await ws_manager.broadcast({"type": "FINANCE_TRANSACTION_DELETED", "data": {"id": tx_id}})
     return {"success": True, "id": tx_id}
+
+# ========================================================
+# BUDGET GUARDRAILS
+# ========================================================
+
+@router.get("/budgets", response_model=List[BudgetResponse])
+async def list_budgets(year: Optional[int] = None, month: Optional[int] = None, db: aiosqlite.Connection = Depends(get_db)):
+    """Retrieves all category budget guardrails with current spent amounts and threshold statuses."""
+    now = datetime.datetime.now()
+    cur_year = year or now.year
+    cur_month = month or now.month
+    month_prefix = f"{cur_year:04d}-{cur_month:02d}"
+
+    spend_by_cat: Dict[str, float] = {}
+    async with db.execute(
+        "SELECT category_id, SUM(amount) as spent FROM finance_transactions WHERE date LIKE ? AND type = 'expense' AND category_id IS NOT NULL GROUP BY category_id",
+        (f"{month_prefix}%",)
+    ) as cursor:
+        for r in await cursor.fetchall():
+            spend_by_cat[r["category_id"]] = r["spent"] or 0.0
+
+    query = """
+        SELECT b.id, b.category_id, b.monthly_limit, b.period_year, b.period_month, b.created_at,
+               c.name as category_name
+        FROM finance_budgets b
+        JOIN finance_categories c ON b.category_id = c.id
+        WHERE b.period_year = ? AND b.period_month = ?
+        ORDER BY c.name ASC
+    """
+    budgets = []
+    found_cat_ids = set()
+    async with db.execute(query, (cur_year, cur_month)) as cursor:
+        for row in await cursor.fetchall():
+            cid = row["category_id"]
+            found_cat_ids.add(cid)
+            limit = row["monthly_limit"]
+            spent = spend_by_cat.get(cid, 0.0)
+            pct = int((spent / limit) * 100) if limit > 0 else 0
+            status = "ok"
+            if pct >= 100:
+                status = "exceeded"
+            elif pct >= 90:
+                status = "danger"
+            elif pct >= 70:
+                status = "warning"
+            budgets.append(BudgetResponse(
+                id=row["id"],
+                category_id=cid,
+                category_name=row["category_name"],
+                monthly_limit=limit,
+                period_year=row["period_year"],
+                period_month=row["period_month"],
+                spent_this_month=round(spent, 2),
+                budget_percentage=pct,
+                status=status,
+                created_at=row["created_at"]
+            ))
+
+    async with db.execute("SELECT id, name, monthly_budget, created_at FROM finance_categories WHERE monthly_budget > 0 ORDER BY name ASC") as cat_cursor:
+        for cat in await cat_cursor.fetchall():
+            cid = cat["id"]
+            if cid not in found_cat_ids:
+                limit = cat["monthly_budget"]
+                spent = spend_by_cat.get(cid, 0.0)
+                pct = int((spent / limit) * 100) if limit > 0 else 0
+                status = "ok"
+                if pct >= 100:
+                    status = "exceeded"
+                elif pct >= 90:
+                    status = "danger"
+                elif pct >= 70:
+                    status = "warning"
+                budgets.append(BudgetResponse(
+                    id=f"default_{cid}",
+                    category_id=cid,
+                    category_name=cat["name"],
+                    monthly_limit=limit,
+                    period_year=cur_year,
+                    period_month=cur_month,
+                    spent_this_month=round(spent, 2),
+                    budget_percentage=pct,
+                    status=status,
+                    created_at=cat["created_at"]
+                ))
+    return budgets
+
+@router.post("/budgets", response_model=BudgetResponse)
+async def set_budget(b: BudgetCreate, db: aiosqlite.Connection = Depends(get_db)):
+    """Sets or updates a monthly budget guardrail for a category."""
+    now = datetime.datetime.now()
+    year = b.period_year or now.year
+    month = b.period_month or now.month
+    b_id = f"bgt_{uuid.uuid4().hex[:10]}"
+    now_iso = now.isoformat()
+
+    async with db.execute("SELECT name FROM finance_categories WHERE id = ?", (b.category_id,)) as cursor:
+        cat = await cursor.fetchone()
+        if not cat:
+            raise HTTPException(status_code=404, detail="Category not found")
+        cat_name = cat["name"]
+
+    async with db.execute(
+        "SELECT id FROM finance_budgets WHERE category_id = ? AND period_year = ? AND period_month = ?",
+        (b.category_id, year, month)
+    ) as cursor:
+        existing = await cursor.fetchone()
+
+    if existing:
+        b_id = existing["id"]
+        await db.execute("UPDATE finance_budgets SET monthly_limit = ? WHERE id = ?", (b.monthly_limit, b_id))
+    else:
+        await db.execute(
+            "INSERT INTO finance_budgets (id, category_id, monthly_limit, period_year, period_month, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (b_id, b.category_id, b.monthly_limit, year, month, now_iso)
+        )
+    await db.execute("UPDATE finance_categories SET monthly_budget = ? WHERE id = ?", (b.monthly_limit, b.category_id))
+    await db.commit()
+
+    month_prefix = f"{year:04d}-{month:02d}"
+    spent = 0.0
+    async with db.execute(
+        "SELECT SUM(amount) as spent FROM finance_transactions WHERE date LIKE ? AND type = 'expense' AND category_id = ?",
+        (f"{month_prefix}%", b.category_id)
+    ) as sc:
+        sr = await sc.fetchone()
+        if sr and sr["spent"]:
+            spent = sr["spent"]
+
+    pct = int((spent / b.monthly_limit) * 100) if b.monthly_limit > 0 else 0
+    status = "ok"
+    if pct >= 100:
+        status = "exceeded"
+    elif pct >= 90:
+        status = "danger"
+    elif pct >= 70:
+        status = "warning"
+
+    res = BudgetResponse(
+        id=b_id, category_id=b.category_id, category_name=cat_name, monthly_limit=b.monthly_limit,
+        period_year=year, period_month=month, spent_this_month=round(spent, 2), budget_percentage=pct,
+        status=status, created_at=now_iso
+    )
+    await ws_manager.broadcast({"type": "FINANCE_BUDGET_UPDATED", "data": res.model_dump()})
+    return res
+
+@router.delete("/budgets/{budget_id}")
+async def delete_budget(budget_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    await db.execute("DELETE FROM finance_budgets WHERE id = ?", (budget_id,))
+    await db.commit()
+    return {"success": True, "id": budget_id}
+
+# ========================================================
+# RECURRING BILLS & SUBSCRIPTION RADAR
+# ========================================================
+
+@router.get("/recurring-bills", response_model=List[RecurringBillResponse])
+async def list_recurring_bills(db: aiosqlite.Connection = Depends(get_db)):
+    """Returns active recurring bills and subscriptions with computed days until due."""
+    bills = []
+    async with db.execute("SELECT * FROM recurring_bills WHERE is_active = 1 ORDER BY due_day_of_month ASC") as cursor:
+        for row in await cursor.fetchall():
+            r = dict(row)
+            due_day = r["due_day_of_month"]
+            days_until, is_overdue = calc_days_until_due(due_day)
+            bills.append(RecurringBillResponse(
+                id=r["id"],
+                name=r["name"],
+                amount=r["amount"],
+                due_day_of_month=due_day,
+                account_id=r.get("account_id"),
+                category=r.get("category", "Utilities & Bills"),
+                icon=r.get("icon", "Receipt"),
+                color=r.get("color", "#6366f1"),
+                is_active=bool(r.get("is_active", 1)),
+                days_until_due=days_until,
+                is_overdue=is_overdue,
+                created_at=r["created_at"]
+            ))
+    bills.sort(key=lambda b: (0 if b.is_overdue else 1, b.days_until_due))
+    return bills
+
+@router.post("/recurring-bills", response_model=RecurringBillResponse)
+async def create_recurring_bill(bill: RecurringBillCreate, db: aiosqlite.Connection = Depends(get_db)):
+    b_id = f"bill_{uuid.uuid4().hex[:8]}"
+    now_iso = datetime.datetime.now().isoformat()
+    await db.execute(
+        """INSERT INTO recurring_bills (id, name, amount, due_day_of_month, account_id, category, icon, color, is_active, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)""",
+        (b_id, bill.name, bill.amount, bill.due_day_of_month, bill.account_id, bill.category, bill.icon, bill.color, now_iso)
+    )
+    await db.commit()
+    days_until, is_overdue = calc_days_until_due(bill.due_day_of_month)
+    res = RecurringBillResponse(
+        id=b_id, name=bill.name, amount=bill.amount, due_day_of_month=bill.due_day_of_month,
+        account_id=bill.account_id, category=bill.category, icon=bill.icon, color=bill.color,
+        is_active=True, days_until_due=days_until, is_overdue=is_overdue, created_at=now_iso
+    )
+    await ws_manager.broadcast({"type": "RECURRING_BILL_CREATED", "data": res.model_dump()})
+    return res
+
+@router.delete("/recurring-bills/{bill_id}")
+async def delete_recurring_bill(bill_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    await db.execute("DELETE FROM recurring_bills WHERE id = ?", (bill_id,))
+    await db.commit()
+    await ws_manager.broadcast({"type": "RECURRING_BILL_DELETED", "data": {"id": bill_id}})
+    return {"success": True, "id": bill_id}

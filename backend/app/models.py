@@ -40,6 +40,7 @@ class WorkItemBase(BaseModel):
     estimated_minutes: int = 30
     actual_minutes: int = 0
     depends_on: List[str] = Field(default_factory=list)
+    context_tags: str = ""
 
 class WorkItemCreate(WorkItemBase):
     subtasks: Optional[List[str]] = None
@@ -62,6 +63,7 @@ class WorkItemUpdate(BaseModel):
     actual_minutes: Optional[int] = None
     depends_on: Optional[List[str]] = None
     is_completed: Optional[bool] = None
+    context_tags: Optional[str] = None
     subtasks: Optional[List[str]] = None
 
 class WorkItemResponse(WorkItemBase):
@@ -84,6 +86,9 @@ class ProjectResponse(BaseModel):
     color: str
     description: Optional[str] = None
     created_at: str
+    total_task_count: int = 0
+    completed_task_count: int = 0
+    progress_percentage: int = 0
 
 class MilestoneCreate(BaseModel):
     project_id: Optional[str] = None
@@ -114,6 +119,28 @@ class DailyPerformance(BaseModel):
     productivity_score: int
     streak_days: int
     timeline: List[Dict[str, Any]] = Field(default_factory=list)
+
+# ========================================================
+# MORNING / EVENING WIZARD REFLECTIONS
+# ========================================================
+
+class DailyReflectionCreate(BaseModel):
+    date: str  # YYYY-MM-DD
+    big_rocks: Optional[List[str]] = None
+    reflection: Optional[str] = ""
+    mood: Optional[str] = ""
+
+class DailyReflectionResponse(BaseModel):
+    id: str
+    date: str
+    big_rocks: List[str] = Field(default_factory=list)
+    reflection: str = ""
+    mood: str = ""
+    completed_count: int = 0
+    planned_count: int = 0
+    migrated_tasks_count: int = 0
+    created_at: str
+    updated_at: str
 
 # ========================================================
 # PERSONAL FINANCE TRACKER
@@ -179,6 +206,55 @@ class TransactionResponse(BaseModel):
     transfer_to_account_id: Optional[str] = None
     transfer_to_account_name: Optional[str] = None
     date: str
+    created_at: str
+
+# ========================================================
+# RECURRING BILLS & SUBSCRIPTION RADAR
+# ========================================================
+
+class RecurringBillCreate(BaseModel):
+    name: str
+    amount: float
+    due_day_of_month: int
+    account_id: Optional[str] = None
+    category: str = "Utilities & Bills"
+    icon: str = "Receipt"
+    color: str = "#6366f1"
+
+class RecurringBillResponse(BaseModel):
+    id: str
+    name: str
+    amount: float
+    due_day_of_month: int
+    account_id: Optional[str] = None
+    category: str
+    icon: str
+    color: str
+    is_active: bool
+    days_until_due: int   # computed: negative = overdue
+    is_overdue: bool
+    created_at: str
+
+# ========================================================
+# FINANCE BUDGET GUARDRAILS
+# ========================================================
+
+class BudgetCreate(BaseModel):
+    category_id: str
+    monthly_limit: float
+    period_year: Optional[int] = None   # defaults to current year
+    period_month: Optional[int] = None  # defaults to current month
+
+class BudgetResponse(BaseModel):
+    id: str
+    category_id: str
+    category_name: Optional[str] = None
+    monthly_limit: float
+    period_year: int
+    period_month: int
+    spent_this_month: float = 0.0
+    budget_percentage: int = 0
+    status: str = "ok"   # ok | warning | danger | exceeded
     created_at: str
 
 # ========================================================

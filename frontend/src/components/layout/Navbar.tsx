@@ -2,21 +2,25 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   CheckSquare, 
+  Folder,
   Wallet, 
   Sparkles, 
   Smartphone, 
   Wifi, 
   WifiOff,
-  RefreshCw
+  RefreshCw,
+  Sun,
+  Moon
 } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 
 interface NavbarProps {
-  activeTab: 'dashboard' | 'tasks' | 'finance' | 'shortcuts';
-  setActiveTab: (tab: 'dashboard' | 'tasks' | 'finance' | 'shortcuts') => void;
+  activeTab: 'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts';
+  setActiveTab: (tab: 'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts') => void;
   isLiveConnected: boolean;
   isSyncing?: boolean;
   onOpenQuickCapture: () => void;
+  onOpenWizard?: (mode?: 'morning' | 'evening') => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -24,8 +28,11 @@ export const Navbar: React.FC<NavbarProps> = ({
   setActiveTab,
   isLiveConnected,
   isSyncing = false,
-  onOpenQuickCapture
+  onOpenQuickCapture,
+  onOpenWizard
 }) => {
+  const currentHour = new Date().getHours();
+  const isEvening = currentHour >= 17 || currentHour < 5;
   return (
     <>
       {/* Mobile Top Navigation Bar */}
@@ -42,6 +49,15 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          {onOpenWizard && (
+            <button
+              onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
+              className={`p-1.5 rounded-lg border ${isEvening ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}
+              title="Daily Wizard"
+            >
+              {isEvening ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
+            </button>
+          )}
           {isSyncing ? (
             <div 
               title="Saving changes in background to Raspberry Pi..."
@@ -106,6 +122,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
 
             <button
+              onClick={() => setActiveTab('projects')}
+              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                activeTab === 'projects'
+                  ? 'bg-zinc-800 text-white shadow-sm'
+                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+              }`}
+            >
+              <Folder className="w-4 h-4" />
+              <span>Projects</span>
+            </button>
+
+            <button
               onClick={() => setActiveTab('finance')}
               className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
                 activeTab === 'finance'
@@ -131,7 +159,22 @@ export const Navbar: React.FC<NavbarProps> = ({
           </nav>
         </div>
 
-        <div className="flex items-center space-x-3">
+        <div className="flex items-center space-x-2.5">
+          {onOpenWizard && (
+            <button
+              onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
+              title={isEvening ? "Open Evening Debrief Wizard" : "Open Morning Kickoff Wizard"}
+              className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-lg border text-xs font-semibold transition-all ${
+                isEvening
+                  ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/30 hover:bg-indigo-600/30'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/30 hover:bg-amber-500/30'
+              }`}
+            >
+              {isEvening ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
+              <span>{isEvening ? 'Evening Debrief' : 'Morning Kickoff'}</span>
+            </button>
+          )}
+
           <button
             onClick={onOpenQuickCapture}
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 text-xs font-medium transition-all"
@@ -186,6 +229,16 @@ export const Navbar: React.FC<NavbarProps> = ({
           >
             <CheckSquare className="w-5 h-5" />
             <span className="text-[10px] font-medium mt-1">Tasks</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('projects')}
+            className={`flex flex-col items-center py-1 px-3 transition-colors ${
+              activeTab === 'projects' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
+            }`}
+          >
+            <Folder className="w-5 h-5" />
+            <span className="text-[10px] font-medium mt-1">Projects</span>
           </button>
 
           {/* Quick Capture Floating Button */}

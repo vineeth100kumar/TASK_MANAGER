@@ -2,15 +2,18 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { TasksView } from './components/tasks/TasksView';
+import { ProjectsHub } from './components/projects/ProjectsHub';
 import { FinanceView } from './components/finance/FinanceView';
 import { ShortcutsModal } from './components/shortcuts/ShortcutsModal';
 import { BrainDumpModal } from './components/layout/BrainDumpModal';
+import { MorningEveningWizard } from './components/planner/MorningEveningWizard';
 import { api } from './services/api';
 import { useLiveSync } from './services/websocket';
 import { 
   WorkItem, 
   WorkItemUpdatePayload,
   Milestone, 
+  Project,
   DailyPerformance, 
   FinanceSummary, 
   Transaction, 
@@ -21,12 +24,15 @@ import {
 } from './types';
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'finance' | 'shortcuts'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts'>('dashboard');
   const [isBrainDumpOpen, setIsBrainDumpOpen] = useState(false);
+  const [isWizardOpen, setIsWizardOpen] = useState(false);
+  const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
 
   // Core Data State
   const [items, setItems] = useState<WorkItem[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
+  const [projects, setProjects] = useState<Project[]>([]);
   const [dailyPerformance, setDailyPerformance] = useState<DailyPerformance | null>(null);
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -44,9 +50,10 @@ export const App: React.FC = () => {
   // Load all data from Raspberry Pi 5
   const loadData = useCallback(async () => {
     try {
-      const [fetchedItems, fetchedMilestones, fetchedPerf, fetchedFin, fetchedTx, fetchedGreet, fetchedWeather] = await Promise.all([
+      const [fetchedItems, fetchedMilestones, fetchedProjects, fetchedPerf, fetchedFin, fetchedTx, fetchedGreet, fetchedWeather] = await Promise.all([
         api.getItems().catch(() => []),
         api.getMilestones().catch(() => []),
+        api.getProjects().catch(() => []),
         api.getTodayDashboard().catch(() => null),
         api.getFinanceSummary().catch(() => null),
         api.getTransactions().catch(() => []),
@@ -56,6 +63,7 @@ export const App: React.FC = () => {
 
       setItems(fetchedItems);
       setMilestones(fetchedMilestones);
+      setProjects(fetchedProjects);
       setDailyPerformance(fetchedPerf);
       setFinanceSummary(fetchedFin);
       setTransactions(fetchedTx);
@@ -91,6 +99,26 @@ export const App: React.FC = () => {
       }
     };
     window.addEventListener('keydown', handleKeyDown);
+
+    // Automatic Morning / Evening Wizard trigger based on schedule
+    const now = new Date();
+    const currentHour = now.getHours();
+    const currentMin = now.getMinutes();
+    const today = now.toISOString().split('T')[0];
+
+    // Morning window: 7:30 AM to 9:30 AM
+    const isMorningWindow = (currentHour === 7 && currentMin >= 30) || currentHour === 8 || (currentHour === 9 && currentMin <= 30);
+    // Evening window: 8:30 PM to 10:30 PM
+    const isEveningWindow = (currentHour === 20 && currentMin >= 30) || currentHour === 21 || (currentHour === 22 && currentMin <= 30);
+
+    if (isMorningWindow && !localStorage.getItem(`sage_morning_done_${today}`)) {
+      setWizardMode('morning');
+      setIsWizardOpen(true);
+    } else if (isEveningWindow && !localStorage.getItem(`sage_evening_done_${today}`)) {
+      setWizardMode('evening');
+      setIsWizardOpen(true);
+    }
+
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [loadData]);
 
@@ -272,6 +300,59 @@ export const App: React.FC = () => {
         console.error('Failed to toggle subtask on Pi', err);
       })
       .finally(endSync);
+  };
+
+  // ==========================================
+  // PROJECT & MILESTONE HANDLERS
+  // ==========================================
+  const handleCreateProject = async (proj: { name: string; color?: string; description?: string }) => {
+    try {
+      startSync();
+      await api.createProject(proj);
+      const updatedProjects = await api.getProjects();
+      setProjects(updatedProjects);
+    } catch (e) {
+      console.error('Failed to create project', e);
+    } finally {
+      endSync();
+    }
+  };
+
+  const handleDeleteProject = async (id: string) => {
+    try {
+      startSync();
+      await api.deleteProject(id);
+      setProjects(prev => prev.filter(p => p.id !== id));
+    } catch (e) {
+      console.error('Failed to delete project', e);
+    } finally {
+      endSync();
+    }
+  };
+
+  const handleCreateMilestone = async (m: { project_id?: string; title: string; due_date: string }) => {
+    try {
+      startSync();
+      await api.createMilestone(m);
+      const updatedMilestones = await api.getMilestones();
+      setMilestones(updatedMilestones);
+    } catch (e) {
+      console.error('Failed to create milestone', e);
+    } finally {
+      endSync();
+    }
+  };
+
+  const handleDeleteMilestone = async (id: string) => {
+    try {
+      startSync();
+      await api.deleteMilestone(id);
+      setMilestones(prev => prev.filter(m => m.id !== id));
+    } catch (e) {
+      console.error('Failed to delete milestone', e);
+    } finally {
+      endSync();
+    }
   };
 
   // ==========================================
@@ -476,6 +557,10 @@ export const App: React.FC = () => {
         isLiveConnected={isConnected}
         isSyncing={isSyncing}
         onOpenQuickCapture={() => setIsBrainDumpOpen(true)}
+        onOpenWizard={(mode) => {
+          setWizardMode(mode || (new Date().getHours() >= 17 ? 'evening' : 'morning'));
+          setIsWizardOpen(true);
+        }}
       />
 
       {/* Main Content Area */}
@@ -505,6 +590,19 @@ export const App: React.FC = () => {
           />
         )}
 
+        {activeTab === 'projects' && (
+          <ProjectsHub
+            projects={projects}
+            milestones={milestones}
+            items={items}
+            onCreateProject={handleCreateProject}
+            onDeleteProject={handleDeleteProject}
+            onCreateMilestone={handleCreateMilestone}
+            onDeleteMilestone={handleDeleteMilestone}
+            onSelectItem={() => setActiveTab('tasks')}
+          />
+        )}
+
         {activeTab === 'finance' && (
           <FinanceView
             summary={financeSummary}
@@ -522,6 +620,14 @@ export const App: React.FC = () => {
           <ShortcutsModal />
         )}
       </main>
+
+      {/* Morning Kickoff & Evening Debrief Wizard */}
+      <MorningEveningWizard
+        isOpen={isWizardOpen}
+        initialMode={wizardMode}
+        onClose={() => setIsWizardOpen(false)}
+        onTasksUpdated={loadData}
+      />
 
       {/* AI Brain Dump Quick Capture Modal */}
       <BrainDumpModal

@@ -1,7 +1,8 @@
 import {
   WorkItem, WorkItemUpdatePayload, Milestone, Project, DailyPerformance,
   FinanceSummary, Transaction, AiGreetingResponse,
-  FinanceAccount, WeatherData
+  FinanceAccount, WeatherData, DailyReflection, KickoffData, DebriefResult,
+  RecurringBill, BudgetGuardrail
 } from '../types';
 
 const BASE_URL = '';
@@ -54,11 +55,19 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(proj),
     }),
+  deleteProject: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/items/projects/${id}`, {
+      method: 'DELETE',
+    }),
   getMilestones: () => fetchJson<Milestone[]>('/api/v1/items/milestones'),
   createMilestone: (m: { project_id?: string; title: string; due_date: string }) =>
     fetchJson<Milestone>('/api/v1/items/milestones', {
       method: 'POST',
       body: JSON.stringify(m),
+    }),
+  deleteMilestone: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/items/milestones/${id}`, {
+      method: 'DELETE',
     }),
 
   // Dashboard & Daily Performance
@@ -100,6 +109,61 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/accounts/${id}`, {
       method: 'DELETE',
     }),
+
+  // Recurring Bills & Subscriptions
+  getRecurringBills: () => fetchJson<RecurringBill[]>('/api/v1/finance/recurring-bills'),
+  createRecurringBill: (bill: {
+    name: string;
+    amount: number;
+    due_day_of_month: number;
+    account_id?: string | null;
+    category?: string;
+    icon?: string;
+    color?: string;
+  }) =>
+    fetchJson<RecurringBill>('/api/v1/finance/recurring-bills', {
+      method: 'POST',
+      body: JSON.stringify(bill),
+    }),
+  deleteRecurringBill: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/recurring-bills/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Budget Guardrails
+  getBudgets: (year?: number, month?: number) => {
+    const q = year && month ? `?year=${year}&month=${month}` : '';
+    return fetchJson<BudgetGuardrail[]>(`/api/v1/finance/budgets${q}`);
+  },
+  setBudget: (budget: {
+    category_id: string;
+    monthly_limit: number;
+    period_year?: number;
+    period_month?: number;
+  }) =>
+    fetchJson<BudgetGuardrail>('/api/v1/finance/budgets', {
+      method: 'POST',
+      body: JSON.stringify(budget),
+    }),
+  deleteBudget: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/budgets/${id}`, {
+      method: 'DELETE',
+    }),
+
+  // Morning Kickoff & Evening Debrief Wizard
+  getKickoff: () => fetchJson<KickoffData>('/api/v1/planner/kickoff'),
+  submitDebrief: (reflection: {
+    date: string;
+    big_rocks?: string[];
+    reflection?: string;
+    mood?: string;
+  }) =>
+    fetchJson<DebriefResult>('/api/v1/planner/debrief', {
+      method: 'POST',
+      body: JSON.stringify(reflection),
+    }),
+  getReflection: (date: string) => fetchJson<DailyReflection>(`/api/v1/planner/reflection/${date}`),
+  listReflections: () => fetchJson<DailyReflection[]>('/api/v1/planner/reflections'),
 
   // Live Weather (Direct & Fast)
   getWeather: (lat = 28.6139, lon = 77.2090) =>
