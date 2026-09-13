@@ -56,24 +56,26 @@ async def get_finance_summary(db: aiosqlite.Connection = Depends(get_db)):
             elif mode == "cash":
                 today_cash_spend += amt
 
-    # 3. Monthly Spend & Budgets
+    # 3. Monthly Spend & Budgets (Batch aggregated in 2 fast queries)
+    spend_by_category: Dict[str, float] = {}
+    async with db.execute(
+        "SELECT category_id, SUM(amount) as spent FROM finance_transactions WHERE date LIKE ? AND type = 'expense' AND category_id IS NOT NULL GROUP BY category_id",
+        (f"{month_prefix}%",)
+    ) as spend_cursor:
+        for r in await spend_cursor.fetchall():
+            cid = r["category_id"]
+            spend_by_category[cid] = r["spent"] or 0.0
+
     total_monthly_spend = 0.0
     total_monthly_budget = 0.0
-    
     categories = []
-    async with db.execute("SELECT * FROM finance_categories") as cat_cursor:
+    
+    async with db.execute("SELECT * FROM finance_categories ORDER BY name ASC") as cat_cursor:
         for cat in await cat_cursor.fetchall():
             cat_id = cat["id"]
-            mb = cat["monthly_budget"]
+            mb = cat["monthly_budget"] or 0.0
             total_monthly_budget += mb
-            
-            # calculate spent for this category this month
-            async with db.execute(
-                "SELECT SUM(amount) FROM finance_transactions WHERE category_id = ? AND date LIKE ? AND type = 'expense'",
-                (cat_id, f"{month_prefix}%")
-            ) as spend_cursor:
-                spent = (await spend_cursor.fetchone())[0] or 0.0
-                
+            spent = spend_by_category.get(cat_id, 0.0)
             total_monthly_spend += spent
             pct = int((spent / mb) * 100) if mb > 0 else 0
             categories.append({

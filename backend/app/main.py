@@ -3,9 +3,10 @@ import asyncio
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .database import init_database, DB_PATH
+from .database import init_database, DB_PATH, db_pool
 from .routers import items, finance, dashboard, ai, shortcuts, push, weather
 from .services.ws_manager import ws_manager
 from .services.push_service import check_due_reminders
@@ -14,8 +15,9 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Initialize SQLite schema and seed default data
+    # Startup: Initialize SQLite schema, indexes, and connection pool
     await init_database()
+    await db_pool.init()
     
     # Start periodic reminder worker (runs every 60 seconds)
     scheduler.add_job(
@@ -26,13 +28,14 @@ async def lifespan(app: FastAPI):
         id="reminder_worker"
     )
     scheduler.start()
-    print("Database initialized and background scheduler started.")
+    print("Database connection pool initialized and background scheduler started.")
     
     yield
     
     # Shutdown
     scheduler.shutdown()
-    print("Scheduler shutdown gracefully.")
+    await db_pool.close()
+    print("Scheduler & database pool shutdown gracefully.")
 
 app = FastAPI(
     title="Sage Life & Task Operating System",
@@ -48,6 +51,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=500)
 
 # Mount Routers
 app.include_router(items.router)

@@ -1,6 +1,7 @@
 import os
+import asyncio
 import aiosqlite
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
 DB_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.dirname(__file__)), "data"))
 os.makedirs(DB_DIR, exist_ok=True)
@@ -148,15 +149,68 @@ CREATE INDEX IF NOT EXISTS idx_finance_tx_category ON finance_transactions(categ
 CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type, date);
 """
 
+class SQLitePool:
+    """Pre-warmed connection pool for high-throughput, low-latency async SQLite on Raspberry Pi 5."""
+    def __init__(self, db_path: str, max_connections: int = 6):
+        self.db_path = db_path
+        self.max_connections = max_connections
+        self._pool: Optional[asyncio.Queue] = None
+        self._all_conns: list[aiosqlite.Connection] = []
+        self._initialized = False
+        self._lock = asyncio.Lock()
+
+    async def init(self):
+        async with self._lock:
+            if self._initialized:
+                return
+            self._pool = asyncio.Queue(maxsize=self.max_connections)
+            for _ in range(self.max_connections):
+                conn = await aiosqlite.connect(self.db_path)
+                conn.row_factory = aiosqlite.Row
+                await conn.execute("PRAGMA synchronous = NORMAL;")
+                await conn.execute("PRAGMA busy_timeout = 10000;")
+                await conn.execute("PRAGMA foreign_keys = ON;")
+                await conn.execute("PRAGMA cache_size = -64000;")
+                self._all_conns.append(conn)
+                await self._pool.put(conn)
+            self._initialized = True
+
+    async def acquire(self) -> aiosqlite.Connection:
+        if not self._initialized:
+            await self.init()
+        assert self._pool is not None
+        return await self._pool.get()
+
+    async def release(self, conn: aiosqlite.Connection):
+        if self._pool is not None:
+            await self._pool.put(conn)
+
+    async def close(self):
+        async with self._lock:
+            for conn in self._all_conns:
+                try:
+                    await conn.close()
+                except Exception:
+                    pass
+            self._all_conns.clear()
+            self._pool = None
+            self._initialized = False
+
+db_pool = SQLitePool(DB_PATH, max_connections=6)
+
 async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
-    """Dependency that provides an async SQLite connection optimized for Raspberry Pi 5."""
-    async with aiosqlite.connect(DB_PATH) as db:
-        db.row_factory = aiosqlite.Row
-        await db.execute("PRAGMA synchronous = NORMAL;")
-        await db.execute("PRAGMA busy_timeout = 10000;")
-        await db.execute("PRAGMA foreign_keys = ON;")
-        await db.execute("PRAGMA cache_size = -64000;")
-        yield db
+    """Dependency that provides an async SQLite connection from the pre-warmed pool."""
+    conn = await db_pool.acquire()
+    try:
+        yield conn
+    except Exception:
+        try:
+            await conn.rollback()
+        except Exception:
+            pass
+        raise
+    finally:
+        await db_pool.release(conn)
 
 async def init_database():
     """Run migrations, tune database pragmas, create indexes, and seed initial data."""

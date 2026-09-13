@@ -3,7 +3,7 @@ import json
 import datetime
 import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from ..database import get_db
 from ..models import (
@@ -24,6 +24,7 @@ async def list_items(
     project_id: Optional[str] = None,
     db: aiosqlite.Connection = Depends(get_db)
 ):
+    """Lists work items with optional filtering and pre-batched subtasks for maximum speed."""
     query = "SELECT * FROM work_items WHERE 1=1"
     params = []
     
@@ -42,57 +43,66 @@ async def list_items(
         
     query += " ORDER BY is_completed ASC, due_date ASC, created_at DESC"
     
-    items = []
     async with db.execute(query, params) as cursor:
         rows = await cursor.fetchall()
-        for row in rows:
-            item_id = row["id"]
-            # Fetch subtasks
-            subtasks = []
-            async with db.execute("SELECT * FROM subtasks WHERE work_item_id = ? ORDER BY position ASC", (item_id,)) as sub_cursor:
-                sub_rows = await sub_cursor.fetchall()
-                for s in sub_rows:
-                    subtasks.append(SubtaskResponse(
-                        id=s["id"],
-                        work_item_id=s["work_item_id"],
-                        title=s["title"],
-                        is_completed=bool(s["is_completed"]),
-                        position=s["position"],
-                        created_at=s["created_at"]
-                    ))
-                    
-            depends_on = []
-            if row["depends_on"]:
-                try:
-                    depends_on = json.loads(row["depends_on"])
-                except Exception:
-                    depends_on = []
-                    
-            items.append(WorkItemResponse(
-                id=row["id"],
-                title=row["title"],
-                description=row["description"],
-                entity_type=row["entity_type"],
-                status=row["status"],
-                priority=row["priority"],
-                energy=row["energy"],
-                due_date=row["due_date"],
-                start_at=row["start_at"],
-                end_at=row["end_at"],
-                remind_at=row["remind_at"],
-                repeat_rule=row["repeat_rule"],
-                next_occurrence=row["next_occurrence"],
-                project_id=row["project_id"],
-                milestone_id=row["milestone_id"],
-                estimated_minutes=row["estimated_minutes"],
-                actual_minutes=row["actual_minutes"],
-                depends_on=depends_on,
-                is_completed=bool(row["is_completed"]),
-                completed_at=row["completed_at"],
-                created_at=row["created_at"],
-                updated_at=row["updated_at"],
-                subtasks=subtasks
-            ))
+
+    if not rows:
+        return []
+
+    item_ids = [row["id"] for row in rows]
+    subtasks_by_item: Dict[str, List[SubtaskResponse]] = {iid: [] for iid in item_ids}
+    
+    # Pre-batch fetch ALL subtasks in ONE single fast query (Eliminates N+1 DB roundtrips)
+    placeholders = ",".join("?" for _ in item_ids)
+    sub_query = f"SELECT * FROM subtasks WHERE work_item_id IN ({placeholders}) ORDER BY position ASC"
+    async with db.execute(sub_query, item_ids) as sub_cursor:
+        for s in await sub_cursor.fetchall():
+            wid = s["work_item_id"]
+            if wid in subtasks_by_item:
+                subtasks_by_item[wid].append(SubtaskResponse(
+                    id=s["id"],
+                    work_item_id=s["work_item_id"],
+                    title=s["title"],
+                    is_completed=bool(s["is_completed"]),
+                    position=s["position"],
+                    created_at=s["created_at"]
+                ))
+
+    items = []
+    for row in rows:
+        item_id = row["id"]
+        depends_on = []
+        if row["depends_on"]:
+            try:
+                depends_on = json.loads(row["depends_on"])
+            except Exception:
+                depends_on = []
+                
+        items.append(WorkItemResponse(
+            id=row["id"],
+            title=row["title"],
+            description=row["description"],
+            entity_type=row["entity_type"],
+            status=row["status"],
+            priority=row["priority"],
+            energy=row["energy"],
+            due_date=row["due_date"],
+            start_at=row["start_at"],
+            end_at=row["end_at"],
+            remind_at=row["remind_at"],
+            repeat_rule=row["repeat_rule"],
+            next_occurrence=row["next_occurrence"],
+            project_id=row["project_id"],
+            milestone_id=row["milestone_id"],
+            estimated_minutes=row["estimated_minutes"],
+            actual_minutes=row["actual_minutes"],
+            depends_on=depends_on,
+            is_completed=bool(row["is_completed"]),
+            completed_at=row["completed_at"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+            subtasks=subtasks_by_item.get(item_id, [])
+        ))
             
     return items
 
@@ -316,28 +326,38 @@ async def create_project(proj: ProjectCreate, db: aiosqlite.Connection = Depends
 
 @router.get("/milestones", response_model=List[MilestoneResponse])
 async def list_milestones(db: aiosqlite.Connection = Depends(get_db)):
+    """Lists milestones with pre-batched task counts in 2 fast queries total."""
     milestones = []
     async with db.execute("SELECT * FROM milestones ORDER BY due_date ASC") as cursor:
-        for row in await cursor.fetchall():
-            m_id = row["id"]
-            # Count linked tasks
-            async with db.execute("SELECT COUNT(*), SUM(is_completed) FROM work_items WHERE milestone_id = ?", (m_id,)) as count_cursor:
-                counts = await count_cursor.fetchone()
-                total = counts[0] or 0
-                completed = counts[1] or 0
-                pct = int((completed / total) * 100) if total > 0 else 0
-                
-            milestones.append(MilestoneResponse(
-                id=m_id,
-                project_id=row["project_id"],
-                title=row["title"],
-                due_date=row["due_date"],
-                status=row["status"],
-                created_at=row["created_at"],
-                linked_task_count=total,
-                completed_task_count=completed,
-                progress_percentage=pct
-            ))
+        m_rows = await cursor.fetchall()
+
+    if not m_rows:
+        return []
+
+    # Batch count linked tasks in 1 single aggregate query
+    counts_by_milestone: Dict[str, tuple] = {}
+    async with db.execute(
+        "SELECT milestone_id, COUNT(*) as total, SUM(is_completed) as completed FROM work_items WHERE milestone_id IS NOT NULL GROUP BY milestone_id"
+    ) as count_cursor:
+        for c in await count_cursor.fetchall():
+            mid = c["milestone_id"]
+            counts_by_milestone[mid] = (c["total"] or 0, c["completed"] or 0)
+
+    for row in m_rows:
+        m_id = row["id"]
+        total, completed = counts_by_milestone.get(m_id, (0, 0))
+        pct = int((completed / total) * 100) if total > 0 else 0
+        milestones.append(MilestoneResponse(
+            id=m_id,
+            project_id=row["project_id"],
+            title=row["title"],
+            due_date=row["due_date"],
+            status=row["status"],
+            created_at=row["created_at"],
+            linked_task_count=total,
+            completed_task_count=completed,
+            progress_percentage=pct
+        ))
     return milestones
 
 @router.post("/milestones", response_model=MilestoneResponse)

@@ -54,22 +54,24 @@ async def get_today_dashboard(db: aiosqlite.Connection = Depends(get_db)):
     else:
         score = int((tasks_completed / tasks_planned) * 100)
 
-    # 3. Real streak calculation (NO hardcoded streak = 1)
+    # 3. Real streak calculation in 1 single fast query (Eliminates 30 sequential DB calls)
     streak = 0
     if tasks_completed > 0:
         streak = 1
-        current_date = datetime.datetime.now()
-        for i in range(1, 30):
-            prev_date_str = (current_date - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
-            async with db.execute(
-                "SELECT COUNT(*) FROM work_items WHERE completed_at LIKE ?",
-                (f"{prev_date_str}%",)
-            ) as prev_cursor:
-                cnt = (await prev_cursor.fetchone())[0]
-                if cnt > 0:
-                    streak += 1
-                else:
-                    break
+        cutoff_date = (datetime.datetime.now() - datetime.timedelta(days=40)).strftime("%Y-%m-%d")
+        async with db.execute(
+            "SELECT DISTINCT substr(completed_at, 1, 10) as cdate FROM work_items WHERE completed_at IS NOT NULL AND completed_at >= ?",
+            (cutoff_date,)
+        ) as cursor:
+            completed_days = {row["cdate"] for row in await cursor.fetchall()}
+
+        now = datetime.datetime.now()
+        for i in range(1, 35):
+            day_str = (now - datetime.timedelta(days=i)).strftime("%Y-%m-%d")
+            if day_str in completed_days:
+                streak += 1
+            else:
+                break
 
     return {
         "date": today_str,
