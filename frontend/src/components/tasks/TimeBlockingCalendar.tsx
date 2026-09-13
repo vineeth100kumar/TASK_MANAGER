@@ -3,10 +3,11 @@ import {
   Clock, ChevronLeft, ChevronRight, Plus, CheckCircle2, 
   Circle, AlertCircle, Calendar as CalendarIcon, Tag
 } from 'lucide-react';
-import { WorkItem, WorkItemUpdatePayload } from '../../types';
+import { WorkItem, WorkItemUpdatePayload, Project } from '../../types';
 
 interface TimeBlockingCalendarProps {
   items: WorkItem[];
+  projects?: Project[];
   onSelectItem: (item: WorkItem) => void;
   onUpdateItem: (id: string, updates: WorkItemUpdatePayload) => void;
   onCreateItem: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
@@ -16,6 +17,7 @@ const HOURS = Array.from({ length: 18 }, (_, i) => i + 6); // 6 AM to 11 PM (23:
 
 export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
   items,
+  projects = [],
   onSelectItem,
   onUpdateItem,
   onCreateItem
@@ -213,6 +215,21 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                             <Circle className="w-3.5 h-3.5 text-zinc-400 flex-shrink-0" />
                           )}
                           <span className="font-semibold truncate">{item.title}</span>
+                          {item.project_id && (() => {
+                            const p = projects.find(proj => proj.id === item.project_id);
+                            if (!p) return null;
+                            return (
+                              <span 
+                                className="text-[9px] px-1.5 py-0.5 rounded font-sans font-medium flex items-center gap-1 shrink-0"
+                                style={{
+                                  backgroundColor: `${p.color || '#3b82f6'}20`,
+                                  color: p.color || '#60a5fa'
+                                }}
+                              >
+                                ● {p.name}
+                              </span>
+                            );
+                          })()}
                         </div>
                         <span className="text-[10px] font-mono text-zinc-400 flex-shrink-0">
                           {durationMin}m
@@ -299,12 +316,29 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                   <span className="text-xs font-semibold text-zinc-200 line-clamp-2">
                     {item.title}
                   </span>
-                  {item.context_tags && (
-                    <div className="flex items-center gap-1 mt-1 text-[10px] text-zinc-400">
-                      <Tag className="w-2.5 h-2.5" />
-                      <span>{item.context_tags}</span>
-                    </div>
-                  )}
+                  <div className="flex items-center gap-1.5 mt-1 flex-wrap">
+                    {item.project_id && (() => {
+                      const p = projects.find(proj => proj.id === item.project_id);
+                      if (!p) return null;
+                      return (
+                        <span 
+                          className="text-[9px] px-1.5 py-0.5 rounded font-sans font-medium flex items-center gap-1 shrink-0"
+                          style={{
+                            backgroundColor: `${p.color || '#3b82f6'}20`,
+                            color: p.color || '#60a5fa'
+                          }}
+                        >
+                          ● {p.name}
+                        </span>
+                      );
+                    })()}
+                    {item.context_tags && (
+                      <div className="flex items-center gap-1 text-[10px] text-zinc-400">
+                        <Tag className="w-2.5 h-2.5" />
+                        <span>{item.context_tags}</span>
+                      </div>
+                    )}
+                  </div>
                 </div>
 
                 {/* Quick Schedule Dropdown / Action */}

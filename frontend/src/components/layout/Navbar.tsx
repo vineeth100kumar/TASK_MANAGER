@@ -10,7 +10,9 @@ import {
   WifiOff,
   RefreshCw,
   Sun,
-  Moon
+  Moon,
+  RotateCcw,
+  RotateCw
 } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 
@@ -21,6 +23,12 @@ interface NavbarProps {
   isSyncing?: boolean;
   onOpenQuickCapture: () => void;
   onOpenWizard?: (mode?: 'morning' | 'evening') => void;
+  canUndo?: boolean;
+  canRedo?: boolean;
+  onUndo?: () => void;
+  onRedo?: () => void;
+  undoTooltip?: string;
+  redoTooltip?: string;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -29,7 +37,13 @@ export const Navbar: React.FC<NavbarProps> = ({
   isLiveConnected,
   isSyncing = false,
   onOpenQuickCapture,
-  onOpenWizard
+  onOpenWizard,
+  canUndo = false,
+  canRedo = false,
+  onUndo,
+  onRedo,
+  undoTooltip = '',
+  redoTooltip = ''
 }) => {
   const currentHour = new Date().getHours();
   const isEvening = currentHour >= 17 || currentHour < 5;
@@ -49,6 +63,16 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
 
         <div className="flex items-center space-x-2">
+          {onUndo && canUndo && (
+            <button
+              onClick={onUndo}
+              className="p-1.5 rounded-lg border bg-zinc-800/80 text-blue-400 border-blue-500/30 active:scale-95 transition-all"
+              title={`Undo: ${undoTooltip || 'Last action'}`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+          )}
+
           {onOpenWizard && (
             <button
               onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
@@ -174,6 +198,35 @@ export const Navbar: React.FC<NavbarProps> = ({
               <span>{isEvening ? 'Evening Debrief' : 'Morning Kickoff'}</span>
             </button>
           )}
+
+          {/* Undo / Redo Global Controls */}
+          <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 shadow-sm">
+            <button
+              onClick={onUndo}
+              disabled={!canUndo}
+              title={canUndo ? `Undo: ${undoTooltip} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)'}
+              className={`p-1.5 rounded-md transition-all ${
+                canUndo
+                  ? 'text-zinc-300 hover:text-white hover:bg-zinc-800 active:scale-95 cursor-pointer'
+                  : 'text-zinc-600 cursor-not-allowed opacity-40'
+              }`}
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+            </button>
+            <div className="w-[1px] h-3.5 bg-zinc-800 mx-0.5" />
+            <button
+              onClick={onRedo}
+              disabled={!canRedo}
+              title={canRedo ? `Redo: ${redoTooltip} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)'}
+              className={`p-1.5 rounded-md transition-all ${
+                canRedo
+                  ? 'text-zinc-300 hover:text-white hover:bg-zinc-800 active:scale-95 cursor-pointer'
+                  : 'text-zinc-600 cursor-not-allowed opacity-40'
+              }`}
+            >
+              <RotateCw className="w-3.5 h-3.5" />
+            </button>
+          </div>
 
           <button
             onClick={onOpenQuickCapture}

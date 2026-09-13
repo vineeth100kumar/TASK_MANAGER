@@ -17,14 +17,16 @@ import {
   Check,
   X,
   Lock,
-  Tag
+  Tag,
+  Folder
 } from 'lucide-react';
-import { WorkItem, WorkItemUpdatePayload, Milestone, EntityType, TaskStatus, TaskPriority } from '../../types';
+import { WorkItem, WorkItemUpdatePayload, Milestone, Project, EntityType, TaskStatus, TaskPriority } from '../../types';
 import { api } from '../../services/api';
 import { TimeBlockingCalendar } from './TimeBlockingCalendar';
 
 interface TasksViewProps {
   items: WorkItem[];
+  projects: Project[];
   milestones: Milestone[];
   onRefresh: () => void;
   onToggleComplete: (item: WorkItem) => void;
@@ -36,6 +38,7 @@ interface TasksViewProps {
 
 export const TasksView: React.FC<TasksViewProps> = ({
   items,
+  projects = [],
   milestones,
   onRefresh,
   onToggleComplete,
@@ -87,6 +90,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [newRepeatRule, setNewRepeatRule] = useState('');
   const [newDescription, setNewDescription] = useState('');
   const [newContextTags, setNewContextTags] = useState('');
+  const [newProjectId, setNewProjectId] = useState<string>('');
+  const [newMilestoneId, setNewMilestoneId] = useState<string>('');
+  const [newEstimatedMinutes, setNewEstimatedMinutes] = useState<number>(30);
+  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
 
   const filteredItems = items.filter((item) => {
     if (filterType === 'task' && item.entity_type !== 'task') return false;
@@ -94,6 +101,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
     if (filterType === 'reminder' && item.entity_type !== 'reminder') return false;
     if (filterType === 'milestone') return false; // Handled separately
     if (selectedTag && !item.context_tags?.toLowerCase().includes(selectedTag.toLowerCase())) {
+      return false;
+    }
+    if (selectedProjectId === 'inbox') {
+      if (item.project_id) return false;
+    } else if (selectedProjectId !== 'all' && item.project_id !== selectedProjectId) {
       return false;
     }
     return true;
@@ -111,6 +123,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
       repeat_rule: newRepeatRule || undefined,
       description: newDescription || undefined,
       context_tags: newContextTags || undefined,
+      project_id: newProjectId || undefined,
+      milestone_id: newMilestoneId || undefined,
+      estimated_minutes: newEstimatedMinutes || 30,
       status: 'todo' as TaskStatus,
       subtasks: generatedSubtasks.length > 0 ? generatedSubtasks : undefined,
     };
@@ -126,6 +141,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
     setNewDueDate('');
     setNewRepeatRule('');
     setNewContextTags('');
+    setNewProjectId('');
+    setNewMilestoneId('');
+    setNewEstimatedMinutes(30);
     setGeneratedSubtasks([]);
     setIsCreating(false);
   };
@@ -394,6 +412,54 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </button>
           ))}
         </div>
+
+        {/* Project Filter Chips */}
+        {projects.length > 0 && (
+          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
+            <span className="text-zinc-500 font-semibold text-[10px] uppercase tracking-wider pr-1 flex items-center gap-1">
+              <Folder className="w-3 h-3 text-zinc-400" /> Project:
+            </span>
+            <button
+              onClick={() => setSelectedProjectId('all')}
+              className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all whitespace-nowrap ${
+                selectedProjectId === 'all'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm'
+                  : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+              }`}
+            >
+              All Projects
+            </button>
+            <button
+              onClick={() => setSelectedProjectId('inbox')}
+              className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all whitespace-nowrap ${
+                selectedProjectId === 'inbox'
+                  ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 shadow-sm'
+                  : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+              }`}
+            >
+              Inbox (Unassigned)
+            </button>
+            {projects.map(proj => (
+              <button
+                key={proj.id}
+                onClick={() => setSelectedProjectId(proj.id)}
+                className={`px-2.5 py-0.5 rounded-full text-[11px] font-medium transition-all whitespace-nowrap flex items-center gap-1.5 ${
+                  selectedProjectId === proj.id
+                    ? 'border shadow-sm font-semibold'
+                    : 'bg-zinc-900/60 text-zinc-400 hover:text-zinc-200 border border-zinc-800'
+                }`}
+                style={selectedProjectId === proj.id ? {
+                  backgroundColor: `${proj.color || '#3b82f6'}20`,
+                  borderColor: `${proj.color || '#3b82f6'}60`,
+                  color: proj.color || '#60a5fa'
+                } : {}}
+              >
+                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: proj.color || '#3b82f6' }} />
+                <span>{proj.name}</span>
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Milestones View if selected */}
@@ -472,6 +538,32 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     </div>
                     <div className="flex items-center space-x-2 mt-1 text-[11px] text-zinc-400 flex-wrap gap-y-1">
                       {item.due_date && <span>📅 {item.due_date}</span>}
+                      {item.project_id && (() => {
+                        const p = projects.find(proj => proj.id === item.project_id);
+                        if (!p) return null;
+                        return (
+                          <span 
+                            className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
+                            style={{
+                              backgroundColor: `${p.color || '#3b82f6'}15`,
+                              borderColor: `${p.color || '#3b82f6'}40`,
+                              color: p.color || '#60a5fa'
+                            }}
+                          >
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
+                            <span className="truncate max-w-[120px]">{p.name}</span>
+                          </span>
+                        );
+                      })()}
+                      {item.milestone_id && (() => {
+                        const m = milestones.find(ms => ms.id === item.milestone_id);
+                        if (!m) return null;
+                        return (
+                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1 font-mono">
+                            🏁 {m.title}
+                          </span>
+                        );
+                      })()}
                       {item.context_tags && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700/60 text-zinc-300 flex items-center gap-1 font-mono">
                           <Tag className="w-2.5 h-2.5 text-zinc-400" />
@@ -609,6 +701,32 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         </div>
                       </div>
                       <div className="flex items-center gap-1.5 flex-wrap">
+                        {item.project_id && (() => {
+                          const p = projects.find(proj => proj.id === item.project_id);
+                          if (!p) return null;
+                          return (
+                            <div 
+                              className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
+                              style={{
+                                backgroundColor: `${p.color || '#3b82f6'}15`,
+                                borderColor: `${p.color || '#3b82f6'}40`,
+                                color: p.color || '#60a5fa'
+                              }}
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
+                              <span className="truncate max-w-[100px]">{p.name}</span>
+                            </div>
+                          );
+                        })()}
+                        {item.milestone_id && (() => {
+                          const m = milestones.find(ms => ms.id === item.milestone_id);
+                          if (!m) return null;
+                          return (
+                            <div className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1 font-mono">
+                              🏁 {m.title}
+                            </div>
+                          );
+                        })()}
                         {item.context_tags && (
                           <div className="text-[10px] text-zinc-400 flex items-center gap-0.5 font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded">
                             <Tag className="w-2.5 h-2.5 text-zinc-500" />
@@ -638,6 +756,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
         /* Timeline View */
         <TimeBlockingCalendar
           items={items}
+          projects={projects}
           onSelectItem={setSelectedItem}
           onUpdateItem={onUpdateItem || (() => {})}
           onCreateItem={onCreateItem || (() => {})}
@@ -760,6 +879,75 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     <option value="weekly:mon">Every Monday</option>
                     <option value="monthly:1">Monthly (1st of month)</option>
                   </select>
+                </div>
+              </div>
+
+              {/* Project & Milestone Assignment */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Project</label>
+                  <select
+                    value={newProjectId}
+                    onChange={(e) => {
+                      setNewProjectId(e.target.value);
+                      setNewMilestoneId('');
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">No Project (Inbox)</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>● {p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs text-zinc-400 mb-1">Milestone (Optional)</label>
+                  <select
+                    value={newMilestoneId}
+                    onChange={(e) => setNewMilestoneId(e.target.value)}
+                    disabled={!newProjectId}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+                  >
+                    <option value="">None</option>
+                    {milestones
+                      .filter(m => m.project_id === newProjectId)
+                      .map(m => (
+                        <option key={m.id} value={m.id}>🏁 {m.title}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Estimated Duration Quick Select */}
+              <div>
+                <label className="block text-xs text-zinc-400 mb-1">Estimated Duration</label>
+                <div className="flex flex-wrap gap-1.5 items-center">
+                  {[15, 30, 45, 60, 90, 120].map(mins => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => setNewEstimatedMinutes(mins)}
+                      className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
+                        newEstimatedMinutes === mins
+                          ? 'bg-blue-600 text-white font-bold shadow-sm'
+                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200'
+                      }`}
+                    >
+                      {mins < 60 ? `${mins}m` : `${mins / 60}h${mins % 60 ? `${mins % 60}m` : ''}`}
+                    </button>
+                  ))}
+                  <div className="flex items-center gap-1 text-xs text-zinc-400 ml-1">
+                    <input
+                      type="number"
+                      min={5}
+                      max={480}
+                      value={newEstimatedMinutes}
+                      onChange={e => setNewEstimatedMinutes(Math.max(5, parseInt(e.target.value) || 30))}
+                      className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-100 text-right"
+                    />
+                    <span>min</span>
+                  </div>
                 </div>
               </div>
 
@@ -907,6 +1095,81 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     </button>
                   );
                 })}
+              </div>
+            </div>
+
+            {/* Project & Milestone Reassignment Section */}
+            <div className="space-y-3 border-t border-zinc-800 pt-3">
+              <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                <Folder className="w-3.5 h-3.5 text-blue-400" /> Project & Milestone Assignment
+              </span>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Project</label>
+                  <select
+                    value={selectedItem.project_id || ''}
+                    onChange={(e) => {
+                      const val = e.target.value || null;
+                      const updated = { ...selectedItem, project_id: val, milestone_id: null };
+                      setSelectedItem(updated);
+                      onUpdateItem?.(selectedItem.id, { project_id: val as any, milestone_id: null as any });
+                    }}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                  >
+                    <option value="">No Project (Inbox)</option>
+                    {projects.map(p => (
+                      <option key={p.id} value={p.id}>● {p.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-[11px] text-zinc-400 mb-1">Milestone</label>
+                  <select
+                    value={selectedItem.milestone_id || ''}
+                    onChange={(e) => {
+                      const val = e.target.value || null;
+                      const updated = { ...selectedItem, milestone_id: val };
+                      setSelectedItem(updated);
+                      onUpdateItem?.(selectedItem.id, { milestone_id: val as any });
+                    }}
+                    disabled={!selectedItem.project_id}
+                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+                  >
+                    <option value="">None</option>
+                    {milestones
+                      .filter(m => m.project_id === selectedItem.project_id)
+                      .map(m => (
+                        <option key={m.id} value={m.id}>🏁 {m.title}</option>
+                      ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Estimated Duration Quick Editor */}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-zinc-400 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-zinc-500" /> Estimated Duration:
+                </span>
+                <div className="flex items-center gap-1.5">
+                  {[15, 30, 45, 60, 120].map(mins => (
+                    <button
+                      key={mins}
+                      type="button"
+                      onClick={() => {
+                        const updated = { ...selectedItem, estimated_minutes: mins };
+                        setSelectedItem(updated);
+                        onUpdateItem?.(selectedItem.id, { estimated_minutes: mins });
+                      }}
+                      className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all ${
+                        selectedItem.estimated_minutes === mins
+                          ? 'bg-blue-600 text-white font-bold shadow-sm'
+                          : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                      }`}
+                    >
+                      {mins < 60 ? `${mins}m` : `${mins / 60}h`}
+                    </button>
+                  ))}
+                </div>
               </div>
             </div>
 

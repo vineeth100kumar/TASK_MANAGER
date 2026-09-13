@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { RotateCcw, X } from 'lucide-react';
 import { Navbar } from './components/layout/Navbar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { TasksView } from './components/tasks/TasksView';
@@ -22,6 +23,14 @@ import {
   TaskStatus,
   FinanceAccount
 } from './types';
+
+export interface HistoryAction {
+  id: string;
+  description: string;
+  undo: () => any;
+  redo: () => any;
+  timestamp: number;
+}
 
 export const App: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts'>('dashboard');
@@ -88,14 +97,96 @@ export const App: React.FC = () => {
     debouncedLoadData();
   }, [debouncedLoadData]));
 
+  // ==========================================
+  // GLOBAL UNDO / REDO ARCHITECTURE
+  // ==========================================
+  const [undoStack, setUndoStack] = useState<HistoryAction[]>([]);
+  const [redoStack, setRedoStack] = useState<HistoryAction[]>([]);
+  const [actionToast, setActionToast] = useState<{ id: string; description: string; undo: () => void } | null>(null);
+  const toastTimerRef = useRef<any>(null);
+
+  const undoStackRef = useRef<HistoryAction[]>([]);
+  undoStackRef.current = undoStack;
+  const redoStackRef = useRef<HistoryAction[]>([]);
+  redoStackRef.current = redoStack;
+
+  const handleUndo = useCallback(async () => {
+    const stack = undoStackRef.current;
+    if (stack.length === 0) return;
+    const action = stack[stack.length - 1];
+    setUndoStack(prev => prev.slice(0, -1));
+    setRedoStack(prev => [...prev, action]);
+    setActionToast(null);
+    try {
+      await action.undo();
+    } catch (e) {
+      console.error('Failed to undo action:', e);
+    }
+  }, []);
+
+  const handleRedo = useCallback(async () => {
+    const stack = redoStackRef.current;
+    if (stack.length === 0) return;
+    const action = stack[stack.length - 1];
+    setRedoStack(prev => prev.slice(0, -1));
+    setUndoStack(prev => [...prev, action]);
+    try {
+      await action.redo();
+    } catch (e) {
+      console.error('Failed to redo action:', e);
+    }
+  }, []);
+
+  const pushHistoryAction = useCallback((action: HistoryAction) => {
+    setUndoStack(prev => [...prev.slice(-30), action]);
+    setRedoStack([]); // Clear redo stack on new action
+    
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setActionToast({
+      id: action.id,
+      description: action.description,
+      undo: () => {
+        handleUndo();
+      }
+    });
+    toastTimerRef.current = setTimeout(() => {
+      setActionToast(null);
+    }, 6000);
+  }, [handleUndo]);
+
   useEffect(() => {
     loadData();
 
-    // Global keyboard shortcut for PC: Ctrl+K or Cmd+K to open AI Brain Dump
+    // Global keyboard shortcuts:
+    // Ctrl+K / Cmd+K: AI Brain Dump
+    // Ctrl+Z / Cmd+Z: Undo
+    // Ctrl+Y / Cmd+Shift+Z / Ctrl+Shift+Z: Redo
     const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      const target = e.target as HTMLElement;
+      const tag = (target?.tagName || '').toLowerCase();
+      const isInput = tag === 'input' || tag === 'textarea' || target?.isContentEditable;
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setIsBrainDumpOpen(prev => !prev);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        if (!isInput) {
+          e.preventDefault();
+          handleUndo();
+        }
+        return;
+      }
+
+      if (((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') ||
+          ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z')) {
+        if (!isInput) {
+          e.preventDefault();
+          handleRedo();
+        }
+        return;
       }
     };
     window.addEventListener('keydown', handleKeyDown);
@@ -120,26 +211,23 @@ export const App: React.FC = () => {
     }
 
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [loadData]);
+  }, [loadData, handleUndo, handleRedo]);
 
   // ==========================================
-  // OPTIMISTIC TASK & EVENT HANDLERS
+  // OPTIMISTIC TASK & EVENT HANDLERS (WITH UNDO/REDO)
   // ==========================================
 
-  // Toggle Item Completion (Instant 0ms UI reflection)
-  const handleToggleComplete = (item: WorkItem) => {
-    const newCompleted = !item.is_completed;
+  // Base toggle completion
+  const executeToggleComplete = useCallback((itemId: string, newCompleted: boolean) => {
     const nowIso = new Date().toISOString();
 
-    // 1. Immediately update items state
-    setItems(prev => prev.map(i => i.id === item.id ? {
+    setItems(prev => prev.map(i => i.id === itemId ? {
       ...i,
       is_completed: newCompleted,
       status: (newCompleted ? 'done' : 'todo') as TaskStatus,
       completed_at: newCompleted ? nowIso : null
     } : i));
 
-    // 2. Immediately update Daily Performance ring and metrics
     setDailyPerformance(prev => {
       if (!prev) return prev;
       const newCompletedCount = Math.max(0, prev.tasks_completed + (newCompleted ? 1 : -1));
@@ -152,19 +240,93 @@ export const App: React.FC = () => {
       };
     });
 
-    // 3. Save to Pi in background
     startSync();
-    api.updateItem(item.id, { is_completed: newCompleted })
+    return api.updateItem(itemId, { is_completed: newCompleted })
       .catch(err => {
         console.error('Failed to sync item toggle to Pi', err);
-        // Rollback on failure
-        setItems(prev => prev.map(i => i.id === item.id ? item : i));
       })
       .finally(endSync);
-  };
+  }, []);
 
-  // Create Item (Instant 0ms UI reflection)
-  const handleCreateItem = (itemData: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => {
+  const handleToggleComplete = useCallback((item: WorkItem) => {
+    const newCompleted = !item.is_completed;
+    executeToggleComplete(item.id, newCompleted);
+
+    pushHistoryAction({
+      id: `act_${Date.now()}_${Math.random()}`,
+      description: `${newCompleted ? 'Completed' : 'Uncompleted'} "${item.title}"`,
+      undo: () => executeToggleComplete(item.id, !newCompleted),
+      redo: () => executeToggleComplete(item.id, newCompleted),
+      timestamp: Date.now()
+    });
+  }, [executeToggleComplete, pushHistoryAction]);
+
+  // Base delete and restore
+  const executeDeleteItem = useCallback((id: string) => {
+    setItems(prev => prev.filter(i => i.id !== id));
+    startSync();
+    return api.deleteItem(id)
+      .catch(err => console.error('Failed to delete item on Pi', err))
+      .finally(endSync);
+  }, []);
+
+  const executeRestoreItem = useCallback((item: WorkItem) => {
+    setItems(prev => [item, ...prev]);
+    startSync();
+    return api.createItem({
+      title: item.title,
+      description: item.description || undefined,
+      entity_type: item.entity_type,
+      status: item.status,
+      priority: item.priority,
+      energy: item.energy,
+      due_date: item.due_date || undefined,
+      repeat_rule: item.repeat_rule || undefined,
+      project_id: item.project_id || undefined,
+      milestone_id: item.milestone_id || undefined,
+      estimated_minutes: item.estimated_minutes,
+      context_tags: item.context_tags || undefined,
+      subtasks: (item.subtasks || []).map(s => s.title)
+    }).then(realItem => {
+      setItems(prev => prev.map(i => i.id === item.id ? realItem : i));
+    }).catch(err => {
+      console.error('Failed to restore item on Pi', err);
+    }).finally(endSync);
+  }, []);
+
+  // Delete Item
+  const handleDeleteItem = useCallback((id: string) => {
+    const toDelete = items.find(i => i.id === id);
+    if (!toDelete) return;
+
+    executeDeleteItem(id);
+
+    if (toDelete.due_date === todayStr || toDelete.priority === 'urgent') {
+      setDailyPerformance(prev => {
+        if (!prev) return prev;
+        const newPlanned = Math.max(0, prev.tasks_planned - 1);
+        const newCompleted = toDelete.is_completed ? Math.max(0, prev.tasks_completed - 1) : prev.tasks_completed;
+        const newScore = newPlanned > 0 ? Math.round((newCompleted / newPlanned) * 100) : (newCompleted > 0 ? 100 : 0);
+        return {
+          ...prev,
+          tasks_planned: newPlanned,
+          tasks_completed: newCompleted,
+          productivity_score: newScore,
+        };
+      });
+    }
+
+    pushHistoryAction({
+      id: `act_${Date.now()}_${Math.random()}`,
+      description: `Deleted "${toDelete.title}"`,
+      undo: () => executeRestoreItem(toDelete),
+      redo: () => executeDeleteItem(toDelete.id),
+      timestamp: Date.now()
+    });
+  }, [items, todayStr, executeDeleteItem, executeRestoreItem, pushHistoryAction]);
+
+  // Create Item
+  const handleCreateItem = useCallback((itemData: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => {
     const tempId = `temp_${Date.now()}`;
     const nowIso = new Date().toISOString();
     const optimisticItem: WorkItem = {
@@ -218,45 +380,24 @@ export const App: React.FC = () => {
     api.createItem(itemData)
       .then(realItem => {
         setItems(prev => prev.map(i => i.id === tempId ? realItem : i));
+        pushHistoryAction({
+          id: `act_${Date.now()}_${Math.random()}`,
+          description: `Created "${realItem.title}"`,
+          undo: () => executeDeleteItem(realItem.id),
+          redo: () => executeRestoreItem(realItem),
+          timestamp: Date.now()
+        });
       })
       .catch(err => {
         console.error('Failed to create item on Pi', err);
         setItems(prev => prev.filter(i => i.id !== tempId));
       })
       .finally(endSync);
-  };
-
-  // Delete Item (Instant 0ms UI reflection)
-  const handleDeleteItem = (id: string) => {
-    const toDelete = items.find(i => i.id === id);
-    setItems(prev => prev.filter(i => i.id !== id));
-
-    if (toDelete && (toDelete.due_date === todayStr || toDelete.priority === 'urgent')) {
-      setDailyPerformance(prev => {
-        if (!prev) return prev;
-        const newPlanned = Math.max(0, prev.tasks_planned - 1);
-        const newCompleted = toDelete.is_completed ? Math.max(0, prev.tasks_completed - 1) : prev.tasks_completed;
-        const newScore = newPlanned > 0 ? Math.round((newCompleted / newPlanned) * 100) : (newCompleted > 0 ? 100 : 0);
-        return {
-          ...prev,
-          tasks_planned: newPlanned,
-          tasks_completed: newCompleted,
-          productivity_score: newScore,
-        };
-      });
-    }
-
-    startSync();
-    api.deleteItem(id)
-      .catch(err => {
-        console.error('Failed to delete item on Pi', err);
-        if (toDelete) setItems(prev => [toDelete, ...prev]);
-      })
-      .finally(endSync);
-  };
+  }, [todayStr, pushHistoryAction, executeDeleteItem, executeRestoreItem]);
 
   // Update Item details
-  const handleUpdateItem = (id: string, updates: WorkItemUpdatePayload) => {
+  const handleUpdateItem = useCallback((id: string, updates: WorkItemUpdatePayload) => {
+    const existing = items.find(i => i.id === id);
     const { subtasks: newSubtaskStrings, ...directUpdates } = updates;
 
     setItems(prev => prev.map(i => {
@@ -274,6 +415,41 @@ export const App: React.FC = () => {
       return { ...i, ...directUpdates, subtasks: nextSubtasks };
     }));
 
+    if (existing) {
+      const existingSnapshot = { ...existing };
+      const prevPayload: WorkItemUpdatePayload = {
+        title: existing.title,
+        description: existing.description,
+        entity_type: existing.entity_type,
+        status: existing.status,
+        priority: existing.priority,
+        energy: existing.energy,
+        due_date: existing.due_date,
+        project_id: existing.project_id,
+        milestone_id: existing.milestone_id,
+        estimated_minutes: existing.estimated_minutes,
+        repeat_rule: existing.repeat_rule,
+        context_tags: existing.context_tags,
+        is_completed: existing.is_completed
+      };
+
+      pushHistoryAction({
+        id: `act_${Date.now()}_${Math.random()}`,
+        description: `Updated "${existing.title}"`,
+        undo: () => {
+          setItems(p => p.map(i => i.id === id ? existingSnapshot : i));
+          startSync();
+          return api.updateItem(id, prevPayload).finally(endSync);
+        },
+        redo: () => {
+          setItems(p => p.map(i => i.id === id ? { ...i, ...directUpdates } : i));
+          startSync();
+          return api.updateItem(id, updates).finally(endSync);
+        },
+        timestamp: Date.now()
+      });
+    }
+
     startSync();
     api.updateItem(id, updates)
       .then(realItem => {
@@ -283,7 +459,7 @@ export const App: React.FC = () => {
         console.error('Failed to update item on Pi', err);
       })
       .finally(endSync);
-  };
+  }, [items, pushHistoryAction]);
 
   // Toggle Subtask
   const handleToggleSubtask = (itemId: string, subtaskId: string) => {
@@ -561,7 +737,7 @@ export const App: React.FC = () => {
   const todayTasks = items.filter(i => i.due_date === todayStr || (!i.is_completed && i.priority === 'urgent'));
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans relative">
       {/* Navigation */}
       <Navbar
         activeTab={activeTab}
@@ -573,6 +749,12 @@ export const App: React.FC = () => {
           setWizardMode(mode || (new Date().getHours() >= 17 ? 'evening' : 'morning'));
           setIsWizardOpen(true);
         }}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        undoTooltip={undoStack[undoStack.length - 1]?.description || ''}
+        redoTooltip={redoStack[redoStack.length - 1]?.description || ''}
       />
 
       {/* Main Content Area */}
@@ -592,6 +774,7 @@ export const App: React.FC = () => {
         {activeTab === 'tasks' && (
           <TasksView
             items={items}
+            projects={projects}
             milestones={milestones}
             onRefresh={loadData}
             onToggleComplete={handleToggleComplete}
@@ -612,6 +795,8 @@ export const App: React.FC = () => {
             onCreateMilestone={handleCreateMilestone}
             onDeleteMilestone={handleDeleteMilestone}
             onSelectItem={() => setActiveTab('tasks')}
+            onCreateItem={handleCreateItem}
+            onToggleComplete={handleToggleComplete}
           />
         )}
 
@@ -632,6 +817,27 @@ export const App: React.FC = () => {
           <ShortcutsModal />
         )}
       </main>
+
+      {/* Global Action Undo Toast */}
+      {actionToast && (
+        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-zinc-900/95 border border-zinc-700/80 text-zinc-100 shadow-2xl shadow-black/80 backdrop-blur-md animate-in fade-in slide-in-from-bottom-3">
+          <span className="text-xs font-medium max-w-[200px] sm:max-w-xs truncate">{actionToast.description}</span>
+          <button
+            onClick={() => actionToast.undo()}
+            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95"
+          >
+            <RotateCcw className="w-3 h-3" />
+            <span>Undo</span>
+          </button>
+          <button
+            onClick={() => setActionToast(null)}
+            className="text-zinc-500 hover:text-zinc-300 p-0.5"
+            title="Dismiss"
+          >
+            <X className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      )}
 
       {/* Morning Kickoff & Evening Debrief Wizard */}
       <MorningEveningWizard
