@@ -27,7 +27,7 @@ export const api = {
     const query = new URLSearchParams(params as Record<string, string>).toString();
     return fetchJson<WorkItem[]>(`/api/v1/items${query ? `?${query}` : ''}`);
   },
-  createItem: (item: Partial<WorkItem> & { subtasks?: string[] }) =>
+  createItem: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) =>
     fetchJson<WorkItem>('/api/v1/items', {
       method: 'POST',
       body: JSON.stringify(item),
@@ -120,6 +120,37 @@ export const api = {
     }>('/api/v1/ai/auto-fill', {
       method: 'POST',
       body: JSON.stringify({ title, context }),
+    }),
+  improveTask: (title: string, context?: string, entity_type?: string) =>
+    fetchJson<{
+      success: boolean;
+      data: {
+        improved_title: string;
+        description: string;
+        subtasks: string[];
+        priority: string;
+        energy: string;
+        estimated_minutes: number;
+        category: string;
+      };
+    }>('/api/v1/ai/improve-task', {
+      method: 'POST',
+      body: JSON.stringify({ title, context, entity_type }),
+    }),
+  organizeBoard: (tasks?: any[]) =>
+    fetchJson<{
+      success: boolean;
+      data: {
+        total_pending: number;
+        total_estimated_hours: number;
+        executive_summary: string;
+        big_rocks: any[];
+        title_improvements: { id: string; current_title: string; improved_title: string; priority: string }[];
+        missing_subtasks_count: number;
+      };
+    }>('/api/v1/ai/organize-board', {
+      method: 'POST',
+      body: JSON.stringify({ tasks }),
     }),
 
   // Web Push

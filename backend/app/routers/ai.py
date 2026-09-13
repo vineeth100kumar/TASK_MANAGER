@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 
-from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details
+from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
 from ..services.weather_service import get_current_weather
 from ..database import get_db
 import aiosqlite
@@ -16,6 +16,14 @@ class BrainDumpRequest(BaseModel):
 class AutoFillRequest(BaseModel):
     title: str
     context: Optional[str] = None
+
+class ImproveTaskRequest(BaseModel):
+    title: str
+    context: Optional[str] = None
+    entity_type: Optional[str] = "task"
+
+class OrganizeBoardRequest(BaseModel):
+    tasks: Optional[List[Dict[str, Any]]] = None
 
 @router.get("/greeting")
 async def get_greeting(
@@ -72,3 +80,24 @@ async def auto_fill(req: AutoFillRequest):
     """Expands a task title into a detailed description and 3-5 subtask checklist."""
     details = await auto_fill_task_details(req.title, req.context)
     return {"success": True, "data": details}
+
+@router.post("/improve-task")
+async def improve_task(req: ImproveTaskRequest):
+    """Refines a task title, description, subtasks, priority, energy, and estimates."""
+    result = await improve_task_data(req.title, req.context, req.entity_type)
+    return {"success": True, "data": result}
+
+@router.post("/organize-board")
+async def organize_board(
+    req: Optional[OrganizeBoardRequest] = None,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    """Analyzes pending tasks across the board to prioritize Big Rocks and propose optimizations."""
+    tasks = req.tasks if (req and req.tasks is not None) else None
+    if tasks is None:
+        async with db.execute("SELECT id, title, description, priority, entity_type, due_date, estimated_minutes, is_completed FROM work_items WHERE is_completed = 0") as cursor:
+            rows = await cursor.fetchall()
+            tasks = [dict(r) for r in rows]
+    
+    result = await organize_board_data(tasks)
+    return {"success": True, "data": result}

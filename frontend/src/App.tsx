@@ -135,7 +135,7 @@ export const App: React.FC = () => {
   };
 
   // Create Item (Instant 0ms UI reflection)
-  const handleCreateItem = (itemData: Partial<WorkItem> & { subtasks?: string[] }) => {
+  const handleCreateItem = (itemData: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => {
     const tempId = `temp_${Date.now()}`;
     const nowIso = new Date().toISOString();
     const optimisticItem: WorkItem = {

@@ -11,7 +11,11 @@ import {
   Kanban, 
   ListFilter,
   CheckCircle2,
-  Clock
+  Clock,
+  Target,
+  Zap,
+  Check,
+  X
 } from 'lucide-react';
 import { WorkItem, Milestone, EntityType, TaskStatus, TaskPriority } from '../../types';
 import { api } from '../../services/api';
@@ -21,7 +25,7 @@ interface TasksViewProps {
   milestones: Milestone[];
   onRefresh: () => void;
   onToggleComplete: (item: WorkItem) => void;
-  onCreateItem?: (item: Partial<WorkItem> & { subtasks?: string[] }) => void;
+  onCreateItem?: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
   onDeleteItem?: (id: string) => void;
   onUpdateItem?: (id: string, updates: Partial<WorkItem>) => void;
   onToggleSubtask?: (itemId: string, subtaskId: string) => void;
@@ -42,6 +46,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isAiExpanding, setIsAiExpanding] = useState(false);
+  
+  // AI Improvisation & Organization State
+  const [isAiPolishing, setIsAiPolishing] = useState(false);
+  const [generatedSubtasks, setGeneratedSubtasks] = useState<string[]>([]);
+  const [isBoardOrganizerOpen, setIsBoardOrganizerOpen] = useState(false);
+  const [boardOrgData, setBoardOrgData] = useState<any | null>(null);
+  const [isOrganizingBoard, setIsOrganizingBoard] = useState(false);
+  const [refiningItemId, setRefiningItemId] = useState<string | null>(null);
 
   // New Item State
   const [newTitle, setNewTitle] = useState('');
@@ -72,6 +84,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       repeat_rule: newRepeatRule || undefined,
       description: newDescription || undefined,
       status: 'todo' as TaskStatus,
+      subtasks: generatedSubtasks.length > 0 ? generatedSubtasks : undefined,
     };
 
     if (onCreateItem) {
@@ -84,7 +97,99 @@ export const TasksView: React.FC<TasksViewProps> = ({
     setNewDescription('');
     setNewDueDate('');
     setNewRepeatRule('');
+    setGeneratedSubtasks([]);
     setIsCreating(false);
+  };
+
+  const handleAiPolishNewItem = async () => {
+    if (!newTitle.trim()) return;
+    setIsAiPolishing(true);
+    try {
+      const res = await api.improveTask(newTitle, newDescription, newType);
+      if (res.success && res.data) {
+        setNewTitle(res.data.improved_title);
+        setNewDescription(res.data.description);
+        if (res.data.priority) setNewPriority(res.data.priority as TaskPriority);
+        if (res.data.subtasks && res.data.subtasks.length > 0) {
+          setGeneratedSubtasks(res.data.subtasks);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to polish item with AI:', err);
+    } finally {
+      setIsAiPolishing(false);
+    }
+  };
+
+  const handleQuickRefine = async (item: WorkItem) => {
+    setRefiningItemId(item.id);
+    try {
+      const res = await api.improveTask(item.title, item.description || undefined, item.entity_type);
+      if (res.success && res.data) {
+        const updates: Partial<WorkItem> = {
+          title: res.data.improved_title,
+          description: res.data.description,
+          priority: (res.data.priority as TaskPriority) || item.priority,
+          estimated_minutes: res.data.estimated_minutes || item.estimated_minutes,
+        };
+        if (onUpdateItem) {
+          onUpdateItem(item.id, updates);
+        } else {
+          await api.updateItem(item.id, updates);
+          onRefresh();
+        }
+      }
+    } catch (err) {
+      console.error('Failed to quick refine task:', err);
+    } finally {
+      setRefiningItemId(null);
+    }
+  };
+
+  const handleOpenBoardOrganizer = async () => {
+    setIsBoardOrganizerOpen(true);
+    setIsOrganizingBoard(true);
+    try {
+      const res = await api.organizeBoard(items);
+      if (res.success && res.data) {
+        setBoardOrgData(res.data);
+      }
+    } catch (err) {
+      console.error('Failed to organize board with AI:', err);
+    } finally {
+      setIsOrganizingBoard(false);
+    }
+  };
+
+  const handleApplyTitleImprovement = async (id: string, improvedTitle: string) => {
+    if (onUpdateItem) {
+      onUpdateItem(id, { title: improvedTitle });
+    } else {
+      await api.updateItem(id, { title: improvedTitle });
+      onRefresh();
+    }
+    if (boardOrgData) {
+      setBoardOrgData({
+        ...boardOrgData,
+        title_improvements: boardOrgData.title_improvements.filter((ti: any) => ti.id !== id)
+      });
+    }
+  };
+
+  const handleApplyAllTitleImprovements = async () => {
+    if (!boardOrgData?.title_improvements) return;
+    for (const ti of boardOrgData.title_improvements) {
+      if (onUpdateItem) {
+        onUpdateItem(ti.id, { title: ti.improved_title });
+      } else {
+        await api.updateItem(ti.id, { title: ti.improved_title });
+      }
+    }
+    onRefresh();
+    setBoardOrgData({
+      ...boardOrgData,
+      title_improvements: []
+    });
   };
 
   const handleAiAutoFill = async (item: WorkItem) => {
@@ -173,6 +278,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <Kanban className="w-4 h-4" />
             </button>
           </div>
+
+          <button
+            onClick={handleOpenBoardOrganizer}
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600/20 via-indigo-600/20 to-purple-600/20 text-blue-300 hover:text-white hover:border-blue-400/40 border border-blue-500/30 rounded-lg text-xs font-semibold shadow-sm transition-all"
+          >
+            <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+            <span>AI Organize Board</span>
+          </button>
 
           <button
             onClick={() => setIsCreating(true)}
@@ -287,7 +400,23 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-3 shrink-0 ml-2">
+                <div className="flex items-center space-x-2 shrink-0 ml-2">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleQuickRefine(item);
+                    }}
+                    disabled={refiningItemId === item.id}
+                    title="Polish title & generate subtasks with AI"
+                    className="text-zinc-500 hover:text-blue-400 p-1 rounded hover:bg-zinc-800 transition-colors"
+                  >
+                    {refiningItemId === item.id ? (
+                      <RotateCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                    ) : (
+                      <Sparkles className="w-3.5 h-3.5" />
+                    )}
+                  </button>
+
                   <span
                     className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
                       item.priority === 'urgent'
@@ -340,15 +469,32 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         <span className={`text-xs font-medium ${item.is_completed ? 'line-through text-zinc-400' : 'text-zinc-200'}`}>
                           {item.title}
                         </span>
-                        <span
-                          className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded shrink-0 ${
-                            item.priority === 'urgent'
-                              ? 'bg-red-500/20 text-red-400'
-                              : 'bg-zinc-800 text-zinc-400'
-                          }`}
-                        >
-                          {item.priority}
-                        </span>
+                        <div className="flex items-center space-x-1 shrink-0">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickRefine(item);
+                            }}
+                            disabled={refiningItemId === item.id}
+                            title="Polish with AI"
+                            className="text-zinc-500 hover:text-blue-400 p-0.5 rounded transition-colors"
+                          >
+                            {refiningItemId === item.id ? (
+                              <RotateCw className="w-3 h-3 animate-spin text-blue-400" />
+                            ) : (
+                              <Sparkles className="w-3 h-3" />
+                            )}
+                          </button>
+                          <span
+                            className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                              item.priority === 'urgent'
+                                ? 'bg-red-500/20 text-red-400'
+                                : 'bg-zinc-800 text-zinc-400'
+                            }`}
+                          >
+                            {item.priority}
+                          </span>
+                        </div>
                       </div>
                       {item.repeat_rule && (
                         <div className="text-[10px] text-blue-400 flex items-center space-x-1">
@@ -373,16 +519,60 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
             <form onSubmit={handleCreate} className="space-y-4">
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Title</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="block text-xs text-zinc-400">Title</label>
+                  <button
+                    type="button"
+                    onClick={handleAiPolishNewItem}
+                    disabled={isAiPolishing || !newTitle.trim()}
+                    className="flex items-center space-x-1 text-[11px] text-blue-400 hover:text-blue-300 disabled:opacity-40 font-medium px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 transition-all"
+                  >
+                    <Sparkles className="w-3 h-3" />
+                    <span>{isAiPolishing ? 'Polishing...' : '✨ AI Polish & Auto-Complete'}</span>
+                  </button>
+                </div>
                 <input
                   type="text"
                   required
-                  placeholder="e.g. Weekly team sync, Pay wifi bill..."
+                  placeholder="e.g. gym, pay wifi, meet raj tomorrow..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
                   className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
                 />
               </div>
+
+              {/* Generated Subtasks Preview in Create Modal */}
+              {generatedSubtasks.length > 0 && (
+                <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-800/80 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-semibold text-blue-400 flex items-center space-x-1.5">
+                      <Sparkles className="w-3 h-3" />
+                      <span>AI Generated Action Checklist ({generatedSubtasks.length})</span>
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setGeneratedSubtasks([])}
+                      className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {generatedSubtasks.map((st, i) => (
+                      <div key={i} className="flex items-center justify-between text-xs bg-zinc-800/60 px-2.5 py-1.5 rounded-lg border border-zinc-700/60 text-zinc-200">
+                        <span>{st}</span>
+                        <button
+                          type="button"
+                          onClick={() => setGeneratedSubtasks(generatedSubtasks.filter((_, idx) => idx !== i))}
+                          className="text-zinc-500 hover:text-red-400"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -540,6 +730,134 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <span>Due: {selectedItem.due_date || 'None'}</span>
               <span>{selectedItem.repeat_rule ? `🔄 Recurrence: ${selectedItem.repeat_rule}` : 'One-time item'}</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* AI Board Organizer Modal */}
+      {isBoardOrganizerOpen && (
+        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
+          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl p-6 space-y-5 shadow-2xl max-h-[88vh] overflow-y-auto">
+            <div className="flex items-start justify-between">
+              <div className="flex items-center space-x-2.5">
+                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
+                  <Sparkles className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wide">
+                    Executive Board Organizer
+                  </h2>
+                  <p className="text-[11px] text-zinc-400">
+                    AI strategic workload analysis & task title optimization
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsBoardOrganizerOpen(false)}
+                className="text-zinc-500 hover:text-zinc-300 p-1"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {isOrganizingBoard ? (
+              <div className="py-12 flex flex-col items-center justify-center space-y-3">
+                <RotateCw className="w-6 h-6 animate-spin text-blue-400" />
+                <p className="text-xs text-zinc-400">Analyzing tasks and strategic priorities...</p>
+              </div>
+            ) : boardOrgData ? (
+              <div className="space-y-4">
+                {/* Executive Summary Card */}
+                <div className="bg-gradient-to-br from-blue-950/40 via-zinc-900 to-zinc-900 border border-blue-500/20 rounded-xl p-3.5 space-y-1.5">
+                  <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider font-semibold">
+                    Workload Synthesis
+                  </span>
+                  <p className="text-xs text-zinc-200 leading-relaxed">
+                    {boardOrgData.executive_summary}
+                  </p>
+                </div>
+
+                {/* Top 3 Big Rocks */}
+                <div className="space-y-2">
+                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-zinc-300">
+                    <Target className="w-4 h-4 text-red-400" />
+                    <span>Today's Strategic Big 3 (High Leverage)</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    {boardOrgData.big_rocks.length === 0 ? (
+                      <p className="text-xs text-zinc-400 italic">No pending tasks on the board.</p>
+                    ) : (
+                      boardOrgData.big_rocks.map((task: any, idx: number) => (
+                        <div
+                          key={task.id || idx}
+                          className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800 text-xs"
+                        >
+                          <div className="flex items-center space-x-2 min-w-0 flex-1">
+                            <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-[10px]">
+                              {idx + 1}
+                            </span>
+                            <span className="font-medium text-zinc-200 truncate">{task.title}</span>
+                          </div>
+                          <span className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded ml-2 ${
+                            task.priority === 'urgent' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
+                          }`}>
+                            {task.priority || 'medium'}
+                          </span>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+
+                {/* Proposed Title Polish */}
+                {boardOrgData.title_improvements && boardOrgData.title_improvements.length > 0 && (
+                  <div className="space-y-2 pt-2 border-t border-zinc-800/80">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-300 flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Recommended Title Improvements ({boardOrgData.title_improvements.length})</span>
+                      </span>
+                      <button
+                        onClick={handleApplyAllTitleImprovements}
+                        className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20"
+                      >
+                        Polish All
+                      </button>
+                    </div>
+
+                    <div className="space-y-2">
+                      {boardOrgData.title_improvements.map((ti: any) => (
+                        <div
+                          key={ti.id}
+                          className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/80 text-xs gap-3"
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="text-[11px] text-zinc-400 line-through truncate">{ti.current_title}</div>
+                            <div className="font-semibold text-emerald-400 truncate mt-0.5">{ti.improved_title}</div>
+                          </div>
+                          <button
+                            onClick={() => handleApplyTitleImprovement(ti.id, ti.improved_title)}
+                            className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium shrink-0 flex items-center space-x-1"
+                          >
+                            <Check className="w-3 h-3 text-emerald-400" />
+                            <span>Apply</span>
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end pt-2">
+                  <button
+                    onClick={() => setIsBoardOrganizerOpen(false)}
+                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-lg"
+                  >
+                    Done
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </div>
         </div>
       )}

@@ -250,9 +250,12 @@ async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
             }
             break
 
+    # Polish the title to make it executive and actionable
+    polished_title = heuristic_improve_title(text, entity_type)
+
     return [{
-        "title": text,
-        "description": f"Captured via AI Brain Dump ({'Event scheduled at ' + time_str if time_str else 'Action item'})",
+        "title": polished_title,
+        "description": f"Captured via AI Brain Dump. Original note: \"{text}\"" + (f" (Scheduled for {time_str})" if time_str else ""),
         "due_date": due_date,
         "start_at": start_at,
         "priority": priority,
@@ -261,22 +264,121 @@ async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
         "expense": expense
     }]
 
-async def auto_fill_task_details(title: str, context: Optional[str] = None) -> Dict[str, Any]:
-    """Generates a detailed description and 3-5 subtask checklist for a given task title."""
+def heuristic_improve_title(raw: str, entity_type: str = "task") -> str:
+    """Refines raw, messy, or conversational text into a crisp, executive action title."""
+    t = raw.strip()
+    if not t:
+        return "Untitled Action Item"
+
+    # Strip conversational prefixes
+    t = re.sub(r'^(?:i (?:need|have|want) to|please|can you|remind me to|don\'t forget to|remember to)\s+', '', t, flags=re.I)
+    
+    # Strip time and date tokens at end or middle (e.g. at 11.30 am, at 5pm, tomorrow, today)
+    t = re.sub(r'\s+at\s+\d{1,2}(?::\d{2}|\.\d{2})?\s*(?:am|pm)?\b', '', t, flags=re.I)
+    t = re.sub(r'\s+\b\d{1,2}(?::\d{2}|\.\d{2})?\s*(?:am|pm)\b', '', t, flags=re.I)
+    t = re.sub(r'\s+(?:today|tomorrow|tmrw|yesterday|tonight|this evening)\b', '', t, flags=re.I)
+    t = re.sub(r'\s+(?:asap|urgent|urgently|pls|please)\b', '', t, flags=re.I)
+    t = t.strip(' ,.-')
+
+    tl = t.lower()
+    
+    def smart_title(s: str) -> str:
+        small_words = {"a", "an", "and", "as", "at", "but", "by", "for", "in", "nor", "of", "on", "or", "the", "to", "up", "with"}
+        words = s.split()
+        return " ".join(w.capitalize() if i == 0 or w.lower() not in small_words else w.lower() for i, w in enumerate(words))
+
+    if 'baby naming' in tl:
+        return 'Attend Baby Naming Ceremony'
+    if 'car service' in tl or 'service car' in tl or 'oil change' in tl:
+        return 'Schedule Periodic Vehicle Maintenance'
+    if 'wifi' in tl or 'broadband' in tl or 'internet bill' in tl:
+        return 'Pay Broadband Internet Bill'
+    if 'electricity bill' in tl or 'power bill' in tl:
+        return 'Pay Monthly Electricity Bill'
+    if 'rent' in tl and ('pay' in tl or 'transfer' in tl):
+        return 'Pay Monthly House Rent'
+    if 'grocer' in tl or 'supermarket' in tl:
+        return 'Purchase Weekly Household Groceries'
+    if 'gym' in tl or 'workout' in tl or 'exercise' in tl:
+        return 'Complete Workout & Fitness Session'
+    if 'dentist' in tl or 'dental' in tl:
+        return 'Attend Dental Health Appointment'
+    if 'doctor' in tl or 'physician' in tl:
+        return 'Consultation with Doctor'
+    if tl.startswith('call '):
+        person = t[5:].strip()
+        if ' about ' in person.lower():
+            idx = person.lower().index(' about ')
+            p = person[:idx].strip()
+            topic = person[idx+7:].strip()
+            return f'Discuss {smart_title(topic)} with {smart_title(p)}'
+        return f'Phone Call with {smart_title(person)}'
+    if tl.startswith(('buy ', 'purchase ', 'get ', 'order ')):
+        item = re.sub(r'^(?:buy|purchase|get|order)\s+', '', t, flags=re.I).strip()
+        return f'Purchase {smart_title(item)}'
+    if tl.startswith('pay '):
+        bill = re.sub(r'^pay\s+', '', t, flags=re.I).strip()
+        return f'Pay {smart_title(bill)}'
+    if tl.startswith(('fix ', 'debug ')):
+        issue = re.sub(r'^(?:fix|debug)\s+', '', t, flags=re.I).strip()
+        return f'Resolve {smart_title(issue)}'
+    if tl.startswith(('prep ', 'prepare ')):
+        doc = re.sub(r'^(?:prep|prepare)\s+', '', t, flags=re.I).strip()
+        return f'Prepare {smart_title(doc)}'
+    if tl.startswith(('email ', 'send ')):
+        msg = re.sub(r'^(?:email|send)\s+', '', t, flags=re.I).strip()
+        return f'Send {smart_title(msg)}'
+    if tl.startswith(('meet ', 'meeting ')):
+        m = re.sub(r'^(?:meet|meeting)\s+(?:with\s+)?', '', t, flags=re.I).strip()
+        return f'Meeting with {smart_title(m)}'
+    if tl.startswith(('read ', 'study ')):
+        bk = re.sub(r'^(?:read|study)\s+', '', t, flags=re.I).strip()
+        return f'Study & Review {smart_title(bk)}'
+    if tl.startswith(('clean ', 'organize ', 'tidy ')):
+        area = re.sub(r'^(?:clean|organize|tidy)\s+(?:up\s+)?', '', t, flags=re.I).strip()
+        return f'Clean & Organize {smart_title(area)}'
+
+    return smart_title(t) if t else raw
+
+async def improve_task_data(title: str, context: Optional[str] = None, entity_type: Optional[str] = "task") -> Dict[str, Any]:
+    """
+    Improvises raw task data into an executive title, structured description,
+    definition of done, sequential subtasks, energy level, and duration estimate.
+    """
     prompt = f"""
-    You are an executive productivity strategist. Given the task title '{title}' (Context: '{context or ''}'),
-    generate a detailed Markdown description and a logical sequence of 3 to 5 subtask checklist items.
-    Respond ONLY with a JSON object in this exact schema:
+    You are an executive productivity strategist for Sage Life OS.
+    Transform the following user task into a polished, executive-ready action item.
+
+    Task Title: "{title}"
+    Additional Context: "{context or ''}"
+    Entity Type: "{entity_type or 'task'}"
+
+    Instructions:
+    1. improved_title: A crisp, professional, action-oriented title starting with an active imperative verb (e.g., "Schedule Dental Checkup", "Finalize Q3 Budget Report", "Restock Kitchen Essentials"). Never include conversational fluff or dates/times in the title.
+    2. description: Formatted in clear Markdown with:
+       - **Objective**: 1 sentence on the target outcome.
+       - **Definition of Done**: Specific completion criteria.
+       - **Key Considerations**: Relevant tools, context, or links.
+    3. subtasks: A list of 3-5 logical, chronological micro-steps to execute the task.
+    4. priority: "low" | "medium" | "high" | "urgent" based on real impact.
+    5. energy: "low" | "medium" | "high" (low for admin/errands, high for deep focus work).
+    6. estimated_minutes: Integer estimate in minutes (15, 30, 45, 60, etc.).
+    7. category: "Work" | "Personal" | "Finance" | "Health" | "Errands" | "Learning"
+
+    Respond ONLY with valid JSON:
     {{
-        "description": "2-3 sentences explaining the objective and definition of done.",
-        "subtasks": ["Step 1...", "Step 2...", "Step 3...", "Step 4..."],
-        "estimated_minutes": 45,
-        "priority": "medium"
+      "improved_title": "...",
+      "description": "...",
+      "subtasks": ["Step 1", "Step 2", "Step 3"],
+      "priority": "medium",
+      "energy": "medium",
+      "estimated_minutes": 30,
+      "category": "Work"
     }}
     """
     
     try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
+        async with httpx.AsyncClient(timeout=7.0) as client:
             resp = await client.post(
                 f"{OLLAMA_HOST}/api/generate",
                 json={
@@ -288,19 +390,155 @@ async def auto_fill_task_details(title: str, context: Optional[str] = None) -> D
                 }
             )
             if resp.status_code == 200:
-                return safe_parse_json(resp.json().get("response", ""))
+                data = safe_parse_json(resp.json().get("response", ""))
+                if isinstance(data, dict) and data.get("improved_title"):
+                    return data
     except Exception:
         pass
 
-    # Intelligent Fallback
-    return {
-        "description": f"Execute and complete: {title}. Ensure all prerequisites are verified and results documented.",
-        "subtasks": [
-            f"Review requirements for {title}",
-            "Draft initial implementation / plan",
+    # High-Performance Heuristic Improvisation Fallback (<5ms execution)
+    refined_title = heuristic_improve_title(title, entity_type or "task")
+    
+    # Contextual category & subtask heuristics
+    tl = title.lower()
+    cat = "Personal"
+    priority = "medium"
+    energy = "medium"
+    est_mins = 30
+
+    if any(k in tl for k in ["urgent", "asap", "emergency", "broken", "down", "critical"]):
+        priority = "urgent"
+    elif any(k in tl for k in ["important", "boss", "client", "tax", "deadline", "pay"]):
+        priority = "high"
+
+    if any(k in tl for k in ["bill", "pay", "tax", "finance", "bank", "account", "invoice", "salary"]):
+        cat = "Finance"
+        energy = "low"
+        est_mins = 15
+        subtasks = [
+            f"Review invoice and payment details for {refined_title}",
+            "Verify source account balance and credentials",
+            "Execute transaction and save digital receipt",
+            "Update budget and record in Sage OS"
+        ]
+    elif any(k in tl for k in ["gym", "workout", "exercise", "run", "doctor", "health", "diet", "medicine", "dentist"]):
+        cat = "Health"
+        energy = "high"
+        est_mins = 60
+        subtasks = [
+            "Prepare gear and hydration prerequisites",
+            f"Begin session: {refined_title}",
+            "Complete core routine with focus",
+            "Cool down, hydrate, and log activity"
+        ]
+    elif any(k in tl for k in ["code", "bug", "deploy", "server", "meeting", "report", "presentation", "client", "feature", "review"]):
+        cat = "Work"
+        energy = "high"
+        est_mins = 45
+        subtasks = [
+            f"Review requirements and gather context for {refined_title}",
+            "Outline key deliverables and approach",
+            "Execute implementation / drafting",
+            "Verify quality and validate definition of done"
+        ]
+    elif any(k in tl for k in ["buy", "grocery", "groceries", "order", "store", "market", "clean", "laundry"]):
+        cat = "Errands"
+        energy = "low"
+        est_mins = 30
+        subtasks = [
+            f"List specific items and requirements needed for {refined_title}",
+            "Execute procurement / errand run",
+            "Inspect and verify received items",
+            "Store or distribute items appropriately"
+        ]
+    else:
+        subtasks = [
+            f"Define requirements and clear scope for {refined_title}",
             "Execute primary action steps",
-            "Perform final review and verification"
-        ],
-        "estimated_minutes": 30,
-        "priority": "medium"
+            "Perform final quality check and complete"
+        ]
+
+    description = f"### Objective\nComplete **{refined_title}** efficiently with high quality.\n\n### Definition of Done\n- All associated checklist items verified and executed.\n- Any outcomes documented or filed.\n\n### Notes\n{context if context else 'Captured via Sage AI Intelligence.'}"
+
+    return {
+        "improved_title": refined_title,
+        "description": description,
+        "subtasks": subtasks,
+        "priority": priority,
+        "energy": energy,
+        "estimated_minutes": est_mins,
+        "category": cat
     }
+
+async def organize_board_data(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """
+    Analyzes an entire task board to provide:
+    1. The Top 3 Strategic Focus items for today (Big Rocks).
+    2. Suggested title & description enhancements for unpolished tasks.
+    3. Missing subtask checklists for complex items.
+    4. Executive workload distribution and recommendations.
+    """
+    uncompleted = [t for t in tasks if not t.get("is_completed")]
+    priority_weights = {"urgent": 4, "high": 3, "medium": 2, "low": 1}
+    
+    # Sort uncompleted tasks by priority and urgency
+    sorted_tasks = sorted(
+        uncompleted,
+        key=lambda x: priority_weights.get(x.get("priority", "medium"), 2),
+        reverse=True
+    )
+
+    # 1. Top 3 "Big Rocks" for Today
+    big_rocks = sorted_tasks[:3]
+
+    # 2. Identify items that need title polishing
+    need_polish = []
+    for t in uncompleted:
+        title = t.get("title", "").strip()
+        words = title.split()
+        is_messy = (
+            len(words) <= 2 or
+            title.islower() or
+            any(w in title.lower() for w in ["tmrw", "asap", "pls", "call", "buy", "pay", "fix", "prep"]) or
+            len(title) < 14
+        )
+        if is_messy:
+            improved = heuristic_improve_title(title, t.get("entity_type", "task"))
+            if improved != title:
+                need_polish.append({
+                    "id": t.get("id"),
+                    "current_title": title,
+                    "improved_title": improved,
+                    "priority": t.get("priority", "medium")
+                })
+
+    # 3. Tasks lacking checklists
+    need_subtasks = []
+    for t in uncompleted:
+        subtasks = t.get("subtasks", [])
+        if not subtasks and t.get("estimated_minutes", 30) >= 30:
+            need_subtasks.append({
+                "id": t.get("id"),
+                "title": t.get("title")
+            })
+
+    total_est_minutes = sum(t.get("estimated_minutes", 30) for t in uncompleted)
+    hours = round(total_est_minutes / 60, 1)
+
+    summary = (
+        f"You have {len(uncompleted)} active items totaling approximately {hours} hours of focused work. "
+        f"Conquering your Top 3 Big Rocks will eliminate your highest-risk bottlenecks today."
+    )
+
+    return {
+        "total_pending": len(uncompleted),
+        "total_estimated_hours": hours,
+        "executive_summary": summary,
+        "big_rocks": big_rocks,
+        "title_improvements": need_polish[:6],
+        "missing_subtasks_count": len(need_subtasks)
+    }
+
+async def auto_fill_task_details(title: str, context: Optional[str] = None) -> Dict[str, Any]:
+    """Expands a task title into a detailed description and 3-5 subtask checklist."""
+    return await improve_task_data(title, context)
