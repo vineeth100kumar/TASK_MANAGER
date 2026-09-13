@@ -9,6 +9,7 @@ import {
   WifiOff,
   RefreshCw
 } from 'lucide-react';
+import { APP_VERSION } from '../../version';
 
 interface NavbarProps {
   activeTab: 'dashboard' | 'tasks' | 'finance' | 'shortcuts';
@@ -27,6 +28,44 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   return (
     <>
+      {/* Mobile Top Navigation Bar */}
+      <header className="md:hidden flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-40">
+        <div className="flex items-center space-x-2">
+          <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-white text-xs shadow-lg shadow-blue-500/20">
+            S
+          </div>
+          <div>
+            <span className="font-semibold text-zinc-100 text-sm tracking-tight">Sage OS</span>
+            <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">RPi5</span>
+            <span className="text-[10px] ml-1 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono font-semibold border border-blue-500/20">{APP_VERSION}</span>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-2">
+          {isSyncing ? (
+            <div 
+              title="Saving changes in background to Raspberry Pi..."
+              className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20"
+            >
+              <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
+              <span>Saving</span>
+            </div>
+          ) : (
+            <div 
+              title={isLiveConnected ? "Connected live to Raspberry Pi 5" : "Reconnecting to Pi 5..."}
+              className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-mono border ${
+                isLiveConnected 
+                  ? 'bg-emerald-500/10 text-emerald-400 border-emerald-500/20' 
+                  : 'bg-amber-500/10 text-amber-400 border-amber-500/20'
+              }`}
+            >
+              {isLiveConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5 animate-pulse" />}
+              <span>{isLiveConnected ? 'RPi5 Live' : 'Connecting'}</span>
+            </div>
+          )}
+        </div>
+      </header>
+
       {/* PC Top Navigation Bar */}
       <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="flex items-center space-x-6">
@@ -37,6 +76,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div>
               <span className="font-semibold text-zinc-100 text-sm tracking-tight">Sage OS</span>
               <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">RPi5</span>
+              <span className="text-[10px] ml-1.5 px-1.5 py-0.5 rounded bg-blue-500/10 text-blue-400 font-mono font-semibold border border-blue-500/20">{APP_VERSION}</span>
             </div>
           </div>
 

@@ -51,7 +51,8 @@ while true; do
         fi
 
         COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "latest")
-        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Synced successfully: \"$COMMIT_MSG\""
+        VERSION_TAG=$(grep 'VERSION =' "$REPO_DIR/backend/app/version.py" 2>/dev/null | cut -d'"' -f2 || echo "2.1.0")
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Synced successfully to v$VERSION_TAG: \"$COMMIT_MSG\""
     fi
 
     sleep 10

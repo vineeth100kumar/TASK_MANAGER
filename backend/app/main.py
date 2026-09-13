@@ -10,6 +10,7 @@ from .database import init_database, DB_PATH, db_pool
 from .routers import items, finance, dashboard, ai, shortcuts, push, weather
 from .services.ws_manager import ws_manager
 from .services.push_service import check_due_reminders
+from .version import VERSION, BUILD_NAME
 
 scheduler = AsyncIOScheduler()
 
@@ -40,7 +41,7 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title="Sage Life & Task Operating System",
     description="Unified Task, Event, Milestone, and Finance Manager for Raspberry Pi 5 with iOS & PC optimization",
-    version="2.0.0",
+    version=VERSION,
     lifespan=lifespan
 )
 
@@ -80,6 +81,8 @@ async def websocket_endpoint(websocket: WebSocket):
 async def health_check():
     return {
         "status": "healthy",
+        "version": VERSION,
+        "build": BUILD_NAME,
         "system": "Raspberry Pi 5 Ready",
         "service": "Sage Life OS Backend",
         "storage": "SQLite WAL Mode Active"

@@ -10,6 +10,9 @@ cd "$REPO_DIR"
 echo "=== 1. Pulling Latest Changes from GitHub ==="
 git reset --hard origin/main || git pull origin main
 
+COMMIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
+VERSION_TAG=$(grep 'VERSION =' backend/app/version.py 2>/dev/null | cut -d'"' -f2 || echo "v2.1.0")
+
 echo "=== 2. Ensuring Permissions ==="
 chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
 mkdir -p "$REPO_DIR/data/backups"
@@ -25,9 +28,12 @@ if command -v systemctl >/dev/null 2>&1; then
     sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
 fi
 
+# Allow uvicorn 2 seconds to bind socket
+sleep 2
+
 echo "=============================================================================="
-echo "🎉 Sage OS is updated!"
+echo "🎉 Sage OS is updated to version v$VERSION_TAG (commit: $COMMIT_HASH)!"
 echo "Status check: http://localhost/api/health"
 echo "=============================================================================="
-curl -s http://localhost/api/health || true
+curl -s http://localhost/api/health || curl -s http://127.0.0.1:8000/api/health || true
 echo ""
