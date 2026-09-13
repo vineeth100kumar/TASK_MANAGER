@@ -35,8 +35,9 @@ while true; do
         # Pull latest code
         git reset --hard origin/main
 
-        # Ensure permissions on dist folder for Nginx
+        # Ensure permissions on dist folder and scripts
         chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
+        chmod +x "$REPO_DIR"/deploy/*.sh 2>/dev/null || true
 
         # Update dependencies if requirements changed
         if [ -n "$REQ_CHANGED" ] && [ -d "$REPO_DIR/.venv" ]; then

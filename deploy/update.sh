@@ -15,6 +15,7 @@ VERSION_TAG=$(grep 'VERSION =' backend/app/version.py 2>/dev/null | cut -d'"' -f
 
 echo "=== 2. Ensuring Permissions ==="
 chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
+chmod +x "$REPO_DIR"/deploy/*.sh 2>/dev/null || true
 mkdir -p "$REPO_DIR/data/backups"
 chmod -R 775 "$REPO_DIR/data" 2>/dev/null || true
 
