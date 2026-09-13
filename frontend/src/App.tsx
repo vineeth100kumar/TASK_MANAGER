@@ -360,7 +360,7 @@ export const App: React.FC = () => {
   // ==========================================
 
   // Create Account (Instant 0ms UI reflection)
-  const handleCreateAccount = (accData: { name: string; account_type: string; balance: number; currency?: string }) => {
+  const handleCreateAccount = (accData: { name: string; account_type: string; balance: number; currency?: string; is_upi_default?: boolean }) => {
     const tempId = `acc_temp_${Date.now()}`;
     const nowIso = new Date().toISOString();
     const optimisticAcc: FinanceAccount = {
@@ -369,12 +369,16 @@ export const App: React.FC = () => {
       account_type: accData.account_type as any,
       balance: accData.balance || 0,
       currency: accData.currency || 'INR',
+      is_upi_default: Boolean(accData.is_upi_default),
       updated_at: nowIso,
     };
 
     setFinanceSummary(prev => {
       if (!prev) return prev;
-      const newAccounts = [...prev.accounts, optimisticAcc];
+      let newAccounts = accData.is_upi_default
+        ? prev.accounts.map(a => ({ ...a, is_upi_default: false }))
+        : [...prev.accounts];
+      newAccounts = [...newAccounts, optimisticAcc];
       const newNetWorth = newAccounts.reduce((sum, a) => sum + (a.account_type === 'credit' ? -a.balance : a.balance), 0);
       return {
         ...prev,
@@ -402,10 +406,18 @@ export const App: React.FC = () => {
   };
 
   // Update Account (Instant 0ms UI reflection)
-  const handleUpdateAccount = (id: string, updates: { name?: string; balance?: number }) => {
+  const handleUpdateAccount = (id: string, updates: { name?: string; balance?: number; is_upi_default?: boolean }) => {
     setFinanceSummary(prev => {
       if (!prev) return prev;
-      const newAccounts = prev.accounts.map(a => a.id === id ? { ...a, ...updates } : a);
+      let newAccounts = prev.accounts.map(a => {
+        if (a.id === id) {
+          return { ...a, ...updates };
+        }
+        if (updates.is_upi_default) {
+          return { ...a, is_upi_default: false };
+        }
+        return a;
+      });
       const newNetWorth = newAccounts.reduce((sum, a) => sum + (a.account_type === 'credit' ? -a.balance : a.balance), 0);
       return {
         ...prev,
@@ -415,7 +427,7 @@ export const App: React.FC = () => {
     });
 
     startSync();
-    api.updateAccount(id, updates)
+    api.updateAccount(id, updates as any)
       .catch(err => {
         console.error('Failed to update account on Pi', err);
       })

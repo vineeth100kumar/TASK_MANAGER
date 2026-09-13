@@ -95,12 +95,12 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/transactions/${id}`, {
       method: 'DELETE',
     }),
-  createAccount: (acc: { name: string; account_type: string; balance: number; currency?: string }) =>
+  createAccount: (acc: { name: string; account_type: string; balance: number; currency?: string; is_upi_default?: boolean }) =>
     fetchJson<FinanceAccount>('/api/v1/finance/accounts', {
       method: 'POST',
       body: JSON.stringify(acc),
     }),
-  updateAccount: (id: string, updates: Partial<{ name: string; balance: number; account_type: string }>) =>
+  updateAccount: (id: string, updates: Partial<{ name: string; balance: number; account_type: string; is_upi_default: boolean }>) =>
     fetchJson<FinanceAccount>(`/api/v1/finance/accounts/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(updates),
@@ -108,6 +108,20 @@ export const api = {
   deleteAccount: (id: string) =>
     fetchJson<{ success: boolean; id: string }>(`/api/v1/finance/accounts/${id}`, {
       method: 'DELETE',
+    }),
+  unifyUPI: (bankAccountId: string, mergeWalletId?: string) =>
+    fetchJson<{ success: boolean; bank_account_id: string; merged_amount: number }>('/api/v1/finance/accounts/unify-upi', {
+      method: 'POST',
+      body: JSON.stringify({ bank_account_id: bankAccountId, merge_wallet_id: mergeWalletId }),
+    }),
+  splitUPI: (bankAccountId: string, walletName?: string, initialBalance?: number) =>
+    fetchJson<{ success: boolean; wallet_id: string }>('/api/v1/finance/accounts/split-upi', {
+      method: 'POST',
+      body: JSON.stringify({
+        bank_account_id: bankAccountId,
+        wallet_name: walletName || 'UPI / Digital Wallet',
+        initial_wallet_balance: initialBalance || 0,
+      }),
     }),
 
   // Recurring Bills & Subscriptions

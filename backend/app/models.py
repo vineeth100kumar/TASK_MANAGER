@@ -155,12 +155,14 @@ class FinanceAccountCreate(BaseModel):
     account_type: AccountType
     balance: float
     currency: str = "INR"
+    is_upi_default: Optional[bool] = False
 
 class FinanceAccountUpdate(BaseModel):
     name: Optional[str] = None
     account_type: Optional[AccountType] = None
     balance: Optional[float] = None
     currency: Optional[str] = None
+    is_upi_default: Optional[bool] = None
 
 class FinanceAccountResponse(BaseModel):
     id: str
@@ -168,7 +170,17 @@ class FinanceAccountResponse(BaseModel):
     account_type: AccountType
     balance: float
     currency: str
+    is_upi_default: bool = False
     updated_at: str
+
+class UnifyUPIRequest(BaseModel):
+    bank_account_id: str
+    merge_wallet_id: Optional[str] = None
+
+class SplitUPIRequest(BaseModel):
+    bank_account_id: str
+    initial_wallet_balance: float = 0.0
+    wallet_name: str = "UPI / Digital Wallet"
 
 class FinanceCategoryCreate(BaseModel):
     name: str

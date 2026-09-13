@@ -91,6 +91,7 @@ export interface FinanceAccount {
   account_type: AccountType;
   balance: number;
   currency: string;
+  is_upi_default?: boolean;
   updated_at: string;
 }
 

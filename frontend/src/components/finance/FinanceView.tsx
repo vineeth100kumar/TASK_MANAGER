@@ -15,7 +15,8 @@ import {
   Receipt,
   CalendarClock,
   ShieldAlert,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Zap
 } from 'lucide-react';
 import { FinanceSummary, FinanceAccount, Transaction, PaymentMode, TransactionType, RecurringBill, FinanceCategory } from '../../types';
 import { api } from '../../services/api';
@@ -24,8 +25,8 @@ interface FinanceViewProps {
   summary: FinanceSummary | null;
   transactions: Transaction[];
   onRefresh: () => void;
-  onCreateAccount?: (acc: { name: string; account_type: string; balance: number; currency?: string }) => void;
-  onUpdateAccount?: (id: string, updates: { name?: string; balance?: number }) => void;
+  onCreateAccount?: (acc: { name: string; account_type: string; balance: number; currency?: string; is_upi_default?: boolean }) => void;
+  onUpdateAccount?: (id: string, updates: { name?: string; balance?: number; is_upi_default?: boolean }) => void;
   onDeleteAccount?: (id: string) => void;
   onCreateTransaction?: (tx: {
     account_id: string;
@@ -54,10 +55,12 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | null>(null);
   const [editName, setEditName] = useState('');
   const [editBalance, setEditBalance] = useState('');
+  const [editIsUpiDefault, setEditIsUpiDefault] = useState(false);
   const [isCreatingAccount, setIsCreatingAccount] = useState(false);
   const [newAccName, setNewAccName] = useState('');
   const [newAccType, setNewAccType] = useState<string>('bank');
   const [newAccBalance, setNewAccBalance] = useState('');
+  const [newAccIsUpiDefault, setNewAccIsUpiDefault] = useState(false);
   const [amount, setAmount] = useState('');
   const [type, setType] = useState<TransactionType>('expense');
   const [paymentMode, setPaymentMode] = useState<PaymentMode>('upi');
@@ -65,6 +68,8 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   const [categoryId, setCategoryId] = useState('');
   const [description, setDescription] = useState('');
   const [transferToAccountId, setTransferToAccountId] = useState('');
+  const [dismissedUpiBanner, setDismissedUpiBanner] = useState(false);
+  const [unifyingUpi, setUnifyingUpi] = useState(false);
 
   // Recurring Bills & Subscription Radar State
   const [recurringBills, setRecurringBills] = useState<RecurringBill[]>([]);
@@ -137,6 +142,20 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     }
   };
 
+  const selectPaymentMode = (mode: PaymentMode) => {
+    setPaymentMode(mode);
+    if (mode === 'upi') {
+      const upiAcc = accounts.find(a => a.is_upi_default) || accounts.find(a => a.account_type === 'bank');
+      if (upiAcc) setAccountId(upiAcc.id);
+    } else if (mode === 'debit_card') {
+      const bankAcc = accounts.find(a => a.account_type === 'bank');
+      if (bankAcc) setAccountId(bankAcc.id);
+    } else if (mode === 'cash') {
+      const cashAcc = accounts.find(a => a.account_type === 'cash');
+      if (cashAcc) setAccountId(cashAcc.id);
+    }
+  };
+
   const accounts = summary?.accounts || [];
   const categories = summary?.categories || [];
 
@@ -144,6 +163,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     setEditingAccount(acc);
     setEditName(acc.name);
     setEditBalance(acc.balance.toString());
+    setEditIsUpiDefault(Boolean(acc.is_upi_default));
   };
 
   const handleSaveAccount = (e: React.FormEvent) => {
@@ -151,14 +171,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     if (!editingAccount) return;
     const val = parseFloat(editBalance);
     const balanceVal = isNaN(val) ? 0 : val;
-    const updates = { name: editName.trim(), balance: balanceVal };
+    const updates = { name: editName.trim(), balance: balanceVal, is_upi_default: editIsUpiDefault };
     const accId = editingAccount.id;
     setEditingAccount(null);
 
     if (onUpdateAccount) {
       onUpdateAccount(accId, updates);
     } else {
-      api.updateAccount(accId, updates).then(() => onRefresh());
+      api.updateAccount(accId, updates as any).then(() => onRefresh());
     }
   };
 
@@ -181,15 +201,32 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       account_type: newAccType,
       balance: isNaN(val) ? 0 : val,
       currency: 'INR',
+      is_upi_default: newAccIsUpiDefault,
     };
     setNewAccName('');
     setNewAccBalance('');
+    setNewAccIsUpiDefault(false);
     setIsCreatingAccount(false);
 
     if (onCreateAccount) {
       onCreateAccount(accData);
     } else {
       api.createAccount(accData).then(() => onRefresh());
+    }
+  };
+
+  const handleUnifyUPI = async () => {
+    const primaryBank = accounts.find(a => a.account_type === 'bank');
+    const walletAccount = accounts.find(a => a.account_type === 'wallet');
+    if (!primaryBank) return;
+    setUnifyingUpi(true);
+    try {
+      await api.unifyUPI(primaryBank.id, walletAccount?.id);
+      onRefresh();
+    } catch (err) {
+      console.error('Failed to unify UPI:', err);
+    } finally {
+      setUnifyingUpi(false);
     }
   };
 
@@ -253,7 +290,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             <span>Add Account</span>
           </button>
           <button
-            onClick={() => setIsAdding(true)}
+            onClick={() => {
+              setIsAdding(true);
+              selectPaymentMode(paymentMode || 'upi');
+            }}
             className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all"
           >
             <Plus className="w-4 h-4" />
@@ -261,6 +301,47 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* Smart Unification Banner if separate wallet exists */}
+      {accounts.some(a => a.account_type === 'wallet') && accounts.some(a => a.account_type === 'bank') && !dismissedUpiBanner && (
+        <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900 to-blue-950/40 border border-purple-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+          <div className="flex items-start gap-3">
+            <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 mt-0.5">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-xs font-bold text-zinc-100 flex items-center gap-1.5">
+                Keep UPI & Bank Account as the same?
+                <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">Unified Balance</span>
+              </h3>
+              <p className="text-[11px] text-zinc-400 mt-0.5">
+                In India, UPI payments come directly from your bank. Consolidate your separate{' '}
+                <strong>
+                  {accounts.find(a => a.account_type === 'wallet')?.name} (₹{(accounts.find(a => a.account_type === 'wallet')?.balance ?? 0).toLocaleString('en-IN')})
+                </strong>{' '}
+                into{' '}
+                <strong>{accounts.find(a => a.account_type === 'bank')?.name}</strong> so all UPI transactions deduct from your true bank balance.
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-2 self-end sm:self-auto flex-shrink-0">
+            <button
+              onClick={handleUnifyUPI}
+              disabled={unifyingUpi}
+              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-xs font-semibold shadow-md shadow-purple-600/20 flex items-center gap-1.5 transition-all"
+            >
+              <Zap className="w-3.5 h-3.5" />
+              <span>{unifyingUpi ? 'Unifying...' : `Merge into ${accounts.find(a => a.account_type === 'bank')?.name}`}</span>
+            </button>
+            <button
+              onClick={() => setDismissedUpiBanner(true)}
+              className="px-2.5 py-1.5 text-xs text-zinc-400 hover:text-zinc-200"
+            >
+              Keep Separate
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* 1. Account Cards (Bank, Cash, Wallet) with Real Balance Edit */}
       {accounts.length === 0 ? (
@@ -279,42 +360,52 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
           {accounts.map((acc) => (
             <div key={acc.id} className="bg-gradient-to-br from-zinc-900 to-zinc-950 border border-zinc-800 p-5 rounded-2xl relative overflow-hidden group">
               <div className="flex items-center justify-between text-xs text-zinc-400">
-                <span className="font-semibold uppercase tracking-wider">{acc.name}</span>
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => handleOpenEdit(acc)}
-                  className="p-1 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
-                  title="Edit Balance"
-                >
-                  <Pencil className="w-3.5 h-3.5" />
-                </button>
-                {acc.account_type === 'bank' ? (
-                  <CreditCard className="w-4 h-4 text-blue-400" />
-                ) : acc.account_type === 'cash' ? (
-                  <Coins className="w-4 h-4 text-amber-400" />
-                ) : (
-                  <Wallet className="w-4 h-4 text-emerald-400" />
-                )}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="font-semibold uppercase tracking-wider">{acc.name}</span>
+                  {acc.is_upi_default && (
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[9px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                      <Zap className="w-2.5 h-2.5 text-purple-400" />
+                      UPI Linked
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center space-x-2">
+                  <button
+                    onClick={() => handleOpenEdit(acc)}
+                    className="p-1 rounded bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 hover:text-white transition-colors"
+                    title="Edit Balance"
+                  >
+                    <Pencil className="w-3.5 h-3.5" />
+                  </button>
+                  {acc.account_type === 'bank' ? (
+                    <CreditCard className="w-4 h-4 text-blue-400" />
+                  ) : acc.account_type === 'cash' ? (
+                    <Coins className="w-4 h-4 text-amber-400" />
+                  ) : (
+                    <Wallet className="w-4 h-4 text-emerald-400" />
+                  )}
+                </div>
+              </div>
+              <div className="mt-3">
+                <p className="text-2xl font-bold text-zinc-100">
+                  ₹{acc.balance.toLocaleString('en-IN')}
+                </p>
+                <div className="flex items-center justify-between mt-1">
+                  <p className="text-[11px] text-zinc-400 capitalize">
+                    {acc.is_upi_default ? 'Bank & UPI Balance' : `${acc.account_type} Balance`}
+                  </p>
+                  <button
+                    onClick={() => handleOpenEdit(acc)}
+                    className="text-[11px] text-blue-400 hover:text-blue-300 font-medium opacity-80 hover:opacity-100"
+                  >
+                    Set Balance
+                  </button>
+                </div>
               </div>
             </div>
-            <div className="mt-3">
-              <p className="text-2xl font-bold text-zinc-100">
-                ₹{acc.balance.toLocaleString('en-IN')}
-              </p>
-              <div className="flex items-center justify-between mt-1">
-                <p className="text-[11px] text-zinc-400 capitalize">{acc.account_type} Balance</p>
-                <button
-                  onClick={() => handleOpenEdit(acc)}
-                  className="text-[11px] text-blue-400 hover:text-blue-300 font-medium opacity-80 hover:opacity-100"
-                >
-                  Set Balance
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-    )}
+          ))}
+        </div>
+      )}
 
       {/* 2. Today's Breakdown by Payment Mode (UPI vs Debit vs Cash) */}
       <div className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-5">
@@ -608,10 +699,12 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                     <button
                       key={m.id}
                       type="button"
-                      onClick={() => setPaymentMode(m.id as PaymentMode)}
+                      onClick={() => selectPaymentMode(m.id as PaymentMode)}
                       className={`py-2 px-3 rounded-lg text-xs font-semibold border transition-all ${
                         paymentMode === m.id
-                          ? 'bg-blue-600/20 border-blue-500 text-blue-400'
+                          ? m.id === 'upi'
+                            ? 'bg-purple-600/20 border-purple-500 text-purple-400'
+                            : 'bg-blue-600/20 border-blue-500 text-blue-400'
                           : 'bg-zinc-800 border-zinc-700 text-zinc-400 hover:text-zinc-200'
                       }`}
                     >
@@ -619,6 +712,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                     </button>
                   ))}
                 </div>
+                {paymentMode === 'upi' && (
+                  <div className="mt-2 flex items-center gap-1.5 text-[11px] text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2.5 py-1.5 rounded-lg">
+                    <Zap className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                    <span>
+                      UPI Linked: Auto-deducts from <strong>{accounts.find(a => a.id === accountId)?.name || 'Primary Bank Account'}</strong>
+                    </span>
+                  </div>
+                )}
               </div>
 
               {/* Account Selector */}
@@ -632,7 +733,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   >
                     {accounts.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name} (₹{a.balance})
+                        {a.name} (₹{a.balance}){a.is_upi_default ? ' • ⚡ UPI Linked' : ''}
                       </option>
                     ))}
                   </select>
@@ -737,6 +838,21 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 />
               </div>
 
+              {editingAccount.account_type === 'bank' && (
+                <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-purple-950/20 border border-purple-800/30 cursor-pointer text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={editIsUpiDefault}
+                    onChange={(e) => setEditIsUpiDefault(e.target.checked)}
+                    className="rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Keep UPI & this Bank Account as the same (Primary UPI)</span>
+                  </div>
+                </label>
+              )}
+
                 <div className="flex items-center justify-between pt-2">
                   <button
                     type="button"
@@ -818,6 +934,21 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   />
                 </div>
               </div>
+
+              {newAccType === 'bank' && (
+                <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-purple-950/20 border border-purple-800/30 cursor-pointer text-xs text-zinc-300">
+                  <input
+                    type="checkbox"
+                    checked={newAccIsUpiDefault}
+                    onChange={(e) => setNewAccIsUpiDefault(e.target.checked)}
+                    className="rounded bg-zinc-800 border-zinc-700 text-purple-600 focus:ring-purple-500"
+                  />
+                  <div className="flex items-center gap-1.5">
+                    <Zap className="w-3.5 h-3.5 text-purple-400" />
+                    <span>Set as Primary UPI Account (Keep UPI & Bank Same)</span>
+                  </div>
+                </label>
+              )}
 
               <div className="flex justify-end space-x-2 pt-2">
                 <button

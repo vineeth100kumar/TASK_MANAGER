@@ -10,7 +10,8 @@ from ..models import (
     FinanceCategoryCreate, FinanceCategoryResponse,
     TransactionCreate, TransactionResponse,
     BudgetCreate, BudgetResponse,
-    RecurringBillCreate, RecurringBillResponse
+    RecurringBillCreate, RecurringBillResponse,
+    UnifyUPIRequest, SplitUPIRequest
 )
 from ..services.ws_manager import ws_manager
 from ..services.finance_service import calc_days_until_due
@@ -32,6 +33,7 @@ async def get_finance_summary(db: aiosqlite.Connection = Depends(get_db)):
     async with db.execute("SELECT * FROM finance_accounts ORDER BY account_type ASC") as cursor:
         for row in await cursor.fetchall():
             acc = dict(row)
+            acc["is_upi_default"] = bool(acc.get("is_upi_default", 0))
             accounts.append(acc)
             if acc["account_type"] == "bank":
                 total_bank += acc["balance"]
@@ -110,7 +112,7 @@ async def get_finance_summary(db: aiosqlite.Connection = Depends(get_db)):
 @router.get("/accounts", response_model=List[FinanceAccountResponse])
 async def list_accounts(db: aiosqlite.Connection = Depends(get_db)):
     accounts = []
-    async with db.execute("SELECT * FROM finance_accounts ORDER BY balance DESC") as cursor:
+    async with db.execute("SELECT * FROM finance_accounts ORDER BY is_upi_default DESC, balance DESC") as cursor:
         for row in await cursor.fetchall():
             accounts.append(FinanceAccountResponse(
                 id=row["id"],
@@ -118,6 +120,7 @@ async def list_accounts(db: aiosqlite.Connection = Depends(get_db)):
                 account_type=row["account_type"],
                 balance=row["balance"],
                 currency=row["currency"],
+                is_upi_default=bool(row["is_upi_default"]) if "is_upi_default" in row.keys() else False,
                 updated_at=row["updated_at"]
             ))
     return accounts
@@ -126,13 +129,16 @@ async def list_accounts(db: aiosqlite.Connection = Depends(get_db)):
 async def create_account(acc: FinanceAccountCreate, db: aiosqlite.Connection = Depends(get_db)):
     acc_id = f"acc_{uuid.uuid4().hex[:8]}"
     now_iso = datetime.datetime.now().isoformat()
+    is_upi = 1 if acc.is_upi_default else 0
+    if is_upi:
+        await db.execute("UPDATE finance_accounts SET is_upi_default = 0")
     await db.execute(
-        "INSERT INTO finance_accounts (id, name, account_type, balance, currency, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (acc_id, acc.name, acc.account_type, acc.balance, acc.currency, now_iso)
+        "INSERT INTO finance_accounts (id, name, account_type, balance, currency, is_upi_default, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (acc_id, acc.name, acc.account_type, acc.balance, acc.currency, is_upi, now_iso)
     )
     await db.commit()
     res = FinanceAccountResponse(
-        id=acc_id, name=acc.name, account_type=acc.account_type, balance=acc.balance, currency=acc.currency, updated_at=now_iso
+        id=acc_id, name=acc.name, account_type=acc.account_type, balance=acc.balance, currency=acc.currency, is_upi_default=bool(is_upi), updated_at=now_iso
     )
     await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_UPDATED", "data": res.model_dump()})
     return res
@@ -149,6 +155,14 @@ async def update_account(account_id: str, updates: FinanceAccountUpdate, db: aio
     values = []
 
     update_dict = updates.model_dump(exclude_unset=True)
+    if "is_upi_default" in update_dict:
+        val = 1 if update_dict["is_upi_default"] else 0
+        if val == 1:
+            await db.execute("UPDATE finance_accounts SET is_upi_default = 0")
+        fields.append("is_upi_default = ?")
+        values.append(val)
+        del update_dict["is_upi_default"]
+
     for k, v in update_dict.items():
         fields.append(f"{k} = ?")
         values.append(v)
@@ -170,10 +184,58 @@ async def update_account(account_id: str, updates: FinanceAccountUpdate, db: aio
         account_type=updated["account_type"],
         balance=updated["balance"],
         currency=updated["currency"],
+        is_upi_default=bool(updated["is_upi_default"]) if "is_upi_default" in updated.keys() else False,
         updated_at=updated["updated_at"]
     )
     await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_UPDATED", "data": res.model_dump()})
     return res
+
+@router.post("/accounts/unify-upi")
+async def unify_upi(req: UnifyUPIRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """Unifies UPI with a designated bank account and optionally merges wallet balance into it."""
+    async with db.execute("SELECT * FROM finance_accounts WHERE id = ?", (req.bank_account_id,)) as cursor:
+        bank_acc = await cursor.fetchone()
+        if not bank_acc:
+            raise HTTPException(status_code=404, detail="Bank account not found")
+
+    # 1. Designate this bank account as the UPI default
+    await db.execute("UPDATE finance_accounts SET is_upi_default = 0")
+    await db.execute("UPDATE finance_accounts SET is_upi_default = 1 WHERE id = ?", (req.bank_account_id,))
+
+    merged_amount = 0.0
+    # 2. If merge_wallet_id is specified, absorb its balance and re-link its transactions
+    if req.merge_wallet_id:
+        async with db.execute("SELECT * FROM finance_accounts WHERE id = ?", (req.merge_wallet_id,)) as w_cursor:
+            wallet_acc = await w_cursor.fetchone()
+            if wallet_acc:
+                merged_amount = float(wallet_acc["balance"])
+                now_iso = datetime.datetime.now().isoformat()
+                # Add wallet balance into the bank account
+                await db.execute("UPDATE finance_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?", (merged_amount, now_iso, req.bank_account_id))
+                # Re-route any past transactions from the wallet to this bank account
+                await db.execute("UPDATE finance_transactions SET account_id = ? WHERE account_id = ?", (req.bank_account_id, req.merge_wallet_id))
+                await db.execute("UPDATE finance_transactions SET transfer_to_account_id = ? WHERE transfer_to_account_id = ?", (req.bank_account_id, req.merge_wallet_id))
+                # Delete the redundant standalone wallet account
+                await db.execute("DELETE FROM finance_accounts WHERE id = ?", (req.merge_wallet_id,))
+
+    await db.commit()
+    await ws_manager.broadcast({"type": "FINANCE_ACCOUNTS_UNIFIED", "data": {"bank_account_id": req.bank_account_id, "merged_amount": merged_amount}})
+    return {"success": True, "bank_account_id": req.bank_account_id, "merged_amount": merged_amount}
+
+@router.post("/accounts/split-upi")
+async def split_upi(req: SplitUPIRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """Creates/restores a separate Digital Wallet account and unlinks it from the bank account."""
+    now_iso = datetime.datetime.now().isoformat()
+    new_wallet_id = f"acc_{uuid.uuid4().hex[:8]}"
+    await db.execute(
+        "INSERT INTO finance_accounts (id, name, account_type, balance, currency, is_upi_default, updated_at) VALUES (?, ?, 'wallet', ?, 'INR', 1, ?)",
+        (new_wallet_id, req.wallet_name, req.initial_wallet_balance, now_iso)
+    )
+    # Remove is_upi_default from bank account
+    await db.execute("UPDATE finance_accounts SET is_upi_default = 0 WHERE id = ?", (req.bank_account_id,))
+    await db.commit()
+    await ws_manager.broadcast({"type": "FINANCE_ACCOUNTS_SPLIT", "data": {"wallet_id": new_wallet_id}})
+    return {"success": True, "wallet_id": new_wallet_id}
 
 @router.delete("/accounts/{account_id}")
 async def delete_account(account_id: str, db: aiosqlite.Connection = Depends(get_db)):

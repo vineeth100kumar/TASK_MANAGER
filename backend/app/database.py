@@ -116,6 +116,7 @@ CREATE TABLE IF NOT EXISTS finance_accounts (
     account_type TEXT CHECK(account_type IN ('bank', 'cash', 'wallet', 'credit')) NOT NULL,
     balance REAL NOT NULL DEFAULT 0.0,
     currency TEXT DEFAULT 'INR',
+    is_upi_default INTEGER DEFAULT 0,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -268,6 +269,16 @@ async def _run_migrations(db: aiosqlite.Connection):
     if "context_tags" not in columns:
         await db.execute("ALTER TABLE work_items ADD COLUMN context_tags TEXT DEFAULT ''")
         print("Migration: added context_tags column to work_items")
+
+    # v2.3.1: Add is_upi_default column to finance_accounts if it doesn't exist
+    async with db.execute("PRAGMA table_info(finance_accounts)") as fa_cursor:
+        fa_cols = {row["name"] for row in await fa_cursor.fetchall()}
+    if "is_upi_default" not in fa_cols:
+        await db.execute("ALTER TABLE finance_accounts ADD COLUMN is_upi_default INTEGER DEFAULT 0")
+        print("Migration: added is_upi_default column to finance_accounts")
+        # Ensure bank account is default UPI if no account has it
+        await db.execute("UPDATE finance_accounts SET is_upi_default = 1 WHERE id = (SELECT id FROM finance_accounts WHERE account_type = 'bank' LIMIT 1)")
+
     await db.commit()
 
 async def init_database():
