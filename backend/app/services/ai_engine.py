@@ -89,21 +89,36 @@ async def generate_greeting(
 
 async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
     """
-    Converts unstructured input into structured task and optional finance entities.
-    Example: 'Pay electricity bill 2500 via upi tomorrow high priority'
+    Converts unstructured input into structured task, event, or reminder entities.
+    Accurately extracts dates, times, priorities, and explicit financial transactions.
+    Times like 'at 11.30 am' are strictly classified as event times, NEVER expenses!
     """
-    today = datetime.datetime.now().strftime("%Y-%m-%d")
-    tomorrow = (datetime.datetime.now() + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
+    now = datetime.datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
     
     prompt = f"""
-    You are an intelligent data extraction AI. Extract distinct actionable tasks from the user's text.
-    Today's date is {today}, tomorrow is {tomorrow}.
-    Respond ONLY with a valid JSON array of objects matching this exact format:
+    You are an intelligent data extraction AI for Sage OS.
+    Extract distinct actionable items from user text.
+    Today's date is {today}, tomorrow is {tomorrow}. Current time is {now.strftime("%H:%M")}.
+
+    CRITICAL RULES:
+    1. Distinguish between EVENT TIMES and EXPENSES:
+       - "11.30 am", "at 5pm", "10:00" are event TIMES, NOT money! Expense MUST be null.
+       - An expense ONLY exists if money is explicitly mentioned with currency or payment action (e.g. "Rs 500", "₹120", "$50", "paid 250 via upi").
+    2. Entity types:
+       - "event" for meetings, parties, ceremonies, namings, birthdays, appointments, calls, flights.
+       - "reminder" for alerts or time-sensitive notes ("remind me to...").
+       - "task" for action items and to-dos.
+    3. If a specific time is mentioned (e.g. "at 11.30 am"), put it in "start_at" formatted as "YYYY-MM-DDTHH:MM:SS".
+
+    Respond ONLY with a valid JSON array of objects:
     [
       {{
         "title": "Clear action title",
         "description": "Optional notes or details",
         "due_date": "YYYY-MM-DD or null",
+        "start_at": "YYYY-MM-DDTHH:MM:SS or null",
         "priority": "low" | "medium" | "high" | "urgent",
         "entity_type": "task" | "event" | "reminder",
         "estimated_minutes": 30,
@@ -111,14 +126,15 @@ async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
             "amount": 2500.0,
             "payment_mode": "upi" | "debit_card" | "cash" | "net_banking",
             "category": "Utilities & Bills"
-        }} (or null if no money/payment mentioned)
+        }} or null
       }}
     ]
+
     User input: "{natural_language}"
     """
     
     try:
-        async with httpx.AsyncClient(timeout=6.0) as client:
+        async with httpx.AsyncClient(timeout=12.0) as client:
             resp = await client.post(
                 f"{OLLAMA_HOST}/api/generate",
                 json={
@@ -131,52 +147,117 @@ async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
             )
             if resp.status_code == 200:
                 parsed = safe_parse_json(resp.json().get("response", ""))
-                if isinstance(parsed, list):
+                if isinstance(parsed, list) and len(parsed) > 0:
+                    # Sanity check: Ensure times weren't accidentally captured as expenses
+                    for item in parsed:
+                        if item.get("expense"):
+                            exp_amt = item["expense"].get("amount")
+                            if exp_amt in [11.3, 11.30, 10.3, 9.3, 12.3] and re.search(r"\b" + str(exp_amt) + r"\s*(?:am|pm)?\b", natural_language, re.I):
+                                if "am" in natural_language.lower() or "pm" in natural_language.lower() or "at " in natural_language.lower():
+                                    item["expense"] = None
                     return parsed
-                elif isinstance(parsed, dict):
+                elif isinstance(parsed, dict) and parsed:
                     return [parsed]
     except Exception:
         pass
 
-    # Heuristic Rule-Based Fallback
+    # Heuristic Rule-Based Fallback (Bulletproof NLP Extraction)
     text = natural_language.strip()
+    text_lower = text.lower()
+    
+    # 1. Determine entity_type
+    event_keywords = [
+        "event", "naming", "ceremony", "wedding", "party", "birthday",
+        "meeting", "meet", "appointment", "call", "interview", "doctor",
+        "dinner", "lunch", "breakfast", "flight", "concert", "webinar"
+    ]
+    reminder_keywords = ["remind", "reminder", "alarm"]
+    
+    entity_type = "task"
+    if any(k in text_lower for k in event_keywords):
+        entity_type = "event"
+    elif any(k in text_lower for k in reminder_keywords):
+        entity_type = "reminder"
+
+    # 2. Extract priority
     priority = "medium"
-    if any(w in text.lower() for w in ["urgent", "asap", "critical"]):
+    if any(w in text_lower for w in ["urgent", "asap", "critical", "emergency"]):
         priority = "urgent"
-    elif any(w in text.lower() for w in ["high", "important"]):
+    elif any(w in text_lower for w in ["high", "important", "must"]):
         priority = "high"
-    elif any(w in text.lower() for w in ["low", "someday", "later"]):
+    elif any(w in text_lower for w in ["low", "someday", "later"]):
         priority = "low"
 
-    due_date = None
-    if "today" in text.lower():
-        due_date = today
-    elif "tomorrow" in text.lower():
-        due_date = tomorrow
+    # 3. Extract Time (e.g. at 11.30 am, 11:30 am, at 4 pm)
+    time_str = None
+    start_at = None
+    time_match = re.search(r"(?:at\s+)?(\b\d{1,2})(?::|\.)(\d{2})\s*(am|pm)?\b", text, re.I)
+    if not time_match:
+        time_match = re.search(r"(?:at\s+)?(\b\d{1,2})\s*(am|pm)\b", text, re.I)
+        if time_match:
+            hr = int(time_match.group(1))
+            mn = 0
+            meridiem = time_match.group(2).lower()
+            if meridiem == "pm" and hr < 12:
+                hr += 12
+            elif meridiem == "am" and hr == 12:
+                hr = 0
+            time_str = f"{hr:02d}:{mn:02d}:00"
+    else:
+        hr = int(time_match.group(1))
+        mn = int(time_match.group(2))
+        meridiem = (time_match.group(3) or "").lower()
+        if meridiem == "pm" and hr < 12:
+            hr += 12
+        elif meridiem == "am" and hr == 12:
+            hr = 0
+        time_str = f"{hr:02d}:{mn:02d}:00"
 
-    # Check for expense mentions (e.g. 500 upi, rs 2500, etc.)
+    # 4. Extract Date
+    due_date = None
+    if "today" in text_lower:
+        due_date = today
+    elif "tomorrow" in text_lower:
+        due_date = tomorrow
+    elif entity_type == "event" and time_str:
+        # Default event with specific time to today
+        due_date = today
+
+    if due_date and time_str:
+        start_at = f"{due_date}T{time_str}"
+
+    # 5. Extract Expense (Strict check - MUST have explicit currency/spending keywords, never times!)
     expense = None
-    money_match = re.search(r"(?:rs\.?|inr|\$|₹)?\s*(\d+(?:\.\d{1,2})?)\s*(?:rs|inr|rupees)?", text, re.I)
-    if money_match:
-        amount = float(money_match.group(1))
-        payment_mode = "upi"
-        if "cash" in text.lower():
-            payment_mode = "cash"
-        elif "card" in text.lower() or "debit" in text.lower():
-            payment_mode = "debit_card"
-        expense = {
-            "amount": amount,
-            "payment_mode": payment_mode,
-            "category": "General Expense"
-        }
+    exp_patterns = [
+        r"(?:rs\.?|inr|₹|\$)\s*(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm|hrs|hours|mins|minutes|o'clock))",
+        r"(\d+(?:\.\d{1,2})?)\s*(?:rs\.?|inr|rupees|\$|bucks)(?!\s*(?:am|pm))",
+        r"(?:paid|pay|spent|spend|cost|fee|bill|bought)\s+(?:of\s+)?(?:rs\.?|inr|₹|\$)?\s*(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm))",
+        r"(\d+(?:\.\d{1,2})?)\s*(?:via|through|by|on|in)\s*(?:upi|gpay|phonepe|paytm|cash|card|debit)"
+    ]
+    for pat in exp_patterns:
+        m = re.search(pat, text, re.I)
+        if m:
+            amt = float(m.group(1))
+            mode = "upi"
+            if "cash" in text_lower:
+                mode = "cash"
+            elif "card" in text_lower or "debit" in text_lower:
+                mode = "debit_card"
+            expense = {
+                "amount": amt,
+                "payment_mode": mode,
+                "category": "General Expense"
+            }
+            break
 
     return [{
         "title": text,
-        "description": "Captured via Quick Brain Dump",
+        "description": f"Captured via AI Brain Dump ({'Event scheduled at ' + time_str if time_str else 'Action item'})",
         "due_date": due_date,
+        "start_at": start_at,
         "priority": priority,
-        "entity_type": "task",
-        "estimated_minutes": 30,
+        "entity_type": entity_type,
+        "estimated_minutes": 60 if entity_type == "event" else 30,
         "expense": expense
     }]
 

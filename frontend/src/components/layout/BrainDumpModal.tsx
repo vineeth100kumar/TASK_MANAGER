@@ -35,6 +35,7 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
             title: item.title,
             description: item.description,
             due_date: item.due_date,
+            start_at: item.start_at,
             priority: item.priority || 'medium',
             entity_type: item.entity_type || 'task',
             status: 'todo',
@@ -111,14 +112,28 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
           <div className="bg-zinc-950/80 border border-zinc-800 rounded-xl p-3 space-y-2 max-h-48 overflow-y-auto">
             <div className="flex items-center space-x-1.5 text-xs text-emerald-400 font-semibold">
               <CheckCircle2 className="w-3.5 h-3.5" />
-              <span>Extracted & Added {extractedItems.length} items to Sage OS:</span>
+              <span>Extracted & Added {extractedItems.length} item(s) to Sage OS:</span>
             </div>
             {extractedItems.map((item, idx) => (
-              <div key={idx} className="text-xs bg-zinc-900 p-2 rounded border border-zinc-800 text-zinc-300">
-                <span className="font-semibold">{item.title}</span>
-                {item.due_date && <span className="ml-2 text-zinc-400">📅 {item.due_date}</span>}
-                {item.priority && <span className="ml-2 uppercase text-[10px] text-blue-400">{item.priority}</span>}
-                {item.expense && <span className="ml-2 text-amber-400">₹{item.expense.amount} ({item.expense.payment_mode})</span>}
+              <div key={idx} className="text-xs bg-zinc-900 p-2.5 rounded-lg border border-zinc-800 text-zinc-300 space-y-1">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-zinc-100">{item.title}</span>
+                  <span className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                    item.entity_type === 'event'
+                      ? 'bg-purple-500/20 text-purple-400 border border-purple-500/30'
+                      : item.entity_type === 'reminder'
+                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                      : 'bg-blue-500/20 text-blue-400 border border-blue-500/30'
+                  }`}>
+                    {item.entity_type || 'task'}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2 text-[11px] text-zinc-400">
+                  {item.due_date && <span>📅 {item.due_date}</span>}
+                  {item.start_at && <span>🕒 {item.start_at.split('T')[1]?.substring(0, 5)}</span>}
+                  {item.priority && <span className="uppercase text-[9px] font-mono text-zinc-400">• {item.priority}</span>}
+                  {item.expense && <span className="text-amber-400 font-medium">💰 ₹{item.expense.amount} ({item.expense.payment_mode})</span>}
+                </div>
               </div>
             ))}
           </div>

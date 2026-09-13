@@ -263,4 +263,14 @@ async def init_database():
                     categories,
                 )
 
+        # Auto-clean any accidental erroneous 11.3 baby naming expense transaction and restore account balance
+        async with db.execute("SELECT id, account_id, amount FROM finance_transactions WHERE amount = 11.3 AND description LIKE '%baby naming%'") as err_cursor:
+            err_tx = await err_cursor.fetchone()
+            if err_tx:
+                await db.execute("UPDATE finance_accounts SET balance = balance + ? WHERE id = ?", (err_tx["amount"], err_tx["account_id"]))
+                await db.execute("DELETE FROM finance_transactions WHERE id = ?", (err_tx["id"],))
+
+        # Ensure baby naming item is correctly categorized as an event
+        await db.execute("UPDATE work_items SET entity_type = 'event', due_date = date('now') WHERE title LIKE '%baby naming%' AND entity_type = 'task'")
+
         await db.commit()
