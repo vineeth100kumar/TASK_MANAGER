@@ -37,6 +37,8 @@ export interface WorkItem {
   subtasks: Subtask[];
 }
 
+export type WorkItemUpdatePayload = Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] };
+
 export interface Milestone {
   id: string;
   project_id?: string | null;

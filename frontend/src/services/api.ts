@@ -1,5 +1,5 @@
 import {
-  WorkItem, Milestone, Project, DailyPerformance,
+  WorkItem, WorkItemUpdatePayload, Milestone, Project, DailyPerformance,
   FinanceSummary, Transaction, AiGreetingResponse,
   FinanceAccount, WeatherData
 } from '../types';
@@ -32,7 +32,7 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(item),
     }),
-  updateItem: (id: string, updates: Partial<WorkItem>) =>
+  updateItem: (id: string, updates: WorkItemUpdatePayload) =>
     fetchJson<WorkItem>(`/api/v1/items/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(updates),

@@ -188,6 +188,7 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
     values = []
     
     update_dict = updates.model_dump(exclude_unset=True)
+    new_subtasks = update_dict.pop("subtasks", None)
     
     # Handle completion & recurrence
     if "is_completed" in update_dict:
@@ -228,13 +229,27 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
             fields.append(f"{k} = ?")
             values.append(v)
             
-    fields.append("updated_at = ?")
-    values.append(now_iso)
-    values.append(item_id)
-    
-    sql = f"UPDATE work_items SET {', '.join(fields)} WHERE id = ?"
-    await db.execute(sql, values)
-    await db.commit()
+    if fields:
+        fields.append("updated_at = ?")
+        values.append(now_iso)
+        values.append(item_id)
+        sql = f"UPDATE work_items SET {', '.join(fields)} WHERE id = ?"
+        await db.execute(sql, values)
+        await db.commit()
+
+    # Process new subtasks if provided
+    if new_subtasks is not None and len(new_subtasks) > 0:
+        async with db.execute("SELECT COALESCE(MAX(position), -1) FROM subtasks WHERE work_item_id = ?", (item_id,)) as max_cur:
+            max_row = await max_cur.fetchone()
+            start_pos = (max_row[0] if max_row else -1) + 1
+
+        for idx, sub_title in enumerate(new_subtasks):
+            sub_id = f"sub_{uuid.uuid4().hex[:10]}"
+            await db.execute(
+                "INSERT INTO subtasks (id, work_item_id, title, is_completed, position, created_at) VALUES (?, ?, ?, 0, ?, ?)",
+                (sub_id, item_id, sub_title, start_pos + idx, now_iso)
+            )
+        await db.commit()
     
     # Return updated item
     async with db.execute("SELECT * FROM work_items WHERE id = ?", (item_id,)) as cursor:

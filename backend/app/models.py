@@ -62,6 +62,7 @@ class WorkItemUpdate(BaseModel):
     actual_minutes: Optional[int] = None
     depends_on: Optional[List[str]] = None
     is_completed: Optional[bool] = None
+    subtasks: Optional[List[str]] = None
 
 class WorkItemResponse(WorkItemBase):
     id: str

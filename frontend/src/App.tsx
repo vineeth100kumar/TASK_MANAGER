@@ -9,6 +9,7 @@ import { api } from './services/api';
 import { useLiveSync } from './services/websocket';
 import { 
   WorkItem, 
+  WorkItemUpdatePayload,
   Milestone, 
   DailyPerformance, 
   FinanceSummary, 
@@ -227,8 +228,24 @@ export const App: React.FC = () => {
   };
 
   // Update Item details
-  const handleUpdateItem = (id: string, updates: Partial<WorkItem>) => {
-    setItems(prev => prev.map(i => i.id === id ? { ...i, ...updates } : i));
+  const handleUpdateItem = (id: string, updates: WorkItemUpdatePayload) => {
+    const { subtasks: newSubtaskStrings, ...directUpdates } = updates;
+
+    setItems(prev => prev.map(i => {
+      if (i.id !== id) return i;
+      let nextSubtasks = i.subtasks;
+      if (newSubtaskStrings && newSubtaskStrings.length > 0 && (!i.subtasks || i.subtasks.length === 0)) {
+        nextSubtasks = newSubtaskStrings.map((title, idx) => ({
+          id: `temp_sub_${Date.now()}_${idx}`,
+          work_item_id: id,
+          title,
+          is_completed: false,
+          position: idx
+        }));
+      }
+      return { ...i, ...directUpdates, subtasks: nextSubtasks };
+    }));
+
     startSync();
     api.updateItem(id, updates)
       .then(realItem => {

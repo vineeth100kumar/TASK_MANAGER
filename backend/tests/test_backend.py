@@ -67,3 +67,22 @@ async def test_database_and_finance_workflow(tmp_path, monkeypatch):
             tx = await cursor.fetchone()
             assert tx["payment_mode"] == "upi"
             assert tx["amount"] == 500.0
+
+@pytest.mark.asyncio
+async def test_ai_task_improvisation():
+    from app.services.ai_engine import improve_task_data, synthesize_domain_task
+    
+    # 1. Test Running improvisation (Zero robotic boilerplate)
+    run_res = await improve_task_data("Go for a Run")
+    assert "efficiently with high quality" not in run_res["description"]
+    assert "associated checklist items" not in run_res["description"]
+    assert "Pacing" in run_res["description"]
+    assert "cadence" in run_res["description"]
+    assert len(run_res["subtasks"]) >= 3
+    assert run_res["category"] == "Health"
+    
+    # 2. Test Finance improvisation
+    bill_res = synthesize_domain_task("pay electricity bill")
+    assert bill_res["category"] == "Finance"
+    assert "payment" in bill_res["description"].lower() or "receipt" in bill_res["description"].lower()
+    assert len(bill_res["subtasks"]) >= 3

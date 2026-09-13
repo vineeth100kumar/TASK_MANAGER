@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Plus, 
   CheckSquare, 
@@ -17,7 +17,7 @@ import {
   Check,
   X
 } from 'lucide-react';
-import { WorkItem, Milestone, EntityType, TaskStatus, TaskPriority } from '../../types';
+import { WorkItem, WorkItemUpdatePayload, Milestone, EntityType, TaskStatus, TaskPriority } from '../../types';
 import { api } from '../../services/api';
 
 interface TasksViewProps {
@@ -27,7 +27,7 @@ interface TasksViewProps {
   onToggleComplete: (item: WorkItem) => void;
   onCreateItem?: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
   onDeleteItem?: (id: string) => void;
-  onUpdateItem?: (id: string, updates: Partial<WorkItem>) => void;
+  onUpdateItem?: (id: string, updates: WorkItemUpdatePayload) => void;
   onToggleSubtask?: (itemId: string, subtaskId: string) => void;
 }
 
@@ -46,6 +46,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isAiExpanding, setIsAiExpanding] = useState(false);
+
+  // Keep selectedItem in sync when items update
+  useEffect(() => {
+    if (selectedItem) {
+      const refreshed = items.find(i => i.id === selectedItem.id);
+      if (refreshed) {
+        setSelectedItem(refreshed);
+      }
+    }
+  }, [items]);
   
   // AI Improvisation & Organization State
   const [isAiPolishing, setIsAiPolishing] = useState(false);
@@ -126,7 +136,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
     try {
       const res = await api.improveTask(item.title, item.description || undefined, item.entity_type);
       if (res.success && res.data) {
-        const updates: Partial<WorkItem> = {
+        const updates: WorkItemUpdatePayload = {
           title: res.data.improved_title,
           description: res.data.description,
           priority: (res.data.priority as TaskPriority) || item.priority,
@@ -197,16 +207,32 @@ export const TasksView: React.FC<TasksViewProps> = ({
     try {
       const res = await api.autoFillTask(item.title, item.description || undefined);
       if (res.success && res.data) {
-        const updates: Partial<WorkItem> = {
+        const updates: WorkItemUpdatePayload = {
           description: res.data.description,
           priority: (res.data.priority as TaskPriority) || item.priority,
           estimated_minutes: res.data.estimated_minutes || item.estimated_minutes
         };
-        setSelectedItem({ ...item, ...updates });
+
+        if ((!item.subtasks || item.subtasks.length === 0) && res.data.subtasks && res.data.subtasks.length > 0) {
+          updates.subtasks = res.data.subtasks;
+        }
+
+        const optimisticSubtasks = updates.subtasks
+          ? updates.subtasks.map((st, idx) => ({
+              id: `temp_sub_${Date.now()}_${idx}`,
+              work_item_id: item.id,
+              title: st,
+              is_completed: false,
+              position: idx
+            }))
+          : item.subtasks;
+
+        setSelectedItem({ ...item, ...updates, subtasks: optimisticSubtasks } as WorkItem);
         if (onUpdateItem) {
           onUpdateItem(item.id, updates);
         } else {
-          await api.updateItem(item.id, updates);
+          const updated = await api.updateItem(item.id, updates);
+          if (updated) setSelectedItem(updated);
           onRefresh();
         }
       }
