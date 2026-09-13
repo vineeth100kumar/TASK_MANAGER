@@ -35,7 +35,10 @@ if command -v systemctl >/dev/null 2>&1; then
         echo "⚠️  sage-backend.service not found in /etc/systemd/system/."
         echo "👉 Please run one-time setup: sudo bash $REPO_DIR/deploy/install_native.sh"
     else
-        sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
+        sudo /bin/systemctl restart sage-backend 2>/dev/null || \
+        sudo /usr/bin/systemctl restart sage-backend 2>/dev/null || \
+        sudo systemctl restart sage-backend 2>/dev/null || \
+        systemctl restart sage-backend 2>/dev/null || true
     fi
 fi
 

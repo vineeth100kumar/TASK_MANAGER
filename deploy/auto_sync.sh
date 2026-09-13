@@ -35,25 +35,49 @@ while true; do
         # Pull latest code
         git reset --hard origin/main
 
-        # Ensure permissions on dist folder and scripts
+        # Ensure permissions on dist folder, scripts, and data
         chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
         chmod +x "$REPO_DIR"/deploy/*.sh 2>/dev/null || true
+        mkdir -p "$REPO_DIR/data/backups" 2>/dev/null || true
+        chmod -R 775 "$REPO_DIR/data" 2>/dev/null || true
 
-        # Update dependencies if requirements changed
-        if [ -n "$REQ_CHANGED" ] && [ -d "$REPO_DIR/.venv" ]; then
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Dependencies changed, updating virtualenv..."
+        # Ensure Python dependencies are up to date
+        NEEDS_PIP=false
+        if [ -n "$REQ_CHANGED" ]; then
+            NEEDS_PIP=true
+        elif ! "$REPO_DIR/.venv/bin/python" -c "import app.main" 2>/dev/null; then
+            NEEDS_PIP=true
+        fi
+
+        if [ "$NEEDS_PIP" = true ] && [ -d "$REPO_DIR/.venv" ]; then
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Updating virtualenv dependencies..."
             "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/backend/requirements.txt" --quiet || true
         fi
 
-        # Restart backend service
+        # Restart backend service using any available systemctl path
         if command -v systemctl >/dev/null 2>&1; then
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔄 Restarting sage-backend service..."
-            sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
+            sudo /bin/systemctl restart sage-backend 2>/dev/null || \
+            sudo /usr/bin/systemctl restart sage-backend 2>/dev/null || \
+            sudo systemctl restart sage-backend 2>/dev/null || \
+            systemctl restart sage-backend 2>/dev/null || true
         fi
 
         COMMIT_MSG=$(git log -1 --pretty=format:"%s" 2>/dev/null || echo "latest")
-        VERSION_TAG=$(grep 'VERSION =' "$REPO_DIR/backend/app/version.py" 2>/dev/null | cut -d'"' -f2 || echo "2.1.0")
+        VERSION_TAG=$(grep 'VERSION =' "$REPO_DIR/backend/app/version.py" 2>/dev/null | cut -d'"' -f2 || echo "2.3.0")
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Synced successfully to v$VERSION_TAG: \"$COMMIT_MSG\""
+
+        # Write status file for remote health diagnostics
+        sleep 2
+        STATUS_LOG="$REPO_DIR/frontend/dist/last_sync.txt"
+        {
+            echo "=== Sage OS Auto-Sync Status ==="
+            date
+            echo "Version: v$VERSION_TAG"
+            echo "Commit: $COMMIT_MSG"
+            echo "Health: $(curl -s http://127.0.0.1:8000/api/health 2>/dev/null || echo 'unreachable')"
+        } > "$STATUS_LOG" 2>&1 || true
+        chmod 644 "$STATUS_LOG" 2>/dev/null || true
     fi
 
     sleep 10

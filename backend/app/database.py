@@ -7,7 +7,7 @@ DB_DIR = os.environ.get("DATA_DIR", os.path.join(os.path.dirname(os.path.dirname
 os.makedirs(DB_DIR, exist_ok=True)
 DB_PATH = os.path.join(DB_DIR, "sage_life.db")
 
-SCHEMA_SQL = """
+SCHEMA_TABLES_SQL = """
 -- Users & Security
 CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
@@ -174,7 +174,9 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     device_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+"""
 
+SCHEMA_INDEXES_SQL = """
 -- High Performance Indexes for Raspberry Pi 5
 CREATE INDEX IF NOT EXISTS idx_work_items_due_completed ON work_items(due_date, is_completed);
 CREATE INDEX IF NOT EXISTS idx_work_items_entity_status ON work_items(entity_type, status);
@@ -191,6 +193,9 @@ CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type
 CREATE INDEX IF NOT EXISTS idx_recurring_bills_active ON recurring_bills(is_active, due_day_of_month);
 CREATE INDEX IF NOT EXISTS idx_daily_reflections_date ON daily_reflections(date);
 """
+
+# Backwards compatibility
+SCHEMA_SQL = SCHEMA_TABLES_SQL + SCHEMA_INDEXES_SQL
 
 class SQLitePool:
     """Pre-warmed connection pool for high-throughput, low-latency async SQLite on Raspberry Pi 5."""
@@ -277,10 +282,17 @@ async def init_database():
         await db.execute("PRAGMA temp_store = MEMORY;")
         await db.execute("PRAGMA mmap_size = 268435456;")
         await db.execute("PRAGMA cache_size = -64000;")
-        await db.executescript(SCHEMA_SQL)
+        
+        # 1. Create base tables
+        await db.executescript(SCHEMA_TABLES_SQL)
         await db.commit()
-        # Run safe column migrations for existing databases
+        
+        # 2. Run safe column migrations for existing databases BEFORE creating indexes
         await _run_migrations(db)
+        
+        # 3. Create high-performance indexes on guaranteed-present columns
+        await db.executescript(SCHEMA_INDEXES_SQL)
+        await db.commit()
 
         # Seed default financial accounts if none exist
         async with db.execute("SELECT COUNT(*) FROM finance_accounts") as cursor:
