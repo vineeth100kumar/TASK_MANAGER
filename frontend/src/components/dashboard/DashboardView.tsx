@@ -13,8 +13,10 @@ import {
   Coins 
 } from 'lucide-react';
 import { DailyPerformance, AiGreetingResponse, FinanceSummary, WorkItem, WeatherData } from '../../types';
+import { Skeleton } from '../common/Skeleton';
 
 interface DashboardViewProps {
+  isLoading?: boolean;
   performance: DailyPerformance | null;
   greetingData: AiGreetingResponse | null;
   weatherData?: WeatherData | null;
@@ -25,6 +27,7 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
+  isLoading = false,
   performance,
   greetingData,
   weatherData,
@@ -49,6 +52,31 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     }
     return `Good ${period}! You have ${tasksPlanned - tasksCompleted} tasks remaining today. Maintain your momentum.`;
   };
+
+  if (isLoading && !performance && !greetingData) {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12 animate-in fade-in">
+        {/* Greeting Skeleton */}
+        <div className="p-6 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-3">
+          <Skeleton variant="text" className="w-48 h-4" />
+          <Skeleton variant="text" className="w-full sm:w-3/4 h-8" />
+        </div>
+        {/* 4 Stats Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <Skeleton variant="card" count={4} />
+        </div>
+        {/* Finance & Tasks */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          <div className="lg:col-span-2 space-y-4">
+            <Skeleton variant="row" count={4} />
+          </div>
+          <div className="space-y-4">
+            <Skeleton variant="card" className="h-64" />
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">

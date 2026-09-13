@@ -4,8 +4,13 @@ import {
   Trash2, ChevronDown, ChevronRight, Calendar, Tag, AlertCircle
 } from 'lucide-react';
 import { Project, Milestone, WorkItem } from '../../types';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Skeleton } from '../common/Skeleton';
 
 interface ProjectsHubProps {
+  isLoading?: boolean;
   projects: Project[];
   milestones: Milestone[];
   items: WorkItem[];
@@ -30,6 +35,7 @@ const COLOR_PRESETS = [
 ];
 
 export const ProjectsHub: React.FC<ProjectsHubProps> = ({
+  isLoading = false,
   projects,
   milestones,
   items,
@@ -42,6 +48,8 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   onToggleComplete
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
+  const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
+  const [deletingMilestoneId, setDeletingMilestoneId] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
   const [newProjectColor, setNewProjectColor] = useState(COLOR_PRESETS[0]);
@@ -132,6 +140,11 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
 
       {/* Projects Grid / List */}
       {projects.length === 0 ? (
+        isLoading ? (
+          <div className="space-y-4">
+            <Skeleton variant="card" count={3} />
+          </div>
+        ) : (
         <div className="text-center py-16 bg-zinc-900/40 border border-zinc-800 rounded-2xl">
           <Folder className="w-12 h-12 text-zinc-600 mx-auto mb-3" />
           <h3 className="text-base font-semibold text-zinc-300">No Projects Yet</h3>
@@ -145,6 +158,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
             Create Project
           </button>
         </div>
+        )
       ) : (
         <div className="space-y-4">
           {projects.map(proj => {
@@ -205,11 +219,11 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (confirm(`Delete project "${proj.name}"? Linked tasks will not be deleted.`)) {
-                          onDeleteProject(proj.id);
-                        }
+                        setDeletingProjectId(proj.id);
                       }}
+                      aria-label={`Delete project: ${proj.name}`}
                       className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-zinc-800 transition-colors"
+                      title="Delete project"
                     >
                       <Trash2 className="w-4 h-4" />
                     </button>
@@ -302,8 +316,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                   + Task
                                 </button>
                                 <button
-                                  onClick={() => onDeleteMilestone(m.id)}
+                                  onClick={() => setDeletingMilestoneId(m.id)}
+                                  aria-label={`Delete milestone: ${m.title}`}
                                   className="p-1 text-zinc-500 hover:text-rose-400 rounded transition-colors"
+                                  title="Delete milestone"
                                 >
                                   <Trash2 className="w-3 h-3" />
                                 </button>
@@ -445,11 +461,14 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
       )}
 
       {/* Create Project Modal */}
-      {showCreateModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4 animate-in fade-in">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-            <h3 className="text-lg font-bold text-white">Create New Project</h3>
-            <form onSubmit={handleCreateProjectSubmit} className="space-y-4">
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Create New Project"
+        icon={<Folder className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleCreateProjectSubmit} className="space-y-4">
               <div>
                 <label className="block text-xs font-semibold uppercase text-zinc-400 mb-1">
                   Project Name
@@ -510,9 +529,39 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
+
+      {/* Delete Project Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingProjectId}
+        title="Delete Project"
+        message={`Are you sure you want to delete "${projects.find(p => p.id === deletingProjectId)?.name || 'this project'}"? Linked tasks will not be deleted, and you can undo this via the undo notification or Ctrl+Z.`}
+        confirmLabel="Delete Project"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingProjectId) {
+            onDeleteProject(deletingProjectId);
+            setDeletingProjectId(null);
+          }
+        }}
+        onCancel={() => setDeletingProjectId(null)}
+      />
+
+      {/* Delete Milestone Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingMilestoneId}
+        title="Delete Milestone"
+        message={`Are you sure you want to delete milestone "${milestones.find(m => m.id === deletingMilestoneId)?.title || 'this milestone'}"? This can be undone via the undo notification or Ctrl+Z.`}
+        confirmLabel="Delete Milestone"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingMilestoneId) {
+            onDeleteMilestone(deletingMilestoneId);
+            setDeletingMilestoneId(null);
+          }
+        }}
+        onCancel={() => setDeletingMilestoneId(null)}
+      />
     </div>
   );
 };

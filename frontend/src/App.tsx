@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { RotateCcw, X } from 'lucide-react';
 import { Navbar } from './components/layout/Navbar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { TasksView } from './components/tasks/TasksView';
@@ -10,6 +9,7 @@ import { BrainDumpModal } from './components/layout/BrainDumpModal';
 import { MorningEveningWizard } from './components/planner/MorningEveningWizard';
 import { api } from './services/api';
 import { useLiveSync } from './services/websocket';
+import { useToast } from './context/ToastContext';
 import { 
   WorkItem, 
   WorkItemUpdatePayload,
@@ -33,10 +33,12 @@ export interface HistoryAction {
 }
 
 export const App: React.FC = () => {
+  const toast = useToast();
   const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts'>('dashboard');
   const [isBrainDumpOpen, setIsBrainDumpOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
 
   // Core Data State
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -80,8 +82,11 @@ export const App: React.FC = () => {
       setWeatherData(fetchedWeather);
     } catch (e) {
       console.error('Failed to load Sage OS data', e);
+      toast.error('Failed to load Sage OS data from Raspberry Pi', 'Sync Error');
+    } finally {
+      setIsInitialLoading(false);
     }
-  }, []);
+  }, [toast]);
 
   // Debounced live sync to prevent websocket broadcasts from stuttering optimistic UI
   const syncDebounceRef = useRef<any>(null);
@@ -102,8 +107,6 @@ export const App: React.FC = () => {
   // ==========================================
   const [undoStack, setUndoStack] = useState<HistoryAction[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryAction[]>([]);
-  const [actionToast, setActionToast] = useState<{ id: string; description: string; undo: () => void } | null>(null);
-  const toastTimerRef = useRef<any>(null);
 
   const undoStackRef = useRef<HistoryAction[]>([]);
   undoStackRef.current = undoStack;
@@ -116,13 +119,14 @@ export const App: React.FC = () => {
     const action = stack[stack.length - 1];
     setUndoStack(prev => prev.slice(0, -1));
     setRedoStack(prev => [...prev, action]);
-    setActionToast(null);
     try {
       await action.undo();
+      toast.info(`Undid: ${action.description}`);
     } catch (e) {
       console.error('Failed to undo action:', e);
+      toast.error('Failed to undo action');
     }
-  }, []);
+  }, [toast]);
 
   const handleRedo = useCallback(async () => {
     const stack = redoStackRef.current;
@@ -132,27 +136,21 @@ export const App: React.FC = () => {
     setUndoStack(prev => [...prev, action]);
     try {
       await action.redo();
+      toast.info(`Redid: ${action.description}`);
     } catch (e) {
       console.error('Failed to redo action:', e);
+      toast.error('Failed to redo action');
     }
-  }, []);
+  }, [toast]);
 
   const pushHistoryAction = useCallback((action: HistoryAction) => {
     setUndoStack(prev => [...prev.slice(-30), action]);
     setRedoStack([]); // Clear redo stack on new action
     
-    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
-    setActionToast({
-      id: action.id,
-      description: action.description,
-      undo: () => {
-        handleUndo();
-      }
-    });
-    toastTimerRef.current = setTimeout(() => {
-      setActionToast(null);
+    toast.action(action.description, 'Undo', () => {
+      handleUndo();
     }, 6000);
-  }, [handleUndo]);
+  }, [handleUndo, toast]);
 
   useEffect(() => {
     loadData();
@@ -244,9 +242,10 @@ export const App: React.FC = () => {
     return api.updateItem(itemId, { is_completed: newCompleted })
       .catch(err => {
         console.error('Failed to sync item toggle to Pi', err);
+        toast.error('Failed to sync task status to Pi');
       })
       .finally(endSync);
-  }, []);
+  }, [toast]);
 
   const handleToggleComplete = useCallback((item: WorkItem) => {
     const newCompleted = !item.is_completed;
@@ -266,9 +265,12 @@ export const App: React.FC = () => {
     setItems(prev => prev.filter(i => i.id !== id));
     startSync();
     return api.deleteItem(id)
-      .catch(err => console.error('Failed to delete item on Pi', err))
+      .catch(err => {
+        console.error('Failed to delete item on Pi', err);
+        toast.error('Failed to delete task on Pi');
+      })
       .finally(endSync);
-  }, []);
+  }, [toast]);
 
   const executeRestoreItem = useCallback((item: WorkItem) => {
     setItems(prev => [item, ...prev]);
@@ -289,10 +291,12 @@ export const App: React.FC = () => {
       subtasks: (item.subtasks || []).map(s => s.title)
     }).then(realItem => {
       setItems(prev => prev.map(i => i.id === item.id ? realItem : i));
+      toast.info(`Restored "${realItem.title}"`);
     }).catch(err => {
       console.error('Failed to restore item on Pi', err);
+      toast.error('Failed to restore task on Pi');
     }).finally(endSync);
-  }, []);
+  }, [toast]);
 
   // Delete Item
   const handleDeleteItem = useCallback((id: string) => {
@@ -380,6 +384,7 @@ export const App: React.FC = () => {
     api.createItem(itemData)
       .then(realItem => {
         setItems(prev => prev.map(i => i.id === tempId ? realItem : i));
+        toast.success(`Created "${realItem.title}"`);
         pushHistoryAction({
           id: `act_${Date.now()}_${Math.random()}`,
           description: `Created "${realItem.title}"`,
@@ -390,10 +395,11 @@ export const App: React.FC = () => {
       })
       .catch(err => {
         console.error('Failed to create item on Pi', err);
+        toast.error('Failed to save task to Raspberry Pi');
         setItems(prev => prev.filter(i => i.id !== tempId));
       })
       .finally(endSync);
-  }, [todayStr, pushHistoryAction, executeDeleteItem, executeRestoreItem]);
+  }, [todayStr, pushHistoryAction, executeDeleteItem, executeRestoreItem, toast]);
 
   // Update Item details
   const handleUpdateItem = useCallback((id: string, updates: WorkItemUpdatePayload) => {
@@ -457,9 +463,10 @@ export const App: React.FC = () => {
       })
       .catch(err => {
         console.error('Failed to update item on Pi', err);
+        toast.error('Failed to update task on Raspberry Pi');
       })
       .finally(endSync);
-  }, [items, pushHistoryAction]);
+  }, [items, pushHistoryAction, toast]);
 
   // Toggle Subtask
   const handleToggleSubtask = (itemId: string, subtaskId: string) => {
@@ -474,33 +481,73 @@ export const App: React.FC = () => {
     api.toggleSubtask(subtaskId)
       .catch(err => {
         console.error('Failed to toggle subtask on Pi', err);
+        toast.error('Failed to toggle checklist item');
       })
       .finally(endSync);
   };
 
   // ==========================================
-  // PROJECT & MILESTONE HANDLERS
+  // PROJECT & MILESTONE HANDLERS (WITH UNDO/REDO)
   // ==========================================
   const handleCreateProject = async (proj: { name: string; color?: string; description?: string }) => {
     try {
       startSync();
-      await api.createProject(proj);
+      const created = await api.createProject(proj);
       const updatedProjects = await api.getProjects();
       setProjects(updatedProjects);
+      toast.success(`Project "${proj.name}" created`);
+      pushHistoryAction({
+        id: `act_${Date.now()}_${Math.random()}`,
+        description: `Created project "${proj.name}"`,
+        undo: () => handleDeleteProject(created.id, false),
+        redo: () => handleCreateProject(proj),
+        timestamp: Date.now()
+      });
     } catch (e) {
       console.error('Failed to create project', e);
+      toast.error('Failed to create project on Raspberry Pi');
     } finally {
       endSync();
     }
   };
 
-  const handleDeleteProject = async (id: string) => {
+  const handleDeleteProject = async (id: string, recordHistory = true) => {
+    const targetProject = projects.find(p => p.id === id);
+    if (!targetProject) return;
+
+    setProjects(prev => prev.filter(p => p.id !== id));
+    startSync();
     try {
-      startSync();
       await api.deleteProject(id);
-      setProjects(prev => prev.filter(p => p.id !== id));
+      toast.info(`Deleted project "${targetProject.name}"`);
+      if (recordHistory) {
+        pushHistoryAction({
+          id: `act_${Date.now()}_${Math.random()}`,
+          description: `Deleted project "${targetProject.name}"`,
+          undo: async () => {
+            startSync();
+            try {
+              const created = await api.createProject({
+                name: targetProject.name,
+                color: targetProject.color,
+                description: targetProject.description || undefined
+              });
+              setProjects(prev => [...prev, created]);
+              toast.info(`Restored project "${created.name}"`);
+            } catch (e) {
+              toast.error('Failed to restore project');
+            } finally {
+              endSync();
+            }
+          },
+          redo: () => handleDeleteProject(id, false),
+          timestamp: Date.now()
+        });
+      }
     } catch (e) {
       console.error('Failed to delete project', e);
+      toast.error('Failed to delete project on Raspberry Pi');
+      setProjects(prev => [...prev, targetProject]);
     } finally {
       endSync();
     }
@@ -509,30 +556,69 @@ export const App: React.FC = () => {
   const handleCreateMilestone = async (m: { project_id?: string; title: string; due_date: string }) => {
     try {
       startSync();
-      await api.createMilestone(m);
+      const created = await api.createMilestone(m);
       const updatedMilestones = await api.getMilestones();
       setMilestones(updatedMilestones);
+      toast.success(`Milestone "${m.title}" added`);
+      pushHistoryAction({
+        id: `act_${Date.now()}_${Math.random()}`,
+        description: `Created milestone "${m.title}"`,
+        undo: () => handleDeleteMilestone(created.id, false),
+        redo: () => handleCreateMilestone(m),
+        timestamp: Date.now()
+      });
     } catch (e) {
       console.error('Failed to create milestone', e);
+      toast.error('Failed to create milestone');
     } finally {
       endSync();
     }
   };
 
-  const handleDeleteMilestone = async (id: string) => {
+  const handleDeleteMilestone = async (id: string, recordHistory = true) => {
+    const targetMilestone = milestones.find(m => m.id === id);
+    if (!targetMilestone) return;
+
+    setMilestones(prev => prev.filter(m => m.id !== id));
+    startSync();
     try {
-      startSync();
       await api.deleteMilestone(id);
-      setMilestones(prev => prev.filter(m => m.id !== id));
+      toast.info(`Deleted milestone "${targetMilestone.title}"`);
+      if (recordHistory) {
+        pushHistoryAction({
+          id: `act_${Date.now()}_${Math.random()}`,
+          description: `Deleted milestone "${targetMilestone.title}"`,
+          undo: async () => {
+            startSync();
+            try {
+              const created = await api.createMilestone({
+                project_id: targetMilestone.project_id || undefined,
+                title: targetMilestone.title,
+                due_date: targetMilestone.due_date
+              });
+              setMilestones(prev => [...prev, created]);
+              toast.info(`Restored milestone "${created.title}"`);
+            } catch (e) {
+              toast.error('Failed to restore milestone');
+            } finally {
+              endSync();
+            }
+          },
+          redo: () => handleDeleteMilestone(id, false),
+          timestamp: Date.now()
+        });
+      }
     } catch (e) {
       console.error('Failed to delete milestone', e);
+      toast.error('Failed to delete milestone on Raspberry Pi');
+      setMilestones(prev => [...prev, targetMilestone]);
     } finally {
       endSync();
     }
   };
 
   // ==========================================
-  // OPTIMISTIC FINANCE HANDLERS
+  // OPTIMISTIC FINANCE HANDLERS (WITH UNDO/REDO)
   // ==========================================
 
   // Create Account (Instant 0ms UI reflection)
@@ -570,9 +656,18 @@ export const App: React.FC = () => {
           ...prev,
           accounts: prev.accounts.map(a => a.id === tempId ? realAcc : a)
         } : prev);
+        toast.success(`Account "${realAcc.name}" created`);
+        pushHistoryAction({
+          id: `act_${Date.now()}_${Math.random()}`,
+          description: `Created account "${realAcc.name}"`,
+          undo: () => handleDeleteAccount(realAcc.id, false),
+          redo: () => handleCreateAccount(accData),
+          timestamp: Date.now()
+        });
       })
       .catch(err => {
         console.error('Failed to create account on Pi', err);
+        toast.error('Failed to create account on Raspberry Pi');
         setFinanceSummary(prev => prev ? {
           ...prev,
           accounts: prev.accounts.filter(a => a.id !== tempId)
@@ -604,14 +699,19 @@ export const App: React.FC = () => {
 
     startSync();
     api.updateAccount(id, updates as any)
+      .then(() => toast.info('Account updated'))
       .catch(err => {
         console.error('Failed to update account on Pi', err);
+        toast.error('Failed to update account');
       })
       .finally(endSync);
   };
 
-  // Delete Account (Instant 0ms UI reflection)
-  const handleDeleteAccount = (id: string) => {
+  // Delete Account (Instant 0ms UI reflection with Undo)
+  const handleDeleteAccount = (id: string, recordHistory = true) => {
+    const targetAcc = financeSummary?.accounts.find(a => a.id === id);
+    if (!targetAcc) return;
+
     setFinanceSummary(prev => {
       if (!prev) return prev;
       const newAccounts = prev.accounts.filter(a => a.id !== id);
@@ -625,8 +725,47 @@ export const App: React.FC = () => {
 
     startSync();
     api.deleteAccount(id)
+      .then(() => {
+        toast.info(`Deleted account "${targetAcc.name}"`);
+        if (recordHistory) {
+          pushHistoryAction({
+            id: `act_${Date.now()}_${Math.random()}`,
+            description: `Deleted account "${targetAcc.name}"`,
+            undo: async () => {
+              startSync();
+              try {
+                const created = await api.createAccount({
+                  name: targetAcc.name,
+                  account_type: targetAcc.account_type,
+                  balance: targetAcc.balance,
+                  currency: targetAcc.currency,
+                  is_upi_default: targetAcc.is_upi_default
+                });
+                setFinanceSummary(prev => prev ? {
+                  ...prev,
+                  accounts: [...prev.accounts, created],
+                  net_worth: prev.net_worth + (created.account_type === 'credit' ? -created.balance : created.balance)
+                } : prev);
+                toast.info(`Restored account "${created.name}"`);
+              } catch (e) {
+                toast.error('Failed to restore account');
+              } finally {
+                endSync();
+              }
+            },
+            redo: () => handleDeleteAccount(id, false),
+            timestamp: Date.now()
+          });
+        }
+      })
       .catch(err => {
         console.error('Failed to delete account on Pi', err);
+        toast.error('Failed to delete account on Raspberry Pi');
+        setFinanceSummary(prev => prev ? {
+          ...prev,
+          accounts: [...prev.accounts, targetAcc],
+          net_worth: prev.net_worth + (targetAcc.account_type === 'credit' ? -targetAcc.balance : targetAcc.balance)
+        } : prev);
       })
       .finally(endSync);
   };
@@ -686,16 +825,25 @@ export const App: React.FC = () => {
     api.createTransaction(txData)
       .then(realTx => {
         setTransactions(prev => prev.map(t => t.id === tempId ? realTx : t));
+        toast.success(`Logged ₹${realTx.amount} ${realTx.type}`);
+        pushHistoryAction({
+          id: `act_${Date.now()}_${Math.random()}`,
+          description: `Logged ₹${realTx.amount} (${realTx.description || realTx.type})`,
+          undo: () => handleDeleteTransaction(realTx.id, false),
+          redo: () => handleCreateTransaction(txData),
+          timestamp: Date.now()
+        });
       })
       .catch(err => {
         console.error('Failed to create transaction on Pi', err);
+        toast.error('Failed to save transaction to Raspberry Pi');
         setTransactions(prev => prev.filter(t => t.id !== tempId));
       })
       .finally(endSync);
   };
 
-  // Delete Transaction (Instant 0ms UI reflection)
-  const handleDeleteTransaction = (id: string) => {
+  // Delete Transaction (Instant 0ms UI reflection with Undo)
+  const handleDeleteTransaction = (id: string, recordHistory = true) => {
     const txToDelete = transactions.find(t => t.id === id);
     if (!txToDelete) return;
     setTransactions(prev => prev.filter(t => t.id !== id));
@@ -727,8 +875,41 @@ export const App: React.FC = () => {
 
     startSync();
     api.deleteTransaction(id)
+      .then(() => {
+        toast.info(`Deleted transaction ₹${txToDelete.amount}`);
+        if (recordHistory) {
+          pushHistoryAction({
+            id: `act_${Date.now()}_${Math.random()}`,
+            description: `Deleted ₹${txToDelete.amount} (${txToDelete.description || txToDelete.type})`,
+            undo: async () => {
+              startSync();
+              try {
+                const restored = await api.createTransaction({
+                  account_id: txToDelete.account_id,
+                  category_id: txToDelete.category_id || undefined,
+                  type: txToDelete.type,
+                  amount: txToDelete.amount,
+                  payment_mode: txToDelete.payment_mode,
+                  description: txToDelete.description || undefined,
+                  transfer_to_account_id: txToDelete.transfer_to_account_id || undefined,
+                  date: txToDelete.date
+                });
+                setTransactions(prev => [restored, ...prev]);
+                toast.info(`Restored transaction ₹${txToDelete.amount}`);
+              } catch (e) {
+                toast.error('Failed to restore transaction');
+              } finally {
+                endSync();
+              }
+            },
+            redo: () => handleDeleteTransaction(id, false),
+            timestamp: Date.now()
+          });
+        }
+      })
       .catch(err => {
         console.error('Failed to delete transaction on Pi', err);
+        toast.error('Failed to delete transaction on Raspberry Pi');
         if (txToDelete) setTransactions(prev => [txToDelete, ...prev]);
       })
       .finally(endSync);
@@ -761,6 +942,7 @@ export const App: React.FC = () => {
       <main className="flex-1 px-4 sm:px-6 md:px-8 pt-4 md:pt-6">
         {activeTab === 'dashboard' && (
           <DashboardView
+            isLoading={isInitialLoading}
             performance={dailyPerformance}
             greetingData={greetingData}
             weatherData={weatherData}
@@ -773,6 +955,7 @@ export const App: React.FC = () => {
 
         {activeTab === 'tasks' && (
           <TasksView
+            isLoading={isInitialLoading}
             items={items}
             projects={projects}
             milestones={milestones}
@@ -787,6 +970,7 @@ export const App: React.FC = () => {
 
         {activeTab === 'projects' && (
           <ProjectsHub
+            isLoading={isInitialLoading}
             projects={projects}
             milestones={milestones}
             items={items}
@@ -802,6 +986,7 @@ export const App: React.FC = () => {
 
         {activeTab === 'finance' && (
           <FinanceView
+            isLoading={isInitialLoading}
             summary={financeSummary}
             transactions={transactions}
             onRefresh={loadData}
@@ -817,27 +1002,6 @@ export const App: React.FC = () => {
           <ShortcutsModal />
         )}
       </main>
-
-      {/* Global Action Undo Toast */}
-      {actionToast && (
-        <div className="fixed bottom-20 md:bottom-6 left-1/2 -translate-x-1/2 z-50 flex items-center gap-3 px-4 py-2.5 rounded-xl bg-zinc-900/95 border border-zinc-700/80 text-zinc-100 shadow-2xl shadow-black/80 backdrop-blur-md animate-in fade-in slide-in-from-bottom-3">
-          <span className="text-xs font-medium max-w-[200px] sm:max-w-xs truncate">{actionToast.description}</span>
-          <button
-            onClick={() => actionToast.undo()}
-            className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-bold transition-all flex items-center gap-1 shadow-sm active:scale-95"
-          >
-            <RotateCcw className="w-3 h-3" />
-            <span>Undo</span>
-          </button>
-          <button
-            onClick={() => setActionToast(null)}
-            className="text-zinc-500 hover:text-zinc-300 p-0.5"
-            title="Dismiss"
-          >
-            <X className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      )}
 
       {/* Morning Kickoff & Evening Debrief Wizard */}
       <MorningEveningWizard

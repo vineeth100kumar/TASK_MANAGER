@@ -44,8 +44,14 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
       setMode(initialMode);
       setStep(1);
       fetchWizardData();
+
+      const handleEsc = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') onClose();
+      };
+      window.addEventListener('keydown', handleEsc);
+      return () => window.removeEventListener('keydown', handleEsc);
     }
-  }, [isOpen, initialMode]);
+  }, [isOpen, initialMode, onClose]);
 
   const fetchWizardData = async () => {
     setLoading(true);
@@ -168,6 +174,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
             </button>
             <button 
               onClick={onClose}
+              aria-label="Close wizard"
               className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-zinc-800 transition-colors"
             >
               <X className="w-5 h-5" />

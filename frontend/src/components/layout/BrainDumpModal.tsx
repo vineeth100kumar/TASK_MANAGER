@@ -1,6 +1,9 @@
 import React, { useState } from 'react';
-import { Sparkles, X, ArrowRight, CheckCircle2 } from 'lucide-react';
+import { Sparkles, ArrowRight, CheckCircle2 } from 'lucide-react';
 import { api } from '../../services/api';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { useToast } from '../../context/ToastContext';
 
 interface BrainDumpModalProps {
   isOpen: boolean;
@@ -13,11 +16,10 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
   onClose,
   onItemsCreated,
 }) => {
+  const toast = useToast();
   const [text, setText] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [extractedItems, setExtractedItems] = useState<any[] | null>(null);
-
-  if (!isOpen) return null;
 
   const handleProcess = async () => {
     if (!text.trim()) return;
@@ -62,28 +64,28 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
           }
         }
 
+        toast.success(`Extracted & created ${res.items.length} item(s)`);
         onItemsCreated();
+      } else {
+        toast.warning('No actionable items detected in the text.');
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.error('Failed to parse brain dump:', e);
+      toast.error('Failed to parse brain dump. Check connection to Raspberry Pi.');
     } finally {
       setIsProcessing(false);
     }
   };
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-      <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2 text-blue-400">
-            <Sparkles className="w-5 h-5" />
-            <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wide">AI Brain Dump Capture</h2>
-          </div>
-          <button onClick={onClose} className="text-zinc-500 hover:text-zinc-300">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-
+    <Modal
+      isOpen={isOpen}
+      onClose={onClose}
+      title="AI Brain Dump Capture"
+      icon={<Sparkles className="w-4 h-4 text-blue-400" />}
+      maxWidth="max-w-lg"
+    >
+      <div className="space-y-4">
         <p className="text-xs text-zinc-400">
           Paste notes, thoughts, or voice dictations. Local AI on Raspberry Pi 5 will parse tasks, deadlines, priorities, and expenses automatically.
         </p>
@@ -93,19 +95,21 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
           value={text}
           onChange={(e) => setText(e.target.value)}
           placeholder="e.g. Pay electricity bill 2500 via upi tomorrow high priority, call doctor on Friday..."
-          className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+          className="w-full bg-zinc-800 border border-zinc-700 rounded-xl p-3 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none focus:border-blue-500"
         />
 
         <div className="flex items-center justify-between pt-1">
           <span className="text-[11px] text-zinc-500">Pressing process saves items directly</span>
-          <button
+          <Button
             onClick={handleProcess}
-            disabled={isProcessing || !text.trim()}
-            className="flex items-center space-x-1.5 px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 disabled:opacity-50"
+            isLoading={isProcessing}
+            disabled={!text.trim()}
+            variant="primary"
+            size="sm"
+            icon={<ArrowRight className="w-3.5 h-3.5" />}
           >
-            <span>{isProcessing ? 'AI Processing...' : 'Process & Save'}</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+            Process & Save
+          </Button>
         </div>
 
         {extractedItems && (
@@ -139,6 +143,6 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
           </div>
         )}
       </div>
-    </div>
+    </Modal>
   );
 };

@@ -23,8 +23,12 @@ import {
 import { WorkItem, WorkItemUpdatePayload, Milestone, Project, EntityType, TaskStatus, TaskPriority } from '../../types';
 import { api } from '../../services/api';
 import { TimeBlockingCalendar } from './TimeBlockingCalendar';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Modal } from '../common/Modal';
+import { Skeleton } from '../common/Skeleton';
 
 interface TasksViewProps {
+  isLoading?: boolean;
   items: WorkItem[];
   projects: Project[];
   milestones: Milestone[];
@@ -37,6 +41,7 @@ interface TasksViewProps {
 }
 
 export const TasksView: React.FC<TasksViewProps> = ({
+  isLoading = false,
   items,
   projects = [],
   milestones,
@@ -53,6 +58,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isAiExpanding, setIsAiExpanding] = useState(false);
+  const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
 
   // Check if an item is blocked by uncompleted dependencies
   const isItemBlocked = (item: WorkItem): { blocked: boolean; blockerTitles: string[] } => {
@@ -324,6 +330,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1 flex items-center">
             <button
               onClick={() => setViewMode('list')}
+              aria-label="List View"
               className={`p-1.5 rounded text-xs transition-colors ${
                 viewMode === 'list' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
               }`}
@@ -333,6 +340,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('kanban')}
+              aria-label="Kanban Board View"
               className={`p-1.5 rounded text-xs transition-colors ${
                 viewMode === 'kanban' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
               }`}
@@ -342,6 +350,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </button>
             <button
               onClick={() => setViewMode('timeline')}
+              aria-label="Daily Timeline Calendar"
               className={`p-1.5 rounded text-xs transition-colors ${
                 viewMode === 'timeline' ? 'bg-zinc-800 text-white' : 'text-zinc-400 hover:text-zinc-200'
               }`}
@@ -498,9 +507,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
         /* List View */
         <div className="space-y-2">
           {filteredItems.length === 0 ? (
-            <div className="text-center py-12 text-zinc-400 text-xs">
-              No items match this filter. Click "+ New Item" or use AI Brain Dump!
-            </div>
+            isLoading ? (
+              <div className="space-y-2">
+                <Skeleton variant="row" count={5} />
+              </div>
+            ) : (
+              <div className="text-center py-12 text-zinc-400 text-xs">
+                No items match this filter. Click "+ New Item" or use AI Brain Dump!
+              </div>
+            )
           ) : (
             filteredItems.map((item) => {
               const { blocked, blockerTitles } = isItemBlocked(item);
@@ -620,7 +635,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   </span>
 
                   <button
-                    onClick={() => handleDelete(item.id)}
+                    onClick={() => setDeletingItemId(item.id)}
+                    aria-label={`Delete task: ${item.title}`}
                     className="text-zinc-400 hover:text-red-400 p-1 rounded transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -764,12 +780,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
       )}
 
       {/* Create Modal */}
-      {isCreating && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-            <h2 className="text-base font-semibold text-zinc-100">Create New Item</h2>
-
-            <form onSubmit={handleCreate} className="space-y-4">
+      <Modal
+        isOpen={isCreating}
+        onClose={() => setIsCreating(false)}
+        title="Create New Item"
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-1">
                   <label className="block text-xs text-zinc-400">Title</label>
@@ -998,9 +1015,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Item Detail & AI Auto-Fill Modal / Drawer */}
       {selectedItem && (
@@ -1013,12 +1028,27 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 </span>
                 <h2 className="text-base font-bold text-zinc-100 mt-0.5">{selectedItem.title}</h2>
               </div>
-              <button
-                onClick={() => setSelectedItem(null)}
-                className="text-zinc-400 hover:text-zinc-200 text-xs"
-              >
-                Close
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => {
+                    const id = selectedItem.id;
+                    setSelectedItem(null);
+                    setDeletingItemId(id);
+                  }}
+                  aria-label={`Delete task: ${selectedItem.title}`}
+                  className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                  title="Delete task"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+                <button
+                  onClick={() => setSelectedItem(null)}
+                  aria-label="Close task details"
+                  className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded-lg hover:bg-zinc-800 transition-colors"
+                >
+                  Close
+                </button>
+              </div>
             </div>
 
             {/* Description */}
@@ -1271,30 +1301,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
       )}
 
       {/* AI Board Organizer Modal */}
-      {isBoardOrganizerOpen && (
-        <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-xl p-6 space-y-5 shadow-2xl max-h-[88vh] overflow-y-auto">
-            <div className="flex items-start justify-between">
-              <div className="flex items-center space-x-2.5">
-                <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center text-white shadow-md shadow-blue-500/20">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-                <div>
-                  <h2 className="text-sm font-bold text-zinc-100 uppercase tracking-wide">
-                    Executive Board Organizer
-                  </h2>
-                  <p className="text-[11px] text-zinc-400">
-                    AI strategic workload analysis & task title optimization
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setIsBoardOrganizerOpen(false)}
-                className="text-zinc-500 hover:text-zinc-300 p-1"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
+      <Modal
+        isOpen={isBoardOrganizerOpen}
+        onClose={() => setIsBoardOrganizerOpen(false)}
+        title="Executive Board Organizer"
+        icon={<Sparkles className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-xl"
+      >
+        <div className="space-y-5">
 
             {isOrganizingBoard ? (
               <div className="py-12 flex flex-col items-center justify-center space-y-3">
@@ -1395,8 +1409,23 @@ export const TasksView: React.FC<TasksViewProps> = ({
               </div>
             ) : null}
           </div>
-        </div>
-      )}
+      </Modal>
+
+      {/* Delete Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingItemId}
+        title="Delete Task"
+        message={`Are you sure you want to delete "${items.find(i => i.id === deletingItemId)?.title || 'this task'}"? This can be undone from the undo notification or with Ctrl+Z.`}
+        confirmLabel="Delete"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingItemId) {
+            handleDelete(deletingItemId);
+            setDeletingItemId(null);
+          }
+        }}
+        onCancel={() => setDeletingItemId(null)}
+      />
     </div>
   );
 };

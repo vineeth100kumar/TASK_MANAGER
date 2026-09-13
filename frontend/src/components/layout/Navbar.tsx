@@ -66,6 +66,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {onUndo && canUndo && (
             <button
               onClick={onUndo}
+              aria-label={`Undo: ${undoTooltip || 'Last action'}`}
               className="p-1.5 rounded-lg border bg-zinc-800/80 text-blue-400 border-blue-500/30 active:scale-95 transition-all"
               title={`Undo: ${undoTooltip || 'Last action'}`}
             >
@@ -76,21 +77,25 @@ export const Navbar: React.FC<NavbarProps> = ({
           {onOpenWizard && (
             <button
               onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
+              aria-label={isEvening ? "Evening Debrief" : "Morning Kickoff"}
               className={`p-1.5 rounded-lg border ${isEvening ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}
-              title="Daily Wizard"
+              title={isEvening ? "Evening Debrief" : "Morning Kickoff"}
             >
               {isEvening ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
             </button>
           )}
-          {isSyncing ? (
-            <div 
-              title="Saving changes in background to Raspberry Pi..."
-              className="flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20"
-            >
-              <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
-              <span>Saving</span>
-            </div>
-          ) : (
+
+          {/* Unified Mobile Status Cluster */}
+          <div className="flex items-center space-x-1.5">
+            {isSyncing && (
+              <div 
+                title="Saving changes in background to Raspberry Pi..."
+                className="flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
+              >
+                <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
+                <span className="hidden xs:inline">Saving</span>
+              </div>
+            )}
             <div 
               title={isLiveConnected ? "Connected live to Raspberry Pi 5" : "Reconnecting to Pi 5..."}
               className={`flex items-center space-x-1 px-2 py-0.5 rounded-full text-[10px] font-mono border ${
@@ -100,9 +105,9 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               {isLiveConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5 animate-pulse" />}
-              <span>{isLiveConnected ? 'RPi5 Live' : 'Connecting'}</span>
+              <span>{isLiveConnected ? 'RPi5' : 'Connecting'}</span>
             </div>
-          )}
+          </div>
         </div>
       </header>
 
@@ -204,6 +209,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onUndo}
               disabled={!canUndo}
+              aria-label={canUndo ? `Undo: ${undoTooltip} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)'}
               title={canUndo ? `Undo: ${undoTooltip} (Ctrl+Z)` : 'Nothing to undo (Ctrl+Z)'}
               className={`p-1.5 rounded-md transition-all ${
                 canUndo
@@ -217,6 +223,7 @@ export const Navbar: React.FC<NavbarProps> = ({
             <button
               onClick={onRedo}
               disabled={!canRedo}
+              aria-label={canRedo ? `Redo: ${redoTooltip} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)'}
               title={canRedo ? `Redo: ${redoTooltip} (Ctrl+Y)` : 'Nothing to redo (Ctrl+Y)'}
               className={`p-1.5 rounded-md transition-all ${
                 canRedo
@@ -230,6 +237,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={onOpenQuickCapture}
+            aria-label="AI Brain Dump Quick Capture (Ctrl+K)"
             className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 text-xs font-medium transition-all"
           >
             <Sparkles className="w-3.5 h-3.5" />
@@ -237,15 +245,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <kbd className="hidden lg:inline text-[10px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded ml-1">Ctrl+K</kbd>
           </button>
 
-          {isSyncing ? (
-            <div 
-              title="Saving changes in background to Raspberry Pi..."
-              className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-sm shadow-blue-500/10"
-            >
-              <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-              <span>Saving to Pi...</span>
-            </div>
-          ) : (
+          {/* Unified Desktop Status Cluster */}
+          <div className="flex items-center space-x-2">
+            {isSyncing && (
+              <div 
+                title="Saving changes in background to Raspberry Pi..."
+                className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-sm shadow-blue-500/10 animate-in fade-in"
+              >
+                <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
+                <span>Saving to Pi...</span>
+              </div>
+            )}
             <div 
               title={isLiveConnected ? "Connected live to Raspberry Pi 5" : "Reconnecting to Pi 5..."}
               className={`flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border ${
@@ -257,7 +267,7 @@ export const Navbar: React.FC<NavbarProps> = ({
               {isLiveConnected ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3 animate-pulse" />}
               <span>{isLiveConnected ? 'RPi5 Live' : 'Connecting'}</span>
             </div>
-          )}
+          </div>
         </div>
       </header>
 
@@ -266,6 +276,7 @@ export const Navbar: React.FC<NavbarProps> = ({
         <div className="flex items-center justify-around py-2">
           <button
             onClick={() => setActiveTab('dashboard')}
+            aria-label="Dashboard"
             className={`flex flex-col items-center py-1 px-3 transition-colors ${
               activeTab === 'dashboard' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -276,6 +287,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => setActiveTab('tasks')}
+            aria-label="Tasks & Events"
             className={`flex flex-col items-center py-1 px-3 transition-colors ${
               activeTab === 'tasks' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -286,6 +298,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => setActiveTab('projects')}
+            aria-label="Projects & Milestones"
             className={`flex flex-col items-center py-1 px-3 transition-colors ${
               activeTab === 'projects' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -297,6 +310,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           {/* Quick Capture Floating Button */}
           <button
             onClick={onOpenQuickCapture}
+            aria-label="AI Brain Dump Quick Capture"
             className="flex items-center justify-center w-11 h-11 -mt-4 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-500 text-white shadow-lg shadow-blue-500/40 active:scale-95 transition-transform"
           >
             <Sparkles className="w-5 h-5" />
@@ -304,6 +318,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => setActiveTab('finance')}
+            aria-label="Finance Tracker"
             className={`flex flex-col items-center py-1 px-3 transition-colors ${
               activeTab === 'finance' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
             }`}
@@ -314,6 +329,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={() => setActiveTab('shortcuts')}
+            aria-label="iOS Shortcuts & Siri"
             className={`flex flex-col items-center py-1 px-3 transition-colors ${
               activeTab === 'shortcuts' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
             }`}

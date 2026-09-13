@@ -20,8 +20,14 @@ import {
 } from 'lucide-react';
 import { FinanceSummary, FinanceAccount, Transaction, PaymentMode, TransactionType, RecurringBill, FinanceCategory } from '../../types';
 import { api } from '../../services/api';
+import { ConfirmDialog } from '../common/ConfirmDialog';
+import { Modal } from '../common/Modal';
+import { Button } from '../common/Button';
+import { Skeleton } from '../common/Skeleton';
+import { useToast } from '../../context/ToastContext';
 
 interface FinanceViewProps {
+  isLoading?: boolean;
   summary: FinanceSummary | null;
   transactions: Transaction[];
   onRefresh: () => void;
@@ -42,6 +48,7 @@ interface FinanceViewProps {
 }
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
+  isLoading = false,
   summary,
   transactions,
   onRefresh,
@@ -51,6 +58,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   onCreateTransaction,
   onDeleteTransaction,
 }) => {
+  const toast = useToast();
+  const [deletingAccountId, setDeletingAccountId] = useState<string | null>(null);
+  const [deletingTxId, setDeletingTxId] = useState<string | null>(null);
+  const [deletingBillId, setDeletingBillId] = useState<string | null>(null);
   const [isAdding, setIsAdding] = useState(false);
   const [editingAccount, setEditingAccount] = useState<FinanceAccount | null>(null);
   const [editName, setEditName] = useState('');
@@ -115,13 +126,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     }
   };
 
-  const handleDeleteBill = async (id: string) => {
-    if (!confirm('Remove this recurring bill?')) return;
+  const executeDeleteBill = async (id: string) => {
     try {
       await api.deleteRecurringBill(id);
+      toast.info('Removed recurring bill');
       fetchBills();
     } catch (err) {
       console.error('Failed to delete recurring bill:', err);
+      toast.error('Failed to remove recurring bill');
     }
   };
 
@@ -182,8 +194,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
     }
   };
 
-  const handleDeleteAccount = (id: string) => {
-    if (!confirm('Are you sure you want to delete this account?')) return;
+  const executeDeleteAccount = (id: string) => {
     setEditingAccount(null);
     if (onDeleteAccount) {
       onDeleteAccount(id);
@@ -269,6 +280,23 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       api.deleteTransaction(id).then(() => onRefresh());
     }
   };
+
+  if (!summary && isLoading) {
+    return (
+      <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12 animate-in fade-in">
+        <div className="p-6 bg-zinc-900 border border-zinc-800 rounded-2xl space-y-3">
+          <Skeleton variant="text" className="w-48 h-6" />
+          <Skeleton variant="text" className="w-96 h-4" />
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Skeleton variant="card" count={3} />
+        </div>
+        <div className="space-y-2">
+          <Skeleton variant="row" count={5} />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
@@ -497,7 +525,8 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       {badgeText}
                     </span>
                     <button
-                      onClick={() => handleDeleteBill(bill.id)}
+                      onClick={() => setDeletingBillId(bill.id)}
+                      aria-label={`Remove bill: ${bill.name}`}
                       className="text-zinc-500 hover:text-rose-400 p-1 rounded transition-colors"
                       title="Remove bill"
                     >
@@ -638,8 +667,10 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                     {tx.type === 'expense' ? `-₹${tx.amount}` : `+₹${tx.amount}`}
                   </span>
                   <button
-                    onClick={() => handleDeleteTx(tx.id)}
+                    onClick={() => setDeletingTxId(tx.id)}
+                    aria-label={`Delete transaction: ₹${tx.amount}`}
                     className="text-zinc-500 hover:text-red-400 p-1 rounded transition-colors"
+                    title="Delete transaction"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
                   </button>
@@ -651,12 +682,14 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       </div>
 
       {/* Log Transaction Modal */}
-      {isAdding && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl">
-            <h2 className="text-base font-semibold text-zinc-100">Log Transaction</h2>
-
-            <form onSubmit={handleCreateTx} className="space-y-4">
+      <Modal
+        isOpen={isAdding}
+        onClose={() => setIsAdding(false)}
+        title="Log Transaction"
+        icon={<Receipt className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-lg"
+      >
+        <form onSubmit={handleCreateTx} className="space-y-4">
               {/* Type Toggle */}
               <div className="grid grid-cols-3 gap-2 bg-zinc-800 p-1 rounded-xl">
                 {(['expense', 'income', 'transfer'] as TransactionType[]).map((t) => (
@@ -798,22 +831,18 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Edit Account Modal */}
-      {editingAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-100">Edit Account & Balance</h3>
-              <button onClick={() => setEditingAccount(null)} className="text-zinc-500 hover:text-zinc-300">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveAccount} className="space-y-4">
+      <Modal
+        isOpen={!!editingAccount}
+        onClose={() => setEditingAccount(null)}
+        title="Edit Account & Balance"
+        icon={<Pencil className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-md"
+      >
+        {editingAccount && (
+          <form onSubmit={handleSaveAccount} className="space-y-4">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Account Name</label>
                 <input
@@ -856,7 +885,12 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <div className="flex items-center justify-between pt-2">
                   <button
                     type="button"
-                    onClick={() => handleDeleteAccount(editingAccount.id)}
+                    onClick={() => {
+                      const id = editingAccount.id;
+                      setEditingAccount(null);
+                      setDeletingAccountId(id);
+                    }}
+                    aria-label={`Delete account: ${editingAccount.name}`}
                     className="flex items-center space-x-1 text-xs text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded hover:bg-red-500/10"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
@@ -879,22 +913,18 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                 </div>
               </form>
-            </div>
-          </div>
         )}
+      </Modal>
 
       {/* Add Account Modal */}
-      {isCreatingAccount && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-zinc-100">Add New Account</h3>
-              <button onClick={() => setIsCreatingAccount(false)} className="text-zinc-500 hover:text-zinc-300">
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleCreateAccount} className="space-y-4">
+      <Modal
+        isOpen={isCreatingAccount}
+        onClose={() => setIsCreatingAccount(false)}
+        title="Add New Account"
+        icon={<Wallet className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Account Name</label>
                 <input
@@ -966,28 +996,17 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Add Recurring Bill Modal */}
-      {isAddingBill && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-md p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
-                <Receipt className="w-4 h-4 text-indigo-400" />
-                Add Recurring Bill or Subscription
-              </h2>
-              <button
-                onClick={() => setIsAddingBill(false)}
-                className="text-zinc-400 hover:text-zinc-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleAddBill} className="space-y-4">
+      <Modal
+        isOpen={isAddingBill}
+        onClose={() => setIsAddingBill(false)}
+        title="Add Recurring Bill or Subscription"
+        icon={<Receipt className="w-4 h-4 text-indigo-400" />}
+        maxWidth="max-w-md"
+      >
+        <form onSubmit={handleAddBill} className="space-y-4">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Bill Name</label>
                 <input
@@ -1057,28 +1076,18 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+      </Modal>
 
       {/* Edit Category Budget Modal */}
-      {editingBudgetCat && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-sm p-6 space-y-4 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h2 className="text-base font-semibold text-zinc-100 flex items-center gap-2">
-                <SlidersHorizontal className="w-4 h-4 text-blue-400" />
-                Adjust Budget Guardrail
-              </h2>
-              <button
-                onClick={() => setEditingBudgetCat(null)}
-                className="text-zinc-400 hover:text-zinc-200"
-              >
-                <X className="w-4 h-4" />
-              </button>
-            </div>
-
-            <form onSubmit={handleSaveBudget} className="space-y-4">
+      <Modal
+        isOpen={!!editingBudgetCat}
+        onClose={() => setEditingBudgetCat(null)}
+        title="Adjust Budget Guardrail"
+        icon={<SlidersHorizontal className="w-4 h-4 text-blue-400" />}
+        maxWidth="max-w-sm"
+      >
+        {editingBudgetCat && (
+          <form onSubmit={handleSaveBudget} className="space-y-4">
               <div>
                 <label className="block text-xs text-zinc-400 mb-1">Category</label>
                 <p className="text-sm font-bold text-white">{editingBudgetCat.name}</p>
@@ -1116,9 +1125,60 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </button>
               </div>
             </form>
-          </div>
-        </div>
-      )}
+        )}
+      </Modal>
+
+      {/* Delete Account Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingAccountId}
+        title="Delete Account"
+        message={`Are you sure you want to delete "${summary?.accounts.find(a => a.id === deletingAccountId)?.name || 'this account'}"? This can be undone from the undo toast or with Ctrl+Z.`}
+        confirmLabel="Delete Account"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingAccountId) {
+            executeDeleteAccount(deletingAccountId);
+            setDeletingAccountId(null);
+          }
+        }}
+        onCancel={() => setDeletingAccountId(null)}
+      />
+
+      {/* Delete Transaction Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingTxId}
+        title="Delete Transaction"
+        message={`Are you sure you want to delete this transaction? This action can be undone immediately via the Undo button or Ctrl+Z.`}
+        confirmLabel="Delete Transaction"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingTxId) {
+            if (onDeleteTransaction) {
+              onDeleteTransaction(deletingTxId);
+            } else {
+              api.deleteTransaction(deletingTxId).then(() => onRefresh());
+            }
+            setDeletingTxId(null);
+          }
+        }}
+        onCancel={() => setDeletingTxId(null)}
+      />
+
+      {/* Delete Recurring Bill Confirmation Dialog */}
+      <ConfirmDialog
+        isOpen={!!deletingBillId}
+        title="Remove Recurring Bill"
+        message={`Are you sure you want to remove "${recurringBills.find(b => b.id === deletingBillId)?.name || 'this recurring bill'}" from your radar?`}
+        confirmLabel="Remove Bill"
+        confirmVariant="danger"
+        onConfirm={() => {
+          if (deletingBillId) {
+            executeDeleteBill(deletingBillId);
+            setDeletingBillId(null);
+          }
+        }}
+        onCancel={() => setDeletingBillId(null)}
+      />
     </div>
   );
 };

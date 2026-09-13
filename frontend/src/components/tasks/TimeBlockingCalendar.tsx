@@ -145,12 +145,14 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
             <div className="flex items-center rounded-lg bg-zinc-800 border border-zinc-700 p-0.5">
               <button
                 onClick={handlePrevDay}
+                aria-label="Previous Day"
                 className="p-1 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={handleNextDay}
+                aria-label="Next Day"
                 className="p-1 text-zinc-400 hover:text-white rounded hover:bg-zinc-700 transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
@@ -273,7 +275,8 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                           setQuickHour(hour);
                           setQuickTitle('');
                         }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1.5 text-[11px] text-zinc-500 hover:text-blue-400 py-1"
+                        aria-label={`Quick schedule task at ${hourLabel}`}
+                        className="opacity-60 sm:opacity-0 sm:group-hover:opacity-100 hover:opacity-100 transition-opacity flex items-center gap-1.5 text-[11px] text-zinc-400 sm:text-zinc-500 hover:text-blue-400 py-1 min-h-[32px]"
                       >
                         <Plus className="w-3 h-3" /> Quick Schedule
                       </button>
