@@ -10,7 +10,10 @@ export function useLiveSync(onMessage?: MessageHandler) {
   useEffect(() => {
     let unmounted = false;
 
+    let pingInterval: any = null;
+
     function connect() {
+      if (unmounted) return;
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
       const wsUrl = `${protocol}//${host}/ws`;
@@ -20,31 +23,52 @@ export function useLiveSync(onMessage?: MessageHandler) {
         wsRef.current = ws;
 
         ws.onopen = () => {
-          if (!unmounted) setIsConnected(true);
+          if (!unmounted) {
+            setIsConnected(true);
+            // Periodic keep-alive ping every 25 seconds
+            clearInterval(pingInterval);
+            pingInterval = setInterval(() => {
+              if (ws.readyState === WebSocket.OPEN) {
+                try {
+                  ws.send('ping');
+                } catch {
+                  // ignore
+                }
+              }
+            }, 25000);
+          }
         };
 
         ws.onmessage = (event) => {
           try {
+            if (event.data === 'pong') return;
             const parsed = JSON.parse(event.data);
             if (onMessage) onMessage(parsed);
-          } catch (e) {
+          } catch {
             // ping or raw string
           }
         };
 
         ws.onclose = () => {
+          clearInterval(pingInterval);
           if (!unmounted) {
             setIsConnected(false);
-            reconnectTimeoutRef.current = setTimeout(connect, 3000);
+            clearTimeout(reconnectTimeoutRef.current);
+            reconnectTimeoutRef.current = setTimeout(connect, 2000);
           }
         };
 
         ws.onerror = () => {
-          ws.close();
+          try {
+            ws.close();
+          } catch {
+            // ignore
+          }
         };
-      } catch (err) {
+      } catch {
         if (!unmounted) {
-          reconnectTimeoutRef.current = setTimeout(connect, 5000);
+          clearTimeout(reconnectTimeoutRef.current);
+          reconnectTimeoutRef.current = setTimeout(connect, 3000);
         }
       }
     }
@@ -53,7 +77,14 @@ export function useLiveSync(onMessage?: MessageHandler) {
 
     return () => {
       unmounted = true;
-      if (wsRef.current) wsRef.current.close();
+      clearInterval(pingInterval);
+      if (wsRef.current) {
+        try {
+          wsRef.current.close();
+        } catch {
+          // ignore
+        }
+      }
       if (reconnectTimeoutRef.current) clearTimeout(reconnectTimeoutRef.current);
     };
   }, []);

@@ -215,6 +215,7 @@ async def get_db() -> AsyncGenerator[aiosqlite.Connection, None]:
 async def init_database():
     """Run migrations, tune database pragmas, create indexes, and seed initial data."""
     async with aiosqlite.connect(DB_PATH) as db:
+        db.row_factory = aiosqlite.Row
         # WAL mode & memory optimizations for Pi
         await db.execute("PRAGMA journal_mode = WAL;")
         await db.execute("PRAGMA synchronous = NORMAL;")
@@ -264,13 +265,19 @@ async def init_database():
                 )
 
         # Auto-clean any accidental erroneous 11.3 baby naming expense transaction and restore account balance
-        async with db.execute("SELECT id, account_id, amount FROM finance_transactions WHERE amount = 11.3 AND description LIKE '%baby naming%'") as err_cursor:
-            err_tx = await err_cursor.fetchone()
-            if err_tx:
-                await db.execute("UPDATE finance_accounts SET balance = balance + ? WHERE id = ?", (err_tx["amount"], err_tx["account_id"]))
-                await db.execute("DELETE FROM finance_transactions WHERE id = ?", (err_tx["id"],))
+        try:
+            async with db.execute("SELECT id, account_id, amount FROM finance_transactions WHERE amount = 11.3 AND description LIKE '%baby naming%'") as err_cursor:
+                err_tx = await err_cursor.fetchone()
+                if err_tx:
+                    tx_id = err_tx[0]
+                    acc_id = err_tx[1]
+                    amt = float(err_tx[2])
+                    await db.execute("UPDATE finance_accounts SET balance = balance + ? WHERE id = ?", (amt, acc_id))
+                    await db.execute("DELETE FROM finance_transactions WHERE id = ?", (tx_id,))
+                    print(f"Auto-healed: refunded {amt} to account {acc_id} and deleted erroneous transaction.")
 
-        # Ensure baby naming item is correctly categorized as an event
-        await db.execute("UPDATE work_items SET entity_type = 'event', due_date = date('now') WHERE title LIKE '%baby naming%' AND entity_type = 'task'")
-
-        await db.commit()
+            # Ensure baby naming item is correctly categorized as an event
+            await db.execute("UPDATE work_items SET entity_type = 'event', due_date = date('now') WHERE title LIKE '%baby naming%' AND entity_type = 'task'")
+            await db.commit()
+        except Exception as e:
+            print(f"Auto-heal notice: {e}")

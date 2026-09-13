@@ -18,22 +18,45 @@ chmod -R 755 "$REPO_DIR/frontend/dist" 2>/dev/null || true
 mkdir -p "$REPO_DIR/data/backups"
 chmod -R 775 "$REPO_DIR/data" 2>/dev/null || true
 
-if [ -d "$REPO_DIR/.venv" ]; then
+if [ ! -d "$REPO_DIR/.venv" ]; then
+    echo "=== 3. Virtual Environment missing, creating .venv... ==="
+    python3 -m venv "$REPO_DIR/.venv"
+    "$REPO_DIR/.venv/bin/pip" install --upgrade pip setuptools --quiet || true
+    "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/backend/requirements.txt" --quiet
+else
     echo "=== 3. Checking Python Dependencies ==="
     "$REPO_DIR/.venv/bin/pip" install -r "$REPO_DIR/backend/requirements.txt" --quiet || true
 fi
 
 echo "=== 4. Restarting Sage OS Backend ==="
 if command -v systemctl >/dev/null 2>&1; then
-    sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
+    if [ ! -f /etc/systemd/system/sage-backend.service ]; then
+        echo "⚠️  sage-backend.service not found in /etc/systemd/system/."
+        echo "👉 Please run one-time setup: sudo bash $REPO_DIR/deploy/install_native.sh"
+    else
+        sudo systemctl restart sage-backend 2>/dev/null || systemctl restart sage-backend 2>/dev/null || true
+    fi
 fi
 
-# Allow uvicorn 2 seconds to bind socket
-sleep 2
+# Wait up to 5 seconds for backend to become ready
+echo "--> Waiting for backend to initialize..."
+HEALTH=""
+for i in {1..5}; do
+    HEALTH=$(curl -s http://127.0.0.1:8000/api/health 2>/dev/null || curl -s http://localhost/api/health 2>/dev/null || true)
+    if echo "$HEALTH" | grep -q "healthy"; then
+        break
+    fi
+    sleep 1
+done
 
 echo "=============================================================================="
-echo "🎉 Sage OS is updated to version v$VERSION_TAG (commit: $COMMIT_HASH)!"
-echo "Status check: http://localhost/api/health"
+if echo "$HEALTH" | grep -q "healthy"; then
+    echo "🎉 Sage OS is live on version v$VERSION_TAG (commit: $COMMIT_HASH)!"
+    echo "Health response: $HEALTH"
+else
+    echo "⚠️ Backend not responding yet. Checking service logs:"
+    if command -v systemctl >/dev/null 2>&1; then
+        sudo journalctl -u sage-backend -n 20 --no-pager 2>/dev/null || true
+    fi
+fi
 echo "=============================================================================="
-curl -s http://localhost/api/health || curl -s http://127.0.0.1:8000/api/health || true
-echo ""
