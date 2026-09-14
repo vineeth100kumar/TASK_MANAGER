@@ -269,6 +269,9 @@ export interface ShapeElement {
   color: string;
   fillColor?: string;
   strokeWidth: number;
+  text?: string;
+  textColor?: string;
+  fontSize?: number;
 }
 
 export interface StickyElement {

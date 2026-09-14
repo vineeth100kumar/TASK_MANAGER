@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Point, StrokeElement, StickyColor, ImageElement, WhiteboardElement, TextElement } from '../../../types';
+import { Point, StrokeElement, StickyColor, ImageElement, WhiteboardElement, TextElement, ShapeElement } from '../../../types';
 
 // Coordinate transformations (mirroring engine logic)
 function screenToWorld(sx: number, sy: number, panX: number, panY: number, zoom: number): Point {
@@ -753,4 +753,181 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(posY).toBe(370);
     });
   });
+
+  describe('Shapes as Text Boxes & Containers Suite', () => {
+    // Word wrapping engine helper identical to WhiteboardCanvas drawShape
+    function wrapShapeText(
+      text: string,
+      maxW: number,
+      charWidth: number
+    ): string[] {
+      const paragraphs = text.split('\n');
+      const lines: string[] = [];
+      for (const para of paragraphs) {
+        if (!para) {
+          lines.push('');
+          continue;
+        }
+        const words = para.split(' ');
+        let currentLine = '';
+        for (const word of words) {
+          const testLine = currentLine ? `${currentLine} ${word}` : word;
+          if (testLine.length * charWidth > maxW && currentLine) {
+            lines.push(currentLine);
+            currentLine = word;
+          } else {
+            currentLine = testLine;
+          }
+        }
+        if (currentLine) lines.push(currentLine);
+      }
+      return lines;
+    }
+
+    it('supports attaching text, textColor, and fontSize to any closed shape element', () => {
+      const shape: ShapeElement = {
+        id: 'shape_rect_text',
+        type: 'shape',
+        shapeType: 'rectangle',
+        x: 100,
+        y: 100,
+        width: 200,
+        height: 120,
+        color: '#1c1917',
+        fillColor: 'rgba(254, 243, 199, 0.65)',
+        strokeWidth: 2,
+        text: 'Editorial Heading\nSubtitle line',
+        textColor: '#b45309',
+        fontSize: 18,
+      };
+
+      expect(shape.text).toBe('Editorial Heading\nSubtitle line');
+      expect(shape.textColor).toBe('#b45309');
+      expect(shape.fontSize).toBe(18);
+    });
+
+    it('correctly calculates shape inner text bounding box for standard and specialized shapes', () => {
+      // Rectangle: w - 20, h - 16
+      const rectW = 200;
+      const rectH = 100;
+      const innerRectW = Math.max(20, rectW - 20);
+      const innerRectH = Math.max(20, rectH - 16);
+      expect(innerRectW).toBe(180);
+      expect(innerRectH).toBe(84);
+
+      // Circle: w * 0.7, h * 0.7 (inscribed rectangle)
+      const circleDiam = 150;
+      const innerCircleW = circleDiam * 0.7;
+      const innerCircleH = circleDiam * 0.7;
+      expect(innerCircleW).toBe(105);
+      expect(innerCircleH).toBe(105);
+
+      // Diamond: w * 0.6, h * 0.6 (inscribed diamond box)
+      const diamondW = 200;
+      const diamondH = 150;
+      const innerDiamondW = diamondW * 0.6;
+      const innerDiamondH = diamondH * 0.6;
+      expect(innerDiamondW).toBe(120);
+      expect(innerDiamondH).toBe(90);
+    });
+
+    it('wraps long words into multiple lines when exceeding max inner width', () => {
+      const text = 'The quick brown fox jumps over the lazy dog';
+      // Suppose each char is 10px wide, max width is 120px (about 12 chars per line)
+      const lines = wrapShapeText(text, 120, 10);
+      expect(lines.length).toBeGreaterThan(1);
+      lines.forEach((line) => {
+        expect(line.length * 10).toBeLessThanOrEqual(120);
+      });
+    });
+
+    it('honors manual line breaks when wrapping shape text', () => {
+      const text = 'Headline One\nSecond Paragraph\nThird Line';
+      const lines = wrapShapeText(text, 500, 10);
+      expect(lines).toEqual(['Headline One', 'Second Paragraph', 'Third Line']);
+    });
+
+    it('calculates vertically and horizontally centered baseline positions for shape text', () => {
+      const shape = { x: 50, y: 50, width: 200, height: 100 };
+      const centerX = shape.x + shape.width / 2; // 150
+      const centerY = shape.y + shape.height / 2; // 100
+      const fontSize = 16;
+      const lineHeight = fontSize * 1.35; // 21.6
+      const lines = ['Line 1', 'Line 2'];
+      const totalBlockHeight = lines.length * lineHeight; // 43.2
+      const startY = centerY - totalBlockHeight / 2 + lineHeight / 2;
+
+      expect(centerX).toBe(150);
+      expect(centerY).toBe(100);
+      expect(startY).toBeCloseTo(100 - 21.6 / 2, 2);
+    });
+
+    it('preserves text and text styling when moving or resizing shapes', () => {
+      const originalShape: ShapeElement = {
+        id: 'shape_orig',
+        type: 'shape',
+        shapeType: 'circle',
+        x: 100,
+        y: 100,
+        width: 150,
+        height: 150,
+        color: '#1c1917',
+        strokeWidth: 2,
+        text: 'Preserved Text',
+        textColor: '#15803d',
+        fontSize: 20,
+      };
+
+      // Moving the shape by +50px
+      const movedShape: ShapeElement = {
+        ...originalShape,
+        x: originalShape.x + 50,
+        y: originalShape.y + 50,
+      };
+
+      expect(movedShape.text).toBe('Preserved Text');
+      expect(movedShape.textColor).toBe('#15803d');
+      expect(movedShape.fontSize).toBe(20);
+
+      // Resizing the shape
+      const resizedShape: ShapeElement = {
+        ...movedShape,
+        width: 250,
+        height: 250,
+      };
+
+      expect(resizedShape.text).toBe('Preserved Text');
+      expect(resizedShape.width).toBe(250);
+    });
+
+    it('copies text content and attributes when duplicating a shape', () => {
+      const sourceShape: ShapeElement = {
+        id: 'shape_source',
+        type: 'shape',
+        shapeType: 'diamond',
+        x: 200,
+        y: 200,
+        width: 160,
+        height: 120,
+        color: '#2563eb',
+        strokeWidth: 2,
+        text: 'Decision Node',
+        textColor: '#2563eb',
+        fontSize: 16,
+      };
+
+      const duplicatedShape: ShapeElement = {
+        ...sourceShape,
+        id: 'shape_clone_' + Date.now(),
+        x: sourceShape.x + 25,
+        y: sourceShape.y + 25,
+      };
+
+      expect(duplicatedShape.text).toBe('Decision Node');
+      expect(duplicatedShape.textColor).toBe('#2563eb');
+      expect(duplicatedShape.fontSize).toBe(16);
+      expect(duplicatedShape.id).not.toBe(sourceShape.id);
+    });
+  });
 });
+

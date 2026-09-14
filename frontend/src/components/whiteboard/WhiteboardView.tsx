@@ -7,6 +7,7 @@ import {
   StickyElement,
   ImageElement,
   TextElement,
+  ShapeElement,
   WhiteboardTool,
   WhiteboardGridType,
   ShapeType,
@@ -618,6 +619,10 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     canvasRef.current?.editTextElement(textEl.id);
   }, []);
 
+  const handleEditShapeText = useCallback((shapeEl: ShapeElement) => {
+    canvasRef.current?.editShapeElement(shapeEl.id);
+  }, []);
+
   const handleToolbarColorChange = useCallback(
     (newColor: string) => {
       setActiveColor(newColor);
@@ -698,6 +703,17 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           e.preventDefault();
           handleDeleteSelectedElements();
         }
+      } else if (e.key === 'Enter') {
+        if (currentSelectedElements.length === 1) {
+          const single = currentSelectedElements[0];
+          if (single.type === 'shape' && single.shapeType !== 'line' && single.shapeType !== 'arrow') {
+            e.preventDefault();
+            canvasRef.current?.editShapeElement(single.id);
+          } else if (single.type === 'text') {
+            e.preventDefault();
+            canvasRef.current?.editTextElement(single.id);
+          }
+        }
       }
     };
 
@@ -708,7 +724,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     handleRedo,
     handleDuplicateSelectedElements,
     handleDeleteSelectedElements,
-    currentSelectedElements.length,
+    currentSelectedElements,
   ]);
 
   if (loading || !board) {
@@ -824,6 +840,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           onBringToFront={handleBringToFront}
           onSendToBack={handleSendToBack}
           onEditText={handleEditText}
+          onEditShapeText={handleEditShapeText}
           edition={edition}
         />
       )}

@@ -23,6 +23,7 @@ export interface WhiteboardCanvasRef {
   getViewState: () => ViewState;
   setViewState: (view: ViewState) => void;
   editTextElement: (id: string) => void;
+  editShapeElement: (id: string) => void;
 }
 
 interface WhiteboardCanvasProps {
@@ -216,6 +217,21 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     const [inlineTextPos, setInlineTextPos] = useState<{ x: number; y: number } | null>(null);
     const [inlineTextVal, setInlineTextVal] = useState('');
     const textInputRef = useRef<HTMLTextAreaElement | null>(null);
+
+    // Shape text box editing inline
+    const [editingShape, setEditingShape] = useState<{
+      id: string;
+      x: number;
+      y: number;
+      width: number;
+      height: number;
+      text: string;
+      fontSize: number;
+      color: string;
+    } | null>(null);
+    const [editingShapeTextVal, setEditingShapeTextVal] = useState('');
+    const shapeTextInputRef = useRef<HTMLTextAreaElement | null>(null);
+    const editingShapeIdRef = useRef<string | null>(null);
 
     // Coordinate conversions
     const screenToWorld = useCallback(
@@ -673,6 +689,68 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         ctx.stroke();
       }
 
+      // Render centered text inside shape (Shape as a text box)
+      if (
+        shape.text &&
+        editingShapeIdRef.current !== shape.id &&
+        shape.shapeType !== 'line' &&
+        shape.shapeType !== 'arrow'
+      ) {
+        ctx.save();
+        const fontSize = shape.fontSize || Math.max(13, Math.min(24, Math.abs(shape.height) * 0.16));
+        ctx.font = `600 ${fontSize}px 'Newsreader', serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+
+        let textColor = shape.textColor;
+        if (!textColor) {
+          if (shape.fillColor) {
+            textColor = edition === 'night' ? '#f5f5f4' : '#1c1917';
+          } else {
+            textColor = shape.color;
+          }
+        }
+        ctx.fillStyle = textColor;
+
+        // Determine inner bounds for text wrapping
+        let innerW = Math.abs(width) - 20;
+        if (shape.shapeType === 'circle') {
+          innerW = Math.abs(width) * 0.7;
+        } else if (shape.shapeType === 'diamond') {
+          innerW = Math.abs(width) * 0.6;
+        }
+        innerW = Math.max(20, innerW);
+
+        // Word wrap text
+        const rawLines = shape.text.split('\n');
+        const wrappedLines: string[] = [];
+        rawLines.forEach((raw) => {
+          const words = raw.split(' ');
+          let currentLine = '';
+          words.forEach((word) => {
+            const testLine = currentLine ? `${currentLine} ${word}` : word;
+            if (ctx.measureText(testLine).width <= innerW || !currentLine) {
+              currentLine = testLine;
+            } else {
+              wrappedLines.push(currentLine);
+              currentLine = word;
+            }
+          });
+          if (currentLine) wrappedLines.push(currentLine);
+        });
+
+        const lineHeight = fontSize * 1.32;
+        const totalHeight = wrappedLines.length * lineHeight;
+        const cx = x + width / 2;
+        const startY = y + height / 2 - totalHeight / 2 + lineHeight / 2;
+
+        wrappedLines.forEach((line, idx) => {
+          ctx.fillText(line, cx, startY + idx * lineHeight);
+        });
+
+        ctx.restore();
+      }
+
       // Selection bounding box and 8 resize handles
       if (isSelected && shape.shapeType !== 'line' && shape.shapeType !== 'arrow') {
         ctx.strokeStyle = '#3b82f6';
@@ -896,6 +974,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       editingTextIdRef.current = null;
       setInlineTextPos(null);
       setInlineTextVal('');
+      editingShapeIdRef.current = null;
+      setEditingShape(null);
+      setEditingShapeTextVal('');
       renderCanvas();
     }, [renderCanvas]);
 
@@ -1010,6 +1091,24 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           setActiveTool?.('select');
           return;
         }
+      }
+
+      // Commit any active inline shape text input before processing new canvas clicks or tools
+      if (editingShape) {
+        const liveVal = shapeTextInputRef.current ? shapeTextInputRef.current.value : editingShapeTextVal;
+        if (editingShapeIdRef.current) {
+          const targetId = editingShapeIdRef.current;
+          const trimmed = liveVal.trim();
+          const updated = elementsRef.current.map((item) =>
+            item.id === targetId && item.type === 'shape'
+              ? { ...item, text: trimmed || undefined }
+              : item
+          );
+          onElementsChange(updated, true);
+        }
+        setEditingShape(null);
+        setEditingShapeTextVal('');
+        editingShapeIdRef.current = null;
       }
 
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1692,7 +1791,58 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       editingTextIdRef.current = null;
     };
 
-    // Double-click to edit text or create sticky note
+    // Shape Text Submission
+    const handleShapeTextSubmit = () => {
+      const liveVal = shapeTextInputRef.current ? shapeTextInputRef.current.value : editingShapeTextVal;
+      if (editingShapeIdRef.current) {
+        const targetId = editingShapeIdRef.current;
+        const trimmed = liveVal.trim();
+        const updated = elementsRef.current.map((item) =>
+          item.id === targetId && item.type === 'shape'
+            ? { ...item, text: trimmed || undefined }
+            : item
+        );
+        onElementsChange(updated, true);
+      }
+      setEditingShape(null);
+      setEditingShapeTextVal('');
+      editingShapeIdRef.current = null;
+    };
+
+    // Helper to start inline shape text box editing
+    const startEditingShapeText = useCallback((shape: ShapeElement) => {
+      editingShapeIdRef.current = shape.id;
+      onSelectElementId(shape.id);
+      if (onSelectElementIds) onSelectElementIds(new Set([shape.id]));
+
+      const fontSize = shape.fontSize || Math.max(13, Math.min(22, Math.abs(shape.height) * 0.16));
+      let textColor = shape.textColor;
+      if (!textColor) {
+        if (shape.fillColor) {
+          textColor = edition === 'night' ? '#f5f5f4' : '#1c1917';
+        } else {
+          textColor = shape.color;
+        }
+      }
+
+      setEditingShape({
+        id: shape.id,
+        x: shape.x,
+        y: shape.y,
+        width: shape.width,
+        height: shape.height,
+        text: shape.text || '',
+        fontSize,
+        color: textColor,
+      });
+      setEditingShapeTextVal(shape.text || '');
+      setTimeout(() => {
+        shapeTextInputRef.current?.focus();
+        shapeTextInputRef.current?.select();
+      }, 50);
+    }, [edition, onSelectElementId, onSelectElementIds]);
+
+    // Double-click to edit text, edit shape text, or create sticky note
     const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isPinchGestureActiveRef.current && activePointersRef.current.size >= 2) return;
       const rect = e.currentTarget.getBoundingClientRect();
@@ -1716,7 +1866,23 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
-      // 2. Otherwise invoke canvas double click (e.g. sticky note)
+      // 2. If double-clicking an existing shape element, edit its text box inline!
+      const hitShape = elements
+        .slice()
+        .reverse()
+        .find(
+          (el): el is ShapeElement =>
+            el.type === 'shape' &&
+            el.shapeType !== 'line' &&
+            el.shapeType !== 'arrow' &&
+            hitTest(el, worldPoint)
+        );
+      if (hitShape) {
+        startEditingShapeText(hitShape);
+        return;
+      }
+
+      // 3. Otherwise invoke canvas double click (e.g. sticky note)
       if (onCanvasDoubleClick) {
         onCanvasDoubleClick(worldPoint);
       }
@@ -1824,8 +1990,15 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
               const d = el.points.map((p, idx) => `${idx === 0 ? 'M' : 'L'} ${p.x} ${p.y}`).join(' ');
               svg += `<path d="${d}" stroke="${el.color}" stroke-width="${el.size}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="${el.opacity ?? 1}" />`;
             }
-          } else if (el.type === 'shape' && el.shapeType === 'rectangle') {
-            svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.color}" stroke-width="${el.strokeWidth}" fill="${el.fillColor || 'none'}" />`;
+          } else if (el.type === 'shape') {
+            if (el.shapeType === 'rectangle') {
+              svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.color}" stroke-width="${el.strokeWidth}" fill="${el.fillColor || 'none'}" />`;
+            } else if (el.shapeType === 'circle') {
+              svg += `<ellipse cx="${el.x + el.width / 2}" cy="${el.y + el.height / 2}" rx="${Math.abs(el.width / 2)}" ry="${Math.abs(el.height / 2)}" stroke="${el.color}" stroke-width="${el.strokeWidth}" fill="${el.fillColor || 'none'}" />`;
+            }
+            if (el.text) {
+              svg += `<text x="${el.x + el.width / 2}" y="${el.y + el.height / 2}" text-anchor="middle" dominant-baseline="middle" fill="${el.textColor || el.color}" font-size="${el.fontSize || 16}" font-family="serif">${el.text}</text>`;
+            }
           } else if (el.type === 'text') {
             svg += `<text x="${el.x}" y="${el.y + el.fontSize}" fill="${el.color}" font-size="${el.fontSize}" font-family="serif">${el.text}</text>`;
           }
@@ -1920,6 +2093,12 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           }, 50);
         }
       },
+      editShapeElement: (id: string) => {
+        const el = elements.find((item) => item.id === id);
+        if (el && el.type === 'shape' && el.shapeType !== 'line' && el.shapeType !== 'arrow') {
+          startEditingShapeText(el);
+        }
+      },
     }));
 
     return (
@@ -1999,6 +2178,54 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
                 overflow: 'hidden',
               }}
               className="bg-paper-light dark:bg-stone-900 border-2 border-amber-600 dark:border-amber-400 rounded-none px-2.5 py-1.5 outline-none font-editorial font-bold shadow-2xl"
+            />
+          </div>
+        )}
+
+        {/* Shape Inline Text Box Tool */}
+        {editingShape && (
+          <div
+            style={{
+              position: 'absolute',
+              left: `${worldToScreen(Math.min(editingShape.x, editingShape.x + editingShape.width), Math.min(editingShape.y, editingShape.y + editingShape.height)).x}px`,
+              top: `${worldToScreen(Math.min(editingShape.x, editingShape.x + editingShape.width), Math.min(editingShape.y, editingShape.y + editingShape.height)).y}px`,
+              width: `${Math.abs(editingShape.width) * viewState.zoom}px`,
+              height: `${Math.abs(editingShape.height) * viewState.zoom}px`,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: `${8 * viewState.zoom}px`,
+            }}
+            className="z-50 pointer-events-auto"
+          >
+            <textarea
+              ref={shapeTextInputRef}
+              value={editingShapeTextVal}
+              onChange={(e) => setEditingShapeTextVal(e.target.value)}
+              onBlur={handleShapeTextSubmit}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.ctrlKey || e.metaKey || !e.shiftKey)) {
+                  e.preventDefault();
+                  handleShapeTextSubmit();
+                } else if (e.key === 'Escape') {
+                  setEditingShape(null);
+                  setEditingShapeTextVal('');
+                  editingShapeIdRef.current = null;
+                }
+              }}
+              placeholder="Type in shape..."
+              style={{
+                color: editingShape.color,
+                fontSize: `${editingShape.fontSize * viewState.zoom}px`,
+                width: '100%',
+                height: '100%',
+                maxHeight: '100%',
+                textAlign: 'center',
+                resize: 'none',
+                overflow: 'hidden',
+                lineHeight: 1.32,
+              }}
+              className="bg-transparent border border-dashed border-amber-600/70 rounded-[1px] p-1 outline-none font-editorial font-bold select-text flex items-center justify-center placeholder:opacity-40"
             />
           </div>
         )}

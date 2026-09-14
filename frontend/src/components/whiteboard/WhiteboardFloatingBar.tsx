@@ -13,6 +13,7 @@ import {
   ArrowUp,
   ArrowDown,
   Edit3,
+  Type,
   Palette,
   Droplet,
   Minus,
@@ -74,6 +75,7 @@ export interface WhiteboardFloatingBarProps {
   onBringToFront: () => void;
   onSendToBack: () => void;
   onEditText?: (textEl: TextElement) => void;
+  onEditShapeText?: (shapeEl: ShapeElement) => void;
   edition?: 'day' | 'night';
 }
 
@@ -86,6 +88,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
   onBringToFront,
   onSendToBack,
   onEditText,
+  onEditShapeText,
   edition = 'day',
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
@@ -120,6 +123,9 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
   const hasShape = selectedElements.some((el) => el.type === 'shape');
   const hasText = selectedElements.some((el) => el.type === 'text');
   const firstText = selectedElements.find((el): el is TextElement => el.type === 'text');
+  const firstShape = selectedElements.find(
+    (el): el is ShapeElement => el.type === 'shape' && el.shapeType !== 'line' && el.shapeType !== 'arrow'
+  );
 
   // Handlers for in-place property changes
   const handleChangeColor = (newColor: string) => {
@@ -185,6 +191,19 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
         >
           <Edit3 size={13} className="text-amber-600" />
           <span>Edit</span>
+        </button>
+      )}
+
+      {/* 1b. In-Place Shape Text Box Editing (if shape element selected) */}
+      {!hasText && firstShape && onEditShapeText && (
+        <button
+          type="button"
+          onClick={() => onEditShapeText(firstShape)}
+          className="flex items-center gap-1 px-2 py-1 text-xs font-ledger font-bold uppercase tracking-wider hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
+          title={firstShape.text ? 'Edit Shape Text' : 'Add Text to Shape'}
+        >
+          <Type size={13} className="text-amber-600" />
+          <span>{firstShape.text ? 'Edit Text' : 'Add Text'}</span>
         </button>
       )}
 
