@@ -861,15 +861,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     // POINTER EVENT HANDLERS
     // -------------------------------------------------------------
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      // If a pinch/zoom gesture is active, ignore new pointerdown
-      if (isPinchGestureActiveRef.current) return;
-
-      // Detect hardware stylus / Apple Pencil
-      if (e.pointerType === 'pen' && !hasPenDetectedRef.current) {
-        hasPenDetectedRef.current = true;
-        onStylusDetected?.();
-      }
-
       // Safe pointer capture: only capture non-touch pointers (mouse, pen)
       // Capturing touch pointers interferes with multi-touch gestures on WebKit
       if (e.pointerType !== 'touch') {
@@ -880,11 +871,23 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
+      // If we have <= 1 active pointer or this is mouse/pen, any previous pinch is cleared
+      if (activePointersRef.current.size <= 1 || e.pointerType !== 'touch') {
+        isPinchGestureActiveRef.current = false;
+        pinchStateRef.current = null;
+      }
+
+      // Detect hardware stylus / Apple Pencil
+      if (e.pointerType === 'pen' && !hasPenDetectedRef.current) {
+        hasPenDetectedRef.current = true;
+        onStylusDetected?.();
+      }
+
       // Cancel any running momentum pan
       if (momentumRafRef.current) cancelAnimationFrame(momentumRafRef.current);
 
-      // Multi-pointer pinch detection (fallback for PointerEvent platforms)
-      if (activePointersRef.current.size >= 2) {
+      // Multi-pointer pinch detection (only for multi-touch gestures!)
+      if (activePointersRef.current.size >= 2 && e.pointerType === 'touch') {
         isPinchGestureActiveRef.current = true;
         abortInProgressActions();
 
@@ -898,11 +901,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
 
       // Palm Rejection & Active Stylus Navigation:
-      // When stylus mode is active (or a pen was detected), touch with fingers
-      // exclusively pans the canvas for inking tools, UNLESS the user explicitly selected
-      // the Eraser or Select tool, or the physical stylus eraser tip is touching.
+      // ONLY if the user explicitly enabled `stylusOnly` in the header!
+      // If stylusOnly is false (default), fingers draw, place shapes, erase, and select freely!
       if (
-        (stylusOnly || hasPenDetectedRef.current) &&
+        stylusOnly &&
         e.pointerType === 'touch' &&
         !isEraser &&
         activeTool !== 'select'
@@ -1000,13 +1002,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
-      // If a multi-touch pinch is active, ignore single pointermove actions
-      if (isPinchGestureActiveRef.current) return;
-
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
-      // Multi-pointer Pinch Zoom fallback for PointerEvent platforms
-      if (activePointersRef.current.size >= 2 && containerRef.current) {
+      // Multi-pointer Pinch Zoom fallback for PointerEvent platforms (touch only)
+      if (activePointersRef.current.size >= 2 && e.pointerType === 'touch' && containerRef.current) {
         isPinchGestureActiveRef.current = true;
         abortInProgressActions();
 
@@ -1031,6 +1030,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         }
         pinchStateRef.current = { lastDist: dist, lastCenter: center };
         return;
+      }
+
+      // If a multi-touch pinch is active (>= 2 touches), ignore single pointer movements
+      if (isPinchGestureActiveRef.current && activePointersRef.current.size >= 2) return;
+
+      // When down to <= 1 pointer, ensure pinch is reset
+      if (activePointersRef.current.size <= 1) {
+        isPinchGestureActiveRef.current = false;
       }
 
       // Handle Pan with Velocity Tracking for Momentum
@@ -1154,15 +1161,20 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const handlePointerUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {}
+
       activePointersRef.current.delete(e.pointerId);
 
-      // If a pinch gesture was active, do NOT commit any stroke, shape, or action!
+      // If a pinch gesture was active, reset immediately when pointers drop to <= 1
       if (isPinchGestureActiveRef.current) {
         abortInProgressActions();
-        if (activePointersRef.current.size === 0) {
-          setTimeout(() => {
-            isPinchGestureActiveRef.current = false;
-          }, 80);
+        if (activePointersRef.current.size <= 1) {
+          isPinchGestureActiveRef.current = false;
+          pinchStateRef.current = null;
         }
         return;
       }
@@ -1271,34 +1283,79 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         }
         currentPointsRef.current = [];
         renderCanvas();
-      } else if (activeTool === 'shape' && shapeStartRef.current && shapeCurrentRef.current) {
+      } else if (activeTool === 'shape' && shapeStartRef.current) {
         const p1 = shapeStartRef.current;
-        const p2 = shapeCurrentRef.current;
-        const x = Math.min(p1.x, p2.x);
-        const y = Math.min(p1.y, p2.y);
-        const w = Math.abs(p2.x - p1.x);
-        const h = Math.abs(p2.y - p1.y);
+        const p2 = shapeCurrentRef.current || shapeStartRef.current;
+        let x = Math.min(p1.x, p2.x);
+        let y = Math.min(p1.y, p2.y);
+        let w = Math.abs(p2.x - p1.x);
+        let h = Math.abs(p2.y - p1.y);
 
-        if (w > 3 || h > 3) {
-          const newShape: ShapeElement = {
-            id: `shape_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-            type: 'shape',
-            shapeType: activeShape,
-            x: activeShape === 'arrow' || activeShape === 'line' ? p1.x : x,
-            y: activeShape === 'arrow' || activeShape === 'line' ? p1.y : y,
-            width: activeShape === 'arrow' || activeShape === 'line' ? p2.x - p1.x : w,
-            height: activeShape === 'arrow' || activeShape === 'line' ? p2.y - p1.y : h,
-            color: activeColor,
-            fillColor: activeFillColor ?? undefined,
-            strokeWidth: activeSize,
-          };
-          onElementsChange([...elements, newShape], true);
+        // Tap/click placement support: create a standard-sized shape if tapped/clicked without dragging
+        const isClickPlacement = w <= 3 && h <= 3;
+        if (isClickPlacement) {
+          if (activeShape === 'rectangle') {
+            w = 160;
+            h = 100;
+            x = p1.x - w / 2;
+            y = p1.y - h / 2;
+          } else if (activeShape === 'circle') {
+            w = 120;
+            h = 120;
+            x = p1.x - w / 2;
+            y = p1.y - h / 2;
+          } else if (activeShape === 'diamond') {
+            w = 130;
+            h = 110;
+            x = p1.x - w / 2;
+            y = p1.y - h / 2;
+          } else if (activeShape === 'line' || activeShape === 'arrow') {
+            w = 140;
+            h = 0;
+            x = p1.x;
+            y = p1.y;
+          } else {
+            w = 140;
+            h = 90;
+            x = p1.x - w / 2;
+            y = p1.y - h / 2;
+          }
         }
+
+        const newShape: ShapeElement = {
+          id: `shape_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+          type: 'shape',
+          shapeType: activeShape,
+          x: activeShape === 'arrow' || activeShape === 'line' ? p1.x : x,
+          y: activeShape === 'arrow' || activeShape === 'line' ? p1.y : y,
+          width: activeShape === 'arrow' || activeShape === 'line' ? (isClickPlacement ? 140 : p2.x - p1.x) : w,
+          height: activeShape === 'arrow' || activeShape === 'line' ? (isClickPlacement ? 0 : p2.y - p1.y) : h,
+          color: activeColor,
+          fillColor: activeFillColor ?? undefined,
+          strokeWidth: activeSize,
+        };
+        onElementsChange([...elements, newShape], true);
+        onSelectElementId(newShape.id);
+        if (onSelectElementIds) onSelectElementIds(new Set([newShape.id]));
 
         shapeStartRef.current = null;
         shapeCurrentRef.current = null;
         renderCanvas();
       }
+    };
+
+    const handlePointerCancel = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      try {
+        if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+          e.currentTarget.releasePointerCapture(e.pointerId);
+        }
+      } catch {}
+      activePointersRef.current.delete(e.pointerId);
+      if (activePointersRef.current.size <= 1) {
+        isPinchGestureActiveRef.current = false;
+        pinchStateRef.current = null;
+      }
+      abortInProgressActions();
     };
 
     // Wheel zoom & pan
@@ -1367,7 +1424,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           };
           pinchStateRef.current = { lastDist: dist, lastCenter: center };
         } else if (e.touches.length === 1) {
-          if (stylusOnly || hasPenDetectedRef.current || activeTool === 'hand' || spacePressedRef.current) {
+          isPinchGestureActiveRef.current = false;
+          pinchStateRef.current = null;
+          if (stylusOnly || activeTool === 'hand' || spacePressedRef.current) {
             e.preventDefault();
           }
         }
@@ -1411,28 +1470,19 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         } else if (e.touches.length === 1) {
           if (isPinchGestureActiveRef.current) {
             e.preventDefault();
-          } else if (stylusOnly || hasPenDetectedRef.current || activeTool === 'hand' || spacePressedRef.current) {
+          } else if (stylusOnly || activeTool === 'hand' || spacePressedRef.current) {
             e.preventDefault();
           }
         }
       };
 
       const handleTouchEnd = (e: TouchEvent) => {
-        if (e.touches.length === 0) {
+        if (e.touches.length <= 1) {
           pinchStateRef.current = null;
-          if (isPinchGestureActiveRef.current) {
+          isPinchGestureActiveRef.current = false;
+          if (e.touches.length === 0) {
             abortInProgressActions();
-            setTimeout(() => {
-              isPinchGestureActiveRef.current = false;
-            }, 80);
           }
-        } else if (e.touches.length === 1 && isPinchGestureActiveRef.current) {
-          const t0 = e.touches[0];
-          pinchStateRef.current = {
-            lastDist: 0,
-            lastCenter: { x: t0.clientX, y: t0.clientY },
-          };
-          abortInProgressActions();
         }
       };
 
@@ -1449,7 +1499,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       };
     }, [stylusOnly, activeTool, abortInProgressActions, onViewStateChange]);
 
-    // Spacebar listener for temporary pan hand
+    // Spacebar listener for temporary pan hand & safety window pointer cleanup
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
         if (
@@ -1470,11 +1520,22 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         }
       };
 
+      const handleWindowPointerRelease = () => {
+        if (activePointersRef.current.size <= 1) {
+          isPinchGestureActiveRef.current = false;
+          pinchStateRef.current = null;
+        }
+      };
+
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('keyup', handleKeyUp);
+      window.addEventListener('pointerup', handleWindowPointerRelease);
+      window.addEventListener('pointercancel', handleWindowPointerRelease);
       return () => {
         window.removeEventListener('keydown', handleKeyDown);
         window.removeEventListener('keyup', handleKeyUp);
+        window.removeEventListener('pointerup', handleWindowPointerRelease);
+        window.removeEventListener('pointercancel', handleWindowPointerRelease);
       };
     }, []);
 
@@ -1535,7 +1596,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
     // Double-click to edit text or create sticky note
     const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
-      if (isPinchGestureActiveRef.current) return;
+      if (isPinchGestureActiveRef.current && activePointersRef.current.size >= 2) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
 
@@ -1787,7 +1848,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
-          onPointerCancel={handlePointerUp}
+          onPointerCancel={handlePointerCancel}
           onPointerLeave={() => {
             currentEraserScreenPosRef.current = null;
             renderCanvas();

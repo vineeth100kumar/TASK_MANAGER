@@ -698,16 +698,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           e.preventDefault();
           handleDeleteSelectedElements();
         }
-      } else if (!e.ctrlKey && !e.metaKey && !e.altKey) {
-        if (e.key.toLowerCase() === 'e') {
-          setActiveTool('eraser');
-        } else if (e.key.toLowerCase() === 'p') {
-          setActiveTool('pen');
-        } else if (e.key.toLowerCase() === 'v') {
-          setActiveTool('select');
-        } else if (e.key.toLowerCase() === 'h') {
-          setActiveTool('hand');
-        }
       }
     };
 
@@ -818,7 +808,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         edition={edition}
         gridType={gridType}
         stylusOnly={stylusOnly}
-        onStylusDetected={() => setStylusOnly(true)}
+        onStylusDetected={() => {}}
         onCanvasDoubleClick={(pt) => handleAddSticky('yellow', pt)}
       />
 

@@ -631,22 +631,78 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(hit).toBe(true);
     });
 
-    it('bypasses palm rejection pan when activeTool is eraser so finger touches erase', () => {
+    it('allows finger touch to draw and place shapes by default when stylusOnly is false', () => {
       const stylusOnly = false;
-      const hasPenDetected = true; // Pen was used earlier
-      const pointerType: string = 'touch'; // Now user touches with finger
+      const pointerType: string = 'touch';
+
+      // Drawing with pen must NOT pan by default
+      const activeToolPen: string = 'pen';
+      const isEraserPen = activeToolPen === 'eraser' || pointerType === 'eraser';
+      const shouldPanPen = stylusOnly && pointerType === 'touch' && !isEraserPen && activeToolPen !== 'select';
+      expect(shouldPanPen).toBe(false);
+
+      // Drawing shapes must NOT pan by default
+      const activeToolShape: string = 'shape';
+      const shouldPanShape = stylusOnly && pointerType === 'touch' && activeToolShape !== 'select';
+      expect(shouldPanShape).toBe(false);
+    });
+
+    it('engages palm rejection pan ONLY when stylusOnly is true, bypassing for eraser and select', () => {
+      const stylusOnly = true;
+      const pointerType: string = 'touch';
 
       // When activeTool is 'pen': finger touch triggers palm rejection pan
       const activeToolPen: string = 'pen';
       const isEraserPen = activeToolPen === 'eraser' || pointerType === 'eraser';
-      const shouldPanPen = (stylusOnly || hasPenDetected) && pointerType === 'touch' && !isEraserPen && activeToolPen !== 'select';
+      const shouldPanPen = stylusOnly && pointerType === 'touch' && !isEraserPen && activeToolPen !== 'select';
       expect(shouldPanPen).toBe(true);
 
       // When activeTool is 'eraser': finger touch MUST NOT pan, it must erase!
       const activeToolEraser: string = 'eraser';
       const isEraserTool = activeToolEraser === 'eraser' || pointerType === 'eraser';
-      const shouldPanEraser = (stylusOnly || hasPenDetected) && pointerType === 'touch' && !isEraserTool && activeToolEraser !== 'select';
+      const shouldPanEraser = stylusOnly && pointerType === 'touch' && !isEraserTool && activeToolEraser !== 'select';
       expect(shouldPanEraser).toBe(false);
+
+      // When activeTool is 'select': finger touch MUST NOT pan, it must select!
+      const activeToolSelect: string = 'select';
+      const shouldPanSelect = stylusOnly && pointerType === 'touch' && activeToolSelect !== 'select';
+      expect(shouldPanSelect).toBe(false);
+    });
+
+    it('generates default dimensions on tap/click placement of shapes', () => {
+      const getShapeDefaults = (shapeType: string, p: { x: number; y: number }) => {
+        let w = 0, h = 0, x = p.x, y = p.y;
+        if (shapeType === 'rectangle' || shapeType === 'cloud') {
+          w = 160; h = 100; x = p.x - w / 2; y = p.y - h / 2;
+        } else if (shapeType === 'circle' || shapeType === 'star') {
+          w = 120; h = 120; x = p.x - w / 2; y = p.y - h / 2;
+        } else if (shapeType === 'triangle' || shapeType === 'diamond') {
+          w = 130; h = 110; x = p.x - w / 2; y = p.y - h / 2;
+        } else if (shapeType === 'cylinder') {
+          w = 120; h = 140; x = p.x - w / 2; y = p.y - h / 2;
+        } else if (shapeType === 'line' || shapeType === 'arrow') {
+          w = 140; h = 0; x = p.x; y = p.y;
+        }
+        return { x, y, w, h };
+      };
+
+      const rect = getShapeDefaults('rectangle', { x: 200, y: 150 });
+      expect(rect.w).toBe(160);
+      expect(rect.h).toBe(100);
+      expect(rect.x).toBe(120);
+      expect(rect.y).toBe(100);
+
+      const circle = getShapeDefaults('circle', { x: 300, y: 300 });
+      expect(circle.w).toBe(120);
+      expect(circle.h).toBe(120);
+      expect(circle.x).toBe(240);
+      expect(circle.y).toBe(240);
+
+      const arrow = getShapeDefaults('arrow', { x: 100, y: 100 });
+      expect(arrow.w).toBe(140);
+      expect(arrow.h).toBe(0);
+      expect(arrow.x).toBe(100);
+      expect(arrow.y).toBe(100);
     });
   });
 });
