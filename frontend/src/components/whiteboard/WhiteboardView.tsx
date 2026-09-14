@@ -653,6 +653,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         edition={edition}
         gridType={gridType}
         stylusOnly={stylusOnly}
+        onStylusDetected={() => setStylusOnly(true)}
         onCanvasDoubleClick={(pt) => handleAddSticky('yellow', pt)}
       />
 

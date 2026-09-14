@@ -92,7 +92,11 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
   // Handle Dragging
   const handleDragStart = (e: React.PointerEvent) => {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    if (e.pointerType !== 'touch') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {}
+    }
     setIsDragging(true);
     onSelect();
     dragStartRef.current = {
@@ -129,7 +133,11 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
   // Handle Resizing
   const handleResizeStart = (e: React.PointerEvent) => {
     e.stopPropagation();
-    e.currentTarget.setPointerCapture(e.pointerId);
+    if (e.pointerType !== 'touch') {
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId);
+      } catch {}
+    }
     setIsResizing(true);
     onSelect();
     dragStartRef.current = {

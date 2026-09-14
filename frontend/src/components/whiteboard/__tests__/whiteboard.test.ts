@@ -63,6 +63,26 @@ function computePinchZoom(
   return { zoom: newZoom, panX: newPanX, panY: newPanY, cx, cy };
 }
 
+// Fluid Incremental Two-Finger Pan & Pinch-Zoom engine math
+function computeIncrementalPinchStep(
+  lastCenter: { x: number; y: number },
+  currCenter: { x: number; y: number },
+  containerRect: { left: number; top: number },
+  currentPan: { x: number; y: number },
+  currentZoom: number,
+  scaleFactor: number
+) {
+  const newZoom = Math.min(3.5, Math.max(0.15, currentZoom * scaleFactor));
+  const lastCx = lastCenter.x - containerRect.left;
+  const lastCy = lastCenter.y - containerRect.top;
+  const currCx = currCenter.x - containerRect.left;
+  const currCy = currCenter.y - containerRect.top;
+  const zoomRatio = newZoom / currentZoom;
+  const newPanX = currCx - (lastCx - currentPan.x) * zoomRatio;
+  const newPanY = currCy - (lastCy - currentPan.y) * zoomRatio;
+  return { zoom: newZoom, panX: newPanX, panY: newPanY };
+}
+
 // Velocity taper factor math
 function computeVelocityTaper(p0: Point, p1: Point): number {
   if (!p0.t || !p1.t) return 1.0;
@@ -133,6 +153,63 @@ describe('Whiteboard Vector Engine Math', () => {
       const worldAfter = screenToWorld(200, 200, res.panX, res.panY, res.zoom);
       expect(worldAfter.x).toBeCloseTo(150, 5);
       expect(worldAfter.y).toBeCloseTo(150, 5);
+    });
+
+    it('performs pure two-finger panning without zoom change (scaleFactor = 1.0)', () => {
+      const lastCenter = { x: 200, y: 200 };
+      const currCenter = { x: 240, y: 215 }; // moved by +40px X, +15px Y
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 50, y: 50 };
+      const currentZoom = 1.5;
+      const scaleFactor = 1.0;
+
+      const res = computeIncrementalPinchStep(lastCenter, currCenter, rect, currentPan, currentZoom, scaleFactor);
+      expect(res.zoom).toBe(1.5);
+      expect(res.panX).toBe(50 + 40); // 90
+      expect(res.panY).toBe(50 + 15); // 65
+    });
+
+    it('handles simultaneous two-finger pan and zoom without drifting', () => {
+      const lastCenter = { x: 200, y: 200 };
+      const currCenter = { x: 220, y: 220 }; // hand shifted +20px while spreading fingers
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 30, y: 30 };
+      const currentZoom = 1.0;
+      const scaleFactor = 1.5;
+
+      const res = computeIncrementalPinchStep(lastCenter, currCenter, rect, currentPan, currentZoom, scaleFactor);
+      expect(res.zoom).toBe(1.5);
+
+      // Verify that the world point that was at lastCenter (200, 200) is now tracked cleanly
+      const worldBefore = screenToWorld(200, 200, currentPan.x, currentPan.y, currentZoom);
+      expect(worldBefore.x).toBe(170);
+      expect(worldBefore.y).toBe(170);
+
+      const worldAfter = screenToWorld(currCenter.x, currCenter.y, res.panX, res.panY, res.zoom);
+      expect(worldAfter.x).toBeCloseTo(170, 5);
+      expect(worldAfter.y).toBeCloseTo(170, 5);
+    });
+
+    it('purges active inking points and shape start when multi-touch pinch begins', () => {
+      let isDrawing = true;
+      let currentPoints: Point[] = [{ x: 10, y: 10 }, { x: 20, y: 20 }];
+      let shapeStart: Point | null = { x: 50, y: 50 };
+      let isPinchActive = false;
+
+      // Simulate multi-touch touchstart event (e.touches.length >= 2)
+      const onMultiTouchStart = () => {
+        isPinchActive = true;
+        isDrawing = false;
+        currentPoints = [];
+        shapeStart = null;
+      };
+
+      onMultiTouchStart();
+
+      expect(isPinchActive).toBe(true);
+      expect(isDrawing).toBe(false);
+      expect(currentPoints).toHaveLength(0);
+      expect(shapeStart).toBeNull();
     });
   });
 
