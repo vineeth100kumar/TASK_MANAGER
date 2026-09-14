@@ -88,6 +88,7 @@ export const Modal: React.FC<ModalProps> = ({
           ref={modalRef}
           tabIndex={-1}
           onClick={e => e.stopPropagation()}
+          style={{ marginBottom: 'var(--keyboard-offset, 0px)' }}
           className={`w-full ${MAX_WIDTH_CLASSES[maxWidth] || maxWidth} bg-zinc-900 border border-zinc-800 rounded-t-2xl sm:rounded-2xl p-5 sm:p-6 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150 max-h-[92vh] sm:max-h-[88vh] overflow-y-auto focus:outline-none ${className}`}
         >
           {(title || !hideCloseButton) && (

@@ -18,6 +18,7 @@ export interface ToastItem {
 interface ToastContextType {
   showToast: (toast: Omit<ToastItem, 'id'>) => string;
   error: (message: string, title?: string) => string;
+  errorWithRetry: (message: string, onRetry: () => void, title?: string) => string;
   success: (message: string, title?: string) => string;
   info: (message: string, title?: string) => string;
   warning: (message: string, title?: string) => string;
@@ -61,6 +62,19 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     return showToast({ type: 'error', message, title });
   }, [showToast]);
 
+  const errorWithRetry = useCallback((message: string, onRetry: () => void, title?: string) => {
+    return showToast({
+      type: 'error',
+      message,
+      title,
+      duration: 8000,
+      action: {
+        label: 'Retry',
+        onClick: onRetry
+      }
+    });
+  }, [showToast]);
+
   const success = useCallback((message: string, title?: string) => {
     return showToast({ type: 'success', message, title });
   }, [showToast]);
@@ -86,7 +100,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, [showToast]);
 
   return (
-    <ToastContext.Provider value={{ showToast, error, success, info, warning, action, dismissToast }}>
+    <ToastContext.Provider value={{ showToast, error, errorWithRetry, success, info, warning, action, dismissToast }}>
       {children}
       <ToastContainer toasts={toasts} onDismiss={dismissToast} />
     </ToastContext.Provider>

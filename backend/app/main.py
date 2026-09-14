@@ -7,7 +7,7 @@ from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
 from .database import init_database, DB_PATH, db_pool
-from .routers import items, finance, dashboard, ai, shortcuts, push, weather, planner
+from .routers import items, finance, dashboard, ai, shortcuts, push, weather, planner, whiteboards
 from .services.ws_manager import ws_manager
 from .services.push_service import check_due_reminders
 from .version import VERSION, BUILD_NAME
@@ -63,6 +63,7 @@ app.include_router(weather.router)
 app.include_router(shortcuts.router)
 app.include_router(push.router)
 app.include_router(planner.router)
+app.include_router(whiteboards.router)
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):

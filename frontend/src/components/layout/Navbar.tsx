@@ -2,26 +2,40 @@ import React from 'react';
 import { 
   LayoutDashboard, 
   CheckSquare, 
-  Folder,
+  Folder, 
   Wallet, 
-  Sparkles, 
   Smartphone, 
+  Sparkles, 
   Wifi, 
-  WifiOff,
-  RefreshCw,
-  Sun,
-  Moon,
-  RotateCcw,
-  RotateCw
+  WifiOff, 
+  RefreshCw, 
+  Sun, 
+  Moon, 
+  RotateCcw, 
+  RotateCw,
+  Search,
+  PenTool
 } from 'lucide-react';
 import { APP_VERSION } from '../../version';
 
+export type NavTabId = 'dashboard' | 'tasks' | 'whiteboard' | 'projects' | 'finance' | 'shortcuts';
+
+export const NAV_TABS: { id: NavTabId; label: string; icon: React.ComponentType<{ className?: string }> }[] = [
+  { id: 'dashboard', label: 'Today', icon: LayoutDashboard },
+  { id: 'tasks', label: 'Tasks', icon: CheckSquare },
+  { id: 'whiteboard', label: 'Draw', icon: PenTool },
+  { id: 'projects', label: 'Projects', icon: Folder },
+  { id: 'finance', label: 'Finance', icon: Wallet },
+  { id: 'shortcuts', label: 'Siri & Pi', icon: Smartphone },
+];
+
 interface NavbarProps {
-  activeTab: 'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts';
-  setActiveTab: (tab: 'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts') => void;
+  activeTab: NavTabId;
+  setActiveTab: (tab: NavTabId) => void;
   isLiveConnected: boolean;
   isSyncing?: boolean;
   onOpenQuickCapture: () => void;
+  onOpenSearch?: () => void;
   onOpenWizard?: (mode?: 'morning' | 'evening') => void;
   canUndo?: boolean;
   canRedo?: boolean;
@@ -37,6 +51,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   isLiveConnected,
   isSyncing = false,
   onOpenQuickCapture,
+  onOpenSearch,
   onOpenWizard,
   canUndo = false,
   canRedo = false,
@@ -47,9 +62,10 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const currentHour = new Date().getHours();
   const isEvening = currentHour >= 17 || currentHour < 5;
+
   return (
     <>
-      {/* Mobile Top Navigation Bar */}
+      {/* Mobile Top Navigation Header */}
       <header className="md:hidden flex items-center justify-between px-4 py-2.5 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="flex items-center space-x-2">
           <div className="w-7 h-7 rounded-xl bg-gradient-to-tr from-blue-600 to-indigo-500 flex items-center justify-center font-bold text-white text-xs shadow-lg shadow-blue-500/20">
@@ -62,23 +78,38 @@ export const Navbar: React.FC<NavbarProps> = ({
           </div>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-1.5">
+          {/* Global Search Button */}
+          {onOpenSearch && (
+            <button
+              onClick={onOpenSearch}
+              aria-label="Search and Command Palette (Ctrl+K)"
+              className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg border bg-zinc-800/80 text-zinc-300 border-zinc-700/60 active:scale-95 transition-all"
+            >
+              <Search className="w-3.5 h-3.5" />
+            </button>
+          )}
+
+          {/* Undo Button */}
           {onUndo && canUndo && (
             <button
               onClick={onUndo}
               aria-label={`Undo: ${undoTooltip || 'Last action'}`}
-              className="p-1.5 rounded-lg border bg-zinc-800/80 text-blue-400 border-blue-500/30 active:scale-95 transition-all"
+              className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg border bg-zinc-800/80 text-blue-400 border-blue-500/30 active:scale-95 transition-all"
               title={`Undo: ${undoTooltip || 'Last action'}`}
             >
               <RotateCcw className="w-3.5 h-3.5" />
             </button>
           )}
 
+          {/* Morning / Evening Wizard Launcher */}
           {onOpenWizard && (
             <button
               onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
               aria-label={isEvening ? "Evening Debrief" : "Morning Kickoff"}
-              className={`p-1.5 rounded-lg border ${isEvening ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'}`}
+              className={`p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg border ${
+                isEvening ? 'bg-indigo-600/20 text-indigo-300 border-indigo-500/30' : 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+              }`}
               title={isEvening ? "Evening Debrief" : "Morning Kickoff"}
             >
               {isEvening ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
@@ -86,14 +117,13 @@ export const Navbar: React.FC<NavbarProps> = ({
           )}
 
           {/* Unified Mobile Status Cluster */}
-          <div className="flex items-center space-x-1.5">
+          <div className="flex items-center space-x-1.5 pl-1">
             {isSyncing && (
               <div 
                 title="Saving changes in background to Raspberry Pi..."
                 className="flex items-center space-x-1 px-1.5 py-0.5 rounded-full text-[10px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 animate-pulse"
               >
                 <RefreshCw className="w-2.5 h-2.5 animate-spin text-blue-400" />
-                <span className="hidden xs:inline">Saving</span>
               </div>
             )}
             <div 
@@ -105,13 +135,13 @@ export const Navbar: React.FC<NavbarProps> = ({
               }`}
             >
               {isLiveConnected ? <Wifi className="w-2.5 h-2.5" /> : <WifiOff className="w-2.5 h-2.5 animate-pulse" />}
-              <span>{isLiveConnected ? 'RPi5' : 'Connecting'}</span>
+              <span>{isLiveConnected ? 'RPi5' : 'Offline'}</span>
             </div>
           </div>
         </div>
       </header>
 
-      {/* PC Top Navigation Bar */}
+      {/* Desktop Top Navigation Bar */}
       <header className="hidden md:flex items-center justify-between px-6 py-3 border-b border-zinc-800/80 bg-zinc-950/80 backdrop-blur-md sticky top-0 z-40">
         <div className="flex items-center space-x-6">
           <div className="flex items-center space-x-2">
@@ -125,70 +155,43 @@ export const Navbar: React.FC<NavbarProps> = ({
             </div>
           </div>
 
+          {/* Unified Desktop Tab Links */}
           <nav className="flex items-center space-x-1">
-            <button
-              onClick={() => setActiveTab('dashboard')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'dashboard'
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-              }`}
-            >
-              <LayoutDashboard className="w-4 h-4" />
-              <span>Dashboard</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('tasks')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'tasks'
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-              }`}
-            >
-              <CheckSquare className="w-4 h-4" />
-              <span>Tasks & Events</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('projects')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'projects'
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-              }`}
-            >
-              <Folder className="w-4 h-4" />
-              <span>Projects</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('finance')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'finance'
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-              }`}
-            >
-              <Wallet className="w-4 h-4" />
-              <span>Finance Tracker</span>
-            </button>
-
-            <button
-              onClick={() => setActiveTab('shortcuts')}
-              className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                activeTab === 'shortcuts'
-                  ? 'bg-zinc-800 text-white shadow-sm'
-                  : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
-              }`}
-            >
-              <Smartphone className="w-4 h-4" />
-              <span>iOS & Siri</span>
-            </button>
+            {NAV_TABS.map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`flex items-center space-x-2 px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                    isActive
+                      ? 'bg-zinc-800 text-white shadow-sm'
+                      : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-900'
+                  }`}
+                >
+                  <Icon className="w-4 h-4" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
           </nav>
         </div>
 
         <div className="flex items-center space-x-2.5">
+          {/* Desktop Search Button */}
+          {onOpenSearch && (
+            <button
+              onClick={onOpenSearch}
+              className="flex items-center space-x-2 px-2.5 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-400 hover:text-zinc-200 text-xs font-medium transition-all"
+            >
+              <Search className="w-3.5 h-3.5" />
+              <span>Search...</span>
+              <kbd className="text-[10px] bg-zinc-800 text-zinc-400 px-1.5 py-0.5 rounded font-mono">Cmd+K</kbd>
+            </button>
+          )}
+
+          {/* Morning / Evening Wizard */}
           {onOpenWizard && (
             <button
               onClick={() => onOpenWizard(isEvening ? 'evening' : 'morning')}
@@ -235,14 +238,14 @@ export const Navbar: React.FC<NavbarProps> = ({
             </button>
           </div>
 
+          {/* Quick Capture (AI Brain Dump) */}
           <button
             onClick={onOpenQuickCapture}
-            aria-label="AI Brain Dump Quick Capture (Ctrl+K)"
-            className="flex items-center space-x-2 px-3 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 text-xs font-medium transition-all"
+            aria-label="AI Brain Dump Quick Capture (Ctrl+B)"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600/20 text-blue-400 hover:bg-blue-600/30 border border-blue-500/30 text-xs font-medium transition-all"
           >
             <Sparkles className="w-3.5 h-3.5" />
             <span>AI Brain Dump</span>
-            <kbd className="hidden lg:inline text-[10px] bg-blue-900/40 text-blue-300 px-1.5 py-0.5 rounded ml-1">Ctrl+K</kbd>
           </button>
 
           {/* Unified Desktop Status Cluster */}
@@ -253,7 +256,7 @@ export const Navbar: React.FC<NavbarProps> = ({
                 className="flex items-center space-x-1.5 px-2.5 py-1 rounded-full text-[11px] font-mono border bg-blue-500/10 text-blue-400 border-blue-500/20 shadow-sm shadow-blue-500/10 animate-in fade-in"
               >
                 <RefreshCw className="w-3 h-3 animate-spin text-blue-400" />
-                <span>Saving to Pi...</span>
+                <span>Saving...</span>
               </div>
             )}
             <div 
@@ -271,41 +274,26 @@ export const Navbar: React.FC<NavbarProps> = ({
         </div>
       </header>
 
-      {/* iOS & Mobile Bottom Tab Navigation */}
+      {/* iOS & Mobile Bottom Tab Navigation (Consolidated & 44pt Tap Targets) */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-zinc-950/90 backdrop-blur-xl border-t border-zinc-800/80 pb-safe">
-        <div className="flex items-center justify-around py-2">
-          <button
-            onClick={() => setActiveTab('dashboard')}
-            aria-label="Dashboard"
-            className={`flex flex-col items-center py-1 px-3 transition-colors ${
-              activeTab === 'dashboard' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <LayoutDashboard className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-1">Today</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('tasks')}
-            aria-label="Tasks & Events"
-            className={`flex flex-col items-center py-1 px-3 transition-colors ${
-              activeTab === 'tasks' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <CheckSquare className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-1">Tasks</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('projects')}
-            aria-label="Projects & Milestones"
-            className={`flex flex-col items-center py-1 px-3 transition-colors ${
-              activeTab === 'projects' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Folder className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-1">Projects</span>
-          </button>
+        <div className="flex items-center justify-around py-1.5">
+          {NAV_TABS.slice(0, 3).map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                aria-label={tab.label}
+                className={`flex flex-col items-center justify-center min-w-[44px] min-h-[44px] py-1 px-1.5 transition-colors ${
+                  isActive ? 'text-blue-500 font-semibold' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-[10px] mt-0.5">{tab.label}</span>
+              </button>
+            );
+          })}
 
           {/* Quick Capture Floating Button */}
           <button
@@ -316,27 +304,23 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Sparkles className="w-5 h-5" />
           </button>
 
-          <button
-            onClick={() => setActiveTab('finance')}
-            aria-label="Finance Tracker"
-            className={`flex flex-col items-center py-1 px-3 transition-colors ${
-              activeTab === 'finance' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Wallet className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-1">Finance</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('shortcuts')}
-            aria-label="iOS Shortcuts & Siri"
-            className={`flex flex-col items-center py-1 px-3 transition-colors ${
-              activeTab === 'shortcuts' ? 'text-blue-500' : 'text-zinc-400 hover:text-zinc-200'
-            }`}
-          >
-            <Smartphone className="w-5 h-5" />
-            <span className="text-[10px] font-medium mt-1">Siri & Pi</span>
-          </button>
+          {NAV_TABS.slice(3).map((tab) => {
+            const Icon = tab.icon;
+            const isActive = activeTab === tab.id;
+            return (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                aria-label={tab.label}
+                className={`flex flex-col items-center justify-center min-w-[44px] min-h-[44px] py-1 px-1.5 transition-colors ${
+                  isActive ? 'text-blue-500 font-semibold' : 'text-zinc-400 hover:text-zinc-200'
+                }`}
+              >
+                <Icon className="w-5 h-5" />
+                <span className="text-[10px] mt-0.5">{tab.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     </>

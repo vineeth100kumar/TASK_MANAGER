@@ -2,7 +2,7 @@ import {
   WorkItem, WorkItemUpdatePayload, Milestone, Project, DailyPerformance,
   FinanceSummary, Transaction, AiGreetingResponse,
   FinanceAccount, WeatherData, DailyReflection, KickoffData, DebriefResult,
-  RecurringBill, BudgetGuardrail
+  RecurringBill, BudgetGuardrail, Whiteboard, WhiteboardListItem, WhiteboardElement, ViewState
 } from '../types';
 
 const BASE_URL = '';
@@ -236,5 +236,137 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>('/api/v1/push/subscribe', {
       method: 'POST',
       body: JSON.stringify(sub),
+    }),
+
+  // Whiteboards / Drawing Boards
+  getWhiteboards: (projectId?: string) => {
+    const query = projectId ? `?project_id=${encodeURIComponent(projectId)}` : '';
+    return fetchJson<WhiteboardListItem[]>(`/api/v1/whiteboards${query}`);
+  },
+  getWhiteboard: async (id: string): Promise<Whiteboard> => {
+    const raw = await fetchJson<{
+      id: string;
+      title: string;
+      project_id?: string | null;
+      project_name?: string | null;
+      project_color?: string | null;
+      elements: string;
+      view_state: string;
+      thumbnail_data?: string | null;
+      created_at: string;
+      updated_at: string;
+    }>(`/api/v1/whiteboards/${id}`);
+    let elements: WhiteboardElement[] = [];
+    try {
+      elements = typeof raw.elements === 'string' ? JSON.parse(raw.elements || '[]') : raw.elements;
+    } catch {
+      elements = [];
+    }
+    let view_state: ViewState = { panX: 0, panY: 0, zoom: 1 };
+    try {
+      view_state = typeof raw.view_state === 'string' ? JSON.parse(raw.view_state || '{"panX": 0, "panY": 0, "zoom": 1}') : raw.view_state;
+    } catch {
+      view_state = { panX: 0, panY: 0, zoom: 1 };
+    }
+    return {
+      ...raw,
+      elements,
+      view_state,
+    };
+  },
+  createWhiteboard: async (payload: {
+    title?: string;
+    project_id?: string | null;
+    elements?: WhiteboardElement[];
+    view_state?: ViewState;
+    thumbnail_data?: string | null;
+  }): Promise<Whiteboard> => {
+    const raw = await fetchJson<{
+      id: string;
+      title: string;
+      project_id?: string | null;
+      project_name?: string | null;
+      project_color?: string | null;
+      elements: string;
+      view_state: string;
+      thumbnail_data?: string | null;
+      created_at: string;
+      updated_at: string;
+    }>('/api/v1/whiteboards', {
+      method: 'POST',
+      body: JSON.stringify({
+        title: payload.title,
+        project_id: payload.project_id,
+        elements: JSON.stringify(payload.elements || []),
+        view_state: JSON.stringify(payload.view_state || { panX: 0, panY: 0, zoom: 1 }),
+        thumbnail_data: payload.thumbnail_data,
+      }),
+    });
+    return {
+      ...raw,
+      elements: payload.elements || [],
+      view_state: payload.view_state || { panX: 0, panY: 0, zoom: 1 },
+    };
+  },
+  updateWhiteboard: async (
+    id: string,
+    payload: {
+      title?: string;
+      project_id?: string | null;
+      elements?: WhiteboardElement[];
+      view_state?: ViewState;
+      thumbnail_data?: string | null;
+    }
+  ): Promise<Whiteboard> => {
+    const body: Record<string, any> = {};
+    if (payload.title !== undefined) body.title = payload.title;
+    if (payload.project_id !== undefined) body.project_id = payload.project_id;
+    if (payload.elements !== undefined) body.elements = JSON.stringify(payload.elements);
+    if (payload.view_state !== undefined) body.view_state = JSON.stringify(payload.view_state);
+    if (payload.thumbnail_data !== undefined) body.thumbnail_data = payload.thumbnail_data;
+
+    const raw = await fetchJson<{
+      id: string;
+      title: string;
+      project_id?: string | null;
+      project_name?: string | null;
+      project_color?: string | null;
+      elements: string;
+      view_state: string;
+      thumbnail_data?: string | null;
+      created_at: string;
+      updated_at: string;
+    }>(`/api/v1/whiteboards/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    });
+
+    let elements: WhiteboardElement[] = payload.elements || [];
+    if (payload.elements === undefined) {
+      try {
+        elements = typeof raw.elements === 'string' ? JSON.parse(raw.elements || '[]') : raw.elements;
+      } catch {
+        elements = [];
+      }
+    }
+
+    let view_state: ViewState = payload.view_state || { panX: 0, panY: 0, zoom: 1 };
+    if (payload.view_state === undefined) {
+      try {
+        view_state = typeof raw.view_state === 'string' ? JSON.parse(raw.view_state || '{"panX": 0, "panY": 0, "zoom": 1}') : raw.view_state;
+      } catch {
+        view_state = { panX: 0, panY: 0, zoom: 1 };
+      }
+    }
+
+    return {
+      ...raw,
+      elements,
+      view_state,
+    };
+  },
+  deleteWhiteboard: (id: string) =>
+    fetchJson<{ success: boolean; id: string }>(`/api/v1/whiteboards/${id}`, {
+      method: 'DELETE',
     }),
 };

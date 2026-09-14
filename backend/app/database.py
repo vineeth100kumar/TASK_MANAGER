@@ -175,6 +175,18 @@ CREATE TABLE IF NOT EXISTS push_subscriptions (
     device_name TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Drawing Board & Whiteboards
+CREATE TABLE IF NOT EXISTS whiteboards (
+    id TEXT PRIMARY KEY,
+    title TEXT NOT NULL DEFAULT 'Untitled Whiteboard',
+    project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
+    elements TEXT DEFAULT '[]',
+    view_state TEXT DEFAULT '{"panX": 0, "panY": 0, "zoom": 1}',
+    thumbnail_data TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 SCHEMA_INDEXES_SQL = """
@@ -193,6 +205,7 @@ CREATE INDEX IF NOT EXISTS idx_finance_tx_category ON finance_transactions(categ
 CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type, date);
 CREATE INDEX IF NOT EXISTS idx_recurring_bills_active ON recurring_bills(is_active, due_day_of_month);
 CREATE INDEX IF NOT EXISTS idx_daily_reflections_date ON daily_reflections(date);
+CREATE INDEX IF NOT EXISTS idx_whiteboards_project ON whiteboards(project_id);
 """
 
 # Backwards compatibility

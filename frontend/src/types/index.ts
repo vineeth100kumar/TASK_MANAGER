@@ -220,3 +220,108 @@ export interface BudgetGuardrail {
   created_at: string;
 }
 
+// ==========================================
+// WHITEBOARD / DRAWING BOARD TYPES
+// ==========================================
+
+export type WhiteboardTool =
+  | 'select'
+  | 'pen'
+  | 'highlighter'
+  | 'eraser'
+  | 'shape'
+  | 'sticky'
+  | 'text'
+  | 'hand';
+
+export type StickyColor = 'yellow' | 'blue' | 'green' | 'pink' | 'purple' | 'orange';
+
+export type ShapeType = 'rectangle' | 'circle' | 'arrow' | 'line' | 'diamond';
+
+export interface Point {
+  x: number;
+  y: number;
+  pressure?: number;
+}
+
+export interface StrokeElement {
+  id: string;
+  type: 'stroke';
+  points: Point[];
+  color: string;
+  size: number;
+  isHighlighter?: boolean;
+  opacity?: number;
+}
+
+export interface ShapeElement {
+  id: string;
+  type: 'shape';
+  shapeType: ShapeType;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: string;
+  fillColor?: string;
+  strokeWidth: number;
+}
+
+export interface StickyElement {
+  id: string;
+  type: 'sticky';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  color: StickyColor;
+  text: string;
+  convertedTaskId?: string;
+}
+
+export interface TextElement {
+  id: string;
+  type: 'text';
+  x: number;
+  y: number;
+  text: string;
+  fontSize: number;
+  color: string;
+  width?: number;
+}
+
+export type WhiteboardElement =
+  | StrokeElement
+  | ShapeElement
+  | StickyElement
+  | TextElement;
+
+export interface ViewState {
+  panX: number;
+  panY: number;
+  zoom: number;
+}
+
+export interface Whiteboard {
+  id: string;
+  title: string;
+  project_id?: string | null;
+  project_name?: string | null;
+  project_color?: string | null;
+  elements: WhiteboardElement[];
+  view_state: ViewState;
+  thumbnail_data?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface WhiteboardListItem {
+  id: string;
+  title: string;
+  project_id?: string | null;
+  project_name?: string | null;
+  project_color?: string | null;
+  thumbnail_data?: string | null;
+  created_at: string;
+  updated_at: string;
+}

@@ -7,9 +7,14 @@ import { FinanceView } from './components/finance/FinanceView';
 import { ShortcutsModal } from './components/shortcuts/ShortcutsModal';
 import { BrainDumpModal } from './components/layout/BrainDumpModal';
 import { MorningEveningWizard } from './components/planner/MorningEveningWizard';
+import { WhiteboardView } from './components/whiteboard/WhiteboardView';
 import { api } from './services/api';
 import { useLiveSync } from './services/websocket';
 import { useToast } from './context/ToastContext';
+import { SearchModal } from './components/search/SearchModal';
+import { CelebrationModal } from './components/common/CelebrationModal';
+import { useVisualViewport } from './hooks/useVisualViewport';
+import { isDueToday } from './utils/dateHelpers';
 import { 
   WorkItem, 
   WorkItemUpdatePayload,
@@ -34,11 +39,17 @@ export interface HistoryAction {
 
 export const App: React.FC = () => {
   const toast = useToast();
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'projects' | 'finance' | 'shortcuts'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'tasks' | 'whiteboard' | 'projects' | 'finance' | 'shortcuts'>('dashboard');
+  const [activeWhiteboardProjectId, setActiveWhiteboardProjectId] = useState<string | null>(null);
   const [isBrainDumpOpen, setIsBrainDumpOpen] = useState(false);
+  const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isCelebrationOpen, setIsCelebrationOpen] = useState(false);
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  // Track iOS Visual Viewport & Keyboard offset dynamically
+  useVisualViewport();
 
   // Core Data State
   const [items, setItems] = useState<WorkItem[]>([]);
@@ -166,6 +177,12 @@ export const App: React.FC = () => {
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
         e.preventDefault();
+        setIsSearchOpen(prev => !prev);
+        return;
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'b') {
+        e.preventDefault();
         setIsBrainDumpOpen(prev => !prev);
         return;
       }
@@ -251,6 +268,14 @@ export const App: React.FC = () => {
     const newCompleted = !item.is_completed;
     executeToggleComplete(item.id, newCompleted);
 
+    // Micro-Celebration Trigger: If this was a task due today and completing it finishes all today's tasks
+    if (newCompleted && isDueToday(item.due_date)) {
+      const remainingToday = items.filter(i => i.id !== item.id && isDueToday(i.due_date) && !i.is_completed);
+      if (remainingToday.length === 0) {
+        setIsCelebrationOpen(true);
+      }
+    }
+
     pushHistoryAction({
       id: `act_${Date.now()}_${Math.random()}`,
       description: `${newCompleted ? 'Completed' : 'Uncompleted'} "${item.title}"`,
@@ -258,7 +283,7 @@ export const App: React.FC = () => {
       redo: () => executeToggleComplete(item.id, newCompleted),
       timestamp: Date.now()
     });
-  }, [executeToggleComplete, pushHistoryAction]);
+  }, [executeToggleComplete, pushHistoryAction, items]);
 
   // Base delete and restore
   const executeDeleteItem = useCallback((id: string) => {
@@ -926,6 +951,7 @@ export const App: React.FC = () => {
         isLiveConnected={isConnected}
         isSyncing={isSyncing}
         onOpenQuickCapture={() => setIsBrainDumpOpen(true)}
+        onOpenSearch={() => setIsSearchOpen(true)}
         onOpenWizard={(mode) => {
           setWizardMode(mode || (new Date().getHours() >= 17 ? 'evening' : 'morning'));
           setIsWizardOpen(true);
@@ -965,6 +991,17 @@ export const App: React.FC = () => {
             onDeleteItem={handleDeleteItem}
             onUpdateItem={handleUpdateItem}
             onToggleSubtask={handleToggleSubtask}
+            onOpenBrainDump={() => setIsBrainDumpOpen(true)}
+            onCelebrationTrigger={() => setIsCelebrationOpen(true)}
+          />
+        )}
+
+        {activeTab === 'whiteboard' && (
+          <WhiteboardView
+            initialProjectId={activeWhiteboardProjectId}
+            projects={projects}
+            onBack={() => setActiveTab('projects')}
+            onTaskCreated={loadData}
           />
         )}
 
@@ -981,6 +1018,10 @@ export const App: React.FC = () => {
             onSelectItem={() => setActiveTab('tasks')}
             onCreateItem={handleCreateItem}
             onToggleComplete={handleToggleComplete}
+            onOpenWhiteboard={(projId) => {
+              setActiveWhiteboardProjectId(projId);
+              setActiveTab('whiteboard');
+            }}
           />
         )}
 
@@ -1018,6 +1059,30 @@ export const App: React.FC = () => {
         onItemsCreated={() => {
           loadData();
         }}
+      />
+
+      {/* Global Command & Search Palette (Cmd/Ctrl+K) */}
+      <SearchModal
+        isOpen={isSearchOpen}
+        onClose={() => setIsSearchOpen(false)}
+        tasks={items}
+        projects={projects}
+        transactions={transactions}
+        onSelectTask={() => setActiveTab('tasks')}
+        onSelectProject={() => setActiveTab('projects')}
+        onNavigateTab={(tab) => setActiveTab(tab)}
+        onOpenWizard={(mode) => {
+          setWizardMode(mode);
+          setIsWizardOpen(true);
+        }}
+        onOpenBrainDump={() => setIsBrainDumpOpen(true)}
+      />
+
+      {/* All Clear Daily Celebration Micro-Interaction */}
+      <CelebrationModal
+        isOpen={isCelebrationOpen}
+        onClose={() => setIsCelebrationOpen(false)}
+        streakDays={dailyPerformance?.streak_days || 1}
       />
     </div>
   );

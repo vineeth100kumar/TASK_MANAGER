@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { 
   Folder, Plus, CheckCircle2, Circle, Clock, Flag, 
-  Trash2, ChevronDown, ChevronRight, Calendar, Tag, AlertCircle
+  Trash2, ChevronDown, ChevronRight, Calendar, Tag, AlertCircle, PenTool
 } from 'lucide-react';
 import { Project, Milestone, WorkItem } from '../../types';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -21,6 +21,7 @@ interface ProjectsHubProps {
   onSelectItem: (item: WorkItem) => void;
   onCreateItem?: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
   onToggleComplete?: (item: WorkItem) => void;
+  onOpenWhiteboard?: (projectId: string) => void;
 }
 
 const COLOR_PRESETS = [
@@ -45,7 +46,8 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   onDeleteMilestone,
   onSelectItem,
   onCreateItem,
-  onToggleComplete
+  onToggleComplete,
+  onOpenWhiteboard,
 }) => {
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
@@ -215,6 +217,20 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                         />
                       </div>
                     </div>
+
+                    {onOpenWhiteboard && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onOpenWhiteboard(proj.id);
+                        }}
+                        aria-label={`Open Whiteboard for ${proj.name}`}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-blue-400 hover:bg-zinc-800 transition-colors"
+                        title="Open Project Whiteboard"
+                      >
+                        <PenTool className="w-4 h-4" />
+                      </button>
+                    )}
 
                     <button
                       onClick={(e) => {

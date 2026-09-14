@@ -69,5 +69,61 @@ class TestSageBackend(unittest.TestCase):
         self.assertIsInstance(days, int)
         self.assertIsInstance(is_overdue, bool)
 
+    def test_whiteboard_models_and_schema(self):
+        import sqlite3
+        from app.database import SCHEMA_TABLES_SQL, SCHEMA_INDEXES_SQL
+        from app.models import WhiteboardCreate, WhiteboardUpdate, WhiteboardResponse, WhiteboardListItem
+
+        # Test Pydantic Models Validation
+        create_payload = WhiteboardCreate(
+            title="Sprint Planning Whiteboard",
+            project_id="proj_123",
+            elements='[{"id":"s1","type":"sticky","text":"Brainstorm"}]',
+            view_state='{"panX": 100, "panY": 200, "zoom": 1.25}'
+        )
+        self.assertEqual(create_payload.title, "Sprint Planning Whiteboard")
+        self.assertEqual(create_payload.project_id, "proj_123")
+
+        update_payload = WhiteboardUpdate(
+            title="Updated Title",
+            elements='[]'
+        )
+        self.assertEqual(update_payload.title, "Updated Title")
+
+        # Test SQLite Table Schema execution
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        conn.executescript(SCHEMA_TABLES_SQL)
+        conn.executescript(SCHEMA_INDEXES_SQL)
+
+        # Insert project
+        conn.execute(
+            "INSERT INTO projects (id, name, color) VALUES ('proj_1', 'Sage OS Whiteboard', '#3b82f6')"
+        )
+
+        # Insert whiteboard
+        conn.execute(
+            """
+            INSERT INTO whiteboards (id, title, project_id, elements, view_state)
+            VALUES ('wb_test_1', 'Architecture Diagram', 'proj_1', '[]', '{"panX":0,"panY":0,"zoom":1}')
+            """
+        )
+        conn.commit()
+
+        cursor = conn.execute(
+            """
+            SELECT w.*, p.name as project_name, p.color as project_color
+            FROM whiteboards w
+            LEFT JOIN projects p ON w.project_id = p.id
+            WHERE w.id = 'wb_test_1'
+            """
+        )
+        row = cursor.fetchone()
+        self.assertIsNotNone(row)
+        self.assertEqual(row["title"], "Architecture Diagram")
+        self.assertEqual(row["project_name"], "Sage OS Whiteboard")
+        self.assertEqual(row["project_color"], "#3b82f6")
+        conn.close()
+
 if __name__ == "__main__":
     unittest.main()

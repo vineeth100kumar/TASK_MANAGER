@@ -292,3 +292,43 @@ class PushSubscriptionCreate(BaseModel):
     p256dh: str
     auth: str
     device_name: Optional[str] = "iOS Safari"
+
+# ========================================================
+# WHITEBOARD & DRAWING CANVAS
+# ========================================================
+
+class WhiteboardCreate(BaseModel):
+    title: Optional[str] = "Untitled Whiteboard"
+    project_id: Optional[str] = None
+    elements: Optional[str] = "[]"
+    view_state: Optional[str] = '{"panX": 0, "panY": 0, "zoom": 1}'
+    thumbnail_data: Optional[str] = None
+
+class WhiteboardUpdate(BaseModel):
+    title: Optional[str] = None
+    project_id: Optional[str] = None
+    elements: Optional[str] = None
+    view_state: Optional[str] = None
+    thumbnail_data: Optional[str] = None
+
+class WhiteboardResponse(BaseModel):
+    id: str
+    title: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    project_color: Optional[str] = None
+    elements: str
+    view_state: str
+    thumbnail_data: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+class WhiteboardListItem(BaseModel):
+    id: str
+    title: str
+    project_id: Optional[str] = None
+    project_name: Optional[str] = None
+    project_color: Optional[str] = None
+    thumbnail_data: Optional[str] = None
+    created_at: str
+    updated_at: str

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   Plus, 
   CheckSquare, 
@@ -18,7 +18,14 @@ import {
   X,
   Lock,
   Tag,
-  Folder
+  Folder,
+  SlidersHorizontal,
+  ChevronDown,
+  ChevronRight,
+  Sun,
+  AlertCircle,
+  CheckCheck,
+  ArrowUpDown
 } from 'lucide-react';
 import { WorkItem, WorkItemUpdatePayload, Milestone, Project, EntityType, TaskStatus, TaskPriority } from '../../types';
 import { api } from '../../services/api';
@@ -26,6 +33,20 @@ import { TimeBlockingCalendar } from './TimeBlockingCalendar';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { Modal } from '../common/Modal';
 import { Skeleton } from '../common/Skeleton';
+import { ListRow } from '../common/ListRow';
+import { PullToRefresh } from '../common/PullToRefresh';
+import { QuickAddBar } from './QuickAddBar';
+import { BulkActionBar } from './BulkActionBar';
+import { usePersistedState } from '../../hooks/usePersistedState';
+import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { 
+  groupTasksBySmartDate, 
+  getTodayDateString, 
+  getTomorrowDateString, 
+  isOverdue, 
+  isDueToday 
+} from '../../utils/dateHelpers';
+import { haptics } from '../../utils/haptics';
 
 interface TasksViewProps {
   isLoading?: boolean;
@@ -38,6 +59,8 @@ interface TasksViewProps {
   onDeleteItem?: (id: string) => void;
   onUpdateItem?: (id: string, updates: WorkItemUpdatePayload) => void;
   onToggleSubtask?: (itemId: string, subtaskId: string) => void;
+  onOpenBrainDump?: () => void;
+  onCelebrationTrigger?: () => void;
 }
 
 export const TasksView: React.FC<TasksViewProps> = ({
@@ -50,15 +73,49 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onCreateItem,
   onDeleteItem,
   onUpdateItem,
-  onToggleSubtask
+  onToggleSubtask,
+  onOpenBrainDump,
+  onCelebrationTrigger
 }) => {
-  const [filterType, setFilterType] = useState<string>('all');
-  const [viewMode, setViewMode] = useState<'list' | 'kanban' | 'timeline'>('list');
-  const [selectedTag, setSelectedTag] = useState<string | null>(null);
+  // Persisted view settings
+  const [filterType, setFilterType] = usePersistedState<string>('tasks_filter_type', 'all');
+  const [viewMode, setViewMode] = usePersistedState<'list' | 'kanban' | 'timeline'>('tasks_view_mode', 'list');
+  const [selectedTag, setSelectedTag] = usePersistedState<string | null>('tasks_selected_tag', null);
+  const [selectedProjectId, setSelectedProjectId] = usePersistedState<string>('tasks_selected_project', 'all');
+  const [sortBy, setSortBy] = usePersistedState<'due_date' | 'priority' | 'title' | 'created_at'>('tasks_sort_by', 'due_date');
+  const [smartGrouping, setSmartGrouping] = usePersistedState<boolean>('tasks_smart_grouping', true);
+
+  // Interaction State
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
   const [isCreating, setIsCreating] = useState(false);
   const [isAiExpanding, setIsAiExpanding] = useState(false);
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
+  const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
+  const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({});
+
+  // Multi-select state
+  const [isSelectMode, setIsSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+
+  // AI Improvisation & Organization State
+  const [isAiPolishing, setIsAiPolishing] = useState(false);
+  const [generatedSubtasks, setGeneratedSubtasks] = useState<string[]>([]);
+  const [isBoardOrganizerOpen, setIsBoardOrganizerOpen] = useState(false);
+  const [boardOrgData, setBoardOrgData] = useState<any | null>(null);
+  const [isOrganizingBoard, setIsOrganizingBoard] = useState(false);
+  const [refiningItemId, setRefiningItemId] = useState<string | null>(null);
+
+  // New Item State (for manual create modal)
+  const [newTitle, setNewTitle] = useState('');
+  const [newType, setNewType] = useState<EntityType>('task');
+  const [newPriority, setNewPriority] = useState<TaskPriority>('medium');
+  const [newDueDate, setNewDueDate] = useState('');
+  const [newRepeatRule, setNewRepeatRule] = useState('');
+  const [newDescription, setNewDescription] = useState('');
+  const [newContextTags, setNewContextTags] = useState('');
+  const [newProjectId, setNewProjectId] = useState<string>('');
+  const [newMilestoneId, setNewMilestoneId] = useState<string>('');
+  const [newEstimatedMinutes, setNewEstimatedMinutes] = useState<number>(30);
 
   // Check if an item is blocked by uncompleted dependencies
   const isItemBlocked = (item: WorkItem): { blocked: boolean; blockerTitles: string[] } => {
@@ -79,101 +136,153 @@ export const TasksView: React.FC<TasksViewProps> = ({
       }
     }
   }, [items]);
-  
-  // AI Improvisation & Organization State
-  const [isAiPolishing, setIsAiPolishing] = useState(false);
-  const [generatedSubtasks, setGeneratedSubtasks] = useState<string[]>([]);
-  const [isBoardOrganizerOpen, setIsBoardOrganizerOpen] = useState(false);
-  const [boardOrgData, setBoardOrgData] = useState<any | null>(null);
-  const [isOrganizingBoard, setIsOrganizingBoard] = useState(false);
-  const [refiningItemId, setRefiningItemId] = useState<string | null>(null);
 
-  // New Item State
-  const [newTitle, setNewTitle] = useState('');
-  const [newType, setNewType] = useState<EntityType>('task');
-  const [newPriority, setNewPriority] = useState<TaskPriority>('medium');
-  const [newDueDate, setNewDueDate] = useState('');
-  const [newRepeatRule, setNewRepeatRule] = useState('');
-  const [newDescription, setNewDescription] = useState('');
-  const [newContextTags, setNewContextTags] = useState('');
-  const [newProjectId, setNewProjectId] = useState<string>('');
-  const [newMilestoneId, setNewMilestoneId] = useState<string>('');
-  const [newEstimatedMinutes, setNewEstimatedMinutes] = useState<number>(30);
-  const [selectedProjectId, setSelectedProjectId] = useState<string>('all');
+  // Filter items
+  const filteredItems = useMemo(() => {
+    return items.filter((item) => {
+      if (filterType === 'task' && item.entity_type !== 'task') return false;
+      if (filterType === 'event' && item.entity_type !== 'event') return false;
+      if (filterType === 'reminder' && item.entity_type !== 'reminder') return false;
+      if (filterType === 'milestone') return false;
+      if (selectedTag && !item.context_tags?.toLowerCase().includes(selectedTag.toLowerCase())) {
+        return false;
+      }
+      if (selectedProjectId === 'inbox') {
+        if (item.project_id) return false;
+      } else if (selectedProjectId !== 'all' && item.project_id !== selectedProjectId) {
+        return false;
+      }
+      return true;
+    });
+  }, [items, filterType, selectedTag, selectedProjectId]);
 
-  const filteredItems = items.filter((item) => {
-    if (filterType === 'task' && item.entity_type !== 'task') return false;
-    if (filterType === 'event' && item.entity_type !== 'event') return false;
-    if (filterType === 'reminder' && item.entity_type !== 'reminder') return false;
-    if (filterType === 'milestone') return false; // Handled separately
-    if (selectedTag && !item.context_tags?.toLowerCase().includes(selectedTag.toLowerCase())) {
-      return false;
+  // Sort items
+  const priorityWeights: { [key: string]: number } = { urgent: 4, high: 3, medium: 2, low: 1 };
+
+  const sortedItems = useMemo(() => {
+    return [...filteredItems].sort((a, b) => {
+      if (sortBy === 'priority') {
+        return (priorityWeights[b.priority] || 0) - (priorityWeights[a.priority] || 0);
+      }
+      if (sortBy === 'title') {
+        return a.title.localeCompare(b.title);
+      }
+      if (sortBy === 'created_at') {
+        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+      }
+      // Default: due_date
+      if (!a.due_date && !b.due_date) return 0;
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.localeCompare(b.due_date);
+    });
+  }, [filteredItems, sortBy]);
+
+  // Smart Date Groups
+  const smartGroups = useMemo(() => {
+    return groupTasksBySmartDate(sortedItems);
+  }, [sortedItems]);
+
+  // Keyboard Navigation Shortcuts (j/k, Space, e, d, t, m)
+  useKeyboardShortcuts({
+    enabled: viewMode === 'list' && !isCreating && !selectedItem && !isBoardOrganizerOpen,
+    onMoveDown: () => setHighlightedIndex(prev => Math.min(sortedItems.length - 1, prev + 1)),
+    onMoveUp: () => setHighlightedIndex(prev => Math.max(0, prev - 1)),
+    onToggleComplete: () => {
+      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
+        onToggleComplete(sortedItems[highlightedIndex]);
+      }
+    },
+    onEdit: () => {
+      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
+        setSelectedItem(sortedItems[highlightedIndex]);
+      }
+    },
+    onDelete: () => {
+      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
+        setDeletingItemId(sortedItems[highlightedIndex].id);
+      }
+    },
+    onSetToday: () => {
+      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length && onUpdateItem) {
+        onUpdateItem(sortedItems[highlightedIndex].id, { due_date: getTodayDateString() });
+      }
+    },
+    onSetTomorrow: () => {
+      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length && onUpdateItem) {
+        onUpdateItem(sortedItems[highlightedIndex].id, { due_date: getTomorrowDateString() });
+      }
     }
-    if (selectedProjectId === 'inbox') {
-      if (item.project_id) return false;
-    } else if (selectedProjectId !== 'all' && item.project_id !== selectedProjectId) {
-      return false;
-    }
-    return true;
   });
 
-  const handleCreate = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTitle.trim()) return;
-
-    const itemData = {
-      title: newTitle.trim(),
-      entity_type: newType,
-      priority: newPriority,
-      due_date: newDueDate || undefined,
-      repeat_rule: newRepeatRule || undefined,
-      description: newDescription || undefined,
-      context_tags: newContextTags || undefined,
-      project_id: newProjectId || undefined,
-      milestone_id: newMilestoneId || undefined,
-      estimated_minutes: newEstimatedMinutes || 30,
-      status: 'todo' as TaskStatus,
-      subtasks: generatedSubtasks.length > 0 ? generatedSubtasks : undefined,
-    };
-
-    if (onCreateItem) {
-      onCreateItem(itemData);
-    } else {
-      api.createItem(itemData).then(() => onRefresh());
-    }
-
-    setNewTitle('');
-    setNewDescription('');
-    setNewDueDate('');
-    setNewRepeatRule('');
-    setNewContextTags('');
-    setNewProjectId('');
-    setNewMilestoneId('');
-    setNewEstimatedMinutes(30);
-    setGeneratedSubtasks([]);
-    setIsCreating(false);
-  };
-
-  const handleAiPolishNewItem = async () => {
-    if (!newTitle.trim()) return;
-    setIsAiPolishing(true);
-    try {
-      const res = await api.improveTask(newTitle, newDescription, newType);
-      if (res.success && res.data) {
-        setNewTitle(res.data.improved_title);
-        setNewDescription(res.data.description);
-        if (res.data.priority) setNewPriority(res.data.priority as TaskPriority);
-        if (res.data.subtasks && res.data.subtasks.length > 0) {
-          setGeneratedSubtasks(res.data.subtasks);
-        }
+  // Multi-Select Handlers
+  const handleToggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev);
+      if (next.has(id)) {
+        next.delete(id);
+      } else {
+        next.add(id);
       }
-    } catch (err) {
-      console.error('Failed to polish item with AI:', err);
-    } finally {
-      setIsAiPolishing(false);
+      return next;
+    });
+  };
+
+  const handleClearSelection = () => {
+    setSelectedIds(new Set());
+    setIsSelectMode(false);
+  };
+
+  const handleBulkComplete = () => {
+    const selectedItems = items.filter(i => selectedIds.has(i.id) && !i.is_completed);
+    selectedItems.forEach(item => onToggleComplete(item));
+    handleClearSelection();
+  };
+
+  const handleBulkDelete = () => {
+    if (onDeleteItem) {
+      selectedIds.forEach(id => onDeleteItem(id));
+    }
+    handleClearSelection();
+  };
+
+  const handleBulkPriority = (priority: TaskPriority) => {
+    if (onUpdateItem) {
+      selectedIds.forEach(id => onUpdateItem(id, { priority }));
+    }
+    handleClearSelection();
+  };
+
+  const handleBulkReschedule = (dateStr: string) => {
+    if (onUpdateItem) {
+      selectedIds.forEach(id => onUpdateItem(id, { due_date: dateStr }));
+    }
+    handleClearSelection();
+  };
+
+  // 1-Tap Reschedule
+  const handleReschedule = (item: WorkItem, newDate: string | null) => {
+    if (onUpdateItem) {
+      onUpdateItem(item.id, { due_date: newDate });
     }
   };
 
+  // Kanban Drag-and-Drop
+  const handleDropOnColumn = (targetStatus: TaskStatus, itemId: string) => {
+    if (!itemId || !onUpdateItem) return;
+    haptics.medium();
+    if (targetStatus === 'done') {
+      onUpdateItem(itemId, { status: 'done', is_completed: true });
+    } else {
+      onUpdateItem(itemId, { status: targetStatus, is_completed: false });
+    }
+  };
+
+  const toggleSectionCollapse = (key: string) => {
+    setCollapsedSections(prev => ({ ...prev, [key]: !prev[key] }));
+  };
+
+  // Quick Refine with AI
   const handleQuickRefine = async (item: WorkItem) => {
     setRefiningItemId(item.id);
     try {
@@ -199,6 +308,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
+  // AI Board Organizer
   const handleOpenBoardOrganizer = async () => {
     setIsBoardOrganizerOpen(true);
     setIsOrganizingBoard(true);
@@ -245,6 +355,27 @@ export const TasksView: React.FC<TasksViewProps> = ({
     });
   };
 
+  // AI Polish New Item
+  const handleAiPolishNewItem = async () => {
+    if (!newTitle.trim()) return;
+    setIsAiPolishing(true);
+    try {
+      const res = await api.improveTask(newTitle, newDescription, newType);
+      if (res.success && res.data) {
+        setNewTitle(res.data.improved_title);
+        setNewDescription(res.data.description);
+        if (res.data.priority) setNewPriority(res.data.priority as TaskPriority);
+        if (res.data.subtasks && res.data.subtasks.length > 0) {
+          setGeneratedSubtasks(res.data.subtasks);
+        }
+      }
+    } catch (err) {
+      console.error('Failed to polish item with AI:', err);
+    } finally {
+      setIsAiPolishing(false);
+    }
+  };
+
   const handleAiAutoFill = async (item: WorkItem) => {
     setIsAiExpanding(true);
     try {
@@ -286,15 +417,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
-  const handleDelete = (id: string) => {
-    if (selectedItem?.id === id) setSelectedItem(null);
-    if (onDeleteItem) {
-      onDeleteItem(id);
-    } else {
-      api.deleteItem(id).then(() => onRefresh());
-    }
-  };
-
   const handleToggleSubtask = (subtaskId: string) => {
     if (selectedItem) {
       const updatedSubtasks = selectedItem.subtasks.map(s => 
@@ -309,6 +431,52 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
+  const handleCreate = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newTitle.trim()) return;
+
+    const itemData = {
+      title: newTitle.trim(),
+      entity_type: newType,
+      priority: newPriority,
+      due_date: newDueDate || undefined,
+      repeat_rule: newRepeatRule || undefined,
+      description: newDescription || undefined,
+      context_tags: newContextTags || undefined,
+      project_id: newProjectId || undefined,
+      milestone_id: newMilestoneId || undefined,
+      estimated_minutes: newEstimatedMinutes || 30,
+      status: 'todo' as TaskStatus,
+      subtasks: generatedSubtasks.length > 0 ? generatedSubtasks : undefined,
+    };
+
+    if (onCreateItem) {
+      onCreateItem(itemData);
+    } else {
+      api.createItem(itemData).then(() => onRefresh());
+    }
+
+    setNewTitle('');
+    setNewDescription('');
+    setNewDueDate('');
+    setNewRepeatRule('');
+    setNewContextTags('');
+    setNewProjectId('');
+    setNewMilestoneId('');
+    setNewEstimatedMinutes(30);
+    setGeneratedSubtasks([]);
+    setIsCreating(false);
+  };
+
+  const handleDelete = (id: string) => {
+    if (selectedItem?.id === id) setSelectedItem(null);
+    if (onDeleteItem) {
+      onDeleteItem(id);
+    } else {
+      api.deleteItem(id).then(() => onRefresh());
+    }
+  };
+
   const kanbanColumns: { id: TaskStatus; label: string }[] = [
     { id: 'todo', label: 'To Do' },
     { id: 'in_progress', label: 'In Progress' },
@@ -317,15 +485,26 @@ export const TasksView: React.FC<TasksViewProps> = ({
   ];
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
+    <PullToRefresh onRefresh={onRefresh} className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
+      {/* 0ms Local Natural-Language Quick Add Bar */}
+      <QuickAddBar
+        projects={projects}
+        onQuickAdd={(itemData) => onCreateItem?.(itemData)}
+        onOpenAiBrainDump={() => onOpenBrainDump?.()}
+      />
+
       {/* Header & Controls */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h1 className="text-xl font-bold text-zinc-100">Tasks, Events & Reminders</h1>
-          <p className="text-xs text-zinc-400">Total items: {items.length} • Recurring active: {items.filter(i => !!i.repeat_rule).length}</p>
+          <h1 className="text-xl font-bold text-zinc-100 flex items-center gap-2">
+            <span>Tasks, Events & Reminders</span>
+          </h1>
+          <p className="text-xs text-zinc-400">
+            Total items: {items.length} • Overdue: {smartGroups.overdue.length} • Today: {smartGroups.today.length}
+          </p>
         </div>
 
-        <div className="flex items-center space-x-2">
+        <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           {/* View Toggle (List vs Kanban vs Timeline) */}
           <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-1 flex items-center">
             <button
@@ -360,14 +539,67 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </button>
           </div>
 
+          {/* Smart Grouping Toggle (for List View) */}
+          {viewMode === 'list' && (
+            <button
+              onClick={() => setSmartGrouping(!smartGrouping)}
+              title={smartGrouping ? "Smart Grouping Enabled (Overdue, Today, Upcoming)" : "Flat List (Smart Grouping Off)"}
+              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                smartGrouping
+                  ? 'bg-blue-600/20 text-blue-300 border-blue-500/30'
+                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+              }`}
+            >
+              <SlidersHorizontal className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">{smartGrouping ? 'Grouped' : 'Flat'}</span>
+            </button>
+          )}
+
+          {/* Sort Dropdown */}
+          <div className="relative flex items-center bg-zinc-900 border border-zinc-800 rounded-lg px-2 py-1">
+            <ArrowUpDown className="w-3.5 h-3.5 text-zinc-400 mr-1.5" />
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as any)}
+              className="bg-transparent text-xs text-zinc-200 focus:outline-none cursor-pointer"
+            >
+              <option value="due_date">Due Date</option>
+              <option value="priority">Priority</option>
+              <option value="title">Title (A-Z)</option>
+              <option value="created_at">Newest</option>
+            </select>
+          </div>
+
+          {/* Multi-Select Mode Toggle */}
+          {viewMode === 'list' && (
+            <button
+              onClick={() => {
+                if (isSelectMode) {
+                  handleClearSelection();
+                } else {
+                  setIsSelectMode(true);
+                }
+              }}
+              className={`px-2.5 py-1.5 rounded-lg border text-xs font-medium transition-colors ${
+                isSelectMode
+                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+              }`}
+            >
+              {isSelectMode ? 'Cancel' : 'Select'}
+            </button>
+          )}
+
+          {/* AI Board Organizer */}
           <button
             onClick={handleOpenBoardOrganizer}
             className="flex items-center space-x-1.5 px-3 py-1.5 bg-gradient-to-r from-blue-600/20 via-indigo-600/20 to-purple-600/20 text-blue-300 hover:text-white hover:border-blue-400/40 border border-blue-500/30 rounded-lg text-xs font-semibold shadow-sm transition-all"
           >
             <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-            <span>AI Organize Board</span>
+            <span className="hidden sm:inline">AI Organize Board</span>
           </button>
 
+          {/* Manual New Item Button */}
           <button
             onClick={() => setIsCreating(true)}
             className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all"
@@ -504,160 +736,250 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
         </div>
       ) : viewMode === 'list' ? (
-        /* List View */
-        <div className="space-y-2">
-          {filteredItems.length === 0 ? (
+        /* List View (Smart Date Grouping or Flat List with ListRow) */
+        <div className="space-y-4">
+          {sortedItems.length === 0 ? (
             isLoading ? (
               <div className="space-y-2">
                 <Skeleton variant="row" count={5} />
               </div>
             ) : (
               <div className="text-center py-12 text-zinc-400 text-xs">
-                No items match this filter. Click "+ New Item" or use AI Brain Dump!
+                No items match this filter. Use the Quick Add bar above!
               </div>
             )
-          ) : (
-            filteredItems.map((item) => {
-              const { blocked, blockerTitles } = isItemBlocked(item);
-              return (
-              <div
-                key={item.id}
-                className={`flex items-center justify-between p-3.5 rounded-xl border transition-all ${
-                  item.is_completed
-                    ? 'bg-zinc-900/40 border-zinc-800/40 text-zinc-400'
-                    : blocked
-                    ? 'bg-zinc-900/60 border-amber-500/30 opacity-70 hover:opacity-100 text-zinc-300'
-                    : 'bg-zinc-900/90 border-zinc-800 hover:border-zinc-700 text-zinc-200'
-                }`}
-              >
-                <div className="flex items-center space-x-3.5 flex-1 min-w-0">
-                  <input
-                    type="checkbox"
-                    checked={item.is_completed}
-                    onChange={() => onToggleComplete(item)}
-                    className="w-4 h-4 rounded text-blue-600 bg-zinc-800 border-zinc-700 cursor-pointer shrink-0"
-                  />
-                  <div 
-                    onClick={() => setSelectedItem(item)}
-                    className="cursor-pointer min-w-0 flex-1"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      {blocked && (
-                        <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-400 shrink-0">
-                          <Lock className="w-3.5 h-3.5" />
-                        </span>
-                      )}
-                      <p className={`text-xs font-medium truncate ${item.is_completed ? 'line-through' : ''}`}>
-                        {item.title}
-                      </p>
-                    </div>
-                    <div className="flex items-center space-x-2 mt-1 text-[11px] text-zinc-400 flex-wrap gap-y-1">
-                      {item.due_date && <span>📅 {item.due_date}</span>}
-                      {item.project_id && (() => {
-                        const p = projects.find(proj => proj.id === item.project_id);
-                        if (!p) return null;
-                        return (
-                          <span 
-                            className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
-                            style={{
-                              backgroundColor: `${p.color || '#3b82f6'}15`,
-                              borderColor: `${p.color || '#3b82f6'}40`,
-                              color: p.color || '#60a5fa'
-                            }}
-                          >
-                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
-                            <span className="truncate max-w-[120px]">{p.name}</span>
-                          </span>
-                        );
-                      })()}
-                      {item.milestone_id && (() => {
-                        const m = milestones.find(ms => ms.id === item.milestone_id);
-                        if (!m) return null;
-                        return (
-                          <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1 font-mono">
-                            🏁 {m.title}
-                          </span>
-                        );
-                      })()}
-                      {item.context_tags && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-zinc-800 border border-zinc-700/60 text-zinc-300 flex items-center gap-1 font-mono">
-                          <Tag className="w-2.5 h-2.5 text-zinc-400" />
-                          {item.context_tags}
-                        </span>
-                      )}
-                      {blocked && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-400 font-medium">
-                          Blocked
-                        </span>
-                      )}
-                      {item.repeat_rule && (
-                        <span className="text-blue-400 flex items-center space-x-1">
-                          <RotateCw className="w-3 h-3" />
-                          <span>{item.repeat_rule}</span>
-                        </span>
-                      )}
-                      {item.subtasks && item.subtasks.length > 0 && (
-                        <span>
-                          ☑ {item.subtasks.filter(s => s.is_completed).length}/{item.subtasks.length}
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-2 shrink-0 ml-2">
+          ) : smartGrouping ? (
+            /* Smart Sections: Overdue, Today, Upcoming, Backlog */
+            <div className="space-y-6">
+              {/* Overdue Section */}
+              {smartGroups.overdue.length > 0 && (
+                <div className="space-y-2">
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleQuickRefine(item);
-                    }}
-                    disabled={refiningItemId === item.id}
-                    title="Polish title & generate subtasks with AI"
-                    className="text-zinc-500 hover:text-blue-400 p-1 rounded hover:bg-zinc-800 transition-colors"
+                    onClick={() => toggleSectionCollapse('overdue')}
+                    className="flex items-center space-x-2 text-xs font-bold text-rose-400 uppercase tracking-wider px-1 cursor-pointer select-none"
                   >
-                    {refiningItemId === item.id ? (
-                      <RotateCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
-                    ) : (
-                      <Sparkles className="w-3.5 h-3.5" />
-                    )}
+                    {collapsedSections['overdue'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <span>Overdue</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                      {smartGroups.overdue.length}
+                    </span>
                   </button>
 
-                  <span
-                    className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
-                      item.priority === 'urgent'
-                        ? 'bg-red-500/20 text-red-400'
-                        : item.priority === 'high'
-                        ? 'bg-amber-500/20 text-amber-400'
-                        : 'bg-zinc-800 text-zinc-400'
-                    }`}
-                  >
-                    {item.priority}
+                  {!collapsedSections['overdue'] && (
+                    <div className="space-y-2 pl-1">
+                      {smartGroups.overdue.map((item, idx) => {
+                        const { blocked, blockerTitles } = isItemBlocked(item);
+                        return (
+                          <ListRow
+                            key={item.id}
+                            item={item}
+                            projects={projects}
+                            isSelected={selectedIds.has(item.id)}
+                            isSelectMode={isSelectMode}
+                            isHighlighted={highlightedIndex === idx}
+                            isBlocked={blocked}
+                            blockerTitles={blockerTitles}
+                            isRefining={refiningItemId === item.id}
+                            onToggleSelect={handleToggleSelect}
+                            onToggleComplete={onToggleComplete}
+                            onDelete={(id) => setDeletingItemId(id)}
+                            onClick={(item) => setSelectedItem(item)}
+                            onRefine={handleQuickRefine}
+                            onReschedule={handleReschedule}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Today Section */}
+              <div className="space-y-2">
+                <button
+                  onClick={() => toggleSectionCollapse('today')}
+                  className="flex items-center space-x-2 text-xs font-bold text-amber-300 uppercase tracking-wider px-1 cursor-pointer select-none"
+                >
+                  {collapsedSections['today'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                  <Sun className="w-4 h-4 text-amber-400" />
+                  <span>Today</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                    {smartGroups.today.length}
                   </span>
+                </button>
 
-                  <button
-                    onClick={() => setDeletingItemId(item.id)}
-                    aria-label={`Delete task: ${item.title}`}
-                    className="text-zinc-400 hover:text-red-400 p-1 rounded transition-colors"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                {!collapsedSections['today'] && (
+                  <div className="space-y-2 pl-1">
+                    {smartGroups.today.length === 0 ? (
+                      <p className="text-xs text-zinc-500 italic py-2 px-3">No tasks due today. You are all caught up!</p>
+                    ) : (
+                      smartGroups.today.map((item, idx) => {
+                        const { blocked, blockerTitles } = isItemBlocked(item);
+                        const globalIdx = smartGroups.overdue.length + idx;
+                        return (
+                          <ListRow
+                            key={item.id}
+                            item={item}
+                            projects={projects}
+                            isSelected={selectedIds.has(item.id)}
+                            isSelectMode={isSelectMode}
+                            isHighlighted={highlightedIndex === globalIdx}
+                            isBlocked={blocked}
+                            blockerTitles={blockerTitles}
+                            isRefining={refiningItemId === item.id}
+                            onToggleSelect={handleToggleSelect}
+                            onToggleComplete={onToggleComplete}
+                            onDelete={(id) => setDeletingItemId(id)}
+                            onClick={(item) => setSelectedItem(item)}
+                            onRefine={handleQuickRefine}
+                            onReschedule={handleReschedule}
+                          />
+                        );
+                      })
+                    )}
+                  </div>
+                )}
               </div>
-            );
-          })
+
+              {/* Upcoming Section */}
+              {smartGroups.upcoming.length > 0 && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => toggleSectionCollapse('upcoming')}
+                    className="flex items-center space-x-2 text-xs font-bold text-blue-400 uppercase tracking-wider px-1 cursor-pointer select-none"
+                  >
+                    {collapsedSections['upcoming'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    <Calendar className="w-4 h-4 text-blue-400" />
+                    <span>Upcoming (Next 7 Days)</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono">
+                      {smartGroups.upcoming.length}
+                    </span>
+                  </button>
+
+                  {!collapsedSections['upcoming'] && (
+                    <div className="space-y-2 pl-1">
+                      {smartGroups.upcoming.map((item, idx) => {
+                        const { blocked, blockerTitles } = isItemBlocked(item);
+                        const globalIdx = smartGroups.overdue.length + smartGroups.today.length + idx;
+                        return (
+                          <ListRow
+                            key={item.id}
+                            item={item}
+                            projects={projects}
+                            isSelected={selectedIds.has(item.id)}
+                            isSelectMode={isSelectMode}
+                            isHighlighted={highlightedIndex === globalIdx}
+                            isBlocked={blocked}
+                            blockerTitles={blockerTitles}
+                            isRefining={refiningItemId === item.id}
+                            onToggleSelect={handleToggleSelect}
+                            onToggleComplete={onToggleComplete}
+                            onDelete={(id) => setDeletingItemId(id)}
+                            onClick={(item) => setSelectedItem(item)}
+                            onRefine={handleQuickRefine}
+                            onReschedule={handleReschedule}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Backlog / No Date Section */}
+              {smartGroups.backlog.length > 0 && (
+                <div className="space-y-2">
+                  <button
+                    onClick={() => toggleSectionCollapse('backlog')}
+                    className="flex items-center space-x-2 text-xs font-bold text-zinc-400 uppercase tracking-wider px-1 cursor-pointer select-none"
+                  >
+                    {collapsedSections['backlog'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+                    <Folder className="w-4 h-4 text-zinc-400" />
+                    <span>No Date / Backlog</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
+                      {smartGroups.backlog.length}
+                    </span>
+                  </button>
+
+                  {!collapsedSections['backlog'] && (
+                    <div className="space-y-2 pl-1">
+                      {smartGroups.backlog.map((item, idx) => {
+                        const { blocked, blockerTitles } = isItemBlocked(item);
+                        const globalIdx = smartGroups.overdue.length + smartGroups.today.length + smartGroups.upcoming.length + idx;
+                        return (
+                          <ListRow
+                            key={item.id}
+                            item={item}
+                            projects={projects}
+                            isSelected={selectedIds.has(item.id)}
+                            isSelectMode={isSelectMode}
+                            isHighlighted={highlightedIndex === globalIdx}
+                            isBlocked={blocked}
+                            blockerTitles={blockerTitles}
+                            isRefining={refiningItemId === item.id}
+                            onToggleSelect={handleToggleSelect}
+                            onToggleComplete={onToggleComplete}
+                            onDelete={(id) => setDeletingItemId(id)}
+                            onClick={(item) => setSelectedItem(item)}
+                            onRefine={handleQuickRefine}
+                            onReschedule={handleReschedule}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          ) : (
+            /* Flat Sorted List */
+            <div className="space-y-2">
+              {sortedItems.map((item, idx) => {
+                const { blocked, blockerTitles } = isItemBlocked(item);
+                return (
+                  <ListRow
+                    key={item.id}
+                    item={item}
+                    projects={projects}
+                    isSelected={selectedIds.has(item.id)}
+                    isSelectMode={isSelectMode}
+                    isHighlighted={highlightedIndex === idx}
+                    isBlocked={blocked}
+                    blockerTitles={blockerTitles}
+                    isRefining={refiningItemId === item.id}
+                    onToggleSelect={handleToggleSelect}
+                    onToggleComplete={onToggleComplete}
+                    onDelete={(id) => setDeletingItemId(id)}
+                    onClick={(item) => setSelectedItem(item)}
+                    onRefine={handleQuickRefine}
+                    onReschedule={handleReschedule}
+                  />
+                );
+              })}
+            </div>
           )}
         </div>
       ) : viewMode === 'kanban' ? (
-        /* Kanban Board View */
+        /* Kanban Board View with Drag-and-Drop */
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
           {kanbanColumns.map((col) => {
-            const colItems = filteredItems.filter(i => {
+            const colItems = sortedItems.filter(i => {
               if (col.id === 'done') return i.is_completed || i.status === 'done';
               return !i.is_completed && i.status === col.id;
             });
 
             return (
-              <div key={col.id} className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-4 flex flex-col">
+              <div 
+                key={col.id} 
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  const droppedId = e.dataTransfer.getData('text/plain');
+                  handleDropOnColumn(col.id, droppedId);
+                }}
+                className="bg-zinc-900/60 border border-zinc-800/80 rounded-2xl p-4 flex flex-col transition-colors hover:border-zinc-700/80"
+              >
                 <div className="flex items-center justify-between mb-3">
                   <span className="text-xs font-semibold text-zinc-300 uppercase tracking-wider">{col.label}</span>
                   <span className="text-[11px] px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 font-mono">
@@ -669,100 +991,92 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   {colItems.map((item) => {
                     const { blocked, blockerTitles } = isItemBlocked(item);
                     return (
-                    <div
-                      key={item.id}
-                      onClick={() => setSelectedItem(item)}
-                      className={`bg-zinc-900 border p-3 rounded-xl cursor-pointer shadow-sm transition-all space-y-2 ${
-                        blocked
-                          ? 'border-amber-500/30 opacity-70 hover:opacity-100'
-                          : 'border-zinc-800/90 hover:border-zinc-700'
-                      }`}
-                    >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-1.5 min-w-0">
-                          {blocked && (
-                            <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-400 shrink-0">
-                              <Lock className="w-3 h-3" />
+                      <div
+                        key={item.id}
+                        draggable
+                        onDragStart={(e) => {
+                          e.dataTransfer.setData('text/plain', item.id);
+                          e.dataTransfer.effectAllowed = 'move';
+                        }}
+                        onClick={() => setSelectedItem(item)}
+                        className={`bg-zinc-900 border p-3 rounded-xl cursor-grab active:cursor-grabbing shadow-sm transition-all space-y-2 select-none ${
+                          blocked
+                            ? 'border-amber-500/30 opacity-70 hover:opacity-100'
+                            : 'border-zinc-800/90 hover:border-zinc-700 hover:shadow-md'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="flex items-center gap-1.5 min-w-0">
+                            {blocked && (
+                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-400 shrink-0">
+                                <Lock className="w-3 h-3" />
+                              </span>
+                            )}
+                            <span className={`text-xs font-medium truncate ${item.is_completed ? 'line-through text-zinc-400' : 'text-zinc-200'}`}>
+                              {item.title}
+                            </span>
+                          </div>
+                          <div className="flex items-center space-x-1 shrink-0">
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleQuickRefine(item);
+                              }}
+                              disabled={refiningItemId === item.id}
+                              title="Polish with AI"
+                              className="text-zinc-500 hover:text-blue-400 p-0.5 rounded transition-colors"
+                            >
+                              {refiningItemId === item.id ? (
+                                <RotateCw className="w-3 h-3 animate-spin text-blue-400" />
+                              ) : (
+                                <Sparkles className="w-3 h-3" />
+                              )}
+                            </button>
+                            <span
+                              className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
+                                item.priority === 'urgent'
+                                  ? 'bg-red-500/20 text-red-400'
+                                  : 'bg-zinc-800 text-zinc-400'
+                              }`}
+                            >
+                              {item.priority}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {item.project_id && (() => {
+                            const p = projects.find(proj => proj.id === item.project_id);
+                            if (!p) return null;
+                            return (
+                              <div 
+                                className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
+                                style={{
+                                  backgroundColor: `${p.color || '#3b82f6'}15`,
+                                  borderColor: `${p.color || '#3b82f6'}40`,
+                                  color: p.color || '#60a5fa'
+                                }}
+                              >
+                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
+                                <span className="truncate max-w-[100px]">{p.name}</span>
+                              </div>
+                            );
+                          })()}
+                          {item.due_date && (
+                            <span className="text-[10px] text-zinc-400 font-mono">
+                              📅 {item.due_date}
                             </span>
                           )}
-                          <span className={`text-xs font-medium truncate ${item.is_completed ? 'line-through text-zinc-400' : 'text-zinc-200'}`}>
-                            {item.title}
-                          </span>
-                        </div>
-                        <div className="flex items-center space-x-1 shrink-0">
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleQuickRefine(item);
-                            }}
-                            disabled={refiningItemId === item.id}
-                            title="Polish with AI"
-                            className="text-zinc-500 hover:text-blue-400 p-0.5 rounded transition-colors"
-                          >
-                            {refiningItemId === item.id ? (
-                              <RotateCw className="w-3 h-3 animate-spin text-blue-400" />
-                            ) : (
-                              <Sparkles className="w-3 h-3" />
-                            )}
-                          </button>
-                          <span
-                            className={`text-[9px] uppercase font-bold px-1.5 py-0.5 rounded ${
-                              item.priority === 'urgent'
-                                ? 'bg-red-500/20 text-red-400'
-                                : 'bg-zinc-800 text-zinc-400'
-                            }`}
-                          >
-                            {item.priority}
-                          </span>
+                          {item.context_tags && (
+                            <div className="text-[10px] text-zinc-400 flex items-center gap-0.5 font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded">
+                              <Tag className="w-2.5 h-2.5 text-zinc-500" />
+                              <span>{item.context_tags}</span>
+                            </div>
+                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        {item.project_id && (() => {
-                          const p = projects.find(proj => proj.id === item.project_id);
-                          if (!p) return null;
-                          return (
-                            <div 
-                              className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
-                              style={{
-                                backgroundColor: `${p.color || '#3b82f6'}15`,
-                                borderColor: `${p.color || '#3b82f6'}40`,
-                                color: p.color || '#60a5fa'
-                              }}
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
-                              <span className="truncate max-w-[100px]">{p.name}</span>
-                            </div>
-                          );
-                        })()}
-                        {item.milestone_id && (() => {
-                          const m = milestones.find(ms => ms.id === item.milestone_id);
-                          if (!m) return null;
-                          return (
-                            <div className="text-[10px] px-1.5 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 text-amber-300 flex items-center gap-1 font-mono">
-                              🏁 {m.title}
-                            </div>
-                          );
-                        })()}
-                        {item.context_tags && (
-                          <div className="text-[10px] text-zinc-400 flex items-center gap-0.5 font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded">
-                            <Tag className="w-2.5 h-2.5 text-zinc-500" />
-                            <span>{item.context_tags}</span>
-                          </div>
-                        )}
-                        {blocked && (
-                          <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/20">
-                            Blocked
-                          </span>
-                        )}
-                        {item.repeat_rule && (
-                          <div className="text-[10px] text-blue-400 flex items-center space-x-1">
-                            <RotateCw className="w-2.5 h-2.5" />
-                            <span>{item.repeat_rule}</span>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  );})}
+                    );
+                  })}
                 </div>
               </div>
             );
@@ -779,7 +1093,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
         />
       )}
 
-      {/* Create Modal */}
+      {/* Floating Bulk Action Bar */}
+      <BulkActionBar
+        selectedCount={selectedIds.size}
+        onClearSelection={handleClearSelection}
+        onBulkComplete={handleBulkComplete}
+        onBulkDelete={handleBulkDelete}
+        onBulkPriority={handleBulkPriority}
+        onBulkReschedule={handleBulkReschedule}
+      />
+
+{/* Create Modal */}
       <Modal
         isOpen={isCreating}
         onClose={() => setIsCreating(false)}
@@ -1426,6 +1750,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
         }}
         onCancel={() => setDeletingItemId(null)}
       />
-    </div>
+    </PullToRefresh>
   );
 };
