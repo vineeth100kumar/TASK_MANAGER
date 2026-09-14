@@ -25,6 +25,8 @@ import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Skeleton } from '../common/Skeleton';
 import { useToast } from '../../context/ToastContext';
+import { motion } from 'framer-motion';
+import { haptics } from '../../utils/haptics';
 
 interface FinanceViewProps {
   isLoading?: boolean;
@@ -46,6 +48,84 @@ interface FinanceViewProps {
   }) => void;
   onDeleteTransaction?: (id: string) => void;
 }
+
+const TransactionRow: React.FC<{
+  tx: Transaction;
+  onDelete: (id: string) => void;
+}> = ({ tx, onDelete }) => {
+  const [dragOffset, setDragOffset] = useState(0);
+
+  return (
+    <div className="relative overflow-hidden rounded-xl bg-zinc-900 border border-zinc-800/80">
+      {/* Background Swipe Action: Delete */}
+      <div
+        className={`absolute inset-0 flex items-center justify-end px-4 transition-colors ${
+          dragOffset <= -60 ? 'bg-rose-600 text-white' : 'bg-rose-950/40 text-rose-400'
+        }`}
+      >
+        <Trash2 className="w-4 h-4" />
+      </div>
+
+      <motion.div
+        drag="x"
+        dragDirectionLock
+        dragConstraints={{ left: 0, right: 0 }}
+        dragElastic={0.4}
+        onDrag={(_e, info) => setDragOffset(info.offset.x)}
+        onDragEnd={(_e, info) => {
+          if (info.offset.x <= -65) {
+            haptics.warning();
+            onDelete(tx.id);
+          }
+          setDragOffset(0);
+        }}
+        animate={{ x: 0 }}
+        transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+        className="relative flex items-center justify-between p-3 bg-zinc-900 text-xs select-none"
+      >
+        <div className="flex items-center space-x-3 truncate pr-2">
+          <div
+            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+              tx.type === 'expense'
+                ? 'bg-red-500/10 text-red-400'
+                : tx.type === 'income'
+                ? 'bg-emerald-500/10 text-emerald-400'
+                : 'bg-blue-500/10 text-blue-400'
+            }`}
+          >
+            {tx.type === 'expense' ? (
+              <ArrowDownLeft className="w-4 h-4" />
+            ) : tx.type === 'income' ? (
+              <ArrowUpRight className="w-4 h-4" />
+            ) : (
+              <RefreshCw className="w-4 h-4" />
+            )}
+          </div>
+          <div className="truncate">
+            <p className="font-medium text-zinc-200 truncate">{tx.description || tx.category_name || 'Transaction'}</p>
+            <p className="text-[10px] text-zinc-400 truncate">
+              {tx.account_name} • <span className="uppercase font-semibold text-blue-400">{tx.payment_mode}</span> • {tx.date}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex items-center space-x-3 shrink-0">
+          <span className={`font-bold font-mono ${tx.type === 'expense' ? 'text-zinc-100' : 'text-emerald-400'}`}>
+            {tx.type === 'expense' ? `-₹${tx.amount}` : `+₹${tx.amount}`}
+          </span>
+          <button
+            onClick={() => onDelete(tx.id)}
+            aria-label={`Delete transaction: ₹${tx.amount}`}
+            className="text-zinc-500 hover:text-red-400 p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded transition-colors"
+            title="Delete transaction"
+          >
+            <Trash2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </motion.div>
+    </div>
+  );
+};
 
 export const FinanceView: React.FC<FinanceViewProps> = ({
   isLoading = false,
@@ -644,38 +724,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             </div>
           ) : (
             transactions.map((tx) => (
-              <div
+              <TransactionRow
                 key={tx.id}
-                className="flex items-center justify-between p-3 rounded-xl bg-zinc-900 border border-zinc-800/80 text-xs"
-              >
-                <div className="flex items-center space-x-3">
-                  <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                    tx.type === 'expense' ? 'bg-red-500/10 text-red-400' : tx.type === 'income' ? 'bg-emerald-500/10 text-emerald-400' : 'bg-blue-500/10 text-blue-400'
-                  }`}>
-                    {tx.type === 'expense' ? <ArrowDownLeft className="w-4 h-4" /> : tx.type === 'income' ? <ArrowUpRight className="w-4 h-4" /> : <RefreshCw className="w-4 h-4" />}
-                  </div>
-                  <div>
-                    <p className="font-medium text-zinc-200">{tx.description || tx.category_name || 'Transaction'}</p>
-                    <p className="text-[10px] text-zinc-400">
-                      {tx.account_name} • <span className="uppercase font-semibold text-blue-400">{tx.payment_mode}</span> • {tx.date}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="flex items-center space-x-3">
-                  <span className={`font-bold ${tx.type === 'expense' ? 'text-zinc-100' : 'text-emerald-400'}`}>
-                    {tx.type === 'expense' ? `-₹${tx.amount}` : `+₹${tx.amount}`}
-                  </span>
-                  <button
-                    onClick={() => setDeletingTxId(tx.id)}
-                    aria-label={`Delete transaction: ₹${tx.amount}`}
-                    className="text-zinc-500 hover:text-red-400 p-1 rounded transition-colors"
-                    title="Delete transaction"
-                  >
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
-                </div>
-              </div>
+                tx={tx}
+                onDelete={(id) => setDeletingTxId(id)}
+              />
             ))
           )}
         </div>
