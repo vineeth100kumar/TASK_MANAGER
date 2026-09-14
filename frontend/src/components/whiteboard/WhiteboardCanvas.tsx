@@ -153,6 +153,17 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       viewStateRef.current = viewState;
     }, [viewState]);
 
+    const elementsRef = useRef<WhiteboardElement[]>(elements);
+    useEffect(() => {
+      elementsRef.current = elements;
+    }, [elements]);
+
+    // Eraser State refs
+    const isErasingRef = useRef(false);
+    const lastEraserPointRef = useRef<Point | null>(null);
+    const hasErasedInCurrentGestureRef = useRef(false);
+    const currentEraserScreenPosRef = useRef<{ x: number; y: number } | null>(null);
+
     // Selection Drag & Resize refs
     const dragElementIdRef = useRef<string | null>(null);
     const dragStartWorldRef = useRef<Point | null>(null);
@@ -454,6 +465,24 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         laserAnimRef.current = requestAnimationFrame(renderCanvas);
       }
 
+      // 8. Draw Eraser Hover Ring (Apple Freeform / Photoshop style)
+      if (activeTool === 'eraser' && currentEraserScreenPosRef.current) {
+        const p = screenToWorld(
+          currentEraserScreenPosRef.current.x,
+          currentEraserScreenPosRef.current.y
+        );
+        const r = 22 / viewState.zoom;
+        ctx.save();
+        ctx.strokeStyle = isNight ? 'rgba(255, 255, 255, 0.75)' : 'rgba(26, 24, 20, 0.75)';
+        ctx.lineWidth = 1.5 / viewState.zoom;
+        ctx.fillStyle = isNight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(26, 24, 20, 0.08)';
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        ctx.restore();
+      }
+
       ctx.restore();
     }, [
       elements,
@@ -703,50 +732,103 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     // -------------------------------------------------------------
-    // ERASER HIT TEST
+    // ERASER HIT TEST (Continuous Segment Interpolation & Multi-Type)
     // -------------------------------------------------------------
-    const eraseIntersecting = (point: Point) => {
-      const eraserRadius = 16 / viewState.zoom;
-      let erasedAny = false;
+    const eraseAtPointOrSegment = (pA: Point, pB: Point) => {
+      const eraserRadius = 22 / viewState.zoom;
+      const currentElements = elementsRef.current;
+      if (currentElements.length === 0) return;
 
-      const remaining = elements.filter((el) => {
-        if (el.type === 'stroke') {
-          for (let i = 0; i < el.points.length - 1; i++) {
-            const dist = distToSegment(point, el.points[i], el.points[i + 1]);
-            if (dist <= eraserRadius + el.size / 2) {
-              erasedAny = true;
-              return false;
+      // Sample points along segment pA -> pB so high-speed flicks never skip
+      const dist = Math.hypot(pB.x - pA.x, pB.y - pA.y);
+      const steps = Math.max(1, Math.ceil(dist / Math.max(4, eraserRadius * 0.6)));
+      const testPoints: Point[] = [];
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        testPoints.push({
+          x: pA.x + (pB.x - pA.x) * t,
+          y: pA.y + (pB.y - pA.y) * t,
+        });
+      }
+
+      const hitElement = (el: WhiteboardElement): boolean => {
+        for (const pt of testPoints) {
+          if (el.type === 'stroke') {
+            if (el.points.length === 1) {
+              const d = Math.hypot(pt.x - el.points[0].x, pt.y - el.points[0].y);
+              if (d <= eraserRadius + el.size / 2) return true;
+            } else {
+              for (let i = 0; i < el.points.length - 1; i++) {
+                const distSeg = distToSegment(pt, el.points[i], el.points[i + 1]);
+                if (distSeg <= eraserRadius + el.size / 2) return true;
+              }
+            }
+          } else if (el.type === 'shape') {
+            if (el.shapeType === 'line' || el.shapeType === 'arrow') {
+              const distSeg = distToSegment(
+                pt,
+                { x: el.x, y: el.y },
+                { x: el.x + el.width, y: el.y + el.height }
+              );
+              if (distSeg <= eraserRadius + el.strokeWidth / 2) return true;
+            } else {
+              const minX = Math.min(el.x, el.x + el.width);
+              const maxX = Math.max(el.x, el.x + el.width);
+              const minY = Math.min(el.y, el.y + el.height);
+              const maxY = Math.max(el.y, el.y + el.height);
+              if (
+                pt.x >= minX - eraserRadius &&
+                pt.x <= maxX + eraserRadius &&
+                pt.y >= minY - eraserRadius &&
+                pt.y <= maxY + eraserRadius
+              ) {
+                return true;
+              }
+            }
+          } else if (el.type === 'image' || el.type === 'sticky') {
+            const minX = Math.min(el.x, el.x + el.width);
+            const maxX = Math.max(el.x, el.x + el.width);
+            const minY = Math.min(el.y, el.y + el.height);
+            const maxY = Math.max(el.y, el.y + el.height);
+            if (
+              pt.x >= minX - eraserRadius &&
+              pt.x <= maxX + eraserRadius &&
+              pt.y >= minY - eraserRadius &&
+              pt.y <= maxY + eraserRadius
+            ) {
+              return true;
+            }
+          } else if (el.type === 'text') {
+            const lines = el.text.split('\n');
+            const textH = lines.length * el.fontSize * 1.35;
+            const textW = el.width || 180;
+            if (
+              pt.x >= el.x - eraserRadius &&
+              pt.x <= el.x + textW + eraserRadius &&
+              pt.y >= el.y - eraserRadius &&
+              pt.y <= el.y + textH + eraserRadius
+            ) {
+              return true;
             }
           }
-          return true;
-        } else if (el.type === 'shape' || el.type === 'image') {
-          if (
-            point.x >= el.x - eraserRadius &&
-            point.x <= el.x + el.width + eraserRadius &&
-            point.y >= el.y - eraserRadius &&
-            point.y <= el.y + el.height + eraserRadius
-          ) {
-            erasedAny = true;
-            return false;
-          }
-          return true;
-        } else if (el.type === 'text') {
-          if (
-            point.x >= el.x - eraserRadius &&
-            point.x <= el.x + 180 + eraserRadius &&
-            point.y >= el.y - eraserRadius &&
-            point.y <= el.y + el.fontSize * 2 + eraserRadius
-          ) {
-            erasedAny = true;
-            return false;
-          }
-          return true;
         }
-        return true;
-      });
+        return false;
+      };
 
-      if (erasedAny) {
-        onElementsChange(remaining, true);
+      const remaining = currentElements.filter((el) => !hitElement(el));
+      if (remaining.length < currentElements.length) {
+        hasErasedInCurrentGestureRef.current = true;
+        elementsRef.current = remaining;
+        onElementsChange(remaining, false);
+        if (selectedElementId && !remaining.some((e) => e.id === selectedElementId)) {
+          onSelectElementId(null);
+        }
+        if (selectedElementIds && selectedElementIds.size > 0) {
+          const updatedIds = new Set(
+            Array.from(selectedElementIds).filter((id) => remaining.some((e) => e.id === id))
+          );
+          if (onSelectElementIds) onSelectElementIds(updatedIds);
+        }
       }
     };
 
@@ -755,14 +837,21 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     // -------------------------------------------------------------
     const abortInProgressActions = useCallback(() => {
       isDrawingRef.current = false;
+      isErasingRef.current = false;
+      lastEraserPointRef.current = null;
+      hasErasedInCurrentGestureRef.current = false;
+      currentEraserScreenPosRef.current = null;
       currentPointsRef.current = [];
       shapeStartRef.current = null;
       shapeCurrentRef.current = null;
       dragElementIdRef.current = null;
+      dragStartWorldRef.current = null;
+      dragSnapshotElementsRef.current = null;
       lassoStartRef.current = null;
       lassoCurrentRef.current = null;
       resizeHandleRef.current = null;
       resizeOriginRef.current = null;
+      editingTextIdRef.current = null;
       setInlineTextPos(null);
       setInlineTextVal('');
       renderCanvas();
@@ -806,10 +895,18 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
+      const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
+
       // Palm Rejection & Active Stylus Navigation:
       // When stylus mode is active (or a pen was detected), touch with fingers
-      // exclusively pans the canvas, while pen inking draws and places shapes.
-      if ((stylusOnly || hasPenDetectedRef.current) && e.pointerType === 'touch') {
+      // exclusively pans the canvas for inking tools, UNLESS the user explicitly selected
+      // the Eraser or Select tool, or the physical stylus eraser tip is touching.
+      if (
+        (stylusOnly || hasPenDetectedRef.current) &&
+        e.pointerType === 'touch' &&
+        !isEraser &&
+        activeTool !== 'select'
+      ) {
         isPanningRef.current = true;
         panStartRef.current = { x: e.clientX - viewState.panX, y: e.clientY - viewState.panY };
         lastPanPosRef.current = { x: e.clientX, y: e.clientY };
@@ -831,9 +928,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       worldPoint.pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : 0.5;
       worldPoint.t = Date.now();
 
-      const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
       if (isEraser) {
-        eraseIntersecting(worldPoint);
+        isErasingRef.current = true;
+        hasErasedInCurrentGestureRef.current = false;
+        lastEraserPointRef.current = worldPoint;
+        currentEraserScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        eraseAtPointOrSegment(worldPoint, worldPoint);
+        renderCanvas();
+        return;
       } else if (activeTool === 'laser') {
         isDrawingRef.current = true;
         laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
@@ -1028,10 +1130,17 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
-      // Tool Drawing
+      // Eraser Tool (Continuous Sweep & Live Circular Tip Preview)
       const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
-      if (isEraser && (e.buttons === 1 || e.pressure > 0)) {
-        eraseIntersecting(worldPoint);
+      if (isEraser) {
+        currentEraserScreenPosRef.current = { x: e.clientX - rect.left, y: e.clientY - rect.top };
+        renderCanvas();
+        if (isErasingRef.current || e.buttons === 1 || e.pressure > 0) {
+          const prevPt = lastEraserPointRef.current || worldPoint;
+          eraseAtPointOrSegment(prevPt, worldPoint);
+          lastEraserPointRef.current = worldPoint;
+        }
+        return;
       } else if (activeTool === 'laser' && isDrawingRef.current) {
         laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
         renderCanvas();
@@ -1080,6 +1189,17 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         momentumRafRef.current = requestAnimationFrame(() =>
           startMomentum(viewState.panX, viewState.panY)
         );
+        return;
+      }
+
+      // Commit Eraser
+      if (isErasingRef.current) {
+        isErasingRef.current = false;
+        lastEraserPointRef.current = null;
+        if (hasErasedInCurrentGestureRef.current) {
+          onElementsChange(elementsRef.current, true);
+          hasErasedInCurrentGestureRef.current = false;
+        }
         return;
       }
 
@@ -1656,7 +1776,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
               : activeTool === 'pen' || activeTool === 'highlighter'
               ? 'crosshair'
               : activeTool === 'eraser'
-              ? 'cell'
+              ? 'crosshair'
               : activeTool === 'text'
               ? 'text'
               : 'default',
@@ -1668,6 +1788,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           onPointerMove={handlePointerMove}
           onPointerUp={handlePointerUp}
           onPointerCancel={handlePointerUp}
+          onPointerLeave={() => {
+            currentEraserScreenPosRef.current = null;
+            renderCanvas();
+          }}
           onWheel={handleWheel}
           onDoubleClick={handleDoubleClick}
           className="absolute inset-0 block w-full h-full touch-none"

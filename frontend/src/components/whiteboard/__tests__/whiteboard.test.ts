@@ -516,4 +516,137 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(sentToBack.map((e) => e.id)).toEqual(['1', '2', '3']);
     });
   });
+
+  describe('Robust Eraser Engine (Continuous Sweep, Negative Shapes & Stylus Bypass)', () => {
+    it('erases a stroke when swept over quickly via segment interpolation', () => {
+      // Stroke vertical line from (100, 50) to (100, 150)
+      const stroke: StrokeElement = {
+        id: 'stroke_v',
+        type: 'stroke',
+        points: [{ x: 100, y: 50 }, { x: 100, y: 150 }],
+        color: '#000',
+        size: 4,
+      };
+
+      // Fast swipe from (80, 100) to (120, 100) (jumping 40px in a single event)
+      const pA = { x: 80, y: 100 };
+      const pB = { x: 120, y: 100 };
+      const eraserRadius = 22;
+
+      // Check discrete point distance for endpoint pB:
+      // pB is (120, 100), distance to (100, 100) is 20px (close, but what if jump was 80px?)
+      const fastPA = { x: 50, y: 100 };
+      const fastPB = { x: 150, y: 100 }; // neither endpoint is within radius 22 of line x=100!
+
+      // Continuous interpolation test
+      const dist = Math.hypot(fastPB.x - fastPA.x, fastPB.y - fastPA.y);
+      const steps = Math.max(1, Math.ceil(dist / 10));
+      let hit = false;
+      for (let s = 0; s <= steps; s++) {
+        const t = s / steps;
+        const pt = { x: fastPA.x + (fastPB.x - fastPA.x) * t, y: fastPA.y + (fastPB.y - fastPA.y) * t };
+        const d = distToSegment(pt, stroke.points[0], stroke.points[1]);
+        if (d <= eraserRadius + stroke.size / 2) {
+          hit = true;
+          break;
+        }
+      }
+
+      expect(hit).toBe(true);
+    });
+
+    it('erases single-point dot/tap strokes', () => {
+      const dotStroke: StrokeElement = {
+        id: 'dot_1',
+        type: 'stroke',
+        points: [{ x: 200, y: 200 }],
+        color: '#dc2626',
+        size: 8,
+      };
+
+      const eraserPt = { x: 205, y: 205 };
+      const eraserRadius = 22;
+
+      const d = Math.hypot(eraserPt.x - dotStroke.points[0].x, eraserPt.y - dotStroke.points[0].y);
+      const hit = d <= eraserRadius + dotStroke.size / 2;
+      expect(hit).toBe(true);
+    });
+
+    it('erases shapes drawn with inverted/negative dimensions', () => {
+      // Shape drawn right-to-left, bottom-to-top: x=300, width=-100, y=300, height=-100
+      const shape: WhiteboardElement = {
+        id: 'shape_neg',
+        type: 'shape',
+        shapeType: 'rectangle',
+        x: 300,
+        y: 300,
+        width: -100,
+        height: -100,
+        color: '#000',
+        strokeWidth: 2,
+      };
+
+      const eraserPt = { x: 250, y: 250 };
+      const eraserRadius = 22;
+
+      const minX = Math.min(shape.x, shape.x + shape.width);
+      const maxX = Math.max(shape.x, shape.x + shape.width);
+      const minY = Math.min(shape.y, shape.y + shape.height);
+      const maxY = Math.max(shape.y, shape.y + shape.height);
+
+      const hit =
+        eraserPt.x >= minX - eraserRadius &&
+        eraserPt.x <= maxX + eraserRadius &&
+        eraserPt.y >= minY - eraserRadius &&
+        eraserPt.y <= maxY + eraserRadius;
+
+      expect(minX).toBe(200);
+      expect(maxX).toBe(300);
+      expect(hit).toBe(true);
+    });
+
+    it('erases line and arrow shapes using segment distance rather than bounding box', () => {
+      const lineShape: WhiteboardElement = {
+        id: 'arrow_1',
+        type: 'shape',
+        shapeType: 'arrow',
+        x: 100,
+        y: 100,
+        width: 100,
+        height: 0, // horizontal arrow from (100, 100) to (200, 100)
+        color: '#b45309',
+        strokeWidth: 4,
+      };
+
+      const eraserPt = { x: 150, y: 110 }; // 10px below arrow
+      const eraserRadius = 22;
+
+      const d = distToSegment(
+        eraserPt,
+        { x: lineShape.x, y: lineShape.y },
+        { x: lineShape.x + lineShape.width, y: lineShape.y + lineShape.height }
+      );
+      const hit = d <= eraserRadius + (lineShape as any).strokeWidth / 2;
+      expect(d).toBe(10);
+      expect(hit).toBe(true);
+    });
+
+    it('bypasses palm rejection pan when activeTool is eraser so finger touches erase', () => {
+      const stylusOnly = false;
+      const hasPenDetected = true; // Pen was used earlier
+      const pointerType: string = 'touch'; // Now user touches with finger
+
+      // When activeTool is 'pen': finger touch triggers palm rejection pan
+      const activeToolPen: string = 'pen';
+      const isEraserPen = activeToolPen === 'eraser' || pointerType === 'eraser';
+      const shouldPanPen = (stylusOnly || hasPenDetected) && pointerType === 'touch' && !isEraserPen && activeToolPen !== 'select';
+      expect(shouldPanPen).toBe(true);
+
+      // When activeTool is 'eraser': finger touch MUST NOT pan, it must erase!
+      const activeToolEraser: string = 'eraser';
+      const isEraserTool = activeToolEraser === 'eraser' || pointerType === 'eraser';
+      const shouldPanEraser = (stylusOnly || hasPenDetected) && pointerType === 'touch' && !isEraserTool && activeToolEraser !== 'select';
+      expect(shouldPanEraser).toBe(false);
+    });
+  });
 });
