@@ -1,19 +1,18 @@
 import React from 'react';
 import { 
   Sparkles, 
-  Flame, 
   Clock, 
-  CheckCircle2, 
   Sun, 
   CloudRain, 
   ArrowUpRight, 
   TrendingUp, 
   Wallet, 
   CreditCard, 
-  Coins 
+  CheckSquare
 } from 'lucide-react';
 import { DailyPerformance, AiGreetingResponse, FinanceSummary, WorkItem, WeatherData } from '../../types';
 import { Skeleton } from '../common/Skeleton';
+import { APP_VERSION } from '../../version';
 
 interface DashboardViewProps {
   isLoading?: boolean;
@@ -48,30 +47,46 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     const hr = new Date().getHours();
     const period = hr < 12 ? 'morning' : hr < 17 ? 'afternoon' : hr < 21 ? 'evening' : 'night';
     if (tasksPlanned === 0) {
-      return `Good ${period}! Your schedule is clear. Use the AI Brain Dump (Ctrl+K) to plan your priorities.`;
+      return `Good ${period}! Your schedule is clear. Use The Wire (Ctrl+B) to draft your priorities.`;
     }
-    return `Good ${period}! You have ${tasksPlanned - tasksCompleted} tasks remaining today. Maintain your momentum.`;
+    return `Good ${period}! You have ${tasksPlanned - tasksCompleted} objectives remaining on today's docket.`;
+  };
+
+  const todayDateStr = new Date().toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric'
+  }).toUpperCase();
+
+  // Dynamic Editorial Headline Generator
+  const getEditorialHeadline = () => {
+    if (tasksPlanned === 0 && tasksCompleted === 0) {
+      return "Morning Docket Open: Strategic Objectives Await Confirmation";
+    }
+    if (score === 100) {
+      return "Complete Clearance: All Scheduled Objectives Successfully Dispatched";
+    }
+    if (score >= 80) {
+      return `${score}% of Strategic Targets Secured as Performance Reaches Record Stride`;
+    }
+    if (score >= 50) {
+      return "Midday Progress: Over Half of Priority Objectives Executed";
+    }
+    return "Operations Underway: Critical Milestones Slated for Resolution";
   };
 
   if (isLoading && !performance && !greetingData) {
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12 animate-in fade-in">
-        {/* Greeting Skeleton */}
-        <div className="p-6 rounded-2xl bg-zinc-900 border border-zinc-800 space-y-3">
-          <Skeleton variant="text" className="w-48 h-4" />
-          <Skeleton variant="text" className="w-full sm:w-3/4 h-8" />
-        </div>
-        {/* 4 Stats Cards */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <Skeleton variant="card" count={4} />
-        </div>
-        {/* Finance & Tasks */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-4">
-            <Skeleton variant="row" count={4} />
-          </div>
-          <div className="space-y-4">
-            <Skeleton variant="card" className="h-64" />
+        {/* Masthead Skeleton */}
+        <div className="p-6 border-2 border-stone-800 bg-[#101013] space-y-4 rounded-none">
+          <Skeleton variant="text" className="w-48 h-3" />
+          <Skeleton variant="text" className="w-3/4 h-12" />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-4 border-t border-stone-800">
+            <Skeleton variant="card" />
+            <Skeleton variant="card" />
+            <Skeleton variant="card" />
           </div>
         </div>
       </div>
@@ -79,199 +94,189 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   }
 
   return (
-    <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
-      {/* 1. AI Greeting & Live Weather Card */}
-      <div className="relative overflow-hidden rounded-2xl bg-gradient-to-br from-zinc-900 via-zinc-900 to-zinc-950 border border-zinc-800/80 p-6 shadow-xl">
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-blue-500/10 rounded-full blur-3xl pointer-events-none" />
+    <div className="max-w-6xl mx-auto border-2 border-stone-800 bg-[#101013] text-[#e8e6e1] shadow-2xl mb-24 md:mb-12">
+      
+      {/* TOP EAR / METADATA HEADER */}
+      <div className="px-4 py-2 border-b border-stone-800 text-[10px] sm:text-xs font-ledger flex justify-between items-center text-stone-400 bg-[#0c0c0e]">
+        <div>VOL. II &bull; {APP_VERSION}</div>
+        <div className="hidden md:block tracking-widest uppercase">EDITION: PRIVATE SUBSCRIBER DISPATCH</div>
+        <div>{todayDateStr}</div>
+        <div>PRICE: FREE &bull; TIME VALUED</div>
+      </div>
+
+      {/* MASTHEAD BANNER */}
+      <header className="px-4 sm:px-8 py-5 text-center border-b border-stone-800">
+        <div className="text-[10px] font-ledger uppercase tracking-[0.3em] text-amber-500 mb-1">
+          THE PERSONAL RECORD & OPERATING DISPATCH OF VINEETH KUMAR
+        </div>
+        <h1 className="font-masthead text-4xl sm:text-6xl md:text-7xl font-black tracking-tight text-stone-100 uppercase">
+          The Sage Daily
+        </h1>
+        <div className="my-3 py-1 double-rule flex justify-between items-center text-[11px] font-editorial italic text-stone-400">
+          <span>"All the Priorities, Dispatches & Ledgers Fit to Execute"</span>
+          <span className="hidden sm:inline font-ledger uppercase tracking-wider not-italic text-[9px] text-stone-500">
+            SYSTEM: RASPBERRY PI 5 &bull; WAL ACTIVE
+          </span>
+          <span>INTELLIGENCE &bull; PURPOSE &bull; CALM FOCUS</span>
+        </div>
+      </header>
+
+      {/* LEAD STORY & SCORECARD BANNER */}
+      <section className="border-b border-stone-800 grid grid-cols-1 lg:grid-cols-12">
         
-        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6 relative z-10">
-          <div className="space-y-2 max-w-2xl">
-            <div className="flex items-center space-x-2 text-blue-400 text-xs font-semibold tracking-wide uppercase">
-              <Sparkles className="w-4 h-4" />
-              <span>Sage Executive Intelligence</span>
-            </div>
-            <h1 className="text-xl md:text-2xl font-semibold text-zinc-100 leading-snug">
-              {greetingData?.greeting || getFallbackGreeting()}
-            </h1>
+        {/* MAIN EDITORIAL STORY (8 COLS) */}
+        <div className="lg:col-span-8 p-5 sm:p-6 lg:border-r border-stone-800 space-y-4">
+          <div className="flex items-center space-x-2 text-[10px] font-ledger uppercase tracking-widest text-amber-500">
+            <span className="inline-block w-2 h-2 bg-amber-500"></span>
+            <span>SPECIAL EXECUTIVE COMMUNIQUÉ &bull; SAGE INTELLIGENCE</span>
           </div>
-
-          {/* Live Weather Widget (Open-Meteo) */}
-          {weather ? (
-            <div className="flex items-center space-x-4 bg-zinc-800/50 backdrop-blur-md px-4 py-3 rounded-xl border border-zinc-700/50 shrink-0">
-              <div className="w-10 h-10 rounded-lg bg-amber-500/10 text-amber-400 flex items-center justify-center">
-                {weather.rain_probability > 30 ? (
-                  <CloudRain className="w-6 h-6 text-blue-400" />
-                ) : (
-                  <Sun className="w-6 h-6 text-amber-400" />
-                )}
-              </div>
-              <div>
-                <div className="flex items-baseline space-x-1.5">
-                  <span className="text-2xl font-bold text-zinc-100">{Math.round(weather.temperature)}°C</span>
-                  <span className="text-xs text-zinc-400 font-medium">{weather.condition}</span>
-                </div>
-                <div className="flex items-center space-x-2 text-[11px] text-zinc-400">
-                  <span>H: {Math.round(weather.temp_max)}° L: {Math.round(weather.temp_min)}°</span>
-                  {weather.rain_probability > 0 && (
-                    <span className="text-blue-400 font-medium">🌧 {weather.rain_probability}% rain</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex items-center space-x-3 bg-zinc-800/30 px-3 py-2 rounded-xl border border-zinc-800 text-zinc-400 text-xs shrink-0">
-              <Sun className="w-4 h-4 text-zinc-500 animate-spin" />
-              <span>Connecting weather...</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      {/* 2. Today's Performance Metrics & Quick Finance Snapshot */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-        {/* Productivity Score Ring */}
-        <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
-            <span>Today's Score</span>
-            <TrendingUp className={`w-4 h-4 ${score > 0 ? 'text-emerald-400' : 'text-zinc-500'}`} />
-          </div>
-          <div className="my-3 flex items-baseline space-x-2">
-            <span className="text-3xl font-bold text-zinc-100">
-              {tasksPlanned > 0 ? `${score}%` : '--'}
-            </span>
-            <span className={`text-xs font-medium ${score >= 80 ? 'text-emerald-400' : 'text-zinc-400'}`}>
-              {tasksPlanned === 0 ? 'No tasks yet' : score >= 80 ? 'Optimal' : 'In Progress'}
-            </span>
-          </div>
-          <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
-            <div 
-              className="bg-gradient-to-r from-blue-500 to-emerald-400 h-full rounded-full transition-all duration-500" 
-              style={{ width: `${score}%` }} 
-            />
-          </div>
-        </div>
-
-        {/* Task Velocity */}
-        <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
-            <span>Tasks Done</span>
-            <CheckCircle2 className={`w-4 h-4 ${tasksCompleted > 0 ? 'text-blue-400' : 'text-zinc-500'}`} />
-          </div>
-          <div className="my-3 flex items-baseline space-x-2">
-            <span className="text-3xl font-bold text-zinc-100">{tasksCompleted}</span>
-            <span className="text-xs text-zinc-400">/ {tasksPlanned} planned</span>
-          </div>
-          <p className="text-xs text-zinc-400">
-            {tasksPlanned === 0 ? 'No tasks for today' : tasksPlanned - tasksCompleted > 0 ? `${tasksPlanned - tasksCompleted} remaining today` : 'All tasks cleared!'}
+          
+          <h2 className="font-editorial text-2xl sm:text-4xl font-bold tracking-tight text-stone-100 leading-[1.12]">
+            {getEditorialHeadline()}
+          </h2>
+          
+          <p className="text-sm sm:text-base font-editorial italic text-stone-300 border-l-2 border-amber-600 pl-4 py-1">
+            "{greetingData?.greeting || getFallbackGreeting()}"
           </p>
-        </div>
 
-        {/* Focus Time & Streak */}
-        <div className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between">
-          <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
-            <span>Focus Time</span>
-            <Clock className={`w-4 h-4 ${focusMinutes > 0 ? 'text-purple-400' : 'text-zinc-500'}`} />
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs font-editorial text-stone-300 leading-relaxed pt-1">
+            <p className="drop-cap">
+              BENGALURU — Today’s executive output reflects consistent alignment with strategic priorities. With {tasksCompleted} milestones completed out of {tasksPlanned} scheduled items, the focus continuum stands at {streak} consecutive days of measured progress.
+            </p>
+            <p>
+              {focusMinutes > 0 
+                ? `A total of ${focusMinutes} deliberate focus minutes have been successfully logged. Cognitive momentum remains primed for deep-work throughput.`
+                : "No focus blocks recorded yet this morning. Initiate a focused drafting session or check off pending clippings to activate the tracking ledger."}
+            </p>
           </div>
-          <div className="my-3 flex items-baseline space-x-2">
-            <span className="text-3xl font-bold text-zinc-100">{focusMinutes}m</span>
-            <span className="text-xs text-purple-400 font-medium">{focusMinutes > 0 ? 'Logged' : 'Ready'}</span>
-          </div>
-          <div className="flex items-center space-x-1.5 text-xs text-zinc-400 font-medium">
-            <Flame className={`w-3.5 h-3.5 ${streak > 0 ? 'fill-amber-400 text-amber-400' : 'text-zinc-600'}`} />
-            <span className={streak > 0 ? 'text-amber-400' : 'text-zinc-500'}>
-              {streak > 0 ? `${streak} Day Streak` : 'Complete task to start streak'}
-            </span>
-          </div>
-        </div>
 
-        {/* Finance Snapshot */}
-        <div 
-          onClick={() => onNavigateToTab('finance')}
-          className="bg-zinc-900/70 border border-zinc-800/80 p-5 rounded-2xl flex flex-col justify-between cursor-pointer hover:border-zinc-700 transition-colors group"
-        >
-          <div className="flex items-center justify-between text-xs text-zinc-400 font-medium">
-            <span>Bank & Cash Balance</span>
-            <ArrowUpRight className="w-4 h-4 text-zinc-400 group-hover:text-white transition-colors" />
-          </div>
-          <div className="my-3">
-            <span className="text-2xl font-bold text-zinc-100">
-              ₹{(financeSummary?.net_worth ?? 0).toLocaleString('en-IN')}
-            </span>
-            <div className="text-[11px] text-zinc-400 mt-0.5 flex space-x-2">
-              <span>Bank: ₹{(financeSummary?.total_bank ?? 0).toLocaleString('en-IN')}</span>
-              <span>•</span>
-              <span>Cash: ₹{(financeSummary?.total_cash ?? 0).toLocaleString('en-IN')}</span>
+          <div className="pt-3 border-t border-stone-800 flex flex-wrap items-center justify-between text-[10px] font-ledger text-stone-400">
+            <div>FILED UNDER: #EXECUTIVE &bull; #LIFE-OS</div>
+            <div className="flex items-center space-x-2">
+              <span>STATUS:</span>
+              <span className="text-amber-500 font-bold">{score >= 80 ? 'OPTIMAL PACE' : 'ACTIVE INNINGS'}</span>
             </div>
           </div>
-          <div className="text-xs text-zinc-400 flex items-center justify-between">
-            <span>Today's Spend:</span>
-            <span className="font-semibold text-zinc-200">₹{(financeSummary?.today_spend ?? 0).toLocaleString('en-IN')}</span>
-          </div>
         </div>
-      </div>
 
-      {/* 3. Today's Action Queue & Accomplishment Timeline */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Today's Tasks Queue (Left 2 cols) */}
-        <div className="lg:col-span-2 bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-5">
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-sm font-semibold text-zinc-100 flex items-center space-x-2">
-              <span>Today's Action Items</span>
-              <span className="text-xs px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-300">
-                {todayTasks.filter(t => !t.is_completed).length} pending
-              </span>
-            </h2>
-            <button
-              onClick={() => onNavigateToTab('tasks')}
-              className="text-xs text-blue-400 hover:text-blue-300 font-medium"
-            >
-              View All
-            </button>
+        {/* EDITORIAL METRIC BOX: HEADLINE NUMBER (4 COLS) */}
+        <div className="lg:col-span-4 p-5 sm:p-6 bg-[#0e0e11] flex flex-col justify-between space-y-5">
+          <div>
+            <div className="text-[10px] font-ledger uppercase tracking-widest text-stone-400 border-b border-stone-800 pb-2 mb-3">
+              DAILY SCORECARD &bull; METRIC INDEX
+            </div>
+            
+            <div className="text-center py-4 border border-stone-800 bg-[#141418]">
+              <div className="text-[10px] font-ledger uppercase tracking-widest text-stone-400">PRODUCTIVITY QUOTIENT</div>
+              <div className="font-editorial text-6xl sm:text-7xl font-bold text-amber-500 tracking-tight my-1">
+                {tasksPlanned > 0 ? score : '--'}<span className="text-3xl text-stone-400">{tasksPlanned > 0 ? '%' : ''}</span>
+              </div>
+              <div className="text-[11px] font-editorial italic text-stone-300">
+                {tasksCompleted} of {tasksPlanned} Objectives Secured
+              </div>
+            </div>
           </div>
 
-          <div className="space-y-2">
-            {todayTasks.length === 0 ? (
-              <div className="text-center py-8 text-zinc-400 text-xs">
-                No items scheduled for today. Capture items using AI Brain Dump!
+          {/* TRI-METRIC LEDGER */}
+          <div className="grid grid-cols-3 gap-2 border-t border-b border-stone-800 py-3 text-center">
+            <div>
+              <div className="text-[9px] font-ledger text-stone-400 uppercase">STREAK</div>
+              <div className="font-editorial text-lg sm:text-xl font-bold text-stone-100">{streak} <span className="text-[9px] font-ledger font-normal text-stone-500">DAYS</span></div>
+            </div>
+            <div className="border-x border-stone-800">
+              <div className="text-[9px] font-ledger text-stone-400 uppercase">FOCUS</div>
+              <div className="font-editorial text-lg sm:text-xl font-bold text-stone-100">{focusMinutes}m</div>
+            </div>
+            <div>
+              <div className="text-[9px] font-ledger text-stone-400 uppercase">DOCKET</div>
+              <div className="font-editorial text-lg sm:text-xl font-bold text-amber-400">
+                {tasksPlanned - tasksCompleted > 0 ? `${tasksPlanned - tasksCompleted}` : 'CLEAR'}
+              </div>
+            </div>
+          </div>
+
+          {/* WEATHER DISPATCH DESK */}
+          <div className="border border-stone-800 p-3 bg-[#111114]">
+            <div className="text-[9px] font-ledger uppercase text-stone-400 mb-2 flex justify-between">
+              <span>METEOROLOGICAL WIRE</span>
+              <span className="text-amber-500">OPEN-METEO</span>
+            </div>
+            {weather ? (
+              <div className="flex items-center justify-between text-xs font-ledger">
+                <div className="flex items-center space-x-2">
+                  {weather.rain_probability > 30 ? (
+                    <CloudRain className="w-4 h-4 text-blue-400" />
+                  ) : (
+                    <Sun className="w-4 h-4 text-amber-400" />
+                  )}
+                  <span className="font-bold text-stone-100">{Math.round(weather.temperature)}°C</span>
+                  <span className="text-stone-400">{weather.condition}</span>
+                </div>
+                <div className="text-[10px] text-stone-400">
+                  H:{Math.round(weather.temp_max)}° L:{Math.round(weather.temp_min)}°
+                </div>
               </div>
             ) : (
-              todayTasks.slice(0, 5).map((task) => (
+              <div className="text-xs font-ledger text-stone-500">Weather feed synchronizing...</div>
+            )}
+          </div>
+
+        </div>
+      </section>
+
+      {/* 3-COLUMN BROADSHEET BODY */}
+      <div className="grid grid-cols-1 md:grid-cols-12 divide-y md:divide-y-0 md:divide-x divide-stone-800">
+        
+        {/* COLUMN 1: CLIPPINGS (TODAY'S PRIORITIES) - 5 COLS */}
+        <section className="md:col-span-5 p-5 space-y-4">
+          <div className="border-b-2 border-stone-800 pb-2 flex justify-between items-baseline">
+            <h3 className="font-editorial text-xl font-bold text-stone-100 tracking-tight uppercase">
+              Clippings & Actionables
+            </h3>
+            <span className="text-[10px] font-ledger text-stone-400">
+              {todayTasks.filter(t => !t.is_completed).length} PENDING
+            </span>
+          </div>
+
+          <div className="space-y-2.5">
+            {todayTasks.length === 0 ? (
+              <div className="border border-stone-800 p-6 text-center text-xs font-editorial italic text-stone-400">
+                No items clipped for today's edition. Use The Wire (Ctrl+B) to draft priority tasks.
+              </div>
+            ) : (
+              todayTasks.slice(0, 6).map((task) => (
                 <div
                   key={task.id}
                   onClick={() => onToggleTask(task)}
-                  className={`flex items-center justify-between p-3 rounded-xl border transition-all cursor-pointer ${
-                    task.is_completed
-                      ? 'bg-zinc-900/30 border-zinc-800/40 text-zinc-400'
-                      : 'bg-zinc-900/80 border-zinc-800/80 hover:border-zinc-700 text-zinc-200'
+                  className={`border border-stone-800 p-3 transition-colors cursor-pointer ${
+                    task.is_completed ? 'bg-stone-900/40 border-stone-800/60 opacity-70' : 'bg-[#131317] hover:bg-[#18181e]'
                   }`}
                 >
-                  <div className="flex items-center space-x-3">
-                    <input
-                      type="checkbox"
-                      checked={task.is_completed}
-                      onChange={() => onToggleTask(task)}
-                      className="w-4 h-4 rounded text-blue-600 bg-zinc-800 border-zinc-700 focus:ring-0 focus:ring-offset-0 cursor-pointer"
-                    />
-                    <div>
-                      <p className={`text-xs font-medium ${task.is_completed ? 'line-through' : ''}`}>
-                        {task.title}
-                      </p>
-                      {task.repeat_rule && (
-                        <span className="text-[10px] text-blue-400">🔄 {task.repeat_rule}</span>
-                      )}
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start space-x-3 flex-1 min-w-0">
+                      <input
+                        type="checkbox"
+                        checked={task.is_completed}
+                        onChange={() => onToggleTask(task)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="mt-0.5 rounded-none accent-amber-500 cursor-pointer shrink-0"
+                      />
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[9px] font-ledger uppercase tracking-wider mb-0.5 text-stone-400">
+                          [{task.priority?.toUpperCase()} &bull; {task.estimated_minutes ? `${task.estimated_minutes}M` : '15M'}]
+                        </div>
+                        <p className={`font-editorial text-sm font-semibold tracking-tight text-stone-100 ${task.is_completed ? 'line-through text-stone-500 italic' : ''}`}>
+                          {task.title}
+                        </p>
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <span
-                      className={`text-[10px] uppercase font-semibold px-2 py-0.5 rounded ${
-                        task.priority === 'urgent'
-                          ? 'bg-red-500/20 text-red-400'
-                          : task.priority === 'high'
-                          ? 'bg-amber-500/20 text-amber-400'
-                          : 'bg-zinc-800 text-zinc-400'
-                      }`}
-                    >
+                    <span className={`text-[9px] font-ledger px-1.5 py-0.5 border shrink-0 rounded-none uppercase ${
+                      task.priority === 'urgent'
+                        ? 'bg-rose-950 text-rose-300 border-rose-800'
+                        : task.priority === 'high'
+                        ? 'bg-amber-950 text-amber-300 border-amber-800'
+                        : 'bg-stone-900 text-stone-400 border-stone-800'
+                    }`}>
                       {task.priority}
                     </span>
                   </div>
@@ -279,36 +284,115 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
               ))
             )}
           </div>
-        </div>
 
-        {/* Accomplishment Timeline (Right 1 col) */}
-        <div className="bg-zinc-900/50 border border-zinc-800/80 rounded-2xl p-5">
-          <h2 className="text-sm font-semibold text-zinc-100 mb-4 flex items-center space-x-2">
-            <CheckCircle2 className="w-4 h-4 text-emerald-400" />
-            <span>Completed Today</span>
-          </h2>
+          <div className="pt-2">
+            <button
+              onClick={() => onNavigateToTab('tasks')}
+              className="w-full py-2 border border-stone-700 text-xs font-ledger uppercase tracking-wider text-stone-300 hover:bg-stone-800 transition-colors"
+            >
+              Open Full Clippings Docket ({todayTasks.length}) →
+            </button>
+          </div>
+        </section>
 
-          <div className="space-y-4 max-h-80 overflow-y-auto pr-1">
+        {/* COLUMN 2: THE FINANCIAL LEDGER - 4 COLS */}
+        <section className="md:col-span-4 p-5 space-y-4">
+          <div className="border-b-2 border-stone-800 pb-2 flex justify-between items-baseline">
+            <h3 className="font-editorial text-xl font-bold text-stone-100 tracking-tight uppercase">
+              The Financial Ledger
+            </h3>
+            <span className="text-[10px] font-ledger text-stone-400">BALANCE SHEET</span>
+          </div>
+
+          {/* NET LIQUIDITY CARD */}
+          <div 
+            onClick={() => onNavigateToTab('finance')}
+            className="border border-stone-800 p-3.5 bg-[#0d0d10] cursor-pointer hover:border-stone-700 transition-colors"
+          >
+            <div className="text-[10px] font-ledger uppercase tracking-wider text-stone-400">NET LIQUID CAPITAL</div>
+            <div className="font-ledger text-2xl font-bold text-stone-100 mt-1">
+              ₹ {(financeSummary?.net_worth ?? 0).toLocaleString('en-IN')}
+            </div>
+            <div className="flex justify-between text-[10px] font-ledger text-stone-400 border-t border-stone-800 pt-2 mt-2">
+              <span>BANK: <span className="text-stone-200 font-bold">₹{(financeSummary?.total_bank ?? 0).toLocaleString('en-IN')}</span></span>
+              <span>CASH: <span className="text-stone-200 font-bold">₹{(financeSummary?.total_cash ?? 0).toLocaleString('en-IN')}</span></span>
+            </div>
+          </div>
+
+          {/* TODAY'S OUTFLOW */}
+          <div className="border border-stone-800 p-3 bg-[#131317]">
+            <div className="flex justify-between items-center text-xs font-ledger">
+              <span className="text-stone-400 uppercase text-[10px]">TODAY'S RECORDED OUTFLOW:</span>
+              <span className="text-rose-400 font-bold">
+                ₹ {(financeSummary?.today_spend ?? 0).toLocaleString('en-IN')}
+              </span>
+            </div>
+          </div>
+
+          <div className="pt-2">
+            <button
+              onClick={() => onNavigateToTab('finance')}
+              className="w-full py-2 border border-stone-700 text-xs font-ledger uppercase tracking-wider text-stone-300 hover:bg-stone-800 transition-colors"
+            >
+              View Full Accounts Ledger →
+            </button>
+          </div>
+        </section>
+
+        {/* COLUMN 3: THE WIRE & ACCOMPLISHMENTS - 3 COLS */}
+        <section className="md:col-span-3 p-5 space-y-4 bg-[#0d0d10]">
+          <div className="border-b-2 border-stone-800 pb-2 flex justify-between items-baseline">
+            <h3 className="font-editorial text-xl font-bold text-stone-100 tracking-tight uppercase">
+              The Wire
+            </h3>
+            <span className="text-[10px] font-ledger text-amber-500 animate-pulse">● LIVE DISPATCH</span>
+          </div>
+
+          {/* COMPLETED TIMELINE DISPATCHES */}
+          <div className="space-y-3 font-ledger text-xs text-stone-300 max-h-80 overflow-y-auto">
             {(!performance?.timeline || performance.timeline.length === 0) ? (
-              <div className="text-center py-8 text-zinc-400 text-xs">
-                No items checked off yet today. Check off your first task to start your timeline!
+              <div className="border-b border-stone-800 pb-3 space-y-1">
+                <div className="text-[9px] text-amber-500 font-bold">WIRE NOTICE &bull; STANDBY</div>
+                <p className="font-editorial text-xs text-stone-400 leading-normal">
+                  "No items checked off yet today. Mark your first objective complete to generate telegraph confirmation."
+                </p>
               </div>
             ) : (
-              performance.timeline.map((item, idx) => (
-                <div key={item.id || idx} className="flex items-start space-x-3 text-xs">
-                  <div className="w-2 h-2 mt-1.5 rounded-full bg-emerald-400 shrink-0" />
-                  <div className="flex-1">
-                    <p className="text-zinc-200 font-medium">{item.title}</p>
-                    <p className="text-[10px] text-zinc-400">
-                      {item.completed_at ? new Date(item.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Completed today'}
-                    </p>
+              performance.timeline.slice(0, 6).map((item, idx) => (
+                <div key={item.id || idx} className="border-b border-stone-800 pb-2.5 space-y-0.5">
+                  <div className="text-[9px] text-emerald-400 font-bold uppercase">
+                    CONFIRMED &bull; {item.completed_at ? new Date(item.completed_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'TODAY'}
                   </div>
+                  <p className="font-editorial text-xs text-stone-200 leading-normal line-through">
+                    {item.title}
+                  </p>
                 </div>
               ))
             )}
           </div>
-        </div>
+
+          <div className="pt-2">
+            <div className="border border-stone-800 p-3 bg-[#131317]">
+              <div className="text-[9px] font-ledger uppercase text-stone-400">DRAFTING ROOM NOTICE</div>
+              <div className="font-editorial text-sm font-bold text-stone-100 mt-1">
+                Vector Canvas Active
+              </div>
+              <p className="text-[10px] font-editorial text-stone-400 mt-0.5">
+                Use drafting board for visual sketches & sticky notes.
+              </p>
+            </div>
+          </div>
+        </section>
+
       </div>
+
+      {/* FOOTER IMPRINT */}
+      <footer className="px-6 py-3 border-t-2 border-stone-800 bg-[#0c0c0e] text-center text-[10px] font-ledger text-stone-500 flex flex-col sm:flex-row justify-between items-center gap-2">
+        <div>PUBLISHED AUTONOMOUSLY BY SAGE LIFE OS &bull; HOSTED LOCALLY ON RASPBERRY PI 5</div>
+        <div>NO TRACKERS &bull; ZERO GRADIENTS &bull; EDITORIAL INTEGRITY</div>
+      </footer>
+
     </div>
   );
 };
+

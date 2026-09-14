@@ -65,19 +65,19 @@ export const ListRow: React.FC<ListRowProps> = ({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-xl group select-none">
+    <div className="relative overflow-hidden rounded-none group select-none border border-stone-800/80 mb-2">
       {/* Background action reveals */}
-      <div className="absolute inset-0 flex items-center justify-between px-4 rounded-xl text-white font-medium text-xs pointer-events-none">
+      <div className="absolute inset-0 flex items-center justify-between px-4 text-white font-medium text-xs pointer-events-none rounded-none">
         {/* Left reveal: Swipe Right Complete */}
         <div
           className={`flex items-center space-x-2 transition-opacity duration-150 ${
             dragOffset > 20 ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <div className="w-8 h-8 rounded-full bg-emerald-500 flex items-center justify-center shadow-lg">
+          <div className="w-7 h-7 rounded-none bg-emerald-600 flex items-center justify-center border border-emerald-400">
             <Check className="w-4 h-4 text-white stroke-[3]" />
           </div>
-          <span className="font-semibold text-emerald-400">
+          <span className="font-ledger font-bold text-emerald-400 text-xs uppercase tracking-wider">
             {item.is_completed ? 'Mark Active' : 'Complete'}
           </span>
         </div>
@@ -88,8 +88,8 @@ export const ListRow: React.FC<ListRowProps> = ({
             dragOffset < -20 ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <span className="font-semibold text-rose-400">Delete</span>
-          <div className="w-8 h-8 rounded-full bg-rose-500 flex items-center justify-center shadow-lg">
+          <span className="font-ledger font-bold text-rose-400 text-xs uppercase tracking-wider">Delete</span>
+          <div className="w-7 h-7 rounded-none bg-rose-600 flex items-center justify-center border border-rose-400">
             <Trash2 className="w-4 h-4 text-white" />
           </div>
         </div>
@@ -102,16 +102,16 @@ export const ListRow: React.FC<ListRowProps> = ({
         dragElastic={0.4}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
-        className={`relative z-10 flex items-center justify-between p-3.5 rounded-xl border transition-colors touch-pan-y ${
+        className={`relative z-10 flex items-center justify-between p-3 rounded-none border-b transition-colors touch-pan-y ${
           isHighlighted
-            ? 'ring-2 ring-blue-500/80 bg-zinc-800/90 border-blue-500/40 shadow-lg'
+            ? 'bg-[#18181f] border-amber-500/80'
             : isSelected
-            ? 'bg-blue-950/40 border-blue-500/40'
+            ? 'bg-amber-950/30 border-amber-500/40'
             : item.is_completed
-            ? 'bg-zinc-900/40 border-zinc-800/40 text-zinc-400'
+            ? 'bg-[#0f0f12] border-stone-800/50 text-stone-500'
             : isBlocked
-            ? 'bg-zinc-900/70 border-amber-500/30 text-zinc-300'
-            : 'bg-zinc-900/95 border-zinc-800/90 hover:border-zinc-700 text-zinc-200 shadow-sm'
+            ? 'bg-[#141418] border-amber-600/30 text-stone-300'
+            : 'bg-[#131317] border-stone-800 hover:border-stone-700 text-stone-200'
         }`}
       >
         <div className="flex items-center space-x-3.5 flex-1 min-w-0">
@@ -129,7 +129,7 @@ export const ListRow: React.FC<ListRowProps> = ({
                 type="checkbox"
                 checked={isSelected}
                 onChange={() => {}}
-                className="w-4 h-4 rounded text-blue-600 bg-zinc-800 border-zinc-700 cursor-pointer shrink-0"
+                className="w-4 h-4 rounded-none accent-amber-500 cursor-pointer shrink-0"
               />
             </div>
           ) : (
@@ -145,7 +145,7 @@ export const ListRow: React.FC<ListRowProps> = ({
                 type="checkbox"
                 checked={item.is_completed}
                 onChange={() => {}}
-                className="w-4 h-4 rounded text-blue-600 bg-zinc-800 border-zinc-700 cursor-pointer shrink-0"
+                className="w-4 h-4 rounded-none accent-amber-500 cursor-pointer shrink-0"
               />
             </div>
           )}
@@ -157,17 +157,17 @@ export const ListRow: React.FC<ListRowProps> = ({
           >
             <div className="flex items-center gap-1.5">
               {isBlocked && (
-                <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-400 shrink-0">
-                  <Lock className="w-3.5 h-3.5" />
+                <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-500 shrink-0 font-ledger text-[10px]">
+                  [BLOCKED]
                 </span>
               )}
-              <p className={`text-xs font-medium truncate ${item.is_completed ? 'line-through text-zinc-500' : ''}`}>
+              <p className={`font-editorial text-sm font-semibold tracking-tight text-stone-100 truncate ${item.is_completed ? 'line-through text-stone-500 italic' : ''}`}>
                 {item.title}
               </p>
             </div>
 
             {/* Badges / Meta Info */}
-            <div className="flex items-center space-x-2 mt-1 text-[11px] text-zinc-400 flex-wrap gap-y-1">
+            <div className="flex items-center space-x-2 mt-1 text-[10px] font-ledger text-stone-400 flex-wrap gap-y-1">
               {/* Due Date with Quick Reschedule */}
               {item.due_date && (
                 <div className="relative inline-block">
@@ -177,12 +177,12 @@ export const ListRow: React.FC<ListRowProps> = ({
                       e.stopPropagation();
                       setIsRescheduleOpen(prev => !prev);
                     }}
-                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded text-[10px] font-medium border transition-colors ${
+                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-none text-[9px] font-ledger uppercase tracking-wider border transition-colors ${
                       overdue
-                        ? 'bg-rose-500/10 text-rose-400 border-rose-500/30 font-semibold'
+                        ? 'bg-rose-950/40 text-rose-300 border-rose-800 font-bold'
                         : dueToday
-                        ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
-                        : 'bg-zinc-800/80 text-zinc-300 border-zinc-700/60 hover:border-zinc-600'
+                        ? 'bg-amber-950/40 text-amber-300 border-amber-800'
+                        : 'bg-stone-900 text-stone-300 border-stone-700 hover:border-stone-600'
                     }`}
                   >
                     <Calendar className="w-2.5 h-2.5" />
@@ -201,29 +201,24 @@ export const ListRow: React.FC<ListRowProps> = ({
               {/* Project Badge */}
               {matchedProject && (
                 <span
-                  className="flex items-center space-x-1 text-[10px] px-1.5 py-0.5 rounded border"
-                  style={{
-                    backgroundColor: `${matchedProject.color || '#3b82f6'}15`,
-                    borderColor: `${matchedProject.color || '#3b82f6'}40`,
-                    color: matchedProject.color || '#60a5fa'
-                  }}
+                  className="flex items-center space-x-1 text-[9px] font-ledger uppercase tracking-wider px-1.5 py-0.5 rounded-none border border-stone-700 bg-stone-900 text-stone-300"
                 >
-                  <Folder className="w-2.5 h-2.5" />
+                  <Folder className="w-2.5 h-2.5 text-amber-500" />
                   <span>{matchedProject.name}</span>
                 </span>
               )}
 
               {/* Context Tag */}
               {item.context_tags && (
-                <span className="flex items-center space-x-1 text-[10px] text-zinc-400 bg-zinc-800/70 px-1.5 py-0.5 rounded border border-zinc-700/60">
-                  <Tag className="w-2.5 h-2.5 text-zinc-400" />
+                <span className="flex items-center space-x-1 text-[9px] font-ledger uppercase tracking-wider text-stone-400 bg-stone-900 px-1.5 py-0.5 rounded-none border border-stone-800">
+                  <Tag className="w-2.5 h-2.5 text-stone-400" />
                   <span>{item.context_tags}</span>
                 </span>
               )}
 
               {/* Recurring rule */}
               {item.repeat_rule && (
-                <span className="text-blue-400 text-[10px] flex items-center space-x-0.5 font-mono">
+                <span className="text-amber-400 text-[9px] flex items-center space-x-0.5 font-ledger uppercase">
                   <RotateCw className="w-2.5 h-2.5" />
                   <span>{item.repeat_rule}</span>
                 </span>
@@ -231,8 +226,8 @@ export const ListRow: React.FC<ListRowProps> = ({
 
               {/* Subtasks Count */}
               {item.subtasks && item.subtasks.length > 0 && (
-                <span className="text-[10px] text-zinc-400 font-mono">
-                  ☑ {item.subtasks.filter(s => s.is_completed).length}/{item.subtasks.length}
+                <span className="text-[9px] text-stone-400 font-ledger">
+                  [{item.subtasks.filter(s => s.is_completed).length}/{item.subtasks.length}]
                 </span>
               )}
             </div>
@@ -251,10 +246,10 @@ export const ListRow: React.FC<ListRowProps> = ({
               disabled={isRefining}
               title="Polish with AI"
               aria-label="Polish with AI"
-              className="min-w-[32px] min-h-[32px] flex items-center justify-center text-zinc-500 hover:text-blue-400 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+              className="min-w-[30px] min-h-[30px] flex items-center justify-center text-stone-500 hover:text-amber-400 p-1 border border-stone-800 rounded-none hover:bg-stone-800 transition-colors"
             >
               {isRefining ? (
-                <RotateCw className="w-3.5 h-3.5 animate-spin text-blue-400" />
+                <RotateCw className="w-3.5 h-3.5 animate-spin text-amber-400" />
               ) : (
                 <Sparkles className="w-3.5 h-3.5" />
               )}
@@ -263,14 +258,14 @@ export const ListRow: React.FC<ListRowProps> = ({
 
           {/* Priority Badge */}
           <span
-            className={`text-[10px] uppercase font-bold px-2 py-0.5 rounded ${
+            className={`text-[9px] uppercase font-ledger font-bold px-1.5 py-0.5 rounded-none border ${
               item.priority === 'urgent'
-                ? 'bg-red-500/20 text-red-400 border border-red-500/30'
+                ? 'bg-rose-950 text-rose-300 border-rose-700'
                 : item.priority === 'high'
-                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                ? 'bg-amber-950 text-amber-300 border-amber-700'
                 : item.priority === 'low'
-                ? 'bg-zinc-800/80 text-zinc-400'
-                : 'bg-blue-500/10 text-blue-400 border border-blue-500/20'
+                ? 'bg-stone-900 text-stone-400 border-stone-800'
+                : 'bg-stone-900 text-stone-300 border-stone-700'
             }`}
           >
             {item.priority}
@@ -283,7 +278,7 @@ export const ListRow: React.FC<ListRowProps> = ({
               onDelete(item.id);
             }}
             aria-label={`Delete task: ${item.title}`}
-            className="min-w-[32px] min-h-[32px] flex items-center justify-center text-zinc-500 hover:text-rose-400 p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+            className="min-w-[30px] min-h-[30px] flex items-center justify-center text-stone-500 hover:text-rose-400 p-1 border border-stone-800 rounded-none hover:bg-stone-800 transition-colors"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>

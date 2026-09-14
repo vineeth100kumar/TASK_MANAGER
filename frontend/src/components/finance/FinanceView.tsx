@@ -56,11 +56,11 @@ const TransactionRow: React.FC<{
   const [dragOffset, setDragOffset] = useState(0);
 
   return (
-    <div className="relative overflow-hidden rounded-xl bg-zinc-900 border border-zinc-800/80">
+    <div className="relative overflow-hidden rounded-none bg-[#111115] border border-stone-800/80 mb-1.5">
       {/* Background Swipe Action: Delete */}
       <div
-        className={`absolute inset-0 flex items-center justify-end px-4 transition-colors ${
-          dragOffset <= -60 ? 'bg-rose-600 text-white' : 'bg-rose-950/40 text-rose-400'
+        className={`absolute inset-0 flex items-center justify-end px-4 transition-colors rounded-none ${
+          dragOffset <= -60 ? 'bg-rose-700 text-white' : 'bg-rose-950/60 text-rose-400'
         }`}
       >
         <Trash2 className="w-4 h-4" />
@@ -81,16 +81,16 @@ const TransactionRow: React.FC<{
         }}
         animate={{ x: 0 }}
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        className="relative flex items-center justify-between p-3 bg-zinc-900 text-xs select-none"
+        className="relative flex items-center justify-between p-3 bg-[#131317] text-xs select-none rounded-none border-b border-stone-800"
       >
         <div className="flex items-center space-x-3 truncate pr-2">
           <div
-            className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+            className={`w-7 h-7 rounded-none border flex items-center justify-center shrink-0 ${
               tx.type === 'expense'
-                ? 'bg-red-500/10 text-red-400'
+                ? 'bg-rose-950/40 text-rose-400 border-rose-800'
                 : tx.type === 'income'
-                ? 'bg-emerald-500/10 text-emerald-400'
-                : 'bg-blue-500/10 text-blue-400'
+                ? 'bg-emerald-950/40 text-emerald-400 border-emerald-800'
+                : 'bg-stone-900 text-amber-400 border-stone-700'
             }`}
           >
             {tx.type === 'expense' ? (
@@ -98,26 +98,45 @@ const TransactionRow: React.FC<{
             ) : tx.type === 'income' ? (
               <ArrowUpRight className="w-4 h-4" />
             ) : (
-              <RefreshCw className="w-4 h-4" />
+              <RefreshCw className="w-3.5 h-3.5" />
             )}
           </div>
+
           <div className="truncate">
-            <p className="font-medium text-zinc-200 truncate">{tx.description || tx.category_name || 'Transaction'}</p>
-            <p className="text-[10px] text-zinc-400 truncate">
-              {tx.account_name} • <span className="uppercase font-semibold text-blue-400">{tx.payment_mode}</span> • {tx.date}
+            <p className="font-editorial text-sm font-semibold text-stone-100 truncate">
+              {tx.description || (tx.type === 'transfer' ? 'Internal Transfer' : 'Unspecified Ledger Entry')}
             </p>
+            <div className="flex items-center space-x-2 text-[10px] font-ledger text-stone-400 mt-0.5">
+              <span>{tx.date}</span>
+              <span>&bull;</span>
+              <span className="uppercase text-stone-300 font-bold">{tx.payment_mode}</span>
+              {tx.account_name && (
+                <>
+                  <span>&bull;</span>
+                  <span className="text-stone-400">{tx.account_name}</span>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center space-x-3 shrink-0">
-          <span className={`font-bold font-mono ${tx.type === 'expense' ? 'text-zinc-100' : 'text-emerald-400'}`}>
-            {tx.type === 'expense' ? `-₹${tx.amount}` : `+₹${tx.amount}`}
+        <div className="flex items-center space-x-2 shrink-0">
+          <span
+            className={`font-ledger text-sm font-bold tracking-tight ${
+              tx.type === 'expense'
+                ? 'text-rose-400'
+                : tx.type === 'income'
+                ? 'text-emerald-400'
+                : 'text-stone-300'
+            }`}
+          >
+            {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}₹{tx.amount.toLocaleString('en-IN')}
           </span>
+
           <button
             onClick={() => onDelete(tx.id)}
-            aria-label={`Delete transaction: ₹${tx.amount}`}
-            className="text-zinc-500 hover:text-red-400 p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded transition-colors"
-            title="Delete transaction"
+            className="hidden sm:flex text-stone-500 hover:text-rose-400 p-1 rounded-none border border-stone-800 hover:bg-stone-800 transition-colors"
+            title="Delete entry"
           >
             <Trash2 className="w-3.5 h-3.5" />
           </button>
@@ -381,30 +400,35 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   return (
     <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
       {/* Header & Quick Log Button */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-stone-800 pb-3">
         <div>
-          <h1 className="text-xl font-bold text-zinc-100">Personal Finance Tracker</h1>
-          <p className="text-xs text-zinc-400">
-            Total Net Worth: ₹{(summary?.net_worth ?? 0).toLocaleString('en-IN')} • Today's Spend: ₹{summary?.today_spend ?? 0}
+          <div className="text-[10px] font-ledger uppercase tracking-widest text-amber-500 mb-0.5">
+            SECTION V &bull; FISCAL COMMUNIQUÉ
+          </div>
+          <h1 className="font-editorial text-2xl sm:text-3xl font-bold text-stone-100 uppercase tracking-tight">
+            The Financial Ledger
+          </h1>
+          <p className="text-[11px] font-ledger text-stone-400 uppercase tracking-wider mt-0.5">
+            NET LIQUID CAPITAL: ₹{(summary?.net_worth ?? 0).toLocaleString('en-IN')} &bull; TODAY'S DISBURSEMENTS: ₹{summary?.today_spend ?? 0}
           </p>
         </div>
 
         <div className="flex items-center space-x-2 self-start sm:self-auto">
           <button
             onClick={() => setIsCreatingAccount(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold border border-zinc-700 transition-all"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-none bg-stone-900 hover:bg-stone-800 text-stone-300 text-xs font-ledger uppercase tracking-wider border border-stone-700 transition-colors"
           >
-            <Plus className="w-4 h-4 text-zinc-400" />
-            <span>Add Account</span>
+            <Plus className="w-3.5 h-3.5 text-stone-400" />
+            <span>+ New Account</span>
           </button>
           <button
             onClick={() => {
               setIsAdding(true);
               selectPaymentMode(paymentMode || 'upi');
             }}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold shadow-lg shadow-blue-600/20 transition-all"
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-none bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-ledger font-bold uppercase tracking-wider border border-amber-500 transition-colors"
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-3.5 h-3.5" />
             <span>Log Transaction</span>
           </button>
         </div>

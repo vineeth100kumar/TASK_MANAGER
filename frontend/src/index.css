@@ -16,4 +16,26 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  .double-rule {
+    border-top: 3px double #3a3a40;
+    border-bottom: 1px solid #3a3a40;
+  }
+  .single-rule {
+    border-top: 1px solid #27272c;
+  }
+  .col-rule {
+    border-right: 1px solid #27272c;
+  }
+  .drop-cap::first-letter {
+    font-family: 'Newsreader', Georgia, serif;
+    float: left;
+    font-size: 3.6rem;
+    line-height: 0.8;
+    padding-top: 4px;
+    padding-right: 8px;
+    padding-bottom: 2px;
+    color: #d97706;
+    font-weight: 700;
+  }
 }
+

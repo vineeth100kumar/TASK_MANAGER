@@ -11,13 +11,13 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   className = '',
   count = 1
 }) => {
-  const baseClasses = 'animate-pulse bg-zinc-800/70 rounded-xl';
+  const baseClasses = 'animate-pulse bg-stone-900 border border-stone-800 rounded-none';
 
   const variantClasses = {
     card: 'h-32 w-full',
-    row: 'h-14 w-full',
-    text: 'h-4 w-3/4 rounded-md',
-    circle: 'w-10 h-10 rounded-full'
+    row: 'h-12 w-full',
+    text: 'h-3.5 w-3/4',
+    circle: 'w-8 h-8'
   };
 
   const elements = Array.from({ length: count }, (_, i) => (

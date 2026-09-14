@@ -17,22 +17,22 @@ export const Button: React.FC<ButtonProps> = ({
   disabled,
   ...props
 }) => {
-  const baseClasses = 'inline-flex items-center justify-center font-semibold transition-all rounded-xl active:scale-95 disabled:opacity-50 disabled:pointer-events-none disabled:active:scale-100 select-none';
+  const baseClasses = 'inline-flex items-center justify-center font-ledger font-bold uppercase tracking-wider transition-colors rounded-none active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none select-none border';
 
   const sizeClasses = {
-    xs: 'px-2.5 py-1 text-xs gap-1.5',
-    sm: 'px-3.5 py-1.5 text-xs gap-2',
-    md: 'px-4 py-2 text-sm gap-2',
-    lg: 'px-5 py-2.5 text-base gap-2.5'
+    xs: 'px-2 py-1 text-[10px] gap-1',
+    sm: 'px-3 py-1.5 text-xs gap-1.5',
+    md: 'px-4 py-2 text-xs gap-2',
+    lg: 'px-5 py-2.5 text-sm gap-2.5'
   };
 
   const variantClasses = {
-    primary: 'bg-blue-600 hover:bg-blue-500 text-white shadow-md shadow-blue-600/20',
-    secondary: 'bg-zinc-800 hover:bg-zinc-700 text-zinc-200 hover:text-white border border-zinc-700',
-    ghost: 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/80',
-    danger: 'bg-rose-600 hover:bg-rose-500 text-white shadow-md shadow-rose-600/20',
-    outline: 'border border-zinc-700 text-zinc-300 hover:text-white hover:bg-zinc-800',
-    gradient: 'bg-gradient-to-r from-blue-600 via-indigo-600 to-purple-600 text-white shadow-md hover:brightness-110'
+    primary: 'bg-amber-600 hover:bg-amber-500 text-stone-950 border-amber-500 font-black',
+    secondary: 'bg-stone-900 hover:bg-stone-800 text-stone-200 hover:text-white border-stone-700',
+    ghost: 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-stone-900',
+    danger: 'bg-stone-950 hover:bg-rose-950/80 text-rose-400 border-rose-800',
+    outline: 'border-stone-700 text-stone-300 hover:text-white hover:bg-stone-900',
+    gradient: 'bg-stone-900 hover:bg-stone-800 text-amber-400 border-amber-600'
   };
 
   return (

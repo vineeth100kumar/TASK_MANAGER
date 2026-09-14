@@ -41,9 +41,14 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({
   };
 
   return (
-    <div className="w-full bg-zinc-900/80 border border-zinc-800 rounded-2xl p-3 shadow-lg backdrop-blur-md space-y-2.5 transition-all focus-within:border-blue-500/50 focus-within:ring-1 focus-within:ring-blue-500/20">
-      <form onSubmit={handleSubmit} className="flex items-center gap-2">
-        <div className="w-7 h-7 rounded-lg bg-blue-600/20 text-blue-400 flex items-center justify-center shrink-0">
+    <div className="w-full bg-[#101013] border-2 border-stone-800 rounded-none p-3 shadow-none space-y-2.5 transition-all focus-within:border-amber-600/70">
+      <div className="flex justify-between items-center text-[9px] font-ledger uppercase tracking-widest text-stone-500 border-b border-stone-800/80 pb-1.5">
+        <span>TELEGRAM DISPATCH ENTRY &bull; 0MS CLIENT NLP</span>
+        <span className="text-amber-500">FORMAT: "Title tomorrow 5pm #project !high @context ~30m"</span>
+      </div>
+
+      <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-0.5">
+        <div className="w-7 h-7 rounded-none bg-stone-900 border border-stone-700 text-amber-500 flex items-center justify-center shrink-0">
           <Plus className="w-4 h-4" />
         </div>
 
@@ -54,52 +59,53 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({
           onChange={(e) => setInput(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-          placeholder='Quick Add: "Buy groceries tomorrow 5pm #Personal !high @errand ~30m"'
-          className="flex-1 bg-transparent text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none"
+          placeholder='Draft clipping: "Review quarterly taxes tomorrow 5pm #Finance !high @audit ~45m"'
+          className="flex-1 bg-transparent text-xs font-ledger text-stone-100 placeholder-stone-600 focus:outline-none rounded-none"
         />
 
         <div className="flex items-center space-x-1.5 shrink-0">
           <button
             type="button"
             onClick={onOpenAiBrainDump}
-            title="Open AI Brain Dump for unstructured paragraphs"
-            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-lg bg-indigo-600/10 hover:bg-indigo-600/20 text-indigo-400 border border-indigo-500/20 text-xs font-medium transition-all"
+            title="Open The Wire for unstructured notes"
+            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-none bg-stone-900 hover:bg-stone-800 text-amber-400 border border-stone-700 text-xs font-ledger uppercase tracking-wider transition-colors"
           >
-            <Sparkles className="w-3 h-3 text-indigo-400" />
-            <span className="hidden sm:inline">AI Brain Dump</span>
+            <Sparkles className="w-3 h-3 text-amber-400" />
+            <span className="hidden sm:inline">The Wire</span>
           </button>
 
           <button
             type="submit"
             disabled={!parsed.title}
-            className={`flex items-center justify-center w-7 h-7 rounded-lg transition-all ${
+            className={`flex items-center justify-center px-3 py-1.5 rounded-none transition-colors border text-xs font-ledger uppercase font-bold tracking-wider ${
               parsed.title
-                ? 'bg-blue-600 hover:bg-blue-500 text-white shadow-md active:scale-95'
-                : 'bg-zinc-800 text-zinc-600 cursor-not-allowed'
+                ? 'bg-amber-600 hover:bg-amber-500 text-stone-950 border-amber-500 font-black'
+                : 'bg-stone-900 text-stone-600 border-stone-800 cursor-not-allowed'
             }`}
           >
-            <ArrowRight className="w-3.5 h-3.5" />
+            <ArrowRight className="w-3.5 h-3.5 mr-1" />
+            <span>DISPATCH</span>
           </button>
         </div>
       </form>
 
       {/* Live Interactive Token Preview Pills */}
       {parsed.tokens.length > 0 && (
-        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-zinc-800/60 text-[11px]">
-          <span className="text-zinc-500 font-medium text-[10px] uppercase tracking-wider shrink-0">Detected:</span>
+        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-stone-800/80 text-[10px] font-ledger">
+          <span className="text-stone-500 font-bold uppercase tracking-wider shrink-0 text-[9px]">DETECTED:</span>
           {parsed.tokens.map((token, idx) => (
             <span
               key={idx}
-              className={`px-2 py-0.5 rounded-md font-medium whitespace-nowrap border shadow-sm ${
+              className={`px-1.5 py-0.5 rounded-none uppercase whitespace-nowrap border ${
                 token.type === 'priority'
-                  ? 'bg-red-500/10 text-red-400 border-red-500/30'
+                  ? 'bg-rose-950/60 text-rose-300 border-rose-800'
                   : token.type === 'project'
-                  ? 'bg-blue-500/10 text-blue-400 border-blue-500/30'
+                  ? 'bg-stone-900 text-stone-200 border-stone-700'
                   : token.type === 'date' || token.type === 'time'
-                  ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                  ? 'bg-amber-950/60 text-amber-300 border-amber-800'
                   : token.type === 'tag'
-                  ? 'bg-purple-500/10 text-purple-300 border-purple-500/30'
-                  : 'bg-zinc-800 text-zinc-300 border-zinc-700'
+                  ? 'bg-stone-900 text-amber-400 border-amber-800/60'
+                  : 'bg-stone-900 text-stone-300 border-stone-700'
               }`}
             >
               {token.display}
