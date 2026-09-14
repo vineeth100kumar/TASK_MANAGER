@@ -23,11 +23,11 @@ services:
     build:
       context: .
       dockerfile: frontend.Dockerfile
-      args:
-        - VITE_API_SECRET=${API_SECRET}
     restart: unless-stopped
     ports:
       - "80:80"
+    volumes:
+      - ./frontend/dist:/usr/share/nginx/html:ro
     depends_on:
       - backend
 

@@ -73,8 +73,9 @@ server {
     location / {
         root $REPO_DIR/frontend/dist;
         index index.html;
-        try_files \$uri \$uri/ /index.html;
+        try_files \$uri \$uri/ /index.html =404;
     }
+
 
     # API Proxy to FastAPI Backend
     location /api/ {
