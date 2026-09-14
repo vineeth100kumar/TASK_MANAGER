@@ -245,6 +245,7 @@ export interface Point {
   x: number;
   y: number;
   pressure?: number;
+  t?: number;
 }
 
 export interface StrokeElement {
@@ -293,11 +294,22 @@ export interface TextElement {
   width?: number;
 }
 
+export interface ImageElement {
+  id: string;
+  type: 'image';
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  dataUrl: string;
+}
+
 export type WhiteboardElement =
   | StrokeElement
   | ShapeElement
   | StickyElement
-  | TextElement;
+  | TextElement
+  | ImageElement;
 
 export interface ViewState {
   panX: number;

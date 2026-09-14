@@ -18,8 +18,8 @@ import {
   Zap,
   ChevronUp,
   ChevronDown,
-  Minimize2,
-  Maximize2
+  Image as ImageIcon,
+  MoreHorizontal
 } from 'lucide-react';
 import { WhiteboardTool, ShapeType, StickyColor } from '../../types';
 
@@ -32,6 +32,8 @@ interface WhiteboardToolbarProps {
   setActiveSize: (size: number) => void;
   activeShape: ShapeType;
   setActiveShape: (shape: ShapeType) => void;
+  activeFillColor?: string | null;
+  setActiveFillColor?: (color: string | null) => void;
   highlighterColor: string;
   setHighlighterColor: (color: string) => void;
   highlighterSize: number;
@@ -42,6 +44,8 @@ interface WhiteboardToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
   onClear: () => void;
+  onTriggerImageUpload?: () => void;
+  onOpenMoreSheet?: () => void;
   edition?: 'day' | 'night';
 }
 
@@ -87,6 +91,16 @@ const STICKY_COLORS: { color: StickyColor; hex: string; name: string }[] = [
   { color: 'orange', hex: '#fed7aa', name: 'Manila Buff' },
 ];
 
+const FILL_COLORS = [
+  '#FFFFFF',
+  '#fef08a',
+  '#bbf7d0',
+  '#bae6fd',
+  '#fbcfe8',
+  '#e9d5ff',
+  '#1e293b',
+];
+
 export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   activeTool,
   setActiveTool,
@@ -96,6 +110,8 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   setActiveSize,
   activeShape,
   setActiveShape,
+  activeFillColor = null,
+  setActiveFillColor,
   highlighterColor,
   setHighlighterColor,
   highlighterSize,
@@ -106,6 +122,8 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   canUndo,
   canRedo,
   onClear,
+  onTriggerImageUpload,
+  onOpenMoreSheet,
   edition = 'day',
 }) => {
   const [showPenFlyout, setShowPenFlyout] = useState(false);
@@ -113,8 +131,17 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   const [showShapeFlyout, setShowShapeFlyout] = useState(false);
   const [showStickyFlyout, setShowStickyFlyout] = useState(false);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isMobile, setIsMobile] = useState(typeof window !== 'undefined' ? window.innerWidth < 640 : false);
 
   const toolbarRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 640);
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
 
   // Close flyouts on outside click
   useEffect(() => {
@@ -176,12 +203,16 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     : 'hover:bg-paper-aged text-ink-primary';
 
   const btnActiveClass = isNight
-    ? 'bg-amber-600/30 text-amber-400 border-amber-600/60'
-    : 'bg-ink-primary text-paper-white border-ink-primary';
+    ? 'bg-amber-600/30 text-amber-400 border-amber-600/60 font-bold'
+    : 'bg-ink-primary text-paper-white border-ink-primary font-bold';
+
+  const bottomStyle = {
+    bottom: 'max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem))'
+  };
 
   if (isCollapsed) {
     return (
-      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30">
+      <div style={bottomStyle} className="fixed left-1/2 -translate-x-1/2 z-30">
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
@@ -196,10 +227,184 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     );
   }
 
+  // -------------------------------------------------------------
+  // MOBILE COMPACT TOOLBAR (< 640px)
+  // -------------------------------------------------------------
+  if (isMobile) {
+    return (
+      <div
+        ref={toolbarRef}
+        style={bottomStyle}
+        className={`fixed left-1/2 -translate-x-1/2 z-30 flex items-center gap-1.5 p-1.5 border-2 shadow-2xl rounded-[1px] select-none ${containerClass}`}
+      >
+        {/* Select */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTool('select');
+            setShowPenFlyout(false);
+            setShowStickyFlyout(false);
+          }}
+          className={`p-2 rounded-[1px] border transition-colors ${
+            activeTool === 'select' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+          }`}
+          title="Select (V)"
+        >
+          <MousePointer size={18} />
+        </button>
+
+        {/* Pen */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={selectPen}
+            className={`p-2 rounded-[1px] border flex items-center gap-1 transition-colors ${
+              activeTool === 'pen' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+            }`}
+            title="Pen (P)"
+          >
+            <Pen size={18} />
+            <div
+              className="w-2.5 h-2.5 rounded-[1px] border border-black/30 shadow-xs"
+              style={{ backgroundColor: activeColor }}
+            />
+          </button>
+
+          {showPenFlyout && (
+            <div
+              className={`absolute bottom-12 left-0 p-3 border-2 shadow-2xl rounded-[1px] w-52 space-y-3 z-40 ${containerClass}`}
+            >
+              <div>
+                <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                  Ink Color
+                </div>
+                <div className="grid grid-cols-4 gap-1.5">
+                  {PEN_COLORS.map((hex) => (
+                    <button
+                      key={hex}
+                      type="button"
+                      onClick={() => {
+                        setActiveColor(hex);
+                        setShowPenFlyout(false);
+                      }}
+                      className={`h-6 rounded-[1px] border border-black/20 flex items-center justify-center transition-transform ${
+                        activeColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: hex }}
+                    />
+                  ))}
+                </div>
+              </div>
+
+              <div>
+                <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                  Line Width
+                </div>
+                <div className="grid grid-cols-2 gap-1 text-[10px] font-ledger">
+                  {PEN_SIZES.map((s) => (
+                    <button
+                      key={s.size}
+                      type="button"
+                      onClick={() => {
+                        setActiveSize(s.size);
+                        setShowPenFlyout(false);
+                      }}
+                      className={`px-2 py-1 border rounded-[1px] text-center ${
+                        activeSize === s.size ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                      }`}
+                    >
+                      {s.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Eraser */}
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTool('eraser');
+            setShowPenFlyout(false);
+            setShowStickyFlyout(false);
+          }}
+          className={`p-2 rounded-[1px] border transition-colors ${
+            activeTool === 'eraser' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+          }`}
+          title="Eraser (E)"
+        >
+          <Eraser size={18} />
+        </button>
+
+        {/* Sticky Note */}
+        <div className="relative">
+          <button
+            type="button"
+            onClick={() => {
+              setShowStickyFlyout((prev) => !prev);
+              setShowPenFlyout(false);
+            }}
+            className={`p-2 rounded-[1px] border transition-colors ${
+              showStickyFlyout ? btnActiveClass : `border-transparent ${btnHoverClass}`
+            }`}
+            title="Sticky Note"
+          >
+            <StickyNote size={18} />
+          </button>
+
+          {showStickyFlyout && (
+            <div
+              className={`absolute bottom-12 left-0 p-2.5 border-2 shadow-2xl rounded-[1px] w-48 space-y-2 z-40 ${containerClass}`}
+            >
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold text-ink-muted">
+                Select Note Color
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {STICKY_COLORS.map((sc) => (
+                  <button
+                    key={sc.color}
+                    type="button"
+                    onClick={() => {
+                      onAddSticky(sc.color);
+                      setShowStickyFlyout(false);
+                    }}
+                    className="h-8 rounded-[1px] border border-black/30 shadow-xs flex items-center justify-center hover:scale-105 active:scale-95 transition-transform text-[9px] font-ledger font-bold text-black/70"
+                    style={{ backgroundColor: sc.hex }}
+                    title={sc.name}
+                  >
+                    {sc.name.split(' ')[0]}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-stone-700' : 'bg-ink-rule'}`} />
+
+        {/* More Instruments (...) */}
+        <button
+          type="button"
+          onClick={onOpenMoreSheet}
+          className={`p-2 rounded-[1px] border border-transparent transition-colors ${btnHoverClass}`}
+          title="More Instruments"
+        >
+          <MoreHorizontal size={18} />
+        </button>
+      </div>
+    );
+  }
+
+  // -------------------------------------------------------------
+  // DESKTOP FULL INSTRUMENT RACK (>= 640px)
+  // -------------------------------------------------------------
   return (
     <div
       ref={toolbarRef}
-      className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1.5 border-2 shadow-2xl rounded-[1px] select-none transition-all ${containerClass}`}
+      style={bottomStyle}
+      className={`fixed left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1.5 border-2 shadow-2xl rounded-[1px] select-none transition-all ${containerClass}`}
     >
       {/* 1. SELECT TOOL */}
       <button
@@ -297,9 +502,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                       setShowPenFlyout(false);
                     }}
                     className={`px-2 py-1 border rounded-[1px] text-center ${
-                      activeSize === s.size
-                        ? btnActiveClass
-                        : `border-transparent ${btnHoverClass}`
+                      activeSize === s.size ? btnActiveClass : `border-transparent ${btnHoverClass}`
                     }`}
                   >
                     {s.label}
@@ -389,9 +592,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                       setShowHighlighterFlyout(false);
                     }}
                     className={`px-1.5 py-1 border rounded-[1px] text-center ${
-                      highlighterSize === s.size
-                        ? btnActiveClass
-                        : `border-transparent ${btnHoverClass}`
+                      highlighterSize === s.size ? btnActiveClass : `border-transparent ${btnHoverClass}`
                     }`}
                   >
                     {s.label}
@@ -440,76 +641,113 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
           {activeShape === 'line' && <Minus size={16} />}
         </button>
 
-        {/* Shapes Flyout */}
+        {/* Shapes Flyout with Shape Types & Fill Color */}
         {showShapeFlyout && (
           <div
-            className={`absolute bottom-12 left-0 p-2 border-2 shadow-2xl rounded-[1px] flex gap-1 z-40 ${containerClass}`}
+            className={`absolute bottom-12 left-0 p-3 border-2 shadow-2xl rounded-[1px] space-y-3 z-40 w-56 ${containerClass}`}
           >
-            <button
-              type="button"
-              onClick={() => {
-                setActiveShape('rectangle');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-[1px] border ${
-                activeShape === 'rectangle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
-              }`}
-              title="Rectangle"
-            >
-              <Square size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveShape('circle');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-[1px] border ${
-                activeShape === 'circle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
-              }`}
-              title="Circle / Ellipse"
-            >
-              <Circle size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveShape('diamond');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-[1px] border ${
-                activeShape === 'diamond' ? btnActiveClass : `border-transparent ${btnHoverClass}`
-              }`}
-              title="Diamond / Decision"
-            >
-              <Diamond size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveShape('arrow');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-[1px] border ${
-                activeShape === 'arrow' ? btnActiveClass : `border-transparent ${btnHoverClass}`
-              }`}
-              title="Flow Arrow"
-            >
-              <ArrowUpRight size={16} />
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setActiveShape('line');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-[1px] border ${
-                activeShape === 'line' ? btnActiveClass : `border-transparent ${btnHoverClass}`
-              }`}
-              title="Straight Line"
-            >
-              <Minus size={16} />
-            </button>
+            <div>
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                Shape Type
+              </div>
+              <div className="flex gap-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveShape('rectangle');
+                    setShowShapeFlyout(false);
+                  }}
+                  className={`p-2 rounded-[1px] border ${
+                    activeShape === 'rectangle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                  }`}
+                  title="Rectangle"
+                >
+                  <Square size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveShape('circle');
+                    setShowShapeFlyout(false);
+                  }}
+                  className={`p-2 rounded-[1px] border ${
+                    activeShape === 'circle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                  }`}
+                  title="Circle / Ellipse"
+                >
+                  <Circle size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveShape('diamond');
+                    setShowShapeFlyout(false);
+                  }}
+                  className={`p-2 rounded-[1px] border ${
+                    activeShape === 'diamond' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                  }`}
+                  title="Diamond / Decision"
+                >
+                  <Diamond size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveShape('arrow');
+                    setShowShapeFlyout(false);
+                  }}
+                  className={`p-2 rounded-[1px] border ${
+                    activeShape === 'arrow' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                  }`}
+                  title="Flow Arrow"
+                >
+                  <ArrowUpRight size={16} />
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setActiveShape('line');
+                    setShowShapeFlyout(false);
+                  }}
+                  className={`p-2 rounded-[1px] border ${
+                    activeShape === 'line' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+                  }`}
+                  title="Straight Line"
+                >
+                  <Minus size={16} />
+                </button>
+              </div>
+            </div>
+
+            {/* Shape Fill Color Selection */}
+            {setActiveFillColor && (
+              <div className="pt-2 border-t border-ink-base/15 dark:border-stone-700">
+                <div className="flex items-center justify-between text-[9px] font-ledger uppercase tracking-wider font-bold mb-1 text-ink-muted">
+                  <span>Fill Tone</span>
+                  <button
+                    type="button"
+                    onClick={() => setActiveFillColor(null)}
+                    className={activeFillColor === null ? "text-amber-600 dark:text-amber-400 font-bold text-[9px]" : "text-ink-muted text-[9px]"}
+                  >
+                    None
+                  </button>
+                </div>
+                <div className="grid grid-cols-7 gap-1">
+                  {FILL_COLORS.map((c) => (
+                    <button
+                      key={c}
+                      type="button"
+                      onClick={() => setActiveFillColor(c)}
+                      className={`w-5 h-5 rounded-[1px] border transition-transform ${
+                        activeFillColor === c ? 'ring-2 ring-amber-500 border-black/40 scale-110' : 'border-black/20 hover:scale-105'
+                      }`}
+                      style={{ backgroundColor: c }}
+                      title={c}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -579,9 +817,21 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <Type size={16} />
       </button>
 
+      {/* 10. INSERT IMAGE BUTTON */}
+      {onTriggerImageUpload && (
+        <button
+          type="button"
+          onClick={onTriggerImageUpload}
+          className={`p-2 rounded-[1px] border border-transparent transition-colors ${btnHoverClass}`}
+          title="Insert Image (Paste / Upload)"
+        >
+          <ImageIcon size={16} />
+        </button>
+      )}
+
       <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-stone-700' : 'bg-ink-rule'}`} />
 
-      {/* 10. UNDO / REDO */}
+      {/* 11. UNDO / REDO */}
       <button
         type="button"
         onClick={onUndo}
@@ -605,7 +855,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <Redo2 size={16} />
       </button>
 
-      {/* 11. CLEAR BOARD */}
+      {/* 12. CLEAR BOARD */}
       <button
         type="button"
         onClick={onClear}
@@ -615,7 +865,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <Trash2 size={16} />
       </button>
 
-      {/* 12. MINIMIZE TOOLBAR BUTTON */}
+      {/* 13. MINIMIZE TOOLBAR BUTTON */}
       <button
         type="button"
         onClick={() => setIsCollapsed(true)}

@@ -5,6 +5,7 @@ import {
   WhiteboardListItem,
   WhiteboardElement,
   StickyElement,
+  ImageElement,
   WhiteboardTool,
   WhiteboardGridType,
   ShapeType,
@@ -16,6 +17,8 @@ import {
 import { WhiteboardCanvas, WhiteboardCanvasRef } from './WhiteboardCanvas';
 import { WhiteboardToolbar } from './WhiteboardToolbar';
 import { WhiteboardHeader } from './WhiteboardHeader';
+import { WhiteboardMinimap } from './WhiteboardMinimap';
+import { WhiteboardBottomSheet } from './WhiteboardBottomSheet';
 import { StickyNoteOverlay } from './StickyNoteOverlay';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
@@ -37,6 +40,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
 }) => {
   const toast = useToast();
   const canvasRef = useRef<WhiteboardCanvasRef | null>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Board Data
   const [board, setBoard] = useState<Whiteboard | null>(null);
@@ -49,11 +53,16 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   const [activeColor, setActiveColor] = useState<string>(edition === 'night' ? '#FFFFFF' : '#1A1814');
   const [activeSize, setActiveSize] = useState<number>(4);
   const [activeShape, setActiveShape] = useState<ShapeType>('rectangle');
+  const [activeFillColor, setActiveFillColor] = useState<string | null>(null);
   const [highlighterColor, setHighlighterColor] = useState<string>('#facc15');
   const [highlighterSize, setHighlighterSize] = useState<number>(22);
   const [selectedElementId, setSelectedElementId] = useState<string | null>(null);
+  const [selectedElementIds, setSelectedElementIds] = useState<Set<string>>(new Set());
 
-  // New Drafting Features
+  // Mobile Bottom Sheet
+  const [isMoreSheetOpen, setIsMoreSheetOpen] = useState(false);
+
+  // Drafting Settings
   const [gridType, setGridType] = useState<WhiteboardGridType>('dots');
   const [stylusOnly, setStylusOnly] = useState(false);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
@@ -147,7 +156,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       setIsSaving(true);
       saveTimeoutRef.current = window.setTimeout(async () => {
         try {
-          // Generate thumbnail snapshot if elements exist
           let thumb: string | undefined = undefined;
           if (canvasRef.current && elementsToSave.length > 0) {
             try {
@@ -273,7 +281,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         status: 'todo',
       });
 
-      // Stamp the sticky note as converted
       const nextElements = board?.elements.map((el) =>
         el.id === sticky.id ? ({ ...el, convertedTaskId: created.id } as WhiteboardElement) : el
       );
@@ -291,7 +298,79 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   };
 
   // -------------------------------------------------------------
-  // 6. BOARD MANAGEMENT
+  // 6. IMAGE INSERTION (Paste & Drag-and-Drop)
+  // -------------------------------------------------------------
+  const fileToDataUrl = (file: File): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+
+  const insertImageFile = useCallback(
+    async (file: File) => {
+      if (!board) return;
+      try {
+        const dataUrl = await fileToDataUrl(file);
+        const img = new Image();
+        img.onload = () => {
+          const maxW = 480;
+          const maxH = 360;
+          const ratio = Math.min(maxW / img.width, maxH / img.height, 1);
+          const w = Math.round(img.width * ratio);
+          const h = Math.round(img.height * ratio);
+          const cx = (window.innerWidth / 2 - viewState.panX) / viewState.zoom;
+          const cy = (window.innerHeight / 2 - viewState.panY) / viewState.zoom;
+
+          const newImg: ImageElement = {
+            id: `img_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            type: 'image',
+            x: Math.round(cx - w / 2),
+            y: Math.round(cy - h / 2),
+            width: w,
+            height: h,
+            dataUrl,
+          };
+
+          handleElementsChange([...board.elements, newImg], true);
+          toast.success('Image clipping placed onto canvas');
+        };
+        img.src = dataUrl;
+      } catch (err) {
+        console.error('Failed to load image file', err);
+        toast.error('Could not load image file');
+      }
+    },
+    [board, viewState, handleElementsChange, toast]
+  );
+
+  // Global Clipboard Paste Listener
+  useEffect(() => {
+    const handlePaste = (e: ClipboardEvent) => {
+      // Don't intercept paste if typing in an input or textarea
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
+        return;
+      }
+
+      const items = Array.from(e.clipboardData?.items || []);
+      const imgItem = items.find((i) => i.type.startsWith('image/'));
+      if (!imgItem) return;
+
+      e.preventDefault();
+      const file = imgItem.getAsFile();
+      if (file) insertImageFile(file);
+    };
+
+    window.addEventListener('paste', handlePaste);
+    return () => window.removeEventListener('paste', handlePaste);
+  }, [insertImageFile]);
+
+  // -------------------------------------------------------------
+  // 7. BOARD MANAGEMENT
   // -------------------------------------------------------------
   const handleSelectBoard = async (boardId: string) => {
     try {
@@ -301,8 +380,11 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       setViewState(full.view_state || { panX: 0, panY: 0, zoom: 1 });
       setUndoStack([]);
       setRedoStack([]);
-    } catch (e) {
-      toast.error('Failed to load selected whiteboard');
+      setSelectedElementId(null);
+      setSelectedElementIds(new Set());
+    } catch (err) {
+      console.error('Failed to fetch board:', err);
+      toast.error('Failed to switch boards');
     } finally {
       setLoading(false);
     }
@@ -316,8 +398,8 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         elements: [],
         view_state: { panX: 0, panY: 0, zoom: 1 },
       });
-      setBoard(created);
       setBoardsList((prev) => [
+        ...prev,
         {
           id: created.id,
           title: created.title,
@@ -326,84 +408,94 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           created_at: created.created_at,
           updated_at: created.updated_at,
         },
-        ...prev,
       ]);
+      setBoard(created);
       setViewState({ panX: 0, panY: 0, zoom: 1 });
       setUndoStack([]);
       setRedoStack([]);
+      setSelectedElementId(null);
+      setSelectedElementIds(new Set());
       toast.success('New drafting board created');
-    } catch (e) {
-      toast.error('Failed to create new board');
+    } catch (err) {
+      console.error('Failed to create board:', err);
+      toast.error('Could not create board');
     }
   };
 
   const handleDeleteCurrentBoard = async () => {
     if (!board) return;
     if (boardsList.length <= 1) {
-      toast.warning('Cannot delete the last remaining whiteboard.');
+      toast.warning('Cannot delete the last remaining drawing board.');
       return;
     }
 
     try {
       await api.deleteWhiteboard(board.id);
-      toast.info('Drafting board deleted');
-      const nextList = boardsList.filter((b) => b.id !== board.id);
-      setBoardsList(nextList);
-      if (nextList.length > 0) {
-        handleSelectBoard(nextList[0].id);
+      const remaining = boardsList.filter((b) => b.id !== board.id);
+      setBoardsList(remaining);
+      if (remaining.length > 0) {
+        handleSelectBoard(remaining[0].id);
       }
-    } catch (e) {
-      toast.error('Failed to delete whiteboard');
+      toast.success('Drafting board deleted');
+    } catch (err) {
+      console.error('Failed to delete board:', err);
+      toast.error('Could not delete board');
     }
   };
 
-  const handleUpdateTitle = (newTitle: string) => {
-    if (!board) return;
-    const updated = { ...board, title: newTitle };
-    setBoard(updated);
-    setBoardsList((prev) => prev.map((b) => (b.id === board.id ? { ...b, title: newTitle } : b)));
-    scheduleAutoSave(board.elements, viewState, newTitle);
+  const handleUpdateTitle = async (newTitle: string) => {
+    if (!board || !newTitle.trim()) return;
+    setBoard((prev) => (prev ? { ...prev, title: newTitle.trim() } : null));
+    setBoardsList((prev) =>
+      prev.map((b) => (b.id === board.id ? { ...b, title: newTitle.trim() } : b))
+    );
+    scheduleAutoSave(board.elements, viewState, newTitle.trim());
   };
 
-  const handleUpdateProject = (projectId: string | null) => {
+  const handleUpdateProject = async (projId: string | null) => {
     if (!board) return;
-    const proj = projects.find((p) => p.id === projectId);
-    const updated: Whiteboard = {
-      ...board,
-      project_id: projectId,
-      project_name: proj?.name || null,
-      project_color: proj?.color || null,
-    };
-    setBoard(updated);
+    const proj = projects.find((p) => p.id === projId);
+    setBoard((prev) =>
+      prev
+        ? {
+            ...prev,
+            project_id: projId,
+            project_name: proj?.name || null,
+            project_color: proj?.color || null,
+          }
+        : null
+    );
     setBoardsList((prev) =>
       prev.map((b) =>
         b.id === board.id
           ? {
               ...b,
-              project_id: projectId,
+              project_id: projId,
               project_name: proj?.name || null,
               project_color: proj?.color || null,
             }
           : b
       )
     );
-    scheduleAutoSave(board.elements, viewState, board.title, projectId);
-    toast.info(projectId ? `Linked to ${proj?.name}` : 'Unlinked from project');
+    scheduleAutoSave(board.elements, viewState, undefined, projId);
   };
 
   // -------------------------------------------------------------
-  // 7. EXPORT ACTIONS
+  // 8. EXPORT ACTIONS
   // -------------------------------------------------------------
   const handleExportPNG = async () => {
     if (!canvasRef.current || !board) return;
     try {
       const dataUrl = await canvasRef.current.exportToPNG();
-      if (!dataUrl) return;
+      if (!dataUrl) {
+        toast.warning('Drawing board is empty.');
+        return;
+      }
       const link = document.createElement('a');
-      link.download = `${board.title.toLowerCase().replace(/[^a-z0-9]/g, '_')}.png`;
+      link.download = `${board.title.replace(/\s+/g, '_')}_blueprint.png`;
       link.href = dataUrl;
       link.click();
-      toast.success('Exported PNG image successfully');
+      toast.success('Exported PNG Blueprint snapshot');
     } catch (err) {
       console.error('Export PNG failed:', err);
       toast.error('Failed to export PNG');
@@ -413,92 +505,68 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   const handleExportSVG = () => {
     if (!canvasRef.current || !board) return;
     try {
-      const svgString = canvasRef.current.exportToSVG();
-      const blob = new Blob([svgString], { type: 'image/svg+xml;charset=utf-8' });
+      const svg = canvasRef.current.exportToSVG();
+      const blob = new Blob([svg], { type: 'image/svg+xml' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.download = `${board.title.toLowerCase().replace(/[^a-z0-9]/g, '_')}.svg`;
+      link.download = `${board.title.replace(/\s+/g, '_')}_vector.svg`;
       link.href = url;
       link.click();
       URL.revokeObjectURL(url);
-      toast.success('Exported SVG successfully');
+      toast.success('Exported SVG Vector Blueprint');
     } catch (err) {
       console.error('Export SVG failed:', err);
       toast.error('Failed to export SVG');
     }
   };
 
-  // -------------------------------------------------------------
-  // 8. KEYBOARD SHORTCUTS
-  // -------------------------------------------------------------
+  // Keyboard Shortcuts (Undo / Redo / Delete)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+      if (
+        document.activeElement?.tagName === 'INPUT' ||
+        document.activeElement?.tagName === 'TEXTAREA'
+      ) {
         return;
       }
 
-      if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
         e.preventDefault();
-        if (e.shiftKey) {
-          handleRedo();
-        } else {
-          handleUndo();
-        }
-        return;
-      }
-
-      if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+        handleUndo();
+      } else if (
+        (e.ctrlKey || e.metaKey) &&
+        (e.key.toLowerCase() === 'y' || (e.shiftKey && e.key.toLowerCase() === 'z'))
+      ) {
         e.preventDefault();
         handleRedo();
-        return;
-      }
-
-      switch (e.key.toLowerCase()) {
-        case 'v':
-          setActiveTool('select');
-          break;
-        case 'p':
-          setActiveTool('pen');
-          break;
-        case 'l':
-          setActiveTool('laser');
-          break;
-        case 'm':
-          setActiveTool('highlighter');
-          break;
-        case 'e':
-          setActiveTool('eraser');
-          break;
-        case 'u':
-          setActiveTool('shape');
-          break;
-        case 's':
-          handleAddSticky('yellow');
-          break;
-        case 't':
-          setActiveTool('text');
-          break;
-        case 'delete':
-        case 'backspace':
-          if (selectedElementId && board) {
-            const remaining = board.elements.filter((el) => el.id !== selectedElementId);
-            handleElementsChange(remaining, true);
-            setSelectedElementId(null);
-          }
-          break;
+      } else if (e.key === 'Backspace' || e.key === 'Delete') {
+        if (selectedElementId && board) {
+          const next = board.elements.filter((el) => el.id !== selectedElementId);
+          handleElementsChange(next, true);
+          setSelectedElementId(null);
+        } else if (selectedElementIds.size > 0 && board) {
+          const next = board.elements.filter((el) => !selectedElementIds.has(el.id));
+          handleElementsChange(next, true);
+          setSelectedElementIds(new Set());
+        }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [board, selectedElementId, handleUndo, handleRedo, handleElementsChange]);
+  }, [handleUndo, handleRedo, selectedElementId, selectedElementIds, board, handleElementsChange]);
 
   if (loading || !board) {
     return (
-      <div className={`w-full h-full flex flex-col items-center justify-center ${edition === 'night' ? 'bg-[#141311] text-stone-400' : 'bg-paper-base text-ink-muted'}`}>
+      <div
+        className={`w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center ${
+          edition === 'night' ? 'bg-[#141311] text-stone-300' : 'bg-[#F5F1E8] text-ink-primary'
+        }`}
+      >
         <div className="w-8 h-8 border-2 border-amber-600 border-t-transparent rounded-full animate-spin mb-3" />
-        <p className="text-xs font-ledger uppercase tracking-wider font-bold">Synchronizing Drafting Room from Pi...</p>
+        <p className="text-xs font-ledger uppercase tracking-wider font-bold">
+          Synchronizing Drafting Room from Pi...
+        </p>
       </div>
     );
   }
@@ -509,7 +577,34 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   );
 
   return (
-    <div className={`relative w-full h-[calc(100vh-4rem)] md:h-[calc(100vh-3.5rem)] overflow-hidden select-none ${edition === 'night' ? 'bg-[#141311]' : 'bg-[#F5F1E8]'}`}>
+    <div
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault();
+        const file = e.dataTransfer.files?.[0];
+        if (file && file.type.startsWith('image/')) {
+          insertImageFile(file);
+        }
+      }}
+      className={`relative w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] overflow-hidden select-none ${
+        edition === 'night' ? 'bg-[#141311]' : 'bg-[#F5F1E8]'
+      }`}
+    >
+      {/* Hidden File Input for Image Upload */}
+      <input
+        type="file"
+        ref={fileInputRef}
+        accept="image/*"
+        className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          if (file) {
+            insertImageFile(file);
+            e.target.value = '';
+          }
+        }}
+      />
+
       {/* 1. TOP HEADER */}
       <WhiteboardHeader
         board={board}
@@ -542,22 +637,26 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         elements={board.elements}
         onElementsChange={handleElementsChange}
         activeTool={activeTool}
+        setActiveTool={setActiveTool}
         activeColor={activeColor}
         activeSize={activeSize}
         activeShape={activeShape}
+        activeFillColor={activeFillColor}
         highlighterColor={highlighterColor}
         highlighterSize={highlighterSize}
         viewState={viewState}
         onViewStateChange={handleViewStateChange}
         selectedElementId={selectedElementId}
         onSelectElementId={setSelectedElementId}
+        selectedElementIds={selectedElementIds}
+        onSelectElementIds={setSelectedElementIds}
         edition={edition}
         gridType={gridType}
         stylusOnly={stylusOnly}
         onCanvasDoubleClick={(pt) => handleAddSticky('yellow', pt)}
       />
 
-      {/* 3. STICKY NOTES DOM OVERLAY (Synchronized via CSS Transform) */}
+      {/* 3. STICKY NOTES DOM OVERLAY */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div
           style={{
@@ -592,7 +691,19 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         </div>
       </div>
 
-      {/* 4. PHYSICAL DRAFTING RACK TOOLBAR */}
+      {/* 4. OVERVIEW MINIMAP (Desktop / Tablet) */}
+      <div className="hidden sm:block absolute bottom-20 right-4 z-30 pointer-events-auto">
+        <WhiteboardMinimap
+          elements={board.elements}
+          viewState={viewState}
+          canvasWidth={typeof window !== 'undefined' ? window.innerWidth : 1200}
+          canvasHeight={typeof window !== 'undefined' ? window.innerHeight : 800}
+          onPanTo={(panX, panY) => setViewState((prev) => ({ ...prev, panX, panY }))}
+          edition={edition}
+        />
+      </div>
+
+      {/* 5. PHYSICAL DRAFTING RACK TOOLBAR */}
       <WhiteboardToolbar
         activeTool={activeTool}
         setActiveTool={setActiveTool}
@@ -602,6 +713,8 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         setActiveSize={setActiveSize}
         activeShape={activeShape}
         setActiveShape={setActiveShape}
+        activeFillColor={activeFillColor}
+        setActiveFillColor={setActiveFillColor}
         highlighterColor={highlighterColor}
         setHighlighterColor={setHighlighterColor}
         highlighterSize={highlighterSize}
@@ -615,6 +728,26 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           if (board.elements.length === 0) return;
           setShowClearConfirm(true);
         }}
+        onTriggerImageUpload={() => fileInputRef.current?.click()}
+        onOpenMoreSheet={() => setIsMoreSheetOpen(true)}
+        edition={edition}
+      />
+
+      {/* 6. MOBILE EXPANDED BOTTOM SHEET */}
+      <WhiteboardBottomSheet
+        isOpen={isMoreSheetOpen}
+        onClose={() => setIsMoreSheetOpen(false)}
+        activeTool={activeTool}
+        setActiveTool={setActiveTool}
+        onUndo={handleUndo}
+        onRedo={handleRedo}
+        canUndo={undoStack.length > 0}
+        canRedo={redoStack.length > 0}
+        onClear={() => {
+          if (board.elements.length === 0) return;
+          setShowClearConfirm(true);
+        }}
+        onTriggerImageUpload={() => fileInputRef.current?.click()}
         edition={edition}
       />
 
@@ -622,7 +755,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       <ConfirmDialog
         isOpen={showClearConfirm}
         title="Clear Drawing Canvas?"
-        message="All inking strokes, geometry shapes, and sticky clippings on this drafting board will be cleared. This action can be undone with Ctrl+Z."
+        message="All inking strokes, geometry shapes, images, and sticky clippings on this drafting board will be cleared. This action can be undone with Ctrl+Z."
         confirmText="Clear Canvas"
         cancelText="Cancel"
         isDestructive={true}
