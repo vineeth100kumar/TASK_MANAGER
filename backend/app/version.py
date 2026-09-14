@@ -1,4 +1,4 @@
 # Sage OS Version Tracking
-VERSION = "2.11.8"
-BUILD_NAME = "Sage Life OS 2.11.8 (Fluid Multi-Touch & Non-Passive Trackpad Pinch Zoom Engine)"
+VERSION = "2.12.0"
+BUILD_NAME = "Sage Life OS 2.12.0 (Security Hardened Bearer Auth, Atomic Finance Arithmetic & Resilient Architecture)"
 API_PREFIX = "/api/v1"

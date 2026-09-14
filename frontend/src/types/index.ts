@@ -339,7 +339,7 @@ export interface WhiteboardListItem {
   project_id?: string | null;
   project_name?: string | null;
   project_color?: string | null;
-  thumbnail_data?: string | null;
   created_at: string;
   updated_at: string;
 }
+

@@ -125,5 +125,188 @@ class TestSageBackend(unittest.TestCase):
         self.assertEqual(row["project_color"], "#3b82f6")
         conn.close()
 
+    def test_auth_token_validation(self):
+        import asyncio
+        from fastapi import HTTPException
+        from fastapi.security import HTTPAuthorizationCredentials
+        from app.auth import verify_auth_token
+        import app.config as config
+        import app.auth as auth
+
+        original_secret = config.API_SECRET
+        try:
+            config.API_SECRET = "secret_key_9876"
+            auth.API_SECRET = "secret_key_9876"
+
+            # 1. Missing credentials -> 401
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(verify_auth_token(None))
+            self.assertEqual(ctx.exception.status_code, 401)
+
+            # 2. Wrong token -> 401
+            bad_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="wrong_password")
+            with self.assertRaises(HTTPException) as ctx:
+                asyncio.run(verify_auth_token(bad_creds))
+            self.assertEqual(ctx.exception.status_code, 401)
+
+            # 3. Valid token -> returns token
+            good_creds = HTTPAuthorizationCredentials(scheme="Bearer", credentials="secret_key_9876")
+            res = asyncio.run(verify_auth_token(good_creds))
+            self.assertEqual(res, "secret_key_9876")
+        finally:
+            config.API_SECRET = original_secret
+            auth.API_SECRET = original_secret
+
+    def test_transaction_models_validation(self):
+        from pydantic import ValidationError
+        from app.models import TransactionCreate, RecurringBillCreate, BudgetCreate, WorkItemCreate
+
+        # 1. Reject non-positive amounts
+        with self.assertRaises(ValidationError):
+            TransactionCreate(
+                account_id="acc_1", type="expense", amount=-10.0,
+                payment_mode="upi", date="2026-09-14"
+            )
+        with self.assertRaises(ValidationError):
+            TransactionCreate(
+                account_id="acc_1", type="expense", amount=0.0,
+                payment_mode="upi", date="2026-09-14"
+            )
+
+        # 2. Reject malformed dates
+        with self.assertRaises(ValidationError):
+            TransactionCreate(
+                account_id="acc_1", type="expense", amount=50.0,
+                payment_mode="upi", date="14-09-2026"
+            )
+
+        # 3. Reject transfer without transfer_to_account_id
+        with self.assertRaises(ValidationError):
+            TransactionCreate(
+                account_id="acc_1", type="transfer", amount=50.0,
+                payment_mode="upi", date="2026-09-14"
+            )
+
+        # 4. Reject transfer to same account
+        with self.assertRaises(ValidationError):
+            TransactionCreate(
+                account_id="acc_1", transfer_to_account_id="acc_1",
+                type="transfer", amount=50.0, payment_mode="upi", date="2026-09-14"
+            )
+
+        # 5. Valid transfer accepted
+        tx = TransactionCreate(
+            account_id="acc_1", transfer_to_account_id="acc_2",
+            type="transfer", amount=50.0, payment_mode="upi", date="2026-09-14"
+        )
+        self.assertEqual(tx.amount, 50.0)
+
+        # 6. Reject invalid RecurringBill and Budget
+        with self.assertRaises(ValidationError):
+            RecurringBillCreate(name="Rent", amount=-100.0, due_day_of_month=1)
+        with self.assertRaises(ValidationError):
+            BudgetCreate(category_id="cat_1", monthly_limit=0)
+
+        # 7. Reject invalid WorkItem estimated_minutes
+        with self.assertRaises(ValidationError):
+            WorkItemCreate(title="Test", estimated_minutes=-5)
+
+    def test_database_check_constraints(self):
+        import sqlite3
+        from app.database import SCHEMA_TABLES_SQL
+
+        conn = sqlite3.connect(":memory:")
+        conn.executescript(SCHEMA_TABLES_SQL)
+
+        # 1. Cannot insert negative transaction amount
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO finance_transactions (id, account_id, type, amount, payment_mode, date) VALUES ('tx1', 'acc1', 'expense', -50.0, 'cash', '2026-09-14')"
+            )
+
+        # 2. Cannot insert negative recurring bill amount
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO recurring_bills (id, name, amount, due_day_of_month) VALUES ('b1', 'Test', -20.0, 5)"
+            )
+
+        # 3. Cannot insert 0 or negative monthly budget
+        with self.assertRaises(sqlite3.IntegrityError):
+            conn.execute(
+                "INSERT INTO finance_budgets (id, category_id, monthly_limit, period_year, period_month) VALUES ('bgt1', 'c1', 0, 2026, 9)"
+            )
+        conn.close()
+
+    def test_planner_streak_logic(self):
+        # Verify streak calculation algorithm
+        today = datetime.date.today()
+        completed_days = {
+            today.isoformat(),
+            (today - datetime.timedelta(days=1)).isoformat(),
+            (today - datetime.timedelta(days=2)).isoformat(),
+        }
+
+        streak_days = 0
+        if today.isoformat() in completed_days:
+            streak_days = 1
+            for i in range(1, 35):
+                day_str = (today - datetime.timedelta(days=i)).isoformat()
+                if day_str in completed_days:
+                    streak_days += 1
+                else:
+                    break
+        self.assertEqual(streak_days, 3)
+
+    def test_api_endpoints_auth_and_404_delete(self):
+        from fastapi.testclient import TestClient
+        import app.config as config
+        import app.auth as auth
+
+        original_secret = config.API_SECRET
+        config.API_SECRET = "test_api_secret_456"
+        auth.API_SECRET = "test_api_secret_456"
+
+        try:
+            from app.main import app
+            with TestClient(app) as client:
+                # 1. Health is public
+                res = client.get("/api/health")
+                self.assertEqual(res.status_code, 200)
+
+                # 2. Items without auth -> 401
+                res = client.get("/api/v1/items")
+                self.assertEqual(res.status_code, 401)
+
+                # 3. Items with bad auth -> 401
+                res = client.get("/api/v1/items", headers={"Authorization": "Bearer wrong_secret"})
+                self.assertEqual(res.status_code, 401)
+
+                headers = {"Authorization": "Bearer test_api_secret_456"}
+
+                # 4. Items with valid auth -> 200
+                res = client.get("/api/v1/items", headers=headers)
+                self.assertEqual(res.status_code, 200)
+
+                # 5. Delete nonexistent item -> 404
+                res = client.delete("/api/v1/items/nonexistent_id_xyz", headers=headers)
+                self.assertEqual(res.status_code, 404)
+
+                # 6. Delete nonexistent account -> 404
+                res = client.delete("/api/v1/finance/accounts/nonexistent_acc_xyz", headers=headers)
+                self.assertEqual(res.status_code, 404)
+
+                # 7. Delete nonexistent budget -> 404
+                res = client.delete("/api/v1/finance/budgets/nonexistent_bgt_xyz", headers=headers)
+                self.assertEqual(res.status_code, 404)
+
+                # 8. Delete nonexistent recurring bill -> 404
+                res = client.delete("/api/v1/finance/recurring-bills/nonexistent_bill_xyz", headers=headers)
+                self.assertEqual(res.status_code, 404)
+        finally:
+            config.API_SECRET = original_secret
+            auth.API_SECRET = original_secret
+
 if __name__ == "__main__":
     unittest.main()
+
+

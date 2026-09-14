@@ -4,23 +4,40 @@ import {
   FinanceAccount, WeatherData, DailyReflection, KickoffData, DebriefResult,
   RecurringBill, BudgetGuardrail, Whiteboard, WhiteboardListItem, WhiteboardElement, ViewState
 } from '../types';
+import { getApiSecret, DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME } from '../config';
 
 const BASE_URL = '';
 
 async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE_URL}${url}`, {
-    ...options,
-    headers: {
-      'Content-Type': 'application/json',
-      ...options?.headers,
-    },
-  });
-  if (!res.ok) {
-    const errText = await res.text();
-    throw new Error(errText || `HTTP error ${res.status}`);
+  const token = getApiSecret();
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 15000);
+
+  try {
+    const res = await fetch(`${BASE_URL}${url}`, {
+      ...options,
+      signal: options?.signal || controller.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+        ...options?.headers,
+      },
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `HTTP error ${res.status}`);
+    }
+    return res.json();
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error(`Request timed out after 15 seconds: ${url}`);
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
-  return res.json();
 }
+
 
 export const api = {
   // Items (Tasks, Events, Reminders)
@@ -180,12 +197,13 @@ export const api = {
   listReflections: () => fetchJson<DailyReflection[]>('/api/v1/planner/reflections'),
 
   // Live Weather (Direct & Fast)
-  getWeather: (lat = 28.6139, lon = 77.2090) =>
+  getWeather: (lat = DEFAULT_LAT, lon = DEFAULT_LON) =>
     fetchJson<WeatherData>(`/api/v1/weather?lat=${lat}&lon=${lon}`),
 
   // Local AI Services
-  getAiGreeting: (name = 'Chief') =>
+  getAiGreeting: (name = DEFAULT_USER_NAME) =>
     fetchJson<AiGreetingResponse>(`/api/v1/ai/greeting?name=${encodeURIComponent(name)}`),
+
   parseBrainDump: (natural_language: string) =>
     fetchJson<{ success: boolean; items: any[] }>('/api/v1/ai/parse-brain-dump', {
       method: 'POST',

@@ -118,9 +118,9 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
             id: created.id,
             title: created.title,
             project_id: created.project_id,
-            thumbnail_data: created.thumbnail_data,
             created_at: created.created_at,
             updated_at: created.updated_at,
+
           },
         ]);
         setViewState({ panX: 0, panY: 0, zoom: 1 });

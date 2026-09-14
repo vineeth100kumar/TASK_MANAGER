@@ -5,6 +5,10 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
+# Build output
+dist/
+frontend/dist/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -22,7 +22,7 @@ async def list_whiteboards(
 ):
     """Lists whiteboards with optional project filtering."""
     query = """
-        SELECT w.id, w.title, w.project_id, w.thumbnail_data, w.created_at, w.updated_at,
+        SELECT w.id, w.title, w.project_id, w.created_at, w.updated_at,
                p.name as project_name, p.color as project_color
         FROM whiteboards w
         LEFT JOIN projects p ON w.project_id = p.id
@@ -45,12 +45,12 @@ async def list_whiteboards(
             project_id=row["project_id"],
             project_name=row["project_name"],
             project_color=row["project_color"],
-            thumbnail_data=row["thumbnail_data"],
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"])
         )
         for row in rows
     ]
+
 
 @router.post("", response_model=WhiteboardResponse)
 async def create_whiteboard(

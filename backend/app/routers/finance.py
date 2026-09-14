@@ -239,7 +239,9 @@ async def split_upi(req: SplitUPIRequest, db: aiosqlite.Connection = Depends(get
 
 @router.delete("/accounts/{account_id}")
 async def delete_account(account_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM finance_accounts WHERE id = ?", (account_id,))
+    cursor = await db.execute("DELETE FROM finance_accounts WHERE id = ?", (account_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Account not found")
     await db.commit()
     await ws_manager.broadcast({"type": "FINANCE_ACCOUNT_DELETED", "data": {"id": account_id}})
     return {"success": True, "id": account_id}
@@ -290,13 +292,17 @@ async def create_transaction(tx: TransactionCreate, db: aiosqlite.Connection = D
     tx_id = f"tx_{uuid.uuid4().hex[:10]}"
     now_iso = datetime.datetime.now().isoformat()
 
-    # 2. Process account balance adjustment
+    # 2. Process account balance adjustment atomically in SQL
     if tx.type == "expense":
-        new_balance = src_acc["balance"] - tx.amount
-        await db.execute("UPDATE finance_accounts SET balance = ?, updated_at = ? WHERE id = ?", (new_balance, now_iso, tx.account_id))
+        await db.execute(
+            "UPDATE finance_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?",
+            (tx.amount, now_iso, tx.account_id)
+        )
     elif tx.type == "income":
-        new_balance = src_acc["balance"] + tx.amount
-        await db.execute("UPDATE finance_accounts SET balance = ?, updated_at = ? WHERE id = ?", (new_balance, now_iso, tx.account_id))
+        await db.execute(
+            "UPDATE finance_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?",
+            (tx.amount, now_iso, tx.account_id)
+        )
     elif tx.type == "transfer":
         if not tx.transfer_to_account_id:
             raise HTTPException(status_code=400, detail="Transfer requires a destination account")
@@ -305,8 +311,14 @@ async def create_transaction(tx: TransactionCreate, db: aiosqlite.Connection = D
             if not dst_acc:
                 raise HTTPException(status_code=404, detail="Destination account not found")
         # Deduct from source, add to destination
-        await db.execute("UPDATE finance_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?", (tx.amount, now_iso, tx.account_id))
-        await db.execute("UPDATE finance_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?", (tx.amount, now_iso, tx.transfer_to_account_id))
+        await db.execute(
+            "UPDATE finance_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?",
+            (tx.amount, now_iso, tx.account_id)
+        )
+        await db.execute(
+            "UPDATE finance_accounts SET balance = balance + ?, updated_at = ? WHERE id = ?",
+            (tx.amount, now_iso, tx.transfer_to_account_id)
+        )
 
     # 3. Record transaction
     query = """
@@ -513,7 +525,9 @@ async def set_budget(b: BudgetCreate, db: aiosqlite.Connection = Depends(get_db)
 
 @router.delete("/budgets/{budget_id}")
 async def delete_budget(budget_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM finance_budgets WHERE id = ?", (budget_id,))
+    cursor = await db.execute("DELETE FROM finance_budgets WHERE id = ?", (budget_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Budget not found")
     await db.commit()
     return {"success": True, "id": budget_id}
 
@@ -568,7 +582,10 @@ async def create_recurring_bill(bill: RecurringBillCreate, db: aiosqlite.Connect
 
 @router.delete("/recurring-bills/{bill_id}")
 async def delete_recurring_bill(bill_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM recurring_bills WHERE id = ?", (bill_id,))
+    cursor = await db.execute("DELETE FROM recurring_bills WHERE id = ?", (bill_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Recurring bill not found")
     await db.commit()
     await ws_manager.broadcast({"type": "RECURRING_BILL_DELETED", "data": {"id": bill_id}})
     return {"success": True, "id": bill_id}
+

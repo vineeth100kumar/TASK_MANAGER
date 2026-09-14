@@ -1,4 +1,5 @@
-from pydantic import BaseModel, Field
+import datetime
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List, Literal, Dict, Any
 
 # ========================================================
@@ -37,7 +38,7 @@ class WorkItemBase(BaseModel):
     repeat_rule: Optional[str] = None # daily, weekly:mon,tue, monthly:1, custom:7d
     project_id: Optional[str] = None
     milestone_id: Optional[str] = None
-    estimated_minutes: int = 30
+    estimated_minutes: int = Field(default=30, gt=0)
     actual_minutes: int = 0
     depends_on: List[str] = Field(default_factory=list)
     context_tags: str = ""
@@ -59,7 +60,7 @@ class WorkItemUpdate(BaseModel):
     repeat_rule: Optional[str] = None
     project_id: Optional[str] = None
     milestone_id: Optional[str] = None
-    estimated_minutes: Optional[int] = None
+    estimated_minutes: Optional[int] = Field(default=None, gt=0)
     actual_minutes: Optional[int] = None
     depends_on: Optional[List[str]] = None
     is_completed: Optional[bool] = None
@@ -199,11 +200,29 @@ class TransactionCreate(BaseModel):
     account_id: str
     category_id: Optional[str] = None
     type: TransactionType
-    amount: float
+    amount: float = Field(..., gt=0)
     payment_mode: PaymentMode
     description: Optional[str] = None
     transfer_to_account_id: Optional[str] = None
     date: str # YYYY-MM-DD
+
+    @field_validator("date")
+    @classmethod
+    def validate_date_format(cls, v: str) -> str:
+        try:
+            datetime.datetime.strptime(v, "%Y-%m-%d")
+        except ValueError:
+            raise ValueError("date must be in YYYY-MM-DD format")
+        return v
+
+    @model_validator(mode="after")
+    def validate_transfer_logic(self):
+        if self.type == "transfer":
+            if not self.transfer_to_account_id:
+                raise ValueError("transfer_to_account_id is required for transfer transactions")
+            if self.account_id == self.transfer_to_account_id:
+                raise ValueError("Source and destination accounts must be different for transfers")
+        return self
 
 class TransactionResponse(BaseModel):
     id: str
@@ -226,8 +245,8 @@ class TransactionResponse(BaseModel):
 
 class RecurringBillCreate(BaseModel):
     name: str
-    amount: float
-    due_day_of_month: int
+    amount: float = Field(..., gt=0)
+    due_day_of_month: int = Field(..., ge=1, le=31)
     account_id: Optional[str] = None
     category: str = "Utilities & Bills"
     icon: str = "Receipt"
@@ -253,7 +272,7 @@ class RecurringBillResponse(BaseModel):
 
 class BudgetCreate(BaseModel):
     category_id: str
-    monthly_limit: float
+    monthly_limit: float = Field(..., gt=0)
     period_year: Optional[int] = None   # defaults to current year
     period_month: Optional[int] = None  # defaults to current month
 
@@ -277,7 +296,7 @@ class SiriQuickTask(BaseModel):
     input_text: str
 
 class SiriQuickExpense(BaseModel):
-    amount: float
+    amount: float = Field(..., gt=0)
     payment_mode: PaymentMode = "upi"
     category: Optional[str] = "Food & Dining"
     description: Optional[str] = None
@@ -329,6 +348,5 @@ class WhiteboardListItem(BaseModel):
     project_id: Optional[str] = None
     project_name: Optional[str] = None
     project_color: Optional[str] = None
-    thumbnail_data: Optional[str] = None
     created_at: str
     updated_at: str

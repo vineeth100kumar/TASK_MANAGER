@@ -1,7 +1,7 @@
 import uuid
 import datetime
 import aiosqlite
-from fastapi import APIRouter, Depends, HTTPException, Header
+from fastapi import APIRouter, Depends, HTTPException
 from typing import Optional, Dict, Any
 
 from ..database import get_db
@@ -10,17 +10,6 @@ from ..services.ai_engine import parse_brain_dump
 from ..services.ws_manager import ws_manager
 
 router = APIRouter(prefix="/api/v1/shortcuts", tags=["iOS Shortcuts & Siri Voice Integration"])
-
-# Simple API Key validation
-API_SECRET = "sage_rpi5_secret_ios_key_2026"
-
-def verify_token(authorization: Optional[str] = Header(None)):
-    if authorization:
-        token = authorization.replace("Bearer ", "").strip()
-        if token == API_SECRET:
-            return True
-    # For initial local network setup convenience, allow without token if not set
-    return True
 
 @router.post("/quick-task")
 async def siri_quick_task(payload: SiriQuickTask, db: aiosqlite.Connection = Depends(get_db)):
@@ -88,9 +77,19 @@ async def siri_log_expense(payload: SiriQuickExpense, db: aiosqlite.Connection =
             async with db.execute("SELECT id, name, balance FROM finance_accounts LIMIT 1") as f_cursor:
                 acc = await f_cursor.fetchone()
 
+    if not acc:
+        raise HTTPException(status_code=404, detail="No active finance account found")
+
     account_id = acc["id"]
-    new_balance = acc["balance"] - payload.amount
-    await db.execute("UPDATE finance_accounts SET balance = ?, updated_at = ? WHERE id = ?", (new_balance, now_iso, account_id))
+    await db.execute(
+        "UPDATE finance_accounts SET balance = balance - ?, updated_at = ? WHERE id = ?",
+        (payload.amount, now_iso, account_id)
+    )
+
+    # Fetch updated balance
+    async with db.execute("SELECT balance FROM finance_accounts WHERE id = ?", (account_id,)) as b_cur:
+        b_row = await b_cur.fetchone()
+        updated_balance = b_row[0] if b_row else 0.0
 
     # Match category
     cat_id = None
@@ -118,8 +117,8 @@ async def siri_log_expense(payload: SiriQuickExpense, db: aiosqlite.Connection =
 
     return {
         "success": True,
-        "spoken_response": f"Logged {payload.amount} rupees spent via {payload.payment_mode.upper()}. Your updated balance is {int(new_balance)} rupees.",
-        "remaining_balance": new_balance
+        "spoken_response": f"Logged {payload.amount} rupees spent via {payload.payment_mode.upper()}. Your updated balance is {int(updated_balance)} rupees.",
+        "remaining_balance": updated_balance
     }
 
 @router.get("/status")

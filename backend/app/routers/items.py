@@ -301,7 +301,9 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM work_items WHERE id = ?", (item_id,))
+    cursor = await db.execute("DELETE FROM work_items WHERE id = ?", (item_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Work item not found")
     await db.commit()
     await ws_manager.broadcast({"type": "ITEM_DELETED", "data": {"id": item_id}})
     return {"success": True, "id": item_id}
@@ -372,7 +374,9 @@ async def create_project(proj: ProjectCreate, db: aiosqlite.Connection = Depends
 
 @router.delete("/projects/{project_id}")
 async def delete_project(project_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    cursor = await db.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Project not found")
     await db.commit()
     return {"success": True, "id": project_id}
 
@@ -435,6 +439,9 @@ async def create_milestone(m: MilestoneCreate, db: aiosqlite.Connection = Depend
 
 @router.delete("/milestones/{milestone_id}")
 async def delete_milestone(milestone_id: str, db: aiosqlite.Connection = Depends(get_db)):
-    await db.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
+    cursor = await db.execute("DELETE FROM milestones WHERE id = ?", (milestone_id,))
+    if cursor.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Milestone not found")
     await db.commit()
     return {"success": True, "id": milestone_id}
+

@@ -5,6 +5,7 @@ from typing import Optional, List, Dict, Any
 
 from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
 from ..services.weather_service import get_current_weather
+from ..config import DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME
 from ..database import get_db
 import aiosqlite
 
@@ -27,11 +28,12 @@ class OrganizeBoardRequest(BaseModel):
 
 @router.get("/greeting")
 async def get_greeting(
-    name: str = "Vineet",
-    lat: float = 28.6139,
-    lon: float = 77.2090,
+    name: str = DEFAULT_USER_NAME,
+    lat: float = DEFAULT_LAT,
+    lon: float = DEFAULT_LON,
     db: aiosqlite.Connection = Depends(get_db)
 ):
+
     """Fetches live weather and task stats to synthesize a personalized AI greeting."""
     weather = await get_current_weather(lat, lon)
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")

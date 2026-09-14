@@ -63,7 +63,7 @@ CREATE TABLE IF NOT EXISTS work_items (
     
     project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
     milestone_id TEXT REFERENCES milestones(id) ON DELETE SET NULL,
-    estimated_minutes INTEGER DEFAULT 30,
+    estimated_minutes INTEGER DEFAULT 30 CHECK(estimated_minutes IS NULL OR estimated_minutes > 0),
     actual_minutes INTEGER DEFAULT 0,
     depends_on TEXT DEFAULT '[]',
     context_tags TEXT DEFAULT '',
@@ -133,7 +133,7 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
     account_id TEXT NOT NULL REFERENCES finance_accounts(id) ON DELETE CASCADE,
     category_id TEXT REFERENCES finance_categories(id) ON DELETE SET NULL,
     type TEXT CHECK(type IN ('expense', 'income', 'transfer')) NOT NULL,
-    amount REAL NOT NULL,
+    amount REAL NOT NULL CHECK(amount > 0),
     payment_mode TEXT CHECK(payment_mode IN ('upi', 'debit_card', 'cash', 'net_banking', 'credit_card')) NOT NULL,
     description TEXT,
     transfer_to_account_id TEXT REFERENCES finance_accounts(id) ON DELETE SET NULL,
@@ -145,7 +145,7 @@ CREATE TABLE IF NOT EXISTS finance_transactions (
 CREATE TABLE IF NOT EXISTS finance_budgets (
     id TEXT PRIMARY KEY,
     category_id TEXT NOT NULL REFERENCES finance_categories(id) ON DELETE CASCADE,
-    monthly_limit REAL NOT NULL DEFAULT 0.0,
+    monthly_limit REAL NOT NULL DEFAULT 0.0 CHECK(monthly_limit > 0),
     period_year INTEGER NOT NULL,
     period_month INTEGER NOT NULL,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
@@ -156,7 +156,7 @@ CREATE TABLE IF NOT EXISTS finance_budgets (
 CREATE TABLE IF NOT EXISTS recurring_bills (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
-    amount REAL NOT NULL,
+    amount REAL NOT NULL CHECK(amount > 0),
     due_day_of_month INTEGER NOT NULL CHECK(due_day_of_month BETWEEN 1 AND 31),
     account_id TEXT REFERENCES finance_accounts(id) ON DELETE SET NULL,
     category TEXT DEFAULT 'Utilities & Bills',
@@ -332,43 +332,10 @@ async def init_database():
                     accounts,
                 )
 
-        # Automatically wipe legacy mock placeholder balances (25000 / 3500) if no transactions have been logged
-        async with db.execute("SELECT COUNT(*) FROM finance_transactions") as tx_cursor:
-            tx_count = (await tx_cursor.fetchone())[0]
-            if tx_count == 0:
-                await db.execute("UPDATE finance_accounts SET balance = 0.0 WHERE balance IN (25000.0, 3500.0, 1200.0)")
-
-        # Seed default financial categories with budgets if none exist
-        async with db.execute("SELECT COUNT(*) FROM finance_categories") as cursor:
-            count = (await cursor.fetchone())[0]
-            if count == 0:
-                categories = [
-                    ("cat_food", "Food & Dining", "Utensils", 8000.0),
-                    ("cat_groceries", "Groceries", "ShoppingCart", 6000.0),
-                    ("cat_transport", "Transport & Fuel", "Car", 3000.0),
-                    ("cat_bills", "Utilities & Bills", "Zap", 4500.0),
-                    ("cat_entertainment", "Entertainment & Subs", "Film", 2000.0),
-                    ("cat_shopping", "Shopping", "Bag", 4000.0),
-                ]
                 await db.executemany(
                     "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
                     categories,
                 )
 
-        # Auto-clean any accidental erroneous 11.3 baby naming expense transaction and restore account balance
-        try:
-            async with db.execute("SELECT id, account_id, amount FROM finance_transactions WHERE amount = 11.3 AND description LIKE '%baby naming%'") as err_cursor:
-                err_tx = await err_cursor.fetchone()
-                if err_tx:
-                    tx_id = err_tx[0]
-                    acc_id = err_tx[1]
-                    amt = float(err_tx[2])
-                    await db.execute("UPDATE finance_accounts SET balance = balance + ? WHERE id = ?", (amt, acc_id))
-                    await db.execute("DELETE FROM finance_transactions WHERE id = ?", (tx_id,))
-                    print(f"Auto-healed: refunded {amt} to account {acc_id} and deleted erroneous transaction.")
+        await db.commit()
 
-            # Ensure baby naming item is correctly categorized as an event
-            await db.execute("UPDATE work_items SET entity_type = 'event', due_date = date('now') WHERE title LIKE '%baby naming%' AND entity_type = 'task'")
-            await db.commit()
-        except Exception as e:
-            print(f"Auto-heal notice: {e}")

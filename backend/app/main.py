@@ -1,11 +1,15 @@
 import os
 import asyncio
+import secrets
+from typing import Optional
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, status
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
+from .config import API_SECRET, ENV, ALLOWED_ORIGINS
+from .auth import verify_auth_token, assert_api_secret_configured
 from .database import init_database, DB_PATH, db_pool
 from .routers import items, finance, dashboard, ai, shortcuts, push, weather, planner, whiteboards
 from .services.ws_manager import ws_manager
@@ -16,6 +20,9 @@ scheduler = AsyncIOScheduler()
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Enforce API_SECRET presence on startup
+    assert_api_secret_configured()
+
     # Startup: Initialize SQLite schema, indexes, and connection pool
     await init_database()
     await db_pool.init()
@@ -47,26 +54,32 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 app.add_middleware(GZipMiddleware, minimum_size=500)
 
-# Mount Routers
-app.include_router(items.router)
-app.include_router(finance.router)
-app.include_router(dashboard.router)
-app.include_router(ai.router)
-app.include_router(weather.router)
-app.include_router(shortcuts.router)
-app.include_router(push.router)
-app.include_router(planner.router)
-app.include_router(whiteboards.router)
+# Mount Routers with shared-secret bearer token authentication
+auth_dep = [Depends(verify_auth_token)]
+app.include_router(items.router, dependencies=auth_dep)
+app.include_router(finance.router, dependencies=auth_dep)
+app.include_router(dashboard.router, dependencies=auth_dep)
+app.include_router(ai.router, dependencies=auth_dep)
+app.include_router(weather.router, dependencies=auth_dep)
+app.include_router(shortcuts.router, dependencies=auth_dep)
+app.include_router(push.router, dependencies=auth_dep)
+app.include_router(planner.router, dependencies=auth_dep)
+app.include_router(whiteboards.router, dependencies=auth_dep)
 
 @app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
+async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
+    if API_SECRET:
+        if not token or not secrets.compare_digest(token, API_SECRET):
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+            return
+
     await ws_manager.connect(websocket)
     try:
         while True:
@@ -92,4 +105,4 @@ async def health_check():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("app.main:app", host="0.0.0.0", port=8000, reload=(ENV == "development"))

@@ -59,23 +59,32 @@ async def morning_kickoff(db: aiosqlite.Connection = Depends(get_db)):
                 "reflection": r.get("reflection", ""),
                 "mood": r.get("mood", "")
             }
+    # Streak calculation in 1 single query
+    cutoff_date = (datetime.date.today() - datetime.timedelta(days=40)).isoformat()
+    async with db.execute(
+        "SELECT DISTINCT substr(completed_at, 1, 10) as cdate FROM work_items WHERE completed_at IS NOT NULL AND completed_at >= ? AND is_completed = 1",
+        (cutoff_date,)
+    ) as cursor:
+        completed_days = {row["cdate"] for row in await cursor.fetchall()}
+
     streak_days = 0
-    check_date = datetime.date.today()
-    for _ in range(30):
-        check_str = check_date.isoformat()
-        async with db.execute(
-            "SELECT COUNT(*) FROM work_items WHERE DATE(completed_at) = ? AND is_completed = 1",
-            (check_str,)
-        ) as cursor:
-            cnt = (await cursor.fetchone())[0]
-        if cnt > 0:
-            streak_days += 1
-            check_date -= datetime.timedelta(days=1)
-        else:
-            if check_date == datetime.date.today():
-                check_date -= datetime.timedelta(days=1)
-                continue
-            break
+    today_date = datetime.date.today()
+    if today_date.isoformat() in completed_days:
+        streak_days = 1
+        for i in range(1, 35):
+            day_str = (today_date - datetime.timedelta(days=i)).isoformat()
+            if day_str in completed_days:
+                streak_days += 1
+            else:
+                break
+    else:
+        for i in range(1, 35):
+            day_str = (today_date - datetime.timedelta(days=i)).isoformat()
+            if day_str in completed_days:
+                streak_days += 1
+            else:
+                break
+
     big_rock_suggestions = compute_big_rock_suggestions(active_tasks, limit=5)
     return {
         "date": today,
