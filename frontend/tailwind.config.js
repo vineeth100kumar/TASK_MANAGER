@@ -32,7 +32,27 @@ export default {
           rule: '#2a2a2f',
           accent: '#d97706',
           seal: '#c2410c'
+        },
+        paper: {
+          base:   '#F5F1E8',   // main clipping background
+          aged:   '#EDE3C8',   // yellowed clippings
+          cream:  '#F7F2E5',   // slightly off-white
+          white:  '#FAFAF8',   // freshest clippings
+          board:  '#E8E0D0',   // cork board / background canvas
+          dark:   '#1C1A16',   // night edition base
+        },
+        ink: {
+          primary:  '#1A1814',
+          muted:    '#5A5650',
+          faint:    '#8A8780',
+          rule:     '#C0B898',
+          danger:   '#8B1A1A',
+          success:  '#1A4A1A',
+          amber:    '#8B5E00',
         }
+      },
+      borderRadius: {
+        'clip': '1px',
       },
       padding: {
         'safe-top': 'env(safe-area-inset-top)',

@@ -43,6 +43,8 @@ interface NavbarProps {
   onRedo?: () => void;
   undoTooltip?: string;
   redoTooltip?: string;
+  edition?: 'day' | 'night';
+  onToggleEdition?: () => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({
@@ -58,7 +60,9 @@ export const Navbar: React.FC<NavbarProps> = ({
   onUndo,
   onRedo,
   undoTooltip = '',
-  redoTooltip = ''
+  redoTooltip = '',
+  edition = 'day',
+  onToggleEdition,
 }) => {
   const currentHour = new Date().getHours();
   const isEvening = currentHour >= 17 || currentHour < 5;
@@ -112,6 +116,18 @@ export const Navbar: React.FC<NavbarProps> = ({
               title={isEvening ? "Evening Debrief" : "Morning Kickoff"}
             >
               {isEvening ? <Moon className="w-3.5 h-3.5 text-indigo-400" /> : <Sun className="w-3.5 h-3.5 text-amber-400" />}
+            </button>
+          )}
+
+          {/* Day / Night Edition Toggle */}
+          {onToggleEdition && (
+            <button
+              onClick={onToggleEdition}
+              aria-label={`Switch to ${edition === 'day' ? 'Night' : 'Day'} edition`}
+              title={`Current: ${edition === 'day' ? 'Day' : 'Night'} Edition. Click to switch.`}
+              className="p-2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-none border border-stone-700 bg-stone-900 text-stone-200 text-xs font-ledger uppercase tracking-wider active:scale-95 transition-all"
+            >
+              <span>{edition === 'day' ? '🌙' : '☀️'}</span>
             </button>
           )}
 
@@ -246,6 +262,18 @@ export const Navbar: React.FC<NavbarProps> = ({
             <Sparkles className="w-3.5 h-3.5 text-stone-950" />
             <span>The Wire</span>
           </button>
+
+          {/* Day / Night Edition Toggle */}
+          {onToggleEdition && (
+            <button
+              onClick={onToggleEdition}
+              aria-label={`Switch to ${edition === 'day' ? 'Night' : 'Day'} edition`}
+              title={`Current: ${edition === 'day' ? 'Day' : 'Night'} Edition. Click to switch.`}
+              className="flex items-center space-x-1.5 px-2.5 py-1.5 rounded-none border border-stone-700 bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-white text-xs font-ledger uppercase tracking-wider transition-colors cursor-pointer"
+            >
+              <span>{edition === 'day' ? '🌙 Night ed.' : '☀️ Day ed.'}</span>
+            </button>
+          )}
 
           {/* Unified Desktop Status Cluster */}
           <div className="flex items-center space-x-1.5 font-ledger text-[10px] uppercase">

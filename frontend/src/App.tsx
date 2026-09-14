@@ -48,6 +48,30 @@ export const App: React.FC = () => {
   const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
+  // Newspaper Edition State ('day' vs 'night')
+  const [edition, setEdition] = useState<'day' | 'night'>(() => {
+    try {
+      const saved = localStorage.getItem('sage_edition');
+      if (saved === 'day' || saved === 'night') return saved;
+    } catch (e) {
+      // localStorage not accessible
+    }
+    const hr = new Date().getHours();
+    return hr >= 20 || hr < 6 ? 'night' : 'day';
+  });
+
+  const handleToggleEdition = useCallback(() => {
+    setEdition((prev) => {
+      const next = prev === 'day' ? 'night' : 'day';
+      try {
+        localStorage.setItem('sage_edition', next);
+      } catch (e) {
+        // ignore
+      }
+      return next;
+    });
+  }, []);
+
   // Track iOS Visual Viewport & Keyboard offset dynamically
   useVisualViewport();
 
@@ -943,13 +967,20 @@ export const App: React.FC = () => {
   const todayTasks = items.filter(i => i.due_date === todayStr || (!i.is_completed && i.priority === 'urgent'));
 
   return (
-    <div className="min-h-screen bg-zinc-950 text-zinc-100 flex flex-col font-sans relative">
+    <div
+      className={`min-h-screen flex flex-col font-sans relative transition-colors duration-300 ${
+        edition === 'night' ? 'bg-[#141311] text-zinc-100' : 'bg-[#E8E0D0] text-[#1A1814]'
+      }`}
+      data-edition={edition}
+    >
       {/* Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isLiveConnected={isConnected}
         isSyncing={isSyncing}
+        edition={edition}
+        onToggleEdition={handleToggleEdition}
         onOpenQuickCapture={() => setIsBrainDumpOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenWizard={(mode) => {
@@ -965,7 +996,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className="flex-1 px-4 sm:px-6 md:px-8 pt-4 md:pt-6">
+      <main className={`flex-1 ${activeTab === 'dashboard' ? '' : 'px-4 sm:px-6 md:px-8 pt-4 md:pt-6'}`}>
         {activeTab === 'dashboard' && (
           <DashboardView
             isLoading={isInitialLoading}

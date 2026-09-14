@@ -39,3 +39,110 @@
   }
 }
 
+@layer components {
+  /* Cork board background */
+  .board-bg {
+    background-color: #E8E0D0;
+    background-image: repeating-linear-gradient(
+      0deg, transparent, transparent 27px,
+      rgba(0,0,0,0.035) 27px, rgba(0,0,0,0.035) 28px
+    );
+  }
+
+  /* Base clipping card — all data sections extend this */
+  .clipping {
+    background: #F5F1E8;
+    border: 0.5px solid rgba(0,0,0,0.15);
+    position: relative;
+  }
+  .clipping-aged   { background: #EDE3C8; }
+  .clipping-cream  { background: #F7F2E5; }
+  .clipping-white  { background: #FAFAF8; }
+
+  /* Night edition overrides */
+  [data-edition="night"] .board-bg {
+    background-color: #141311;
+    background-image: repeating-linear-gradient(
+      0deg, transparent, transparent 27px,
+      rgba(255,255,255,0.02) 27px, rgba(255,255,255,0.02) 28px
+    );
+  }
+  [data-edition="night"] .clipping        { background: #1C1A16; border-color: rgba(255,255,255,0.1); }
+  [data-edition="night"] .clipping-aged   { background: #211F19; }
+  [data-edition="night"] .clipping-cream  { background: #1E1C17; }
+  [data-edition="night"] .clipping-white  { background: #242118; }
+  [data-edition="night"] .hed             { color: #EDECE8; }
+  [data-edition="night"] .byline          { color: #9E9D96; }
+  [data-edition="night"] .dateline        { color: #EDECE8; }
+  [data-edition="night"] .clip-rule       { background: #EDECE8; }
+  [data-edition="night"] .clip-rule-thin  { background: #5A5650; }
+  [data-edition="night"] .clip-rule-double {
+    border-top-color: #EDECE8;
+    border-bottom-color: #EDECE8;
+  }
+  [data-edition="night"] .torn-top {
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0px, transparent 4px,
+      #141311 4px, #141311 5px
+    );
+  }
+  [data-edition="night"] .torn-bottom {
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0px, transparent 3px,
+      #141311 3px, #141311 6px,
+      transparent 6px, transparent 8px,
+      #141311 8px, #141311 9px
+    );
+  }
+
+  /* Column rules */
+  .clip-rule        { width: 100%; height: 1.5px; background: #1A1814; margin: 6px 0; }
+  .clip-rule-thin   { height: 0.5px; background: #8A8780; margin: 4px 0; }
+  .clip-rule-double {
+    border-top: 1.5px solid #1A1814;
+    border-bottom: 0.5px solid #1A1814;
+    padding-top: 3px;
+    margin: 6px 0;
+  }
+
+  /* Tape strip decoration */
+  .tape-strip {
+    position: absolute;
+    background: rgba(255,255,200,0.55);
+    border: 0.5px solid rgba(200,190,100,0.3);
+    width: 36px;
+    height: 14px;
+    pointer-events: none;
+  }
+
+  /* Torn edge effect (top) */
+  .torn-top {
+    height: 8px;
+    margin: -1px -1px 0;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0px, transparent 4px,
+      #E8E0D0 4px, #E8E0D0 5px
+    );
+  }
+
+  /* Torn edge effect (bottom) */
+  .torn-bottom {
+    height: 8px;
+    margin: 0 -1px -1px;
+    background: repeating-linear-gradient(
+      90deg,
+      transparent 0px, transparent 3px,
+      #E8E0D0 3px, #E8E0D0 6px,
+      transparent 6px, transparent 8px,
+      #E8E0D0 8px, #E8E0D0 9px
+    );
+  }
+
+  /* Typography helpers */
+  .hed    { font-family: 'Newsreader', Georgia, serif; color: #1A1814; font-weight: 700; line-height: 1.05; }
+  .byline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 0.06em; text-transform: uppercase; }
+  .dateline { font-family: Arial, sans-serif; font-size: 9px; font-weight: bold; color: #1A1814; letter-spacing: 0.08em; text-transform: uppercase; }
+}
