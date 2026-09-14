@@ -52,6 +52,7 @@
   /* Base clipping card — all data sections extend this */
   .clipping {
     background: #F5F1E8;
+    color: #1A1814;
     border: 0.5px solid rgba(0,0,0,0.15);
     position: relative;
   }
@@ -67,7 +68,7 @@
       rgba(255,255,255,0.02) 27px, rgba(255,255,255,0.02) 28px
     );
   }
-  [data-edition="night"] .clipping        { background: #1C1A16; border-color: rgba(255,255,255,0.1); }
+  [data-edition="night"] .clipping        { background: #1C1A16; border-color: rgba(255,255,255,0.1); color: #EDECE8; }
   [data-edition="night"] .clipping-aged   { background: #211F19; }
   [data-edition="night"] .clipping-cream  { background: #1E1C17; }
   [data-edition="night"] .clipping-white  { background: #242118; }

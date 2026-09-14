@@ -996,7 +996,7 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className={`flex-1 ${activeTab === 'dashboard' ? '' : 'px-4 sm:px-6 md:px-8 pt-4 md:pt-6'}`}>
+      <main className={`flex-1 ${activeTab === 'dashboard' || activeTab === 'whiteboard' ? '' : 'px-4 sm:px-6 md:px-8 pt-4 md:pt-6'}`}>
         {activeTab === 'dashboard' && (
           <DashboardView
             isLoading={isInitialLoading}
@@ -1031,6 +1031,7 @@ export const App: React.FC = () => {
           <WhiteboardView
             initialProjectId={activeWhiteboardProjectId}
             projects={projects}
+            edition={edition}
             onBack={() => setActiveTab('projects')}
             onTaskCreated={loadData}
           />

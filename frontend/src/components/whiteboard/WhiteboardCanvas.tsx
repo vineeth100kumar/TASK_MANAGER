@@ -5,6 +5,7 @@ import {
   ShapeElement,
   TextElement,
   WhiteboardTool,
+  WhiteboardGridType,
   ShapeType,
   ViewState,
   Point,
@@ -34,6 +35,10 @@ interface WhiteboardCanvasProps {
   onViewStateChange: (view: ViewState) => void;
   selectedElementId: string | null;
   onSelectElementId: (id: string | null) => void;
+  edition?: 'day' | 'night';
+  gridType?: WhiteboardGridType;
+  stylusOnly?: boolean;
+  onCanvasDoubleClick?: (point: Point) => void;
 }
 
 // Helper: Distance from point P to line segment AB
@@ -66,6 +71,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       onViewStateChange,
       selectedElementId,
       onSelectElementId,
+      edition = 'day',
+      gridType = 'dots',
+      stylusOnly = false,
+      onCanvasDoubleClick,
     },
     ref
   ) => {
@@ -77,6 +86,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     const currentPointsRef = useRef<Point[]>([]);
     const shapeStartRef = useRef<Point | null>(null);
     const shapeCurrentRef = useRef<Point | null>(null);
+
+    // Laser pointer points with timestamps: { x, y, time }
+    const laserPointsRef = useRef<{ x: number; y: number; time: number }[]>([]);
+    const laserAnimRef = useRef<number | null>(null);
 
     // Panning & zooming state
     const isPanningRef = useRef(false);
@@ -115,7 +128,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     );
 
     // -------------------------------------------------------------
-    // RENDER PASS: Infinite Dotted Grid + Vector Elements
+    // RENDER PASS: Infinite Grid + Vector Elements + Laser
     // -------------------------------------------------------------
     const renderCanvas = useCallback(() => {
       const canvas = canvasRef.current;
@@ -126,13 +139,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const dpr = window.devicePixelRatio || 1;
       const width = canvas.width / dpr;
       const height = canvas.height / dpr;
+      const isNight = edition === 'night';
 
-      // Clear Canvas (Dark Mode background: #09090b or #0e0e11)
+      // 1. Clear Canvas Background (Parchment in Day, Slate Blueprint in Night)
       ctx.save();
       ctx.setTransform(1, 0, 0, 1, 0, 0);
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      ctx.fillStyle = '#09090b';
+      ctx.fillStyle = isNight ? '#141311' : '#F5F1E8';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
       ctx.restore();
 
@@ -142,27 +156,71 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       ctx.translate(viewState.panX, viewState.panY);
       ctx.scale(viewState.zoom, viewState.zoom);
 
-      // 1. Draw Infinite Dotted Grid
-      const gridSpacing = 28;
-      const startX = Math.floor((-viewState.panX / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
-      const endX = startX + (width / viewState.zoom) + gridSpacing * 2;
-      const startY = Math.floor((-viewState.panY / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
-      const endY = startY + (height / viewState.zoom) + gridSpacing * 2;
+      // 2. Draw Drafting Grid Surface
+      if (gridType === 'dots') {
+        const gridSpacing = 28;
+        const startX = Math.floor((-viewState.panX / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
+        const endX = startX + (width / viewState.zoom) + gridSpacing * 2;
+        const startY = Math.floor((-viewState.panY / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
+        const endY = startY + (height / viewState.zoom) + gridSpacing * 2;
 
-      ctx.fillStyle = 'rgba(255, 255, 255, 0.12)';
-      const dotRadius = Math.max(1, 1.2 / viewState.zoom);
+        ctx.fillStyle = isNight ? 'rgba(255, 255, 255, 0.14)' : 'rgba(26, 24, 20, 0.16)';
+        const dotRadius = Math.max(0.8, 1.1 / viewState.zoom);
 
-      ctx.beginPath();
-      for (let x = startX; x <= endX; x += gridSpacing) {
-        for (let y = startY; y <= endY; y += gridSpacing) {
-          ctx.moveTo(x + dotRadius, y);
-          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+        ctx.beginPath();
+        for (let x = startX; x <= endX; x += gridSpacing) {
+          for (let y = startY; y <= endY; y += gridSpacing) {
+            ctx.moveTo(x + dotRadius, y);
+            ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+          }
         }
-      }
-      ctx.fill();
+        ctx.fill();
+      } else if (gridType === 'graph') {
+        const gridSpacing = 24;
+        const startX = Math.floor((-viewState.panX / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
+        const endX = startX + (width / viewState.zoom) + gridSpacing * 2;
+        const startY = Math.floor((-viewState.panY / viewState.zoom) / gridSpacing) * gridSpacing - gridSpacing;
+        const endY = startY + (height / viewState.zoom) + gridSpacing * 2;
 
-      // 2. Draw Committed Elements (strokes, shapes, text)
-      // Note: Sticky Notes are rendered in the DOM overlay for native text editing
+        ctx.lineWidth = 0.5 / viewState.zoom;
+        for (let x = startX; x <= endX; x += gridSpacing) {
+          const isMajor = Math.round(x / gridSpacing) % 5 === 0;
+          ctx.strokeStyle = isNight
+            ? (isMajor ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.04)')
+            : (isMajor ? 'rgba(26, 24, 20, 0.15)' : 'rgba(26, 24, 20, 0.06)');
+          ctx.beginPath();
+          ctx.moveTo(x, startY);
+          ctx.lineTo(x, endY);
+          ctx.stroke();
+        }
+        for (let y = startY; y <= endY; y += gridSpacing) {
+          const isMajor = Math.round(y / gridSpacing) % 5 === 0;
+          ctx.strokeStyle = isNight
+            ? (isMajor ? 'rgba(255, 255, 255, 0.14)' : 'rgba(255, 255, 255, 0.04)')
+            : (isMajor ? 'rgba(26, 24, 20, 0.15)' : 'rgba(26, 24, 20, 0.06)');
+          ctx.beginPath();
+          ctx.moveTo(startX, y);
+          ctx.lineTo(endX, y);
+          ctx.stroke();
+        }
+      } else if (gridType === 'ruled') {
+        const lineSpacing = 32;
+        const startX = Math.floor((-viewState.panX / viewState.zoom) / lineSpacing) * lineSpacing - lineSpacing;
+        const endX = startX + (width / viewState.zoom) + lineSpacing * 2;
+        const startY = Math.floor((-viewState.panY / viewState.zoom) / lineSpacing) * lineSpacing - lineSpacing;
+        const endY = startY + (height / viewState.zoom) + lineSpacing * 2;
+
+        ctx.lineWidth = 0.6 / viewState.zoom;
+        ctx.strokeStyle = isNight ? 'rgba(255, 255, 255, 0.08)' : 'rgba(26, 24, 20, 0.11)';
+        ctx.beginPath();
+        for (let y = startY; y <= endY; y += lineSpacing) {
+          ctx.moveTo(startX, y);
+          ctx.lineTo(endX, y);
+        }
+        ctx.stroke();
+      }
+
+      // 3. Draw Committed Elements (strokes, shapes, text)
       elements.forEach((el) => {
         if (el.type === 'stroke') {
           drawStroke(ctx, el);
@@ -173,7 +231,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         }
       });
 
-      // 3. Draw Active Inking Stroke (In Progress)
+      // 4. Draw Active Inking Stroke (In Progress)
       if (isDrawingRef.current && currentPointsRef.current.length > 1) {
         if (activeTool === 'pen') {
           drawStroke(ctx, {
@@ -196,7 +254,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         }
       }
 
-      // 4. Draw Active Shape Preview (In Progress)
+      // 5. Draw Active Shape Preview (In Progress)
       if (activeTool === 'shape' && shapeStartRef.current && shapeCurrentRef.current) {
         const p1 = shapeStartRef.current;
         const p2 = shapeCurrentRef.current;
@@ -222,6 +280,40 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         );
       }
 
+      // 6. Draw Laser Pointer Trace (Smooth temporary fading beam)
+      const now = Date.now();
+      laserPointsRef.current = laserPointsRef.current.filter((p) => now - p.time < 1200);
+
+      if (laserPointsRef.current.length > 1) {
+        for (let i = 0; i < laserPointsRef.current.length - 1; i++) {
+          const p1 = laserPointsRef.current[i];
+          const p2 = laserPointsRef.current[i + 1];
+          const age = now - p2.time;
+          const alpha = Math.max(0, 1 - age / 1200);
+
+          ctx.save();
+          ctx.lineCap = 'round';
+          ctx.lineJoin = 'round';
+          ctx.lineWidth = (8 / viewState.zoom) * alpha;
+          ctx.strokeStyle = isNight
+            ? `rgba(255, 69, 58, ${alpha * 0.9})`
+            : `rgba(217, 38, 38, ${alpha * 0.9})`;
+          ctx.shadowColor = isNight ? '#ff453a' : '#d92626';
+          ctx.shadowBlur = 8;
+          ctx.beginPath();
+          ctx.moveTo(p1.x, p1.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.stroke();
+          ctx.restore();
+        }
+      }
+
+      // If laser points remain, continue animation loop for smooth fadeout
+      if (laserPointsRef.current.length > 0) {
+        if (laserAnimRef.current) cancelAnimationFrame(laserAnimRef.current);
+        laserAnimRef.current = requestAnimationFrame(renderCanvas);
+      }
+
       ctx.restore();
     }, [
       elements,
@@ -233,6 +325,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       highlighterColor,
       highlighterSize,
       selectedElementId,
+      edition,
+      gridType,
     ]);
 
     // -------------------------------------------------------------
@@ -265,7 +359,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
-      // Midpoint Quadratic Bezier Interpolation for ultra-smooth lines
+      // Midpoint Quadratic Bezier Interpolation for smooth strokes
       ctx.beginPath();
       ctx.moveTo(points[0].x, points[0].y);
 
@@ -281,42 +375,42 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const drawShape = (ctx: CanvasRenderingContext2D, shape: ShapeElement, isSelected: boolean) => {
+      const { shapeType, x, y, width, height, color, fillColor, strokeWidth } = shape;
       ctx.save();
-      ctx.strokeStyle = shape.color;
-      ctx.lineWidth = shape.strokeWidth;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-
-      const { x, y, width, height, shapeType } = shape;
-
-      ctx.beginPath();
+      ctx.strokeStyle = color;
+      ctx.lineWidth = strokeWidth;
 
       if (shapeType === 'rectangle') {
-        const r = 8;
         ctx.beginPath();
-        ctx.roundRect(x, y, width, height, r);
-        if (shape.fillColor) {
-          ctx.fillStyle = shape.fillColor;
+        ctx.rect(x, y, width, height);
+        if (fillColor) {
+          ctx.fillStyle = fillColor;
           ctx.fill();
         }
         ctx.stroke();
       } else if (shapeType === 'circle') {
         ctx.beginPath();
-        ctx.ellipse(x + width / 2, y + height / 2, width / 2, height / 2, 0, 0, Math.PI * 2);
-        if (shape.fillColor) {
-          ctx.fillStyle = shape.fillColor;
+        const rx = Math.abs(width) / 2;
+        const ry = Math.abs(height) / 2;
+        const cx = x + width / 2;
+        const cy = y + height / 2;
+        ctx.ellipse(cx, cy, Math.max(1, rx), Math.max(1, ry), 0, 0, Math.PI * 2);
+        if (fillColor) {
+          ctx.fillStyle = fillColor;
           ctx.fill();
         }
         ctx.stroke();
       } else if (shapeType === 'diamond') {
         ctx.beginPath();
-        ctx.moveTo(x + width / 2, y);
-        ctx.lineTo(x + width, y + height / 2);
-        ctx.lineTo(x + width / 2, y + height);
-        ctx.lineTo(x, y + height / 2);
+        const cx = x + width / 2;
+        const cy = y + height / 2;
+        ctx.moveTo(cx, y);
+        ctx.lineTo(x + width, cy);
+        ctx.lineTo(cx, y + height);
+        ctx.lineTo(x, cy);
         ctx.closePath();
-        if (shape.fillColor) {
-          ctx.fillStyle = shape.fillColor;
+        if (fillColor) {
+          ctx.fillStyle = fillColor;
           ctx.fill();
         }
         ctx.stroke();
@@ -326,37 +420,38 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         ctx.lineTo(x + width, y + height);
         ctx.stroke();
       } else if (shapeType === 'arrow') {
-        const endX = x + width;
-        const endY = y + height;
-        const angle = Math.atan2(endY - y, endX - x);
-        const headlen = Math.max(12, shape.strokeWidth * 3.5);
+        const fromX = x;
+        const fromY = y;
+        const toX = x + width;
+        const toY = y + height;
+        const headlen = Math.max(14, strokeWidth * 3.5);
+        const angle = Math.atan2(toY - fromY, toX - fromX);
 
         ctx.beginPath();
-        ctx.moveTo(x, y);
-        ctx.lineTo(endX, endY);
+        ctx.moveTo(fromX, fromY);
+        ctx.lineTo(toX, toY);
         ctx.stroke();
 
-        // Arrowhead
         ctx.beginPath();
-        ctx.moveTo(endX, endY);
+        ctx.fillStyle = color;
+        ctx.moveTo(toX, toY);
         ctx.lineTo(
-          endX - headlen * Math.cos(angle - Math.PI / 6),
-          endY - headlen * Math.sin(angle - Math.PI / 6)
+          toX - headlen * Math.cos(angle - Math.PI / 6),
+          toY - headlen * Math.sin(angle - Math.PI / 6)
         );
-        ctx.moveTo(endX, endY);
         ctx.lineTo(
-          endX - headlen * Math.cos(angle + Math.PI / 6),
-          endY - headlen * Math.sin(angle + Math.PI / 6)
+          toX - headlen * Math.cos(angle + Math.PI / 6),
+          toY - headlen * Math.sin(angle + Math.PI / 6)
         );
-        ctx.stroke();
+        ctx.closePath();
+        ctx.fill();
       }
 
       if (isSelected) {
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 1.5;
         ctx.setLineDash([4, 4]);
-        ctx.strokeRect(x - 6, y - 6, (shapeType === 'arrow' || shapeType === 'line' ? Math.abs(width) : width) + 12, (shapeType === 'arrow' || shapeType === 'line' ? Math.abs(height) : height) + 12);
-        ctx.setLineDash([]);
+        ctx.strokeRect(x - 4, y - 4, width + 8, height + 8);
       }
 
       ctx.restore();
@@ -364,29 +459,23 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
     const drawText = (ctx: CanvasRenderingContext2D, el: TextElement, isSelected: boolean) => {
       ctx.save();
+      ctx.font = `600 ${el.fontSize}px 'Newsreader', Georgia, serif`;
       ctx.fillStyle = el.color;
-      ctx.font = `600 ${el.fontSize}px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif`;
-      ctx.textBaseline = 'top';
-
-      const lines = el.text.split('\n');
-      lines.forEach((line, idx) => {
-        ctx.fillText(line, el.x, el.y + idx * (el.fontSize * 1.3));
-      });
+      ctx.fillText(el.text, el.x, el.y + el.fontSize);
 
       if (isSelected) {
-        const metrics = ctx.measureText(el.text);
         ctx.strokeStyle = '#3b82f6';
-        ctx.lineWidth = 1.5;
-        ctx.setLineDash([4, 4]);
-        ctx.strokeRect(el.x - 4, el.y - 4, metrics.width + 8, el.fontSize * 1.3 * lines.length + 8);
-        ctx.setLineDash([]);
+        ctx.lineWidth = 1;
+        ctx.setLineDash([3, 3]);
+        const metrics = ctx.measureText(el.text);
+        ctx.strokeRect(el.x - 3, el.y, metrics.width + 6, el.fontSize + 6);
       }
 
       ctx.restore();
     };
 
     // -------------------------------------------------------------
-    // RESIZE & DEVICE PIXEL RATIO SYNC
+    // CANVAS RESIZING & SETUP
     // -------------------------------------------------------------
     useEffect(() => {
       const handleResize = () => {
@@ -395,13 +484,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         if (!canvas || !container) return;
 
         const dpr = window.devicePixelRatio || 1;
-        const rect = container.getBoundingClientRect();
-
-        canvas.width = rect.width * dpr;
-        canvas.height = rect.height * dpr;
-        canvas.style.width = `${rect.width}px`;
-        canvas.style.height = `${rect.height}px`;
-
+        canvas.width = container.clientWidth * dpr;
+        canvas.height = container.clientHeight * dpr;
         renderCanvas();
       };
 
@@ -415,47 +499,41 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     }, [renderCanvas]);
 
     // -------------------------------------------------------------
-    // STROKE ERASER LOGIC
+    // ERASER HIT TEST
     // -------------------------------------------------------------
     const eraseIntersecting = (point: Point) => {
-      const eraseRadius = 14 / viewState.zoom;
-      let didDelete = false;
+      const eraserRadius = 16 / viewState.zoom;
+      let erasedAny = false;
 
       const remaining = elements.filter((el) => {
         if (el.type === 'stroke') {
           for (let i = 0; i < el.points.length - 1; i++) {
-            const d = distToSegment(point, el.points[i], el.points[i + 1]);
-            if (d <= eraseRadius + el.size / 2) {
-              didDelete = true;
-              return false; // delete this stroke
+            const dist = distToSegment(point, el.points[i], el.points[i + 1]);
+            if (dist <= eraserRadius + el.size / 2) {
+              erasedAny = true;
+              return false;
             }
           }
           return true;
         } else if (el.type === 'shape') {
-          // Bounding box hit
-          const minX = Math.min(el.x, el.x + el.width);
-          const maxX = Math.max(el.x, el.x + el.width);
-          const minY = Math.min(el.y, el.y + el.height);
-          const maxY = Math.max(el.y, el.y + el.height);
-
           if (
-            point.x >= minX - eraseRadius &&
-            point.x <= maxX + eraseRadius &&
-            point.y >= minY - eraseRadius &&
-            point.y <= maxY + eraseRadius
+            point.x >= el.x - eraserRadius &&
+            point.x <= el.x + el.width + eraserRadius &&
+            point.y >= el.y - eraserRadius &&
+            point.y <= el.y + el.height + eraserRadius
           ) {
-            didDelete = true;
+            erasedAny = true;
             return false;
           }
           return true;
         } else if (el.type === 'text') {
           if (
-            point.x >= el.x - eraseRadius &&
-            point.x <= el.x + 200 + eraseRadius &&
-            point.y >= el.y - eraseRadius &&
-            point.y <= el.y + el.fontSize * 2 + eraseRadius
+            point.x >= el.x - eraserRadius &&
+            point.x <= el.x + 160 + eraserRadius &&
+            point.y >= el.y - eraserRadius &&
+            point.y <= el.y + 40 + eraserRadius
           ) {
-            didDelete = true;
+            erasedAny = true;
             return false;
           }
           return true;
@@ -463,13 +541,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return true;
       });
 
-      if (didDelete) {
+      if (erasedAny) {
         onElementsChange(remaining, true);
       }
     };
 
     // -------------------------------------------------------------
-    // POINTER EVENTS HANDLING (Pen, Highlighter, Shapes, Eraser, Pan)
+    // POINTER EVENTS HANDLING (Pen, Laser, Shapes, Eraser, Pan)
     // -------------------------------------------------------------
     const handlePointerDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
       e.currentTarget.setPointerCapture(e.pointerId);
@@ -484,6 +562,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
+      // Palm Rejection: If stylus-only mode is active and input is touch, only pan
+      if (stylusOnly && e.pointerType === 'touch') {
+        isPanningRef.current = true;
+        panStartRef.current = { x: e.clientX - viewState.panX, y: e.clientY - viewState.panY };
+        return;
+      }
+
       // Spacebar or Middle-click or Hand tool initiates canvas pan
       if (spacePressedRef.current || e.button === 1 || activeTool === 'hand') {
         isPanningRef.current = true;
@@ -495,7 +580,11 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
       worldPoint.pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : 0.5;
 
-      if (activeTool === 'pen' || activeTool === 'highlighter') {
+      if (activeTool === 'laser') {
+        isDrawingRef.current = true;
+        laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
+        renderCanvas();
+      } else if (activeTool === 'pen' || activeTool === 'highlighter') {
         isDrawingRef.current = true;
         currentPointsRef.current = [worldPoint];
         renderCanvas();
@@ -554,7 +643,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
-      // Handle Canvas Panning
       if (isPanningRef.current) {
         onViewStateChange({
           ...viewState,
@@ -568,7 +656,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
       worldPoint.pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : 0.5;
 
-      if (isDrawingRef.current) {
+      if (activeTool === 'laser' && isDrawingRef.current) {
+        laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
+        renderCanvas();
+      } else if (isDrawingRef.current && (activeTool === 'pen' || activeTool === 'highlighter')) {
         currentPointsRef.current.push(worldPoint);
         renderCanvas();
       } else if (activeTool === 'shape' && shapeStartRef.current) {
@@ -585,45 +676,41 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         initialPinchDistRef.current = null;
       }
 
-      try {
-        e.currentTarget.releasePointerCapture(e.pointerId);
-      } catch {
-        // Ignore
-      }
-
       if (isPanningRef.current) {
         isPanningRef.current = false;
         return;
       }
 
-      if (isDrawingRef.current && currentPointsRef.current.length > 0) {
+      if (activeTool === 'laser') {
         isDrawingRef.current = false;
-        const isHigh = activeTool === 'highlighter';
-        const newStroke: StrokeElement = {
-          id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          type: 'stroke',
-          points: [...currentPointsRef.current],
-          color: isHigh ? highlighterColor : activeColor,
-          size: isHigh ? highlighterSize : activeSize,
-          isHighlighter: isHigh,
-          opacity: isHigh ? 0.38 : 1,
-        };
-        currentPointsRef.current = [];
-        onElementsChange([...elements, newStroke], true);
+        return;
       }
 
-      if (activeTool === 'shape' && shapeStartRef.current && shapeCurrentRef.current) {
+      if (isDrawingRef.current && (activeTool === 'pen' || activeTool === 'highlighter')) {
+        isDrawingRef.current = false;
+        if (currentPointsRef.current.length > 0) {
+          const newStroke: StrokeElement = {
+            id: `stroke_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+            type: 'stroke',
+            points: [...currentPointsRef.current],
+            color: activeTool === 'pen' ? activeColor : highlighterColor,
+            size: activeTool === 'pen' ? activeSize : highlighterSize,
+            isHighlighter: activeTool === 'highlighter',
+            opacity: activeTool === 'highlighter' ? 0.38 : 1,
+          };
+          onElementsChange([...elements, newStroke], true);
+        }
+        currentPointsRef.current = [];
+        renderCanvas();
+      } else if (activeTool === 'shape' && shapeStartRef.current && shapeCurrentRef.current) {
         const p1 = shapeStartRef.current;
         const p2 = shapeCurrentRef.current;
-        shapeStartRef.current = null;
-        shapeCurrentRef.current = null;
-
         const x = Math.min(p1.x, p2.x);
         const y = Math.min(p1.y, p2.y);
         const w = Math.abs(p2.x - p1.x);
         const h = Math.abs(p2.y - p1.y);
 
-        if (w > 4 || h > 4) {
+        if (w > 3 || h > 3) {
           const newShape: ShapeElement = {
             id: `shape_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
             type: 'shape',
@@ -637,43 +724,59 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           };
           onElementsChange([...elements, newShape], true);
         }
+
+        shapeStartRef.current = null;
+        shapeCurrentRef.current = null;
+        renderCanvas();
       }
     };
 
-    // -------------------------------------------------------------
-    // MOUSE WHEEL ZOOM (Centered at Cursor)
-    // -------------------------------------------------------------
+    // Wheel zoom & pan
     const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
       e.preventDefault();
-      const rect = e.currentTarget.getBoundingClientRect();
-      const cursorX = e.clientX - rect.left;
-      const cursorY = e.clientY - rect.top;
+      if (e.ctrlKey || e.metaKey) {
+        // Zoom
+        const rect = e.currentTarget.getBoundingClientRect();
+        const mouseX = e.clientX - rect.left;
+        const mouseY = e.clientY - rect.top;
 
-      const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-      const newZoom = Math.min(3.5, Math.max(0.15, viewState.zoom * zoomFactor));
+        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
+        const newZoom = Math.min(3, Math.max(0.2, viewState.zoom * zoomFactor));
 
-      const newPanX = cursorX - (cursorX - viewState.panX) * (newZoom / viewState.zoom);
-      const newPanY = cursorY - (cursorY - viewState.panY) * (newZoom / viewState.zoom);
+        const newPanX = mouseX - (mouseX - viewState.panX) * (newZoom / viewState.zoom);
+        const newPanY = mouseY - (mouseY - viewState.panY) * (newZoom / viewState.zoom);
 
-      onViewStateChange({
-        zoom: newZoom,
-        panX: newPanX,
-        panY: newPanY,
-      });
+        onViewStateChange({
+          panX: newPanX,
+          panY: newPanY,
+          zoom: newZoom,
+        });
+      } else {
+        // Trackpad Pan
+        onViewStateChange({
+          ...viewState,
+          panX: viewState.panX - e.deltaX,
+          panY: viewState.panY - e.deltaY,
+        });
+      }
     };
 
-    // Spacebar listener for dragging
+    // Keyboard spacebar listener for panning
     useEffect(() => {
       const handleKeyDown = (e: KeyboardEvent) => {
-        if (e.code === 'Space' && !spacePressedRef.current && (e.target as HTMLElement).tagName !== 'TEXTAREA' && (e.target as HTMLElement).tagName !== 'INPUT') {
+        if (e.code === 'Space' && !e.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
           spacePressedRef.current = true;
+          if (containerRef.current) containerRef.current.style.cursor = 'grab';
         }
       };
+
       const handleKeyUp = (e: KeyboardEvent) => {
         if (e.code === 'Space') {
           spacePressedRef.current = false;
+          if (containerRef.current) containerRef.current.style.cursor = 'default';
         }
       };
+
       window.addEventListener('keydown', handleKeyDown);
       window.addEventListener('keyup', handleKeyUp);
       return () => {
@@ -683,7 +786,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     }, []);
 
     // -------------------------------------------------------------
-    // EXPORT & VIEW IMPERATIVE METHODS
+    // EXPORT UTILITIES (PNG / SVG)
     // -------------------------------------------------------------
     useImperativeHandle(ref, () => ({
       exportToPNG: async (): Promise<string> => {
@@ -691,7 +794,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         const offCtx = offscreen.getContext('2d');
         if (!offCtx) return '';
 
-        // Calculate bounding box of all elements
         let minX = Infinity;
         let minY = Infinity;
         let maxX = -Infinity;
@@ -713,7 +815,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           } else if (el.type === 'text') {
             minX = Math.min(minX, el.x);
             minY = Math.min(minY, el.y);
-            maxX = Math.max(maxX, el.x + 200);
+            maxX = Math.max(maxX, el.x + 180);
             maxY = Math.max(maxY, el.y + 40);
           }
         });
@@ -728,22 +830,25 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
         const outW = Math.max(800, maxX - minX + padding * 2);
         const outH = Math.max(600, maxY - minY + padding * 2);
+        const isNight = edition === 'night';
 
         offscreen.width = outW * 2;
         offscreen.height = outH * 2;
         offCtx.scale(2, 2);
 
         // Background
-        offCtx.fillStyle = '#09090b';
+        offCtx.fillStyle = isNight ? '#141311' : '#F5F1E8';
         offCtx.fillRect(0, 0, outW, outH);
 
         // Grid
-        offCtx.fillStyle = 'rgba(255, 255, 255, 0.1)';
-        for (let x = 0; x <= outW; x += 28) {
-          for (let y = 0; y <= outH; y += 28) {
-            offCtx.beginPath();
-            offCtx.arc(x, y, 1, 0, Math.PI * 2);
-            offCtx.fill();
+        if (gridType !== 'blank') {
+          offCtx.fillStyle = isNight ? 'rgba(255, 255, 255, 0.1)' : 'rgba(26, 24, 20, 0.12)';
+          for (let x = 0; x <= outW; x += 28) {
+            for (let y = 0; y <= outH; y += 28) {
+              offCtx.beginPath();
+              offCtx.arc(x, y, 1, 0, Math.PI * 2);
+              offCtx.fill();
+            }
           }
         }
 
@@ -756,14 +861,13 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           if (el.type === 'shape') drawShape(offCtx, el, false);
           if (el.type === 'text') drawText(offCtx, el, false);
           if (el.type === 'sticky') {
-            // Draw Sticky Card in PNG
             offCtx.save();
             offCtx.fillStyle = '#fef08a';
             offCtx.beginPath();
-            offCtx.roundRect(el.x, el.y, el.width, el.height, 8);
+            offCtx.rect(el.x, el.y, el.width, el.height);
             offCtx.fill();
-            offCtx.fillStyle = '#713f12';
-            offCtx.font = '500 14px sans-serif';
+            offCtx.fillStyle = '#1c1917';
+            offCtx.font = '500 13px serif';
             offCtx.fillText(el.text, el.x + 12, el.y + 24, el.width - 24);
             offCtx.restore();
           }
@@ -774,7 +878,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       },
 
       exportToSVG: (): string => {
-        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" style="background:#09090b">`;
+        const isNight = edition === 'night';
+        const bg = isNight ? '#141311' : '#F5F1E8';
+        let svg = `<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="800" viewBox="0 0 1200 800" style="background:${bg}">`;
         elements.forEach((el) => {
           if (el.type === 'stroke') {
             if (el.points.length > 1) {
@@ -782,9 +888,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
               svg += `<path d="${d}" stroke="${el.color}" stroke-width="${el.size}" fill="none" stroke-linecap="round" stroke-linejoin="round" opacity="${el.opacity ?? 1}" />`;
             }
           } else if (el.type === 'shape' && el.shapeType === 'rectangle') {
-            svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" rx="8" stroke="${el.color}" stroke-width="${el.strokeWidth}" fill="none" />`;
+            svg += `<rect x="${el.x}" y="${el.y}" width="${el.width}" height="${el.height}" stroke="${el.color}" stroke-width="${el.strokeWidth}" fill="none" />`;
           } else if (el.type === 'text') {
-            svg += `<text x="${el.x}" y="${el.y + el.fontSize}" fill="${el.color}" font-size="${el.fontSize}" font-family="sans-serif">${el.text}</text>`;
+            svg += `<text x="${el.x}" y="${el.y + el.fontSize}" fill="${el.color}" font-size="${el.fontSize}" font-family="serif">${el.text}</text>`;
           }
         });
         svg += '</svg>';
@@ -879,7 +985,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           x: inlineTextPos.x,
           y: inlineTextPos.y,
           text: inlineTextVal.trim(),
-          fontSize: Math.max(16, activeSize * 4.5),
+          fontSize: 18,
           color: activeColor,
         };
         onElementsChange([...elements, newText], true);
@@ -891,7 +997,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     return (
       <div
         ref={containerRef}
-        className="relative w-full h-full overflow-hidden select-none touch-none cursor-crosshair bg-zinc-950"
+        className="w-full h-full relative overflow-hidden select-none touch-none"
+        onDoubleClick={(e) => {
+          if (onCanvasDoubleClick) {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+            onCanvasDoubleClick(worldPoint);
+          }
+        }}
       >
         <canvas
           ref={canvasRef}
@@ -901,34 +1014,46 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           onPointerCancel={handlePointerUp}
           onWheel={handleWheel}
           className="absolute inset-0 block w-full h-full"
+          style={{
+            cursor:
+              activeTool === 'laser'
+                ? 'crosshair'
+                : activeTool === 'pen' || activeTool === 'highlighter'
+                ? 'crosshair'
+                : activeTool === 'eraser'
+                ? 'cell'
+                : activeTool === 'hand'
+                ? 'grab'
+                : activeTool === 'shape'
+                ? 'crosshair'
+                : 'default',
+          }}
         />
 
-        {/* Inline Text Input Overlay */}
+        {/* Inline Text Editing Box */}
         {inlineTextPos && (
           <div
             style={{
               position: 'absolute',
               left: `${worldToScreen(inlineTextPos.x, inlineTextPos.y).x}px`,
               top: `${worldToScreen(inlineTextPos.x, inlineTextPos.y).y}px`,
+              transform: 'translateY(-50%)',
             }}
-            className="z-50 pointer-events-auto"
+            className="z-20 pointer-events-auto"
           >
             <input
               ref={textInputRef}
               type="text"
               value={inlineTextVal}
               onChange={(e) => setInlineTextVal(e.target.value)}
-              onBlur={handleTextSubmit}
               onKeyDown={(e) => {
                 if (e.key === 'Enter') handleTextSubmit();
                 if (e.key === 'Escape') setInlineTextPos(null);
               }}
-              placeholder="Type text..."
-              style={{
-                color: activeColor,
-                fontSize: `${Math.max(16, activeSize * 4.5) * viewState.zoom}px`,
-              }}
-              className="bg-zinc-900/90 border border-blue-500 rounded px-2 py-0.5 outline-none font-semibold shadow-lg"
+              onBlur={handleTextSubmit}
+              placeholder="Type dispatch note..."
+              style={{ color: activeColor }}
+              className="bg-paper-white/95 border border-ink-primary px-2.5 py-1 text-sm font-editorial font-bold outline-none shadow-md rounded-[1px]"
             />
           </div>
         )}

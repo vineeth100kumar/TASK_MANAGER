@@ -494,27 +494,29 @@ export const TasksView: React.FC<TasksViewProps> = ({
       />
 
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-stone-800 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-stone-300 dark:border-stone-800 pb-3">
         <div>
-          <div className="text-[10px] font-ledger uppercase tracking-widest text-amber-500 mb-0.5">
+          <div className="text-[10px] font-ledger uppercase tracking-widest text-amber-700 dark:text-amber-500 font-bold mb-0.5">
             SECTION II &bull; ACTION DOCKET
           </div>
-          <h1 className="font-editorial text-2xl sm:text-3xl font-bold text-stone-100 uppercase tracking-tight">
+          <h1 className="font-editorial text-2xl sm:text-3xl font-bold text-stone-900 dark:text-stone-100 uppercase tracking-tight">
             Clippings & Actionables
           </h1>
-          <p className="text-[11px] font-ledger text-stone-400 uppercase tracking-wider mt-0.5">
+          <p className="text-[11px] font-ledger text-stone-600 dark:text-stone-400 uppercase tracking-wider mt-0.5">
             TOTAL CLIPPINGS: {items.length} &bull; OVERDUE: {smartGroups.overdue.length} &bull; TODAY'S DOCKET: {smartGroups.today.length}
           </p>
         </div>
 
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           {/* View Toggle (List vs Kanban vs Timeline) */}
-          <div className="bg-stone-900 border border-stone-800 rounded-none p-0.5 flex items-center">
+          <div className="bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-none p-0.5 flex items-center">
             <button
               onClick={() => setViewMode('list')}
               aria-label="List View"
               className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
-                viewMode === 'list' ? 'bg-stone-100 text-stone-950 font-bold' : 'text-stone-400 hover:text-stone-200'
+                viewMode === 'list' 
+                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
               }`}
               title="List View"
             >
@@ -524,7 +526,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
               onClick={() => setViewMode('kanban')}
               aria-label="Kanban Board View"
               className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
-                viewMode === 'kanban' ? 'bg-stone-100 text-stone-950 font-bold' : 'text-stone-400 hover:text-stone-200'
+                viewMode === 'kanban' 
+                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
               }`}
               title="Kanban Board"
             >
@@ -534,7 +538,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
               onClick={() => setViewMode('timeline')}
               aria-label="Daily Timeline Calendar"
               className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
-                viewMode === 'timeline' ? 'bg-stone-100 text-stone-950 font-bold' : 'text-stone-400 hover:text-stone-200'
+                viewMode === 'timeline' 
+                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
               }`}
               title="Daily Timeline Calendar"
             >
@@ -549,8 +555,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               title={smartGrouping ? "Smart Grouping Enabled (Overdue, Today, Upcoming)" : "Flat List (Smart Grouping Off)"}
               className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-none border text-xs font-ledger uppercase tracking-wider transition-colors ${
                 smartGrouping
-                  ? 'bg-amber-950/40 text-amber-300 border-amber-800'
-                  : 'bg-stone-900 text-stone-400 border-stone-800 hover:text-stone-200'
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
+                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -559,17 +565,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
 
           {/* Sort Dropdown */}
-          <div className="relative flex items-center bg-stone-900 border border-stone-800 rounded-none px-2 py-1 font-ledger text-xs">
-            <ArrowUpDown className="w-3.5 h-3.5 text-stone-400 mr-1.5" />
+          <div className="relative flex items-center bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-none px-2 py-1 font-ledger text-xs">
+            <ArrowUpDown className="w-3.5 h-3.5 text-stone-500 mr-1.5" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-xs text-stone-200 uppercase focus:outline-none cursor-pointer"
+              className="bg-transparent text-xs text-stone-800 dark:text-stone-200 uppercase focus:outline-none cursor-pointer"
             >
-              <option value="due_date" className="bg-stone-900 text-stone-200">DUE DATE</option>
-              <option value="priority" className="bg-stone-900 text-stone-200">PRIORITY</option>
-              <option value="title" className="bg-stone-900 text-stone-200">TITLE (A-Z)</option>
-              <option value="created_at" className="bg-stone-900 text-stone-200">NEWEST</option>
+              <option value="due_date" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">DUE DATE</option>
+              <option value="priority" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">PRIORITY</option>
+              <option value="title" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">TITLE (A-Z)</option>
+              <option value="created_at" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">NEWEST</option>
             </select>
           </div>
 
@@ -585,8 +591,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               }}
               className={`px-2.5 py-1.5 rounded-none border text-xs font-ledger uppercase tracking-wider transition-colors ${
                 isSelectMode
-                  ? 'bg-amber-950/60 text-amber-300 border-amber-700'
-                  : 'bg-stone-900 text-stone-400 border-stone-800 hover:text-stone-200'
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
+                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
               }`}
             >
               {isSelectMode ? 'Cancel' : 'Select'}
@@ -596,16 +602,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
           {/* AI Board Organizer */}
           <button
             onClick={handleOpenBoardOrganizer}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-stone-900 hover:bg-stone-800 text-amber-400 border border-stone-700 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border border-stone-300 dark:border-stone-700 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors"
           >
-            <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             <span className="hidden sm:inline">AI Organize</span>
           </button>
 
           {/* Manual New Item Button */}
           <button
             onClick={() => setIsCreating(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-none bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-ledger font-bold uppercase tracking-wider border border-amber-500 transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-none bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-ledger font-bold uppercase tracking-wider border border-amber-600 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>+ New Clipping</span>
@@ -628,8 +634,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               onClick={() => setFilterType(chip.id)}
               className={`px-3 py-1.5 rounded-none text-xs font-ledger uppercase tracking-wider whitespace-nowrap transition-colors border ${
                 filterType === chip.id
-                  ? 'bg-stone-100 text-stone-950 font-bold border-stone-100'
-                  : 'text-stone-400 hover:text-stone-200 bg-stone-900 border-stone-800'
+                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold border-stone-900 dark:border-stone-100'
+                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 bg-paper-aged dark:bg-stone-900 border-stone-300 dark:border-stone-800'
               }`}
             >
               {chip.label}
@@ -639,8 +645,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
         {/* GTD Context Tag Filters */}
         <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-          <span className="text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
-            <Tag className="w-3 h-3 text-amber-500" /> CONTEXT:
+          <span className="text-stone-600 dark:text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
+            <Tag className="w-3 h-3 text-amber-600 dark:text-amber-500" /> CONTEXT:
           </span>
           {['all', '@errands', '@computer', '@phone', '@home', '@deep-work'].map((tag) => (
             <button
@@ -648,8 +654,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               onClick={() => setSelectedTag(tag === 'all' ? null : tag)}
               className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
                 (tag === 'all' && !selectedTag) || selectedTag === tag
-                  ? 'bg-amber-950/60 text-amber-300 border-amber-700 font-bold'
-                  : 'bg-stone-900 text-stone-400 hover:text-stone-200 border-stone-800'
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
+                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
               }`}
             >
               {tag === 'all' ? 'All' : tag}
@@ -660,15 +666,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
         {/* Project Filter Chips */}
         {projects.length > 0 && (
           <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-            <span className="text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
-              <Folder className="w-3 h-3 text-amber-500" /> PROJECT:
+            <span className="text-stone-600 dark:text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
+              <Folder className="w-3 h-3 text-amber-600 dark:text-amber-500" /> PROJECT:
             </span>
             <button
               onClick={() => setSelectedProjectId('all')}
               className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
                 selectedProjectId === 'all'
-                  ? 'bg-amber-950/60 text-amber-300 border-amber-700 font-bold'
-                  : 'bg-stone-900 text-stone-400 hover:text-stone-200 border-stone-800'
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
+                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
               }`}
             >
               All Projects
@@ -677,8 +683,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               onClick={() => setSelectedProjectId('inbox')}
               className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
                 selectedProjectId === 'inbox'
-                  ? 'bg-amber-950/60 text-amber-300 border-amber-700 font-bold'
-                  : 'bg-stone-900 text-stone-400 hover:text-stone-200 border-stone-800'
+                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
+                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
               }`}
             >
               Inbox (Unassigned)
@@ -689,8 +695,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 onClick={() => setSelectedProjectId(p.id)}
                 className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
                   selectedProjectId === p.id
-                    ? 'bg-amber-950/60 text-amber-300 border-amber-700 font-bold'
-                    : 'bg-stone-900 text-stone-400 hover:text-stone-200 border-stone-800'
+                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
+                    : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
                 }`}
               >
                 <span className="w-1.5 h-1.5 rounded-none" style={{ backgroundColor: p.color || '#d97706' }} />
@@ -976,14 +982,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   const droppedId = e.dataTransfer.getData('text/plain');
                   handleDropOnColumn(col.id, droppedId);
                 }}
-                className="bg-[#101013] border-2 border-stone-800 rounded-none p-3.5 flex flex-col transition-colors hover:border-stone-700"
+                className="clipping clipping-aged border-2 border-stone-300 dark:border-stone-800 rounded-none p-3.5 flex flex-col transition-colors hover:border-stone-400 dark:hover:border-stone-700 relative"
               >
-                <div className="flex items-center justify-between mb-3 border-b border-stone-800/80 pb-2">
+                <div className="tape-strip -top-2 right-4 transform rotate-1" />
+                <div className="flex items-center justify-between mb-3 border-b border-stone-300 dark:border-stone-800/80 pb-2">
                   <div>
-                    <div className="text-[9px] font-ledger uppercase tracking-widest text-amber-500 font-bold">{col.desk}</div>
-                    <span className="font-editorial text-sm font-bold text-stone-100 uppercase tracking-wide">{col.label}</span>
+                    <div className="text-[9px] font-ledger uppercase tracking-widest text-amber-700 dark:text-amber-500 font-bold">{col.desk}</div>
+                    <span className="font-editorial text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">{col.label}</span>
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-none bg-stone-900 text-stone-300 font-ledger border border-stone-800">
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-none bg-paper-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 font-ledger border border-stone-300 dark:border-stone-800">
                     {colItems.length}
                   </span>
                 </div>
@@ -1000,20 +1007,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           e.dataTransfer.effectAllowed = 'move';
                         }}
                         onClick={() => setSelectedItem(item)}
-                        className={`bg-[#131317] border p-2.5 rounded-none cursor-grab active:cursor-grabbing shadow-none transition-colors space-y-2 select-none ${
+                        className={`clipping clipping-white border p-2.5 rounded-none cursor-grab active:cursor-grabbing shadow-xs transition-colors space-y-2 select-none ${
                           blocked
-                            ? 'border-amber-600/40 opacity-75 hover:opacity-100'
-                            : 'border-stone-800 hover:border-stone-700'
+                            ? 'border-amber-600/40 opacity-80 hover:opacity-100'
+                            : 'border-stone-300 dark:border-stone-800 hover:border-stone-400 dark:hover:border-stone-700'
                         }`}
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             {blocked && (
-                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-500 shrink-0 font-ledger text-[9px]">
+                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-600 dark:text-amber-500 shrink-0 font-ledger text-[9px] font-bold">
                                 [BLOCKED]
                               </span>
                             )}
-                            <span className={`font-editorial text-xs font-semibold truncate ${item.is_completed ? 'line-through text-stone-500 italic' : 'text-stone-100'}`}>
+                            <span className={`font-editorial text-xs font-semibold truncate ${item.is_completed ? 'line-through text-stone-400 dark:text-stone-500 italic' : 'text-stone-900 dark:text-stone-100'}`}>
                               {item.title}
                             </span>
                           </div>
@@ -1025,10 +1032,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
                               }}
                               disabled={refiningItemId === item.id}
                               title="Polish with AI"
-                              className="text-stone-500 hover:text-amber-400 p-0.5 rounded-none transition-colors"
+                              className="text-stone-500 hover:text-amber-600 dark:hover:text-amber-400 p-0.5 rounded-none transition-colors"
                             >
                               {refiningItemId === item.id ? (
-                                <RotateCw className="w-3 h-3 animate-spin text-amber-400" />
+                                <RotateCw className="w-3 h-3 animate-spin text-amber-500" />
                               ) : (
                                 <Sparkles className="w-3 h-3" />
                               )}
@@ -1036,8 +1043,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             <span
                               className={`text-[9px] uppercase font-ledger font-bold px-1 py-0.2 rounded-none border ${
                                 item.priority === 'urgent'
-                                  ? 'bg-rose-950 text-rose-300 border-rose-800'
-                                  : 'bg-stone-900 text-stone-400 border-stone-800'
+                                  ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'
+                                  : 'bg-paper-aged dark:bg-stone-900 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800'
                               }`}
                             >
                               {item.priority}
@@ -1051,26 +1058,25 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             if (!p) return null;
                             return (
                               <div 
-                                className="text-[10px] px-1.5 py-0.5 rounded border flex items-center gap-1 font-medium font-sans"
+                                className="text-[10px] px-1.5 py-0.5 rounded-none border border-stone-300 dark:border-stone-700 flex items-center gap-1 font-medium font-ledger uppercase"
                                 style={{
-                                  backgroundColor: `${p.color || '#3b82f6'}15`,
-                                  borderColor: `${p.color || '#3b82f6'}40`,
-                                  color: p.color || '#60a5fa'
+                                  backgroundColor: `${p.color || '#d97706'}20`,
+                                  color: p.color || '#d97706'
                                 }}
                               >
-                                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: p.color || '#3b82f6' }} />
+                                <span className="w-1.5 h-1.5 rounded-none" style={{ backgroundColor: p.color || '#d97706' }} />
                                 <span className="truncate max-w-[100px]">{p.name}</span>
                               </div>
                             );
                           })()}
                           {item.due_date && (
-                            <span className="text-[10px] text-zinc-400 font-mono">
+                            <span className="text-[10px] text-stone-500 dark:text-zinc-400 font-ledger">
                               📅 {item.due_date}
                             </span>
                           )}
                           {item.context_tags && (
-                            <div className="text-[10px] text-zinc-400 flex items-center gap-0.5 font-mono bg-zinc-800/80 px-1.5 py-0.5 rounded">
-                              <Tag className="w-2.5 h-2.5 text-zinc-500" />
+                            <div className="text-[10px] text-stone-500 dark:text-zinc-400 flex items-center gap-0.5 font-ledger bg-paper-base dark:bg-zinc-800/80 px-1.5 py-0.5 rounded-none border border-stone-200 dark:border-stone-700">
+                              <Tag className="w-2.5 h-2.5 text-stone-400" />
                               <span>{item.context_tags}</span>
                             </div>
                           )}
@@ -1137,7 +1143,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
               {/* Generated Subtasks Preview in Create Modal */}
               {generatedSubtasks.length > 0 && (
-                <div className="bg-zinc-950/60 p-3 rounded-xl border border-zinc-800/80 space-y-2">
+                <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3 rounded border border-ink-base/15 dark:border-stone-800 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-xs font-semibold text-blue-400 flex items-center space-x-1.5">
                       <Sparkles className="w-3 h-3" />
@@ -1377,7 +1383,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
 
             {/* Description */}
-            <div className="bg-zinc-950/60 p-3.5 rounded-xl border border-zinc-800/80">
+            <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3.5 rounded border border-ink-base/15 dark:border-stone-800">
               <div className="flex items-center justify-between mb-1.5">
                 <span className="text-xs font-semibold text-zinc-300">Description & Context</span>
                 {/* AI Detail Filling Button */}
@@ -1665,7 +1671,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       boardOrgData.big_rocks.map((task: any, idx: number) => (
                         <div
                           key={task.id || idx}
-                          className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/60 border border-zinc-800 text-xs"
+                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-xs"
                         >
                           <div className="flex items-center space-x-2 min-w-0 flex-1">
                             <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-[10px]">
@@ -1704,7 +1710,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       {boardOrgData.title_improvements.map((ti: any) => (
                         <div
                           key={ti.id}
-                          className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/50 border border-zinc-800/80 text-xs gap-3"
+                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-xs gap-3"
                         >
                           <div className="min-w-0 flex-1">
                             <div className="text-[11px] text-zinc-400 line-through truncate">{ti.current_title}</div>

@@ -11,9 +11,11 @@ import {
   Edit2,
   Share2,
   Trash2,
-  ArrowLeft
+  ArrowLeft,
+  Grid,
+  PenTool
 } from 'lucide-react';
-import { Whiteboard, WhiteboardListItem, Project } from '../../types';
+import { Whiteboard, WhiteboardListItem, Project, WhiteboardGridType } from '../../types';
 
 interface WhiteboardHeaderProps {
   board: Whiteboard;
@@ -33,7 +35,19 @@ interface WhiteboardHeaderProps {
   onExportSVG: () => void;
   isSaving: boolean;
   onBack?: () => void;
+  gridType?: WhiteboardGridType;
+  onSelectGrid?: (grid: WhiteboardGridType) => void;
+  stylusOnly?: boolean;
+  onToggleStylusOnly?: () => void;
+  edition?: 'day' | 'night';
 }
+
+const GRID_OPTIONS: { type: WhiteboardGridType; label: string; desc: string }[] = [
+  { type: 'dots', label: 'Architect Dots', desc: 'Neat 28px alignment dots' },
+  { type: 'graph', label: 'Blueprint Graph', desc: 'Millimeter technical grid' },
+  { type: 'ruled', label: 'Ruled Paper', desc: 'Lined tracing paper' },
+  { type: 'blank', label: 'Blank Slate', desc: 'Pure unlined parchment' },
+];
 
 export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   board,
@@ -53,16 +67,23 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   onExportSVG,
   isSaving,
   onBack,
+  gridType = 'dots',
+  onSelectGrid,
+  stylusOnly = false,
+  onToggleStylusOnly,
+  edition = 'day',
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(board.title);
   const [showBoardsDropdown, setShowBoardsDropdown] = useState(false);
   const [showProjectsDropdown, setShowProjectsDropdown] = useState(false);
   const [showExportDropdown, setShowExportDropdown] = useState(false);
+  const [showGridDropdown, setShowGridDropdown] = useState(false);
 
   const boardsDropdownRef = useRef<HTMLDivElement>(null);
   const projectsDropdownRef = useRef<HTMLDivElement>(null);
   const exportDropdownRef = useRef<HTMLDivElement>(null);
+  const gridDropdownRef = useRef<HTMLDivElement>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -88,6 +109,9 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
       if (exportDropdownRef.current && !exportDropdownRef.current.contains(e.target as Node)) {
         setShowExportDropdown(false);
       }
+      if (gridDropdownRef.current && !gridDropdownRef.current.contains(e.target as Node)) {
+        setShowGridDropdown(false);
+      }
     };
     window.addEventListener('mousedown', handleDown);
     return () => window.removeEventListener('mousedown', handleDown);
@@ -104,37 +128,56 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   };
 
   const currentProject = projects.find((p) => p.id === board.project_id);
+  const isNight = edition === 'night';
+
+  const headerBg = isNight
+    ? 'bg-[#0c0c0e]/95 border-b-2 border-stone-800 text-[#edece8]'
+    : 'bg-paper-aged/95 border-b-2 border-ink-primary text-ink-primary';
+
+  const dropdownBg = isNight
+    ? 'bg-[#141418] border border-stone-700 text-stone-200'
+    : 'bg-paper-white border-2 border-ink-primary text-ink-primary';
+
+  const btnBg = isNight
+    ? 'bg-stone-900 hover:bg-stone-800 border-stone-700 text-stone-300'
+    : 'bg-paper-white hover:bg-paper-cream border-ink-rule text-ink-primary';
 
   return (
-    <header className="absolute top-0 left-0 right-0 z-30 h-14 px-4 bg-zinc-950/80 backdrop-blur-md border-b border-zinc-800/80 flex items-center justify-between select-none">
+    <header className={`absolute top-0 left-0 right-0 z-30 h-14 px-3 sm:px-4 backdrop-blur-md flex items-center justify-between select-none ${headerBg}`}>
       {/* LEFT SECTION: Back button + Board Switcher & Title */}
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-2 sm:gap-3">
         {onBack && (
           <button
             type="button"
             onClick={onBack}
-            className="p-1.5 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800/60 rounded-xl transition-colors"
-            title="Back"
+            className={`p-1.5 border rounded-[1px] transition-colors ${btnBg}`}
+            title="Back to Projects"
           >
-            <ArrowLeft size={18} />
+            <ArrowLeft size={16} />
           </button>
         )}
+
+        {/* Section Roman Numeral Eyebrow */}
+        <div className="hidden lg:flex items-center gap-1.5 font-ledger text-[10px] uppercase font-bold tracking-wider text-ink-muted border-r border-ink-rule pr-2.5">
+          <span className="text-amber-600 font-bold">III.</span>
+          <span>DRAFTING ROOM</span>
+        </div>
 
         {/* Board Switcher Dropdown */}
         <div ref={boardsDropdownRef} className="relative">
           <button
             type="button"
             onClick={() => setShowBoardsDropdown((prev) => !prev)}
-            className="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-zinc-900/90 hover:bg-zinc-800 border border-zinc-800 text-zinc-200 text-sm font-semibold transition-colors"
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-[1px] text-xs font-ledger font-bold uppercase tracking-wider transition-colors ${btnBg}`}
           >
-            <span className="max-w-[140px] md:max-w-[200px] truncate">{board.title || 'Untitled'}</span>
-            <ChevronDown size={14} className="text-zinc-400" />
+            <span className="max-w-[120px] sm:max-w-[180px] truncate">{board.title || 'Drafting Canvas'}</span>
+            <ChevronDown size={13} className="opacity-60" />
           </button>
 
           {showBoardsDropdown && (
-            <div className="absolute top-full left-0 mt-2 w-64 p-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                My Whiteboards
+            <div className={`absolute top-full left-0 mt-2 w-64 p-2 border-2 shadow-2xl rounded-[1px] z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
+              <div className="px-2 py-1 text-[9px] font-ledger font-bold uppercase tracking-wider text-ink-muted border-b border-ink-rule/30 mb-1">
+                Drafting Canvases
               </div>
               <div className="max-h-60 overflow-y-auto space-y-0.5">
                 {boardsList.map((b) => (
@@ -145,28 +188,28 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
                       onSelectBoard(b.id);
                       setShowBoardsDropdown(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2.5 py-2 rounded-xl text-xs text-left transition-colors ${
+                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-[1px] text-xs font-editorial text-left transition-colors ${
                       b.id === board.id
-                        ? 'bg-blue-600/20 text-blue-400 font-medium'
-                        : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'
+                        ? isNight ? 'bg-amber-600/30 text-amber-300 font-bold' : 'bg-ink-primary text-paper-white font-bold'
+                        : isNight ? 'text-stone-300 hover:bg-stone-800' : 'text-ink-primary hover:bg-paper-aged'
                     }`}
                   >
                     <span className="truncate">{b.title}</span>
-                    {b.id === board.id && <Check size={14} className="text-blue-400 shrink-0 ml-2" />}
+                    {b.id === board.id && <Check size={13} className="shrink-0 ml-1" />}
                   </button>
                 ))}
               </div>
-              <div className="h-px bg-zinc-800 my-1" />
+              <div className="border-t border-ink-rule/40 my-1" />
               <button
                 type="button"
                 onClick={() => {
                   onCreateNewBoard();
                   setShowBoardsDropdown(false);
                 }}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs font-semibold text-blue-400 hover:bg-blue-500/10 transition-colors"
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-[1px] text-xs font-ledger uppercase font-bold text-amber-600 hover:bg-amber-600/10 transition-colors"
               >
-                <Plus size={15} />
-                <span>New Whiteboard</span>
+                <Plus size={14} />
+                <span>New Drawing Canvas</span>
               </button>
             </div>
           )}
@@ -187,29 +230,25 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
                 setIsEditingTitle(false);
               }
             }}
-            className="px-2 py-0.5 text-sm font-semibold bg-zinc-800 border border-blue-500 rounded-lg text-white focus:outline-none"
+            className="px-2 py-0.5 text-xs font-ledger uppercase font-bold bg-paper-white border border-amber-500 rounded-[1px] text-ink-primary outline-none"
           />
         ) : (
           <button
             type="button"
             onClick={() => setIsEditingTitle(true)}
-            className="p-1 text-zinc-500 hover:text-zinc-300 transition-colors"
-            title="Rename Board"
+            className="p-1 text-ink-muted hover:text-ink-primary transition-colors"
+            title="Rename Canvas"
           >
             <Edit2 size={13} />
           </button>
         )}
 
         {/* Project Link Dropdown */}
-        <div ref={projectsDropdownRef} className="relative hidden sm:block">
+        <div ref={projectsDropdownRef} className="relative hidden md:block">
           <button
             type="button"
             onClick={() => setShowProjectsDropdown((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-xl text-xs font-medium border transition-colors ${
-              currentProject
-                ? 'bg-zinc-900 border-zinc-700 text-zinc-200'
-                : 'bg-zinc-900/40 border-zinc-800 text-zinc-500 hover:text-zinc-300'
-            }`}
+            className={`flex items-center gap-1.5 px-2 py-1 rounded-[1px] text-xs font-ledger uppercase border transition-colors ${btnBg}`}
           >
             <Folder
               size={13}
@@ -222,9 +261,9 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
           </button>
 
           {showProjectsDropdown && (
-            <div className="absolute top-full left-0 mt-2 w-56 p-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
-              <div className="px-2 py-1 text-[11px] font-semibold text-zinc-400 uppercase tracking-wider">
-                Assign Project
+            <div className={`absolute top-full left-0 mt-2 w-56 p-1.5 border-2 shadow-2xl rounded-[1px] z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
+              <div className="px-2 py-1 text-[9px] font-ledger uppercase tracking-wider font-bold text-ink-muted border-b border-ink-rule/30 mb-1">
+                Assign Project Dossier
               </div>
               <button
                 type="button"
@@ -232,14 +271,12 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
                   onUpdateProject(null);
                   setShowProjectsDropdown(false);
                 }}
-                className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-left transition-colors ${
-                  !board.project_id
-                    ? 'bg-zinc-800 text-white font-medium'
-                    : 'text-zinc-400 hover:bg-zinc-800/60'
+                className={`w-full flex items-center justify-between px-2 py-1 rounded-[1px] text-xs font-ledger transition-colors ${
+                  !board.project_id ? 'font-bold text-amber-600' : 'text-ink-muted hover:text-ink-primary'
                 }`}
               >
-                <span>No Project</span>
-                {!board.project_id && <Check size={14} />}
+                <span>Standalone (No Project)</span>
+                {!board.project_id && <Check size={13} />}
               </button>
               <div className="max-h-48 overflow-y-auto space-y-0.5 mt-1">
                 {projects.map((p) => (
@@ -250,20 +287,18 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
                       onUpdateProject(p.id);
                       setShowProjectsDropdown(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2.5 py-1.5 rounded-xl text-xs text-left transition-colors ${
-                      board.project_id === p.id
-                        ? 'bg-zinc-800 text-white font-medium'
-                        : 'text-zinc-300 hover:bg-zinc-800/60'
+                    className={`w-full flex items-center justify-between px-2 py-1 rounded-[1px] text-xs font-editorial text-left transition-colors ${
+                      board.project_id === p.id ? 'font-bold text-amber-600' : 'hover:bg-paper-aged'
                     }`}
                   >
-                    <div className="flex items-center gap-2 truncate">
+                    <div className="flex items-center gap-1.5 truncate">
                       <span
-                        className="w-2 h-2 rounded-full shrink-0"
+                        className="w-2 h-2 rounded-[1px] shrink-0"
                         style={{ backgroundColor: p.color || '#3b82f6' }}
                       />
                       <span className="truncate">{p.name}</span>
                     </div>
-                    {board.project_id === p.id && <Check size={14} className="text-blue-400 shrink-0" />}
+                    {board.project_id === p.id && <Check size={13} className="shrink-0 ml-1" />}
                   </button>
                 ))}
               </div>
@@ -272,37 +307,99 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
         </div>
 
         {/* Auto-save Status */}
-        <div className="text-[11px] text-zinc-500 flex items-center gap-1.5 ml-1 hidden md:flex">
+        <div className="text-[10px] font-ledger uppercase tracking-wider text-ink-muted flex items-center gap-1.5 ml-1 hidden lg:flex">
           {isSaving ? (
             <>
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-pulse" />
-              <span>Saving...</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
+              <span>SAVING...</span>
             </>
           ) : (
             <>
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-              <span>Saved</span>
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
+              <span>DRAFT SAVED</span>
             </>
           )}
         </div>
       </div>
 
-      {/* RIGHT SECTION: Zoom Controls + Export + Delete */}
-      <div className="flex items-center gap-2">
+      {/* RIGHT SECTION: Grid selector + Stylus Palm Rejection + Zoom Controls + Export + Delete */}
+      <div className="flex items-center gap-1.5 sm:gap-2">
+        {/* Grid Selector Dropdown */}
+        {onSelectGrid && (
+          <div ref={gridDropdownRef} className="relative hidden sm:block">
+            <button
+              type="button"
+              onClick={() => setShowGridDropdown((prev) => !prev)}
+              className={`flex items-center gap-1.5 px-2 py-1 border rounded-[1px] text-xs font-ledger uppercase tracking-wider transition-colors ${btnBg}`}
+              title="Change Canvas Grid Surface"
+            >
+              <Grid size={13} />
+              <span className="capitalize">{gridType}</span>
+              <ChevronDown size={11} className="opacity-60" />
+            </button>
+
+            {showGridDropdown && (
+              <div className={`absolute top-full right-0 mt-2 w-52 p-1.5 border-2 shadow-2xl rounded-[1px] z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
+                <div className="px-2 py-1 text-[9px] font-ledger uppercase tracking-wider font-bold text-ink-muted border-b border-ink-rule/30 mb-1">
+                  Drafting Surface
+                </div>
+                {GRID_OPTIONS.map((g) => (
+                  <button
+                    key={g.type}
+                    type="button"
+                    onClick={() => {
+                      onSelectGrid(g.type);
+                      setShowGridDropdown(false);
+                    }}
+                    className={`w-full flex flex-col px-2 py-1.5 rounded-[1px] text-left transition-colors ${
+                      gridType === g.type
+                        ? isNight ? 'bg-amber-600/30 text-amber-300' : 'bg-ink-primary text-paper-white font-bold'
+                        : isNight ? 'text-stone-300 hover:bg-stone-800' : 'text-ink-primary hover:bg-paper-aged'
+                    }`}
+                  >
+                    <div className="flex items-center justify-between text-xs font-ledger uppercase">
+                      <span>{g.label}</span>
+                      {gridType === g.type && <Check size={12} />}
+                    </div>
+                    <span className="text-[9px] opacity-70 font-sans">{g.desc}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Stylus / Palm Rejection Mode Toggle */}
+        {onToggleStylusOnly && (
+          <button
+            type="button"
+            onClick={onToggleStylusOnly}
+            className={`flex items-center gap-1 px-2 py-1 border rounded-[1px] text-xs font-ledger uppercase tracking-wider transition-colors ${
+              stylusOnly
+                ? 'bg-amber-600 text-stone-950 border-amber-500 font-bold'
+                : btnBg
+            }`}
+            title={stylusOnly ? 'Stylus Mode Active: Touches only pan/zoom' : 'All Input: Touch draws and pans'}
+          >
+            <PenTool size={13} />
+            <span className="hidden md:inline">{stylusOnly ? 'Stylus Only' : 'Touch+Pen'}</span>
+          </button>
+        )}
+
         {/* Zoom Controls */}
-        <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-xl px-1 py-0.5">
+        <div className={`flex items-center border rounded-[1px] px-1 py-0.5 ${btnBg}`}>
           <button
             type="button"
             onClick={onZoomOut}
-            className="p-1 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1 hover:opacity-100 opacity-60 transition-opacity"
             title="Zoom Out"
           >
-            <ZoomOut size={15} />
+            <ZoomOut size={14} />
           </button>
           <button
             type="button"
             onClick={onResetZoom}
-            className="px-2 py-0.5 text-xs font-semibold text-zinc-300 hover:text-white transition-colors"
+            className="px-1.5 py-0.5 text-xs font-ledger font-bold tabular-nums"
             title="Reset to 100%"
           >
             {Math.round(zoom * 100)}%
@@ -310,18 +407,18 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
           <button
             type="button"
             onClick={onZoomIn}
-            className="p-1 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors"
+            className="p-1 hover:opacity-100 opacity-60 transition-opacity"
             title="Zoom In"
           >
-            <ZoomIn size={15} />
+            <ZoomIn size={14} />
           </button>
           <button
             type="button"
             onClick={onFitToContent}
-            className="p-1 text-zinc-400 hover:text-zinc-100 hover:bg-zinc-800 rounded-lg transition-colors border-l border-zinc-800 ml-0.5 pl-1.5"
+            className="p-1 border-l border-ink-rule/40 ml-0.5 pl-1 hover:opacity-100 opacity-60 transition-opacity"
             title="Fit to Content"
           >
-            <Maximize2 size={13} />
+            <Maximize2 size={12} />
           </button>
         </div>
 
@@ -330,27 +427,27 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
           <button
             type="button"
             onClick={() => setShowExportDropdown((prev) => !prev)}
-            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 text-zinc-300 text-xs font-medium transition-colors"
-            title="Export Whiteboard"
+            className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-[1px] text-xs font-ledger uppercase font-bold tracking-wider transition-colors ${btnBg}`}
+            title="Export Drafting Room"
           >
-            <Download size={14} />
+            <Download size={13} />
             <span className="hidden sm:inline">Export</span>
           </button>
 
           {showExportDropdown && (
-            <div className="absolute top-full right-0 mt-2 w-48 p-1.5 bg-zinc-900 border border-zinc-800 rounded-2xl shadow-2xl z-50 animate-in fade-in slide-in-from-top-2 duration-150">
+            <div className={`absolute top-full right-0 mt-2 w-48 p-1.5 border-2 shadow-2xl rounded-[1px] z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
               <button
                 type="button"
                 onClick={() => {
                   onExportPNG();
                   setShowExportDropdown(false);
                 }}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[1px] text-xs font-editorial text-left hover:bg-paper-aged transition-colors"
               >
-                <Download size={14} className="text-blue-400" />
+                <Download size={13} className="text-amber-600" />
                 <div>
-                  <div className="font-semibold">Export PNG</div>
-                  <div className="text-[10px] text-zinc-500">High-res raster image</div>
+                  <div className="font-bold">Export PNG Image</div>
+                  <div className="text-[9px] text-ink-muted">High-res broadsheet raster</div>
                 </div>
               </button>
               <button
@@ -359,12 +456,12 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
                   onExportSVG();
                   setShowExportDropdown(false);
                 }}
-                className="w-full flex items-center gap-2 px-2.5 py-2 rounded-xl text-xs text-zinc-300 hover:bg-zinc-800 hover:text-white transition-colors text-left"
+                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-[1px] text-xs font-editorial text-left hover:bg-paper-aged transition-colors"
               >
-                <Share2 size={14} className="text-emerald-400" />
+                <Share2 size={13} className="text-emerald-600" />
                 <div>
-                  <div className="font-semibold">Export SVG</div>
-                  <div className="text-[10px] text-zinc-500">Lossless vector format</div>
+                  <div className="font-bold">Export SVG Vector</div>
+                  <div className="text-[9px] text-ink-muted">Scalable vector blueprint</div>
                 </div>
               </button>
             </div>
@@ -375,10 +472,10 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
         <button
           type="button"
           onClick={onDeleteCurrentBoard}
-          className="p-1.5 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/10 rounded-xl transition-colors"
-          title="Delete this whiteboard"
+          className="p-1.5 border border-transparent hover:border-ink-danger text-ink-muted hover:text-ink-danger hover:bg-rose-950/20 rounded-[1px] transition-colors"
+          title="Delete current canvas"
         >
-          <Trash2 size={16} />
+          <Trash2 size={15} />
         </button>
       </div>
     </header>

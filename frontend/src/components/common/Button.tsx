@@ -27,12 +27,12 @@ export const Button: React.FC<ButtonProps> = ({
   };
 
   const variantClasses = {
-    primary: 'bg-amber-600 hover:bg-amber-500 text-stone-950 border-amber-500 font-black',
-    secondary: 'bg-stone-900 hover:bg-stone-800 text-stone-200 hover:text-white border-stone-700',
-    ghost: 'border-transparent text-stone-400 hover:text-stone-200 hover:bg-stone-900',
-    danger: 'bg-stone-950 hover:bg-rose-950/80 text-rose-400 border-rose-800',
-    outline: 'border-stone-700 text-stone-300 hover:text-white hover:bg-stone-900',
-    gradient: 'bg-stone-900 hover:bg-stone-800 text-amber-400 border-amber-600'
+    primary: 'bg-amber-600 hover:bg-amber-500 text-stone-950 border-amber-600 font-black shadow-sm',
+    secondary: 'bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-200 border-stone-300 dark:border-stone-700',
+    ghost: 'border-transparent text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 hover:bg-black/5 dark:hover:bg-stone-900',
+    danger: 'bg-rose-50 dark:bg-stone-950 hover:bg-rose-100 dark:hover:bg-rose-950/80 text-rose-800 dark:text-rose-400 border-rose-300 dark:border-rose-800',
+    outline: 'border-stone-300 dark:border-stone-700 text-stone-700 dark:text-stone-300 hover:text-stone-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-stone-900',
+    gradient: 'bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border-amber-500/50'
   };
 
   return (

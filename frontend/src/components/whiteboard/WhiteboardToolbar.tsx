@@ -15,7 +15,11 @@ import {
   Undo2,
   Redo2,
   Trash2,
-  ChevronUp
+  Zap,
+  ChevronUp,
+  ChevronDown,
+  Minimize2,
+  Maximize2
 } from 'lucide-react';
 import { WhiteboardTool, ShapeType, StickyColor } from '../../types';
 
@@ -38,26 +42,25 @@ interface WhiteboardToolbarProps {
   canUndo: boolean;
   canRedo: boolean;
   onClear: () => void;
+  edition?: 'day' | 'night';
 }
 
 const PEN_COLORS = [
-  '#ffffff', // White
-  '#09090b', // Deep Dark
-  '#3b82f6', // Electric Blue
-  '#06b6d4', // Cyan
-  '#22c55e', // Emerald
-  '#eab308', // Amber
-  '#f97316', // Orange
-  '#ef4444', // Coral Red
-  '#a855f7', // Violet
-  '#ec4899', // Pink
+  '#1A1814', // Newsprint Ink
+  '#8B1A1A', // Editorial Crimson
+  '#1A4A1A', // Forest Green
+  '#8B5E00', // Amber
+  '#003366', // Deep Navy
+  '#5A5650', // Slate Gray
+  '#FFFFFF', // White
+  '#9333EA', // Violet
 ];
 
 const PEN_SIZES = [
-  { label: 'Fine', size: 2 },
-  { label: 'Medium', size: 4 },
-  { label: 'Bold', size: 8 },
-  { label: 'Thick', size: 14 },
+  { label: 'Fine (2pt)', size: 2 },
+  { label: 'Medium (4pt)', size: 4 },
+  { label: 'Bold (8pt)', size: 8 },
+  { label: 'Chisel (14pt)', size: 14 },
 ];
 
 const HIGHLIGHTER_COLORS = [
@@ -70,18 +73,18 @@ const HIGHLIGHTER_COLORS = [
 ];
 
 const HIGHLIGHTER_SIZES = [
-  { label: 'Small', size: 14 },
+  { label: 'Narrow', size: 14 },
   { label: 'Medium', size: 22 },
-  { label: 'Chisel', size: 34 },
+  { label: 'Broad', size: 34 },
 ];
 
 const STICKY_COLORS: { color: StickyColor; hex: string; name: string }[] = [
-  { color: 'yellow', hex: '#fef08a', name: 'Yellow' },
-  { color: 'blue', hex: '#bae6fd', name: 'Blue' },
-  { color: 'green', hex: '#bbf7d0', name: 'Green' },
-  { color: 'pink', hex: '#fbcfe8', name: 'Pink' },
-  { color: 'purple', hex: '#e9d5ff', name: 'Purple' },
-  { color: 'orange', hex: '#fed7aa', name: 'Orange' },
+  { color: 'yellow', hex: '#fef08a', name: 'Canary Yellow' },
+  { color: 'blue', hex: '#bae6fd', name: 'Blueprint Cyan' },
+  { color: 'green', hex: '#bbf7d0', name: 'Mint Green' },
+  { color: 'pink', hex: '#fbcfe8', name: 'Rose Coral' },
+  { color: 'purple', hex: '#e9d5ff', name: 'Lilac' },
+  { color: 'orange', hex: '#fed7aa', name: 'Manila Buff' },
 ];
 
 export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
@@ -103,11 +106,13 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   canUndo,
   canRedo,
   onClear,
+  edition = 'day',
 }) => {
   const [showPenFlyout, setShowPenFlyout] = useState(false);
   const [showHighlighterFlyout, setShowHighlighterFlyout] = useState(false);
   const [showShapeFlyout, setShowShapeFlyout] = useState(false);
   const [showStickyFlyout, setShowStickyFlyout] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(false);
 
   const toolbarRef = useRef<HTMLDivElement>(null);
 
@@ -149,7 +154,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     setShowStickyFlyout(false);
   };
 
-  const selectShapeTool = () => {
+  const selectShape = () => {
     if (activeTool === 'shape') {
       setShowShapeFlyout((prev) => !prev);
     } else {
@@ -161,267 +166,356 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     setShowStickyFlyout(false);
   };
 
-  const renderShapeIcon = (type: ShapeType) => {
-    switch (type) {
-      case 'rectangle':
-        return <Square size={17} />;
-      case 'circle':
-        return <Circle size={17} />;
-      case 'diamond':
-        return <Diamond size={17} />;
-      case 'arrow':
-        return <ArrowUpRight size={17} />;
-      case 'line':
-        return <Minus size={17} />;
-    }
-  };
+  const isNight = edition === 'night';
+  const containerClass = isNight
+    ? 'bg-[#141418] border-stone-700 text-stone-200'
+    : 'bg-paper-white border-ink-primary text-ink-primary';
+
+  const btnHoverClass = isNight
+    ? 'hover:bg-stone-800 text-stone-300'
+    : 'hover:bg-paper-aged text-ink-primary';
+
+  const btnActiveClass = isNight
+    ? 'bg-amber-600/30 text-amber-400 border-amber-600/60'
+    : 'bg-ink-primary text-paper-white border-ink-primary';
+
+  if (isCollapsed) {
+    return (
+      <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-30">
+        <button
+          type="button"
+          onClick={() => setIsCollapsed(false)}
+          className={`flex items-center gap-2 px-3 py-1.5 border-2 shadow-xl rounded-[1px] font-ledger text-xs font-bold uppercase tracking-wider ${containerClass}`}
+          title="Expand Drafting Rack"
+        >
+          <Pen size={14} className="text-amber-500" />
+          <span>Drafting Rack</span>
+          <ChevronUp size={14} />
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div
       ref={toolbarRef}
-      className="fixed bottom-6 left-1/2 -translate-x-1/2 z-40 flex flex-col items-center select-none"
+      className={`fixed bottom-4 left-1/2 -translate-x-1/2 z-30 flex items-center gap-1 p-1.5 border-2 shadow-2xl rounded-[1px] select-none transition-all ${containerClass}`}
     >
-      {/* ================= PEN FLYOUT ================= */}
-      {showPenFlyout && activeTool === 'pen' && (
-        <div className="mb-3 p-3 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-3 min-w-[260px] animate-in fade-in slide-in-from-bottom-2 duration-150">
-          <div className="flex items-center justify-between text-xs font-semibold text-zinc-400">
-            <span>Ink Color</span>
-            <div
-              className="w-3.5 h-3.5 rounded-full border border-zinc-700 shadow-sm"
-              style={{ backgroundColor: activeColor }}
-            />
-          </div>
-          <div className="grid grid-cols-5 gap-2">
-            {PEN_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setActiveColor(c)}
-                className={`w-7 h-7 rounded-full transition-transform flex items-center justify-center ${
-                  activeColor === c ? 'scale-110 ring-2 ring-blue-500 ring-offset-2 ring-offset-zinc-900' : 'hover:scale-105'
-                }`}
-                style={{ backgroundColor: c }}
-                title={c}
-              />
-            ))}
-          </div>
-          <div className="h-px bg-zinc-800 my-0.5" />
-          <div className="flex items-center justify-between text-xs font-semibold text-zinc-400">
-            <span>Thickness</span>
-            <span className="text-zinc-500">{activeSize}px</span>
-          </div>
-          <div className="flex items-center justify-around gap-2">
-            {PEN_SIZES.map((s) => (
-              <button
-                key={s.size}
-                type="button"
-                onClick={() => setActiveSize(s.size)}
-                className={`flex-1 py-1.5 rounded-lg flex flex-col items-center gap-1.5 transition-colors ${
-                  activeSize === s.size ? 'bg-zinc-800 text-blue-400 border border-zinc-700' : 'text-zinc-400 hover:bg-zinc-800/50'
-                }`}
-              >
-                <div
-                  className="rounded-full bg-current"
-                  style={{ width: s.size * 1.5, height: s.size * 1.5 }}
-                />
-                <span className="text-[10px] font-medium">{s.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 1. SELECT TOOL */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTool('select');
+          setShowPenFlyout(false);
+          setShowHighlighterFlyout(false);
+          setShowShapeFlyout(false);
+          setShowStickyFlyout(false);
+        }}
+        className={`p-2 rounded-[1px] border transition-colors ${
+          activeTool === 'select' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+        }`}
+        title="Select & Move (V)"
+      >
+        <MousePointer size={16} />
+      </button>
 
-      {/* ================= HIGHLIGHTER FLYOUT ================= */}
-      {showHighlighterFlyout && activeTool === 'highlighter' && (
-        <div className="mb-3 p-3 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl flex flex-col gap-3 min-w-[260px] animate-in fade-in slide-in-from-bottom-2 duration-150">
-          <div className="flex items-center justify-between text-xs font-semibold text-zinc-400">
-            <span>Highlighter Ink</span>
-            <div
-              className="w-3.5 h-3.5 rounded-full border border-zinc-700 shadow-sm"
-              style={{ backgroundColor: highlighterColor }}
-            />
-          </div>
-          <div className="grid grid-cols-6 gap-2">
-            {HIGHLIGHTER_COLORS.map((c) => (
-              <button
-                key={c}
-                type="button"
-                onClick={() => setHighlighterColor(c)}
-                className={`w-7 h-7 rounded-full transition-transform flex items-center justify-center ${
-                  highlighterColor === c ? 'scale-110 ring-2 ring-blue-500 ring-offset-2 ring-offset-zinc-900' : 'hover:scale-105'
-                }`}
-                style={{ backgroundColor: c }}
-                title={c}
-              />
-            ))}
-          </div>
-          <div className="h-px bg-zinc-800 my-0.5" />
-          <div className="flex items-center justify-between text-xs font-semibold text-zinc-400">
-            <span>Chisel Width</span>
-            <span className="text-zinc-500">{highlighterSize}px</span>
-          </div>
-          <div className="flex items-center justify-around gap-2">
-            {HIGHLIGHTER_SIZES.map((s) => (
-              <button
-                key={s.size}
-                type="button"
-                onClick={() => setHighlighterSize(s.size)}
-                className={`flex-1 py-1.5 rounded-lg flex flex-col items-center gap-1.5 transition-colors ${
-                  highlighterSize === s.size ? 'bg-zinc-800 text-amber-400 border border-zinc-700' : 'text-zinc-400 hover:bg-zinc-800/50'
-                }`}
-              >
-                <div
-                  className="rounded-full bg-current"
-                  style={{ width: Math.min(s.size, 16), height: 6 }}
-                />
-                <span className="text-[10px] font-medium">{s.label}</span>
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 2. HAND / PAN TOOL */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTool('hand');
+          setShowPenFlyout(false);
+          setShowHighlighterFlyout(false);
+          setShowShapeFlyout(false);
+          setShowStickyFlyout(false);
+        }}
+        className={`p-2 rounded-[1px] border transition-colors ${
+          activeTool === 'hand' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+        }`}
+        title="Pan Canvas (H / Space+Drag)"
+      >
+        <Hand size={16} />
+      </button>
 
-      {/* ================= SHAPES FLYOUT ================= */}
-      {showShapeFlyout && (
-        <div className="mb-3 p-2 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl flex items-center gap-1.5 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          {(['rectangle', 'circle', 'diamond', 'arrow', 'line'] as ShapeType[]).map((shape) => (
-            <button
-              key={shape}
-              type="button"
-              onClick={() => {
-                setActiveShape(shape);
-                setActiveTool('shape');
-                setShowShapeFlyout(false);
-              }}
-              className={`p-2 rounded-xl transition-all ${
-                activeShape === shape && activeTool === 'shape'
-                  ? 'bg-blue-600 text-white shadow-md shadow-blue-500/25'
-                  : 'text-zinc-400 hover:bg-zinc-800 hover:text-zinc-200'
-              }`}
-              title={shape.charAt(0).toUpperCase() + shape.slice(1)}
-            >
-              {renderShapeIcon(shape)}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-stone-700' : 'bg-ink-rule'}`} />
 
-      {/* ================= STICKY NOTE COLOR PICKER ================= */}
-      {showStickyFlyout && (
-        <div className="mb-3 p-2.5 bg-zinc-900/95 backdrop-blur-xl border border-zinc-800 rounded-2xl shadow-2xl flex items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-150">
-          <span className="text-xs text-zinc-400 font-medium px-1">Note Color:</span>
-          {STICKY_COLORS.map((item) => (
-            <button
-              key={item.color}
-              type="button"
-              onClick={() => {
-                onAddSticky(item.color);
-                setShowStickyFlyout(false);
-              }}
-              className="w-7 h-7 rounded-lg shadow-sm border border-black/20 hover:scale-110 active:scale-95 transition-transform flex items-center justify-center font-bold text-xs"
-              style={{ backgroundColor: item.hex }}
-              title={`Add ${item.name} Note`}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* ================= MAIN FLOATING DOCK ================= */}
-      <div className="flex items-center gap-1 px-2.5 py-2 bg-zinc-900/90 backdrop-blur-xl border border-zinc-800/80 rounded-2xl shadow-2xl">
-        {/* SELECT */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool('select');
-            setShowPenFlyout(false);
-            setShowHighlighterFlyout(false);
-            setShowShapeFlyout(false);
-            setShowStickyFlyout(false);
-          }}
-          className={`p-2.5 rounded-xl transition-all relative ${
-            activeTool === 'select'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-          }`}
-          title="Select / Move (V)"
-        >
-          <MousePointer size={18} />
-        </button>
-
-        {/* PEN */}
+      {/* 3. PEN TOOL */}
+      <div className="relative">
         <button
           type="button"
           onClick={selectPen}
-          className={`p-2.5 rounded-xl transition-all relative flex items-center gap-1 ${
-            activeTool === 'pen'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+          className={`p-2 rounded-[1px] border flex items-center gap-1 transition-colors ${
+            activeTool === 'pen' ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Pen (P) - Click again for colors & thickness"
+          title="Drafting Pen (P)"
         >
-          <Pen size={18} />
+          <Pen size={16} />
           <div
-            className="w-2 h-2 rounded-full ring-1 ring-black/40"
+            className="w-2.5 h-2.5 rounded-[1px] border border-black/30 shadow-xs"
             style={{ backgroundColor: activeColor }}
           />
-          {activeTool === 'pen' && <ChevronUp size={12} className="opacity-70" />}
         </button>
 
-        {/* HIGHLIGHTER */}
+        {/* Pen Customizer Flyout */}
+        {showPenFlyout && (
+          <div
+            className={`absolute bottom-12 left-0 p-3 border-2 shadow-2xl rounded-[1px] w-56 space-y-3 z-40 ${containerClass}`}
+          >
+            <div>
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                Ink Color
+              </div>
+              <div className="grid grid-cols-4 gap-1.5">
+                {PEN_COLORS.map((hex) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => {
+                      setActiveColor(hex);
+                      setShowPenFlyout(false);
+                    }}
+                    className={`h-6 rounded-[1px] border border-black/20 flex items-center justify-center transition-transform ${
+                      activeColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                Line Width
+              </div>
+              <div className="grid grid-cols-2 gap-1 text-[10px] font-ledger">
+                {PEN_SIZES.map((s) => (
+                  <button
+                    key={s.size}
+                    type="button"
+                    onClick={() => {
+                      setActiveSize(s.size);
+                      setShowPenFlyout(false);
+                    }}
+                    className={`px-2 py-1 border rounded-[1px] text-center ${
+                      activeSize === s.size
+                        ? btnActiveClass
+                        : `border-transparent ${btnHoverClass}`
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 4. LASER POINTER TOOL */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTool('laser');
+          setShowPenFlyout(false);
+          setShowHighlighterFlyout(false);
+          setShowShapeFlyout(false);
+          setShowStickyFlyout(false);
+        }}
+        className={`p-2 rounded-[1px] border transition-colors ${
+          activeTool === 'laser'
+            ? 'bg-rose-600 text-white border-rose-600 font-bold shadow-sm animate-pulse'
+            : `border-transparent ${btnHoverClass}`
+        }`}
+        title="Laser Pointer (L) - Temporary Fading Trace"
+      >
+        <Zap size={16} />
+      </button>
+
+      {/* 5. HIGHLIGHTER TOOL */}
+      <div className="relative">
         <button
           type="button"
           onClick={selectHighlighter}
-          className={`p-2.5 rounded-xl transition-all relative flex items-center gap-1 ${
-            activeTool === 'highlighter'
-              ? 'bg-amber-600 text-white shadow-md shadow-amber-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+          className={`p-2 rounded-[1px] border flex items-center gap-1 transition-colors ${
+            activeTool === 'highlighter' ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Highlighter (H) - Translucent chisel inking"
+          title="Marker & Highlighter (M)"
         >
-          <Highlighter size={18} />
+          <Highlighter size={16} />
           <div
-            className="w-2 h-2 rounded-full ring-1 ring-black/40"
+            className="w-2.5 h-2.5 rounded-[1px] border border-black/30 shadow-xs"
             style={{ backgroundColor: highlighterColor }}
           />
-          {activeTool === 'highlighter' && <ChevronUp size={12} className="opacity-70" />}
         </button>
 
-        {/* ERASER */}
+        {/* Highlighter Flyout */}
+        {showHighlighterFlyout && (
+          <div
+            className={`absolute bottom-12 left-0 p-3 border-2 shadow-2xl rounded-[1px] w-52 space-y-3 z-40 ${containerClass}`}
+          >
+            <div>
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                Marker Ink
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {HIGHLIGHTER_COLORS.map((hex) => (
+                  <button
+                    key={hex}
+                    type="button"
+                    onClick={() => {
+                      setHighlighterColor(hex);
+                      setShowHighlighterFlyout(false);
+                    }}
+                    className={`h-6 rounded-[1px] border border-black/20 flex items-center justify-center transition-transform ${
+                      highlighterColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                    }`}
+                    style={{ backgroundColor: hex }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <div className="font-ledger text-[9px] uppercase tracking-wider font-bold mb-1.5 text-ink-muted">
+                Tip Width
+              </div>
+              <div className="grid grid-cols-3 gap-1 text-[10px] font-ledger">
+                {HIGHLIGHTER_SIZES.map((s) => (
+                  <button
+                    key={s.size}
+                    type="button"
+                    onClick={() => {
+                      setHighlighterSize(s.size);
+                      setShowHighlighterFlyout(false);
+                    }}
+                    className={`px-1.5 py-1 border rounded-[1px] text-center ${
+                      highlighterSize === s.size
+                        ? btnActiveClass
+                        : `border-transparent ${btnHoverClass}`
+                    }`}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* 6. ERASER TOOL */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTool('eraser');
+          setShowPenFlyout(false);
+          setShowHighlighterFlyout(false);
+          setShowShapeFlyout(false);
+          setShowStickyFlyout(false);
+        }}
+        className={`p-2 rounded-[1px] border transition-colors ${
+          activeTool === 'eraser' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+        }`}
+        title="Precision Eraser (E)"
+      >
+        <Eraser size={16} />
+      </button>
+
+      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-stone-700' : 'bg-ink-rule'}`} />
+
+      {/* 7. SHAPES TOOL */}
+      <div className="relative">
         <button
           type="button"
-          onClick={() => {
-            setActiveTool('eraser');
-            setShowPenFlyout(false);
-            setShowHighlighterFlyout(false);
-            setShowShapeFlyout(false);
-            setShowStickyFlyout(false);
-          }}
-          className={`p-2.5 rounded-xl transition-all ${
-            activeTool === 'eraser'
-              ? 'bg-rose-600 text-white shadow-md shadow-rose-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+          onClick={selectShape}
+          className={`p-2 rounded-[1px] border flex items-center gap-1 transition-colors ${
+            activeTool === 'shape' ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Stroke Eraser (E) - Tap any stroke to erase"
+          title="Geometric Drafting Shapes (U)"
         >
-          <Eraser size={18} />
+          {activeShape === 'rectangle' && <Square size={16} />}
+          {activeShape === 'circle' && <Circle size={16} />}
+          {activeShape === 'diamond' && <Diamond size={16} />}
+          {activeShape === 'arrow' && <ArrowUpRight size={16} />}
+          {activeShape === 'line' && <Minus size={16} />}
         </button>
 
-        {/* SHAPES */}
-        <button
-          type="button"
-          onClick={selectShapeTool}
-          className={`p-2.5 rounded-xl transition-all relative flex items-center gap-1 ${
-            activeTool === 'shape'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-          }`}
-          title="Shapes (S) - Click for circle, rectangle, arrow..."
-        >
-          {renderShapeIcon(activeShape)}
-          <ChevronUp size={12} className="opacity-70" />
-        </button>
+        {/* Shapes Flyout */}
+        {showShapeFlyout && (
+          <div
+            className={`absolute bottom-12 left-0 p-2 border-2 shadow-2xl rounded-[1px] flex gap-1 z-40 ${containerClass}`}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShape('rectangle');
+                setShowShapeFlyout(false);
+              }}
+              className={`p-2 rounded-[1px] border ${
+                activeShape === 'rectangle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+              }`}
+              title="Rectangle"
+            >
+              <Square size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShape('circle');
+                setShowShapeFlyout(false);
+              }}
+              className={`p-2 rounded-[1px] border ${
+                activeShape === 'circle' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+              }`}
+              title="Circle / Ellipse"
+            >
+              <Circle size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShape('diamond');
+                setShowShapeFlyout(false);
+              }}
+              className={`p-2 rounded-[1px] border ${
+                activeShape === 'diamond' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+              }`}
+              title="Diamond / Decision"
+            >
+              <Diamond size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShape('arrow');
+                setShowShapeFlyout(false);
+              }}
+              className={`p-2 rounded-[1px] border ${
+                activeShape === 'arrow' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+              }`}
+              title="Flow Arrow"
+            >
+              <ArrowUpRight size={16} />
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveShape('line');
+                setShowShapeFlyout(false);
+              }}
+              className={`p-2 rounded-[1px] border ${
+                activeShape === 'line' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+              }`}
+              title="Straight Line"
+            >
+              <Minus size={16} />
+            </button>
+          </div>
+        )}
+      </div>
 
-        {/* STICKY NOTES */}
+      {/* 8. STICKY NOTE TOOL */}
+      <div className="relative">
         <button
           type="button"
           onClick={() => {
@@ -430,94 +524,106 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             setShowHighlighterFlyout(false);
             setShowShapeFlyout(false);
           }}
-          className={`p-2.5 rounded-xl transition-all ${
-            showStickyFlyout
-              ? 'bg-amber-500/20 text-amber-300 ring-1 ring-amber-500/40'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
+          className={`p-2 rounded-[1px] border transition-colors ${
+            showStickyFlyout ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Sticky Note (N) - Colorful brainstorming cards"
+          title="Add Clipping Note (S)"
         >
-          <StickyNote size={18} />
+          <StickyNote size={16} />
         </button>
 
-        {/* TEXT */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool('text');
-            setShowPenFlyout(false);
-            setShowHighlighterFlyout(false);
-            setShowShapeFlyout(false);
-            setShowStickyFlyout(false);
-          }}
-          className={`p-2.5 rounded-xl transition-all ${
-            activeTool === 'text'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-          }`}
-          title="Text Label (T)"
-        >
-          <Type size={18} />
-        </button>
-
-        {/* HAND / PAN */}
-        <button
-          type="button"
-          onClick={() => {
-            setActiveTool('hand');
-            setShowPenFlyout(false);
-            setShowHighlighterFlyout(false);
-            setShowShapeFlyout(false);
-            setShowStickyFlyout(false);
-          }}
-          className={`p-2.5 rounded-xl transition-all ${
-            activeTool === 'hand'
-              ? 'bg-blue-600 text-white shadow-md shadow-blue-500/30'
-              : 'text-zinc-400 hover:text-zinc-200 hover:bg-zinc-800/60'
-          }`}
-          title="Pan Canvas (Space / Hand)"
-        >
-          <Hand size={18} />
-        </button>
-
-        <div className="w-px h-6 bg-zinc-800 mx-1" />
-
-        {/* UNDO */}
-        <button
-          type="button"
-          onClick={onUndo}
-          disabled={!canUndo}
-          className={`p-2.5 rounded-xl transition-all ${
-            canUndo ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white' : 'text-zinc-600 cursor-not-allowed'
-          }`}
-          title="Undo (Ctrl+Z)"
-        >
-          <Undo2 size={18} />
-        </button>
-
-        {/* REDO */}
-        <button
-          type="button"
-          onClick={onRedo}
-          disabled={!canRedo}
-          className={`p-2.5 rounded-xl transition-all ${
-            canRedo ? 'text-zinc-300 hover:bg-zinc-800 hover:text-white' : 'text-zinc-600 cursor-not-allowed'
-          }`}
-          title="Redo (Ctrl+Y)"
-        >
-          <Redo2 size={18} />
-        </button>
-
-        {/* CLEAR ALL */}
-        <button
-          type="button"
-          onClick={onClear}
-          className="p-2.5 rounded-xl text-zinc-400 hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-          title="Clear Whiteboard"
-        >
-          <Trash2 size={18} />
-        </button>
+        {/* Sticky Palette Flyout */}
+        {showStickyFlyout && (
+          <div
+            className={`absolute bottom-12 left-0 p-2.5 border-2 shadow-2xl rounded-[1px] w-48 space-y-2 z-40 ${containerClass}`}
+          >
+            <div className="font-ledger text-[9px] uppercase tracking-wider font-bold text-ink-muted">
+              Select Note Color
+            </div>
+            <div className="grid grid-cols-3 gap-1.5">
+              {STICKY_COLORS.map((sc) => (
+                <button
+                  key={sc.color}
+                  type="button"
+                  onClick={() => {
+                    onAddSticky(sc.color);
+                    setShowStickyFlyout(false);
+                  }}
+                  className="h-8 rounded-[1px] border border-black/30 shadow-xs flex items-center justify-center hover:scale-105 active:scale-95 transition-transform text-[9px] font-ledger font-bold text-black/70"
+                  style={{ backgroundColor: sc.hex }}
+                  title={sc.name}
+                >
+                  {sc.name.split(' ')[0]}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
+
+      {/* 9. TEXT TOOL */}
+      <button
+        type="button"
+        onClick={() => {
+          setActiveTool('text');
+          setShowPenFlyout(false);
+          setShowHighlighterFlyout(false);
+          setShowShapeFlyout(false);
+          setShowStickyFlyout(false);
+        }}
+        className={`p-2 rounded-[1px] border transition-colors ${
+          activeTool === 'text' ? btnActiveClass : `border-transparent ${btnHoverClass}`
+        }`}
+        title="Typeset Text (T)"
+      >
+        <Type size={16} />
+      </button>
+
+      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-stone-700' : 'bg-ink-rule'}`} />
+
+      {/* 10. UNDO / REDO */}
+      <button
+        type="button"
+        onClick={onUndo}
+        disabled={!canUndo}
+        className={`p-2 rounded-[1px] border border-transparent transition-colors ${
+          canUndo ? btnHoverClass : 'opacity-25 cursor-not-allowed'
+        }`}
+        title="Undo (Ctrl+Z)"
+      >
+        <Undo2 size={16} />
+      </button>
+      <button
+        type="button"
+        onClick={onRedo}
+        disabled={!canRedo}
+        className={`p-2 rounded-[1px] border border-transparent transition-colors ${
+          canRedo ? btnHoverClass : 'opacity-25 cursor-not-allowed'
+        }`}
+        title="Redo (Ctrl+Y)"
+      >
+        <Redo2 size={16} />
+      </button>
+
+      {/* 11. CLEAR BOARD */}
+      <button
+        type="button"
+        onClick={onClear}
+        className={`p-2 rounded-[1px] border border-transparent transition-colors text-rose-600 hover:bg-rose-950/20`}
+        title="Clear Drawing Board"
+      >
+        <Trash2 size={16} />
+      </button>
+
+      {/* 12. MINIMIZE TOOLBAR BUTTON */}
+      <button
+        type="button"
+        onClick={() => setIsCollapsed(true)}
+        className={`p-2 rounded-[1px] border border-transparent text-ink-muted hover:text-ink-primary`}
+        title="Minimize Drafting Rack"
+      >
+        <ChevronDown size={16} />
+      </button>
     </div>
   );
 };

@@ -7,7 +7,8 @@ import {
   ExternalLink, 
   Play, 
   Sparkles,
-  DollarSign
+  DollarSign,
+  Radio
 } from 'lucide-react';
 import { api } from '../../services/api';
 
@@ -45,119 +46,152 @@ export const ShortcutsModal: React.FC = () => {
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto pb-24 md:pb-12">
-      {/* Header */}
-      <div>
-        <h1 className="text-xl font-bold text-zinc-100 flex items-center space-x-2">
-          <Smartphone className="w-5 h-5 text-blue-400" />
-          <span>iOS Siri & Apple Shortcuts Integration</span>
+      {/* Broadsheet Section Header */}
+      <div className="border-b-2 border-ink-base/80 dark:border-paper-light/80 pb-3 pt-1">
+        <div className="flex items-center justify-between text-[10px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400 mb-1">
+          <span>WIRE TRANSMISSION OFFICE • SEC. VI</span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+            PI-5 LOCAL BROADCAST ACTIVE
+          </span>
+        </div>
+        <h1 className="text-2xl md:text-3xl font-editorial font-bold text-ink-base dark:text-paper-light flex items-center space-x-2 tracking-tight">
+          <Radio className="w-6 h-6 text-amber-600 dark:text-amber-400" />
+          <span>Telegraph Wire & Apple Siri Integration</span>
         </h1>
-        <p className="text-xs text-zinc-400 mt-1">
-          Turn your iPhone, Apple Watch, or HomePod into a voice controller for your Raspberry Pi 5.
+        <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-400 mt-1">
+          Direct telephone dispatch and voice telegraph line linking iPhone, Apple Watch, or HomePod to your Raspberry Pi 5.
         </p>
       </div>
 
       {/* Siri Capabilities Cards */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-zinc-900/80 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <div className="w-8 h-8 rounded-lg bg-blue-500/10 text-blue-400 flex items-center justify-center">
+        <div className="clipping clipping-white p-5 space-y-2.5 relative">
+          <div className="w-8 h-8 rounded border border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-ledger font-bold text-xs">
             <Mic className="w-4 h-4" />
           </div>
-          <h3 className="text-sm font-semibold text-zinc-200">"Hey Siri, Quick Task"</h3>
-          <p className="text-xs text-zinc-400">
+          <h3 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light">"Hey Siri, Quick Task"</h3>
+          <p className="text-xs font-editorial text-ink-muted dark:text-stone-400 leading-relaxed">
             Dictate anything naturally. Local AI parses dates, priorities, and checklist steps automatically.
           </p>
+          <div className="pt-2 text-[9px] font-ledger uppercase tracking-wider text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
+            DISPATCH CH. 01 • TASK INGESTION
+          </div>
         </div>
 
-        <div className="bg-zinc-900/80 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 text-emerald-400 flex items-center justify-center">
+        <div className="clipping clipping-white p-5 space-y-2.5 relative">
+          <div className="w-8 h-8 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-ledger font-bold text-xs">
             <DollarSign className="w-4 h-4" />
           </div>
-          <h3 className="text-sm font-semibold text-zinc-200">"Hey Siri, Log Expense"</h3>
-          <p className="text-xs text-zinc-400">
-            Say "250 rupees for lunch via UPI". It logs the expense and deducts from your bank account.
+          <h3 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light">"Hey Siri, Log Expense"</h3>
+          <p className="text-xs font-editorial text-ink-muted dark:text-stone-400 leading-relaxed">
+            Say "250 rupees for lunch via UPI". It logs the disbursement and adjusts your account ledger.
           </p>
+          <div className="pt-2 text-[9px] font-ledger uppercase tracking-wider text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
+            DISPATCH CH. 02 • LEDGER DISBURSEMENT
+          </div>
         </div>
 
-        <div className="bg-zinc-900/80 border border-zinc-800 p-4 rounded-2xl space-y-2">
-          <div className="w-8 h-8 rounded-lg bg-purple-500/10 text-purple-400 flex items-center justify-center">
+        <div className="clipping clipping-white p-5 space-y-2.5 relative">
+          <div className="w-8 h-8 rounded border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-ledger font-bold text-xs">
             <Sparkles className="w-4 h-4" />
           </div>
-          <h3 className="text-sm font-semibold text-zinc-200">"Hey Siri, Daily Status"</h3>
-          <p className="text-xs text-zinc-400">
-            Siri reads aloud your productivity score, pending urgent tasks, and current bank balance.
+          <h3 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light">"Hey Siri, Daily Status"</h3>
+          <p className="text-xs font-editorial text-ink-muted dark:text-stone-400 leading-relaxed">
+            Siri reads aloud your productivity headline, pending urgent docket items, and current treasury balance.
           </p>
+          <div className="pt-2 text-[9px] font-ledger uppercase tracking-wider text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
+            DISPATCH CH. 03 • INTELLIGENCE BRIEF
+          </div>
         </div>
       </div>
 
       {/* Setup Guide for iOS Shortcuts */}
-      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 space-y-4">
-        <h2 className="text-sm font-semibold text-zinc-100">Quick 2-Minute iOS Setup:</h2>
+      <div className="clipping clipping-cream p-6 space-y-4">
+        <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2">
+          <h2 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light uppercase tracking-wider">
+            OPERATING INSTRUCTIONS: 2-MINUTE iOS SHORTCUT SETUP
+          </h2>
+          <span className="text-[10px] font-ledger text-ink-muted dark:text-stone-400 uppercase">
+            PROTOCOL REV 4.2
+          </span>
+        </div>
 
-        <ol className="list-decimal list-inside space-y-3 text-xs text-zinc-300">
-          <li>
-            Open the <strong>Shortcuts</strong> app on your iPhone or iPad.
+        <ol className="list-decimal list-inside space-y-3.5 text-xs font-editorial text-ink-base dark:text-stone-300">
+          <li className="leading-relaxed">
+            Open the <strong>Shortcuts</strong> application on your iPhone or iPad.
           </li>
-          <li>
-            Tap <strong>+</strong> to create a new Shortcut and rename it: <code className="bg-zinc-800 px-1.5 py-0.5 rounded text-blue-300">Quick Task</code>
+          <li className="leading-relaxed">
+            Tap <strong>+</strong> to create a new Shortcut and designate title: <code className="font-ledger bg-paper-aged dark:bg-stone-800 border border-ink-base/20 dark:border-stone-700 px-2 py-0.5 rounded text-amber-700 dark:text-amber-300 font-bold">Quick Task</code>
           </li>
-          <li>
+          <li className="leading-relaxed">
             Add action: <strong>"Ask for Input"</strong> (Type: Text, Prompt: <em>"What task would you like to add?"</em>)
           </li>
-          <li>
+          <li className="leading-relaxed">
             Add action: <strong>"Get Contents of URL"</strong>:
-            <div className="mt-2 space-y-2 pl-4">
+            <div className="mt-2.5 space-y-2 pl-4">
               <div className="flex items-center space-x-2">
-                <span className="text-zinc-400">URL:</span>
-                <code className="bg-zinc-800 px-2 py-1 rounded text-zinc-200 font-mono text-[11px] truncate flex-1">
+                <span className="text-[11px] font-ledger uppercase text-ink-muted dark:text-stone-400">ENDPOINT:</span>
+                <code className="bg-paper-white dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 px-2.5 py-1.5 rounded text-ink-base dark:text-stone-200 font-ledger text-[11px] truncate flex-1 shadow-inner">
                   {currentHost}/api/v1/shortcuts/quick-task
                 </code>
                 <button
                   onClick={() => copyToClipboard(`${currentHost}/api/v1/shortcuts/quick-task`, 'task_url')}
-                  className="p-1.5 bg-zinc-800 hover:bg-zinc-700 rounded text-zinc-300"
+                  className="p-1.5 bg-paper-aged dark:bg-stone-800 hover:bg-paper-white dark:hover:bg-stone-700 border border-ink-base/20 dark:border-stone-700 rounded text-ink-base dark:text-stone-200 transition-colors"
+                  title="Copy URL"
                 >
-                  {copiedField === 'task_url' ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                  {copiedField === 'task_url' ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
                 </button>
               </div>
-              <div className="text-[11px] text-zinc-400">
-                Method: <strong className="text-zinc-200">POST</strong> • Request Body: <strong className="text-zinc-200">JSON</strong> with key: <code className="text-blue-400">input_text</code> = <em>Provided Input</em>
+              <div className="text-[11px] font-ledger text-ink-muted dark:text-stone-400">
+                METHOD: <strong className="text-ink-base dark:text-stone-200">POST</strong> • BODY: <strong className="text-ink-base dark:text-stone-200">JSON</strong> with key: <code className="text-amber-700 dark:text-amber-400">input_text</code> = <em>Provided Input</em>
               </div>
             </div>
           </li>
-          <li>
-            Add action: <strong>"Speak Text"</strong> (select <code>Contents of URL &gt; spoken_response</code>) so Siri responds verbally!
+          <li className="leading-relaxed">
+            Add action: <strong>"Speak Text"</strong> (select <code>Contents of URL &gt; spoken_response</code>) so Siri confirms receipt verbally.
           </li>
         </ol>
       </div>
 
       {/* Live Voice Simulator / Endpoint Tester */}
-      <div className="bg-zinc-900/60 border border-zinc-800 rounded-2xl p-5 space-y-3">
-        <h2 className="text-sm font-semibold text-zinc-100 flex items-center space-x-2">
-          <Play className="w-4 h-4 text-blue-400" />
-          <span>Test Siri Voice Endpoint Live</span>
-        </h2>
+      <div className="clipping clipping-white p-6 space-y-4">
+        <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2">
+          <h2 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light flex items-center space-x-2">
+            <Play className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+            <span>TRANSMITTER TEST TERMINAL (LIVE WIRE SIMULATION)</span>
+          </h2>
+          <span className="text-[10px] font-ledger text-ink-muted dark:text-stone-400 uppercase">
+            STATION PI-5
+          </span>
+        </div>
 
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <input
             type="text"
             value={testTaskText}
             onChange={(e) => setTestTaskText(e.target.value)}
-            className="flex-1 bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
-            placeholder="Type what you would say to Siri..."
+            className="flex-1 bg-paper-aged/50 dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 rounded-lg px-3.5 py-2.5 text-xs font-ledger text-ink-base dark:text-stone-100 placeholder-ink-muted/60 dark:placeholder-stone-500 focus:outline-none focus:border-amber-600 dark:focus:border-amber-400"
+            placeholder="Dictate simulated dispatch (e.g. Schedule meeting with counsel tomorrow 2pm)..."
           />
           <button
             onClick={runTestTask}
             disabled={isTesting}
-            className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold rounded-lg shrink-0 flex items-center space-x-1.5"
+            className="px-4 py-2.5 bg-ink-base hover:bg-stone-800 text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base text-xs font-ledger font-bold rounded-lg shrink-0 flex items-center justify-center space-x-1.5 transition-all shadow-sm"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            <span>{isTesting ? 'Sending to Pi...' : 'Simulate Siri'}</span>
+            <span>{isTesting ? 'TRANSMITTING...' : 'SIMULATE SIRI'}</span>
           </button>
         </div>
 
         {testResult && (
-          <div className="p-3 bg-zinc-950/80 border border-zinc-800 rounded-xl text-xs space-y-1">
-            <span className="text-[10px] uppercase font-bold text-emerald-400">Siri Spoken Response:</span>
-            <p className="text-zinc-200 font-medium">"{testResult}"</p>
+          <div className="p-3.5 bg-paper-aged dark:bg-stone-950 border border-ink-base/20 dark:border-stone-800 rounded-lg text-xs space-y-1">
+            <span className="text-[10px] font-ledger uppercase font-bold text-emerald-600 dark:text-emerald-400 tracking-wider">
+              TELEGRAPH RECEIPT & SPOKEN RESPONSE:
+            </span>
+            <p className="text-ink-base dark:text-stone-200 font-editorial font-medium italic text-sm">
+              "{testResult}"
+            </p>
           </div>
         )}
       </div>

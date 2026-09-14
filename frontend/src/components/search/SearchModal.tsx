@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Search, CheckSquare, Folder, Wallet, Sparkles, Sun, Moon, ArrowRight, X } from 'lucide-react';
+import { Search, CheckSquare, Folder, Wallet, Sparkles, Sun, Moon, ArrowRight, BookOpen } from 'lucide-react';
 import { WorkItem, Project, Transaction } from '../../types';
 import { Modal } from '../common/Modal';
 
@@ -54,29 +54,29 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   // Actions
   const actions = [
-    { id: 'act_brain_dump', title: 'Open AI Brain Dump', category: 'Action', icon: <Sparkles className="w-4 h-4 text-blue-400" />, onSelect: () => onOpenBrainDump?.() },
-    { id: 'act_morning', title: 'Start Morning Kickoff Wizard', category: 'Action', icon: <Sun className="w-4 h-4 text-amber-400" />, onSelect: () => onOpenWizard?.('morning') },
-    { id: 'act_evening', title: 'Start Evening Debrief Wizard', category: 'Action', icon: <Moon className="w-4 h-4 text-indigo-400" />, onSelect: () => onOpenWizard?.('evening') },
-    { id: 'act_nav_tasks', title: 'Go to Tasks & Events', category: 'Navigation', icon: <CheckSquare className="w-4 h-4 text-emerald-400" />, onSelect: () => onNavigateTab?.('tasks') },
-    { id: 'act_nav_projects', title: 'Go to Projects Hub', category: 'Navigation', icon: <Folder className="w-4 h-4 text-purple-400" />, onSelect: () => onNavigateTab?.('projects') },
-    { id: 'act_nav_finance', title: 'Go to Finance Tracker', category: 'Navigation', icon: <Wallet className="w-4 h-4 text-amber-400" />, onSelect: () => onNavigateTab?.('finance') }
+    { id: 'act_brain_dump', title: 'The Wire — Transmit Brain Dump', category: 'Dispatch', icon: <Sparkles className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenBrainDump?.() },
+    { id: 'act_morning', title: 'Morning Edition — Daily Kickoff', category: 'Survey', icon: <Sun className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenWizard?.('morning') },
+    { id: 'act_evening', title: 'Evening Edition — Debrief & Ledger Close', category: 'Survey', icon: <Moon className="w-4 h-4 text-indigo-400" />, onSelect: () => onOpenWizard?.('evening') },
+    { id: 'act_nav_tasks', title: 'Section II — Action Docket & Calendar', category: 'Desk', icon: <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />, onSelect: () => onNavigateTab?.('tasks') },
+    { id: 'act_nav_projects', title: 'Section IV — Dossiers & Projects Hub', category: 'Desk', icon: <Folder className="w-4 h-4 text-purple-600 dark:text-purple-400" />, onSelect: () => onNavigateTab?.('projects') },
+    { id: 'act_nav_finance', title: 'Section V — Treasury & Financial Ledger', category: 'Desk', icon: <Wallet className="w-4 h-4 text-amber-600 dark:text-amber-400" />, onSelect: () => onNavigateTab?.('finance') }
   ].filter(a => !q || a.title.toLowerCase().includes(q));
 
   const allResults = [
     ...matchedTasks.map(t => ({
-      type: 'task' as const,
+      type: 'docket' as const,
       id: t.id,
       title: t.title,
-      sub: t.due_date ? `Due ${t.due_date}` : 'No date',
-      icon: <CheckSquare className="w-4 h-4 text-blue-400" />,
+      sub: t.due_date ? `Due ${t.due_date}` : 'Unscheduled clipping',
+      icon: <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />,
       action: () => onSelectTask?.(t)
     })),
     ...matchedProjects.map(p => ({
-      type: 'project' as const,
+      type: 'dossier' as const,
       id: p.id,
       title: p.name,
-      sub: `${p.total_task_count || 0} tasks`,
-      icon: <Folder className="w-4 h-4" style={{ color: p.color || '#3b82f6' }} />,
+      sub: `${p.total_task_count || 0} items filed`,
+      icon: <Folder className="w-4 h-4" style={{ color: p.color || '#d97706' }} />,
       action: () => {
         onNavigateTab?.('projects');
         onSelectProject?.(p.id);
@@ -112,9 +112,22 @@ export const SearchModal: React.FC<SearchModalProps> = ({
   return (
     <Modal isOpen={isOpen} onClose={onClose} maxWidth="xl" hideCloseButton>
       <div className="space-y-3" onKeyDown={handleKeyDown}>
+        {/* Newspaper Archive Registry Header */}
+        <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2 px-1">
+          <div className="flex items-center gap-2">
+            <BookOpen className="w-4 h-4 text-ink-muted dark:text-stone-400" />
+            <span className="text-[10px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400 font-bold">
+              THE SAGE DAILY • ARCHIVE & INDEX REGISTRY
+            </span>
+          </div>
+          <kbd className="hidden sm:inline text-[9px] font-ledger px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400">
+            ESC TO DISMISS
+          </kbd>
+        </div>
+
         {/* Search Input Bar */}
-        <div className="flex items-center space-x-3 px-3 py-2.5 rounded-xl bg-zinc-950 border border-zinc-800">
-          <Search className="w-5 h-5 text-zinc-400" />
+        <div className="flex items-center space-x-3 px-3.5 py-2.5 rounded-lg bg-paper-aged/50 dark:bg-black/40 border border-ink-base/20 dark:border-paper-light/15">
+          <Search className="w-4 h-4 text-ink-muted dark:text-stone-400 shrink-0" />
           <input
             ref={inputRef}
             type="text"
@@ -123,17 +136,16 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               setQuery(e.target.value);
               setSelectedIndex(0);
             }}
-            placeholder="Search tasks, projects, or actions... (Cmd+K)"
-            className="flex-1 bg-transparent text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none"
+            placeholder="Search action dockets, dossiers, or press commands... (Cmd+K)"
+            className="flex-1 bg-transparent text-xs sm:text-sm font-editorial text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none"
           />
-          <kbd className="hidden sm:inline text-[10px] font-mono px-1.5 py-0.5 rounded bg-zinc-800 text-zinc-400">ESC</kbd>
         </div>
 
         {/* Results List */}
-        <div className="max-h-[380px] overflow-y-auto space-y-1 pr-1">
+        <div className="max-h-[380px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
           {allResults.length === 0 ? (
-            <div className="text-center py-8 text-xs text-zinc-500">
-              No results found for "{query}"
+            <div className="text-center py-8 text-xs font-editorial italic text-ink-muted dark:text-stone-500">
+              No archival records matching "{query}"
             </div>
           ) : (
             allResults.map((item, idx) => (
@@ -144,22 +156,24 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                   onClose();
                 }}
                 onMouseEnter={() => setSelectedIndex(idx)}
-                className={`w-full flex items-center justify-between p-2.5 rounded-xl text-left transition-colors ${
-                  selectedIndex === idx ? 'bg-zinc-800 text-white' : 'text-zinc-300 hover:bg-zinc-800/60'
+                className={`w-full flex items-center justify-between p-2.5 rounded-lg text-left transition-colors border ${
+                  selectedIndex === idx
+                    ? 'bg-paper-aged/70 dark:bg-stone-800/80 border-ink-base/30 dark:border-stone-600 text-ink-base dark:text-paper-light shadow-sm'
+                    : 'border-transparent text-ink-muted dark:text-stone-300 hover:bg-paper-aged/40 dark:hover:bg-stone-800/40'
                 }`}
               >
                 <div className="flex items-center space-x-3 min-w-0">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
+                  <div className="w-7 h-7 rounded border border-ink-base/15 dark:border-stone-700 bg-paper-white dark:bg-stone-900 flex items-center justify-center shrink-0">
                     {item.icon}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-semibold truncate">{item.title}</p>
-                    <p className="text-[10px] text-zinc-500">{item.sub}</p>
+                    <p className="text-xs font-editorial font-bold truncate text-ink-base dark:text-paper-light">{item.title}</p>
+                    <p className="text-[10px] font-ledger text-ink-muted dark:text-stone-400">{item.sub}</p>
                   </div>
                 </div>
 
-                <div className="flex items-center space-x-2 text-zinc-500">
-                  <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-800">
+                <div className="flex items-center space-x-2 text-ink-muted dark:text-stone-400">
+                  <span className="text-[9px] uppercase font-ledger px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-stone-700 bg-paper-aged dark:bg-stone-900">
                     {item.type}
                   </span>
                   <ArrowRight className="w-3.5 h-3.5 opacity-60" />

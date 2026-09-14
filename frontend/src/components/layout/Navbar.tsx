@@ -66,18 +66,37 @@ export const Navbar: React.FC<NavbarProps> = ({
 }) => {
   const currentHour = new Date().getHours();
   const isEvening = currentHour >= 17 || currentHour < 5;
+  const isNight = edition === 'night';
+
+  const barBg = isNight
+    ? 'bg-[#0d0d10] border-stone-800 text-stone-100'
+    : 'bg-paper-aged border-ink-primary text-ink-primary';
+  const desktopBarBg = isNight
+    ? 'bg-[#0c0c0e] border-stone-800 text-stone-100'
+    : 'bg-paper-aged border-ink-primary text-ink-primary';
+  const tabActiveBg = isNight
+    ? 'bg-stone-100 text-stone-950 font-bold border-stone-100'
+    : 'bg-ink-primary text-paper-white font-bold border-ink-primary';
+  const tabInactiveBg = isNight
+    ? 'text-stone-400 hover:text-stone-200 hover:bg-stone-900 border-transparent hover:border-stone-800'
+    : 'text-ink-muted hover:text-ink-primary hover:bg-paper-cream border-transparent hover:border-ink-rule';
+  const btnBg = isNight
+    ? 'bg-stone-900 hover:bg-stone-800 border-stone-700 text-stone-300'
+    : 'bg-paper-white hover:bg-paper-cream border-ink-rule text-ink-primary';
 
   return (
     <>
       {/* Mobile Top Navigation Header */}
-      <header className="md:hidden flex items-center justify-between px-3.5 py-2 border-b-2 border-stone-800 bg-[#0d0d10] sticky top-0 z-40">
+      <header className={`md:hidden flex items-center justify-between px-3.5 py-2 border-b-2 sticky top-0 z-40 ${barBg}`}>
         <div className="flex items-center space-x-2">
           <div className="w-7 h-7 rounded-none bg-amber-600 border border-amber-400 flex items-center justify-center font-masthead font-black text-stone-950 text-xs">
             S
           </div>
           <div>
-            <span className="font-masthead font-bold text-stone-100 text-xs tracking-wider uppercase">The Sage Daily</span>
-            <span className="text-[9px] ml-1.5 px-1 py-0.2 rounded-none bg-stone-900 text-amber-500 font-ledger border border-stone-800">{APP_VERSION}</span>
+            <span className="font-masthead font-bold text-xs tracking-wider uppercase">The Sage Daily</span>
+            <span className={`text-[9px] ml-1.5 px-1 py-0.2 rounded-none font-ledger border ${
+              isNight ? 'bg-stone-900 text-amber-500 border-stone-800' : 'bg-paper-white text-amber-700 border-ink-rule'
+            }`}>{APP_VERSION}</span>
           </div>
         </div>
 
@@ -157,15 +176,15 @@ export const Navbar: React.FC<NavbarProps> = ({
       </header>
 
       {/* Desktop Top Navigation Bar (Broadsheet Section Ribbon) */}
-      <header className="hidden md:flex items-center justify-between px-6 py-2.5 border-b-2 border-stone-800 bg-[#0c0c0e] sticky top-0 z-40">
+      <header className={`hidden md:flex items-center justify-between px-6 py-2.5 border-b-2 sticky top-0 z-40 ${desktopBarBg}`}>
         <div className="flex items-center space-x-6">
           <div className="flex items-center space-x-2.5">
             <div className="w-8 h-8 rounded-none bg-amber-600 border border-amber-400 flex items-center justify-center font-masthead font-black text-stone-950 text-sm">
               S
             </div>
             <div>
-              <div className="font-masthead font-black text-stone-100 text-sm tracking-wider uppercase">The Sage Daily</div>
-              <div className="text-[9px] font-ledger text-stone-400 uppercase tracking-widest">
+              <div className="font-masthead font-black text-sm tracking-wider uppercase">The Sage Daily</div>
+              <div className="text-[9px] font-ledger opacity-70 uppercase tracking-widest">
                 VOL. II &bull; RPi5 &bull; {APP_VERSION}
               </div>
             </div>
@@ -180,12 +199,10 @@ export const Navbar: React.FC<NavbarProps> = ({
                   key={tab.id}
                   onClick={() => setActiveTab(tab.id)}
                   className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors border ${
-                    isActive
-                      ? 'bg-stone-100 text-stone-950 font-bold border-stone-100'
-                      : 'text-stone-400 hover:text-stone-200 hover:bg-stone-900 border-transparent hover:border-stone-800'
+                    isActive ? tabActiveBg : tabInactiveBg
                   }`}
                 >
-                  <span className={isActive ? 'text-amber-700 font-bold' : 'text-stone-500'}>{tab.sectionNum}.</span>
+                  <span className={isActive ? 'text-amber-600 font-bold' : 'opacity-60'}>{tab.sectionNum}.</span>
                   <span>{tab.label}</span>
                 </button>
               );
@@ -302,7 +319,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       </header>
 
       {/* iOS & Mobile Bottom Tab Navigation (Consolidated & 44pt Tap Targets) */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-[#0d0d10] border-t-2 border-stone-800 pb-safe">
+      <div className={`md:hidden fixed bottom-0 left-0 right-0 z-50 border-t-2 pb-safe ${barBg}`}>
         <div className="flex items-center justify-around py-1">
           {NAV_TABS.slice(0, 3).map((tab) => {
             const Icon = tab.icon;
@@ -313,7 +330,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setActiveTab(tab.id)}
                 aria-label={tab.label}
                 className={`flex flex-col items-center justify-center min-w-[44px] min-h-[44px] py-1 px-1 transition-colors ${
-                  isActive ? 'text-amber-500 font-bold' : 'text-stone-400 hover:text-stone-200'
+                  isActive
+                    ? isNight ? 'text-amber-500 font-bold' : 'text-amber-700 font-black'
+                    : isNight ? 'text-stone-400 hover:text-stone-200' : 'text-ink-muted hover:text-ink-primary'
                 }`}
               >
                 <Icon className="w-4 h-4" />
@@ -326,7 +345,7 @@ export const Navbar: React.FC<NavbarProps> = ({
           <button
             onClick={onOpenQuickCapture}
             aria-label="The Wire Quick Capture"
-            className="flex items-center justify-center w-11 h-11 -mt-3 rounded-none bg-amber-600 border border-amber-400 text-stone-950 active:scale-95 transition-transform"
+            className="flex items-center justify-center w-11 h-11 -mt-3 rounded-none bg-amber-600 border border-amber-400 text-stone-950 active:scale-95 transition-transform shadow-md"
           >
             <Sparkles className="w-5 h-5 stroke-[2.5]" />
           </button>
@@ -340,7 +359,9 @@ export const Navbar: React.FC<NavbarProps> = ({
                 onClick={() => setActiveTab(tab.id)}
                 aria-label={tab.label}
                 className={`flex flex-col items-center justify-center min-w-[44px] min-h-[44px] py-1 px-1 transition-colors ${
-                  isActive ? 'text-amber-500 font-bold' : 'text-stone-400 hover:text-stone-200'
+                  isActive
+                    ? isNight ? 'text-amber-500 font-bold' : 'text-amber-700 font-black'
+                    : isNight ? 'text-stone-400 hover:text-stone-200' : 'text-ink-muted hover:text-ink-primary'
                 }`}
               >
                 <Icon className="w-4 h-4" />

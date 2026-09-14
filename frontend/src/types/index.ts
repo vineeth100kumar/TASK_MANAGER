@@ -228,11 +228,14 @@ export type WhiteboardTool =
   | 'select'
   | 'pen'
   | 'highlighter'
+  | 'laser'
   | 'eraser'
   | 'shape'
   | 'sticky'
   | 'text'
   | 'hand';
+
+export type WhiteboardGridType = 'dots' | 'graph' | 'ruled' | 'blank';
 
 export type StickyColor = 'yellow' | 'blue' | 'green' | 'pink' | 'purple' | 'orange';
 
