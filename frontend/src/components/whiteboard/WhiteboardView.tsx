@@ -243,12 +243,12 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   const handleAddSticky = (color: StickyColor, customPos?: Point) => {
     if (!board) return;
 
-    let posX = -viewState.panX / viewState.zoom + 200;
-    let posY = -viewState.panY / viewState.zoom + 160;
+    let posX = (window.innerWidth / 2 - viewState.panX) / viewState.zoom - 110;
+    let posY = (window.innerHeight / 2 - viewState.panY) / viewState.zoom - 80;
 
     if (customPos) {
-      posX = customPos.x - 100;
-      posY = customPos.y - 70;
+      posX = customPos.x - 110;
+      posY = customPos.y - 80;
     }
 
     const newSticky: StickyElement = {
@@ -810,6 +810,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         stylusOnly={stylusOnly}
         onStylusDetected={() => {}}
         onCanvasDoubleClick={(pt) => handleAddSticky('yellow', pt)}
+        onAddSticky={handleAddSticky}
       />
 
       {/* FLOATING CONTEXTUAL ACTION BAR FOR SELECTED ELEMENTS */}
@@ -828,14 +829,14 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       )}
 
       {/* 3. STICKY NOTES DOM OVERLAY */}
-      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+      <div className="absolute inset-0 pointer-events-none z-20">
         <div
           style={{
             transform: `translate(${viewState.panX}px, ${viewState.panY}px) scale(${viewState.zoom})`,
             transformOrigin: '0 0',
-            width: '100%',
-            height: '100%',
             position: 'absolute',
+            left: 0,
+            top: 0,
           }}
         >
           {stickyElements.map((sticky) => (
@@ -850,6 +851,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
                 );
                 handleElementsChange(nextElements, false);
               }}
+              onCommitHistory={() => handleElementsChange(board.elements, true)}
               onDelete={() => {
                 const nextElements = board.elements.filter((el) => el.id !== sticky.id);
                 handleElementsChange(nextElements, true);

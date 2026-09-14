@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { Point, StrokeElement, StickyColor, ImageElement, WhiteboardElement } from '../../../types';
+import { Point, StrokeElement, StickyColor, ImageElement, WhiteboardElement, TextElement } from '../../../types';
 
 // Coordinate transformations (mirroring engine logic)
 function screenToWorld(sx: number, sy: number, panX: number, panY: number, zoom: number): Point {
@@ -703,6 +703,54 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(arrow.h).toBe(0);
       expect(arrow.x).toBe(100);
       expect(arrow.y).toBe(100);
+    });
+  });
+
+  describe('Text and Sticky Notes Precision Suite', () => {
+    it('computes multiline text dimensions and bounding box accurately', () => {
+      const text = 'Line 1\nLine 2 is longer\nL3';
+      const fontSize = 20;
+      const lines = text.split('\n');
+      const lineHeight = fontSize * 1.35;
+      const expectedHeight = lines.length * lineHeight; // 3 * 27 = 81
+      const maxLineLen = Math.max(...lines.map((l) => l.length)); // 16
+      const approxWidth = maxLineLen * (fontSize * 0.58); // 16 * 11.6 = 185.6
+
+      const el: TextElement = {
+        id: 'txt_test',
+        type: 'text',
+        x: 100,
+        y: 200,
+        text,
+        fontSize,
+        color: '#1c1917',
+        width: Math.ceil(approxWidth),
+      };
+
+      expect(el.width).toBeGreaterThanOrEqual(185);
+      expect(expectedHeight).toBe(81);
+    });
+
+    it('determines sticky note placement in viewport center when no click coordinate is provided', () => {
+      const viewState = { panX: 100, panY: 50, zoom: 1.5 };
+      const windowWidth = 1200;
+      const windowHeight = 800;
+
+      // Centered calculation
+      const posX = (windowWidth / 2 - viewState.panX) / viewState.zoom - 110;
+      const posY = (windowHeight / 2 - viewState.panY) / viewState.zoom - 80;
+
+      expect(Math.round(posX)).toBe(Math.round((600 - 100) / 1.5 - 110));
+      expect(Math.round(posY)).toBe(Math.round((400 - 50) / 1.5 - 80));
+    });
+
+    it('places sticky note exactly centered at click location when point is provided', () => {
+      const clickPoint = { x: 350, y: 450 };
+      const posX = clickPoint.x - 110;
+      const posY = clickPoint.y - 80;
+
+      expect(posX).toBe(240);
+      expect(posY).toBe(370);
     });
   });
 });

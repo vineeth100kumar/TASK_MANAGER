@@ -10,6 +10,7 @@ import {
   ShapeType,
   ViewState,
   Point,
+  StickyColor,
 } from '../../types';
 
 export interface WhiteboardCanvasRef {
@@ -46,6 +47,7 @@ interface WhiteboardCanvasProps {
   stylusOnly?: boolean;
   onStylusDetected?: () => void;
   onCanvasDoubleClick?: (point: Point) => void;
+  onAddSticky?: (color: StickyColor, pt?: Point) => void;
 }
 
 // Distance from point P to line segment AB
@@ -63,6 +65,33 @@ function distToSegment(p: Point, v: Point, w: Point) {
   return Math.sqrt(distToSegmentSquared(p, v, w));
 }
 
+// Calculate precise multiline text dimensions
+function getTextElementDimensions(
+  ctx: CanvasRenderingContext2D | null,
+  text: string,
+  fontSize: number
+): { width: number; height: number } {
+  const lines = text.split('\n');
+  const lineHeight = fontSize * 1.35;
+  const height = Math.max(fontSize * 1.5, lines.length * lineHeight);
+  let maxWidth = 100;
+  if (ctx) {
+    ctx.save();
+    ctx.font = `600 ${fontSize}px 'Newsreader', serif`;
+    lines.forEach((line) => {
+      const metrics = ctx.measureText(line);
+      if (metrics.width > maxWidth) maxWidth = metrics.width;
+    });
+    ctx.restore();
+  } else {
+    lines.forEach((line) => {
+      const approx = line.length * (fontSize * 0.58);
+      if (approx > maxWidth) maxWidth = approx;
+    });
+  }
+  return { width: Math.ceil(maxWidth), height: Math.ceil(height) };
+}
+
 // Bounding box helper
 function getElementBBox(el: WhiteboardElement): { x: number; y: number; w: number; h: number } | null {
   if (el.type === 'shape' || el.type === 'sticky' || el.type === 'image') {
@@ -73,7 +102,10 @@ function getElementBBox(el: WhiteboardElement): { x: number; y: number; w: numbe
     return { x: minX, y: minY, w, h };
   }
   if (el.type === 'text') {
-    return { x: el.x, y: el.y, w: el.width || 160, h: el.fontSize * 1.5 };
+    const lines = el.text.split('\n');
+    const h = lines.length * el.fontSize * 1.35;
+    const w = el.width || Math.max(100, Math.max(...lines.map((l) => l.length * el.fontSize * 0.58)));
+    return { x: el.x, y: el.y, w, h };
   }
   if (el.type === 'stroke') {
     if (el.points.length === 0) return null;
@@ -113,6 +145,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       stylusOnly = false,
       onStylusDetected,
       onCanvasDoubleClick,
+      onAddSticky,
     },
     ref
   ) => {
@@ -233,7 +266,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       if (el.type === 'text') {
         const lines = el.text.split('\n');
         const h = lines.length * el.fontSize * 1.35;
-        return p.x >= el.x && p.x <= el.x + (el.width || 180) && p.y >= el.y && p.y <= el.y + h;
+        const w = el.width || Math.max(100, Math.max(...lines.map((l) => l.length * el.fontSize * 0.58)));
+        return p.x >= el.x && p.x <= el.x + w && p.y >= el.y && p.y <= el.y + h;
       }
       if (el.type === 'stroke') {
         for (let i = 0; i < el.points.length - 1; i++) {
@@ -359,7 +393,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         } else if (el.type === 'image') {
           drawImage(ctx, el, isSelected);
         } else if (el.type === 'sticky') {
-          drawSticky(ctx, el, isSelected);
+          // Sticky notes are interactive DOM elements managed by StickyNoteOverlay.
+          // Omit drawing static rectangles on live canvas to prevent ghost duplicate rendering.
+          return;
         }
       });
 
@@ -668,6 +704,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const drawText = (ctx: CanvasRenderingContext2D, textEl: TextElement, isSelected: boolean) => {
+      // Prevent double rendering / ghosting while actively editing this text element inline
+      if (editingTextIdRef.current === textEl.id) return;
+
       ctx.save();
       ctx.fillStyle = textEl.color;
       ctx.font = `600 ${textEl.fontSize}px 'Newsreader', serif`;
@@ -676,13 +715,16 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const lines = textEl.text.split('\n');
       const lineHeight = textEl.fontSize * 1.35;
 
+      let maxLineWidth = 0;
       lines.forEach((line, idx) => {
         ctx.fillText(line, textEl.x, textEl.y + idx * lineHeight);
+        const m = ctx.measureText(line);
+        if (m.width > maxLineWidth) maxLineWidth = m.width;
       });
 
       if (isSelected) {
         const textH = lines.length * lineHeight;
-        const textW = textEl.width || 180;
+        const textW = textEl.width || Math.max(80, maxLineWidth);
         ctx.strokeStyle = '#3b82f6';
         ctx.lineWidth = 1.5 / viewState.zoom;
         ctx.setLineDash([4 / viewState.zoom, 4 / viewState.zoom]);
@@ -801,7 +843,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           } else if (el.type === 'text') {
             const lines = el.text.split('\n');
             const textH = lines.length * el.fontSize * 1.35;
-            const textW = el.width || 180;
+            const textW = el.width || Math.max(100, Math.max(...lines.map((l) => l.length * el.fontSize * 0.58)));
             if (
               pt.x >= el.x - eraserRadius &&
               pt.x <= el.x + textW + eraserRadius &&
@@ -925,6 +967,51 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
+      // Commit any active inline text input before processing new canvas clicks or tools
+      if (inlineTextPos) {
+        const liveVal = textInputRef.current ? textInputRef.current.value : inlineTextVal;
+        const trimmed = liveVal.trim();
+        if (trimmed) {
+          const ctx = canvasRef.current?.getContext('2d');
+          const fontSize = Math.max(16, activeSize * 4.5);
+          const dims = getTextElementDimensions(ctx || null, trimmed, fontSize);
+
+          if (editingTextIdRef.current) {
+            const targetId = editingTextIdRef.current;
+            const updated = elementsRef.current.map((item) =>
+              item.id === targetId && item.type === 'text'
+                ? { ...item, text: trimmed, width: dims.width }
+                : item
+            );
+            onElementsChange(updated, true);
+          } else {
+            const newId = `text_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+            const newText: TextElement = {
+              id: newId,
+              type: 'text',
+              x: inlineTextPos.x,
+              y: inlineTextPos.y,
+              text: trimmed,
+              width: dims.width,
+              fontSize,
+              color: activeColor,
+            };
+            onElementsChange([...elementsRef.current, newText], true);
+            onSelectElementId(newId);
+            if (onSelectElementIds) onSelectElementIds(new Set([newId]));
+          }
+        }
+        setInlineTextPos(null);
+        setInlineTextVal('');
+        editingTextIdRef.current = null;
+
+        // If in text mode, clicking elsewhere commits and switches tool to select
+        if (activeTool === 'text') {
+          setActiveTool?.('select');
+          return;
+        }
+      }
+
       const rect = e.currentTarget.getBoundingClientRect();
       const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
       worldPoint.pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : 0.5;
@@ -949,6 +1036,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       } else if (activeTool === 'shape') {
         shapeStartRef.current = worldPoint;
         shapeCurrentRef.current = worldPoint;
+      } else if (activeTool === 'sticky') {
+        onAddSticky?.('yellow', worldPoint);
+        setActiveTool?.('select');
+        return;
       } else if (activeTool === 'text') {
         setInlineTextPos(worldPoint);
         setInlineTextVal('');
@@ -1563,12 +1654,18 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
     // Multi-line Text Submission (Create or In-Place Edit)
     const handleTextSubmit = () => {
-      if (inlineTextPos && inlineTextVal.trim()) {
+      const liveVal = textInputRef.current ? textInputRef.current.value : inlineTextVal;
+      const trimmed = liveVal.trim();
+      if (inlineTextPos && trimmed) {
+        const ctx = canvasRef.current?.getContext('2d');
+        const fontSize = Math.max(16, activeSize * 4.5);
+        const dims = getTextElementDimensions(ctx || null, trimmed, fontSize);
+
         if (editingTextIdRef.current) {
           const targetId = editingTextIdRef.current;
-          const updated = elements.map((item) =>
+          const updated = elementsRef.current.map((item) =>
             item.id === targetId && item.type === 'text'
-              ? { ...item, text: inlineTextVal.trim() }
+              ? { ...item, text: trimmed, width: dims.width }
               : item
           );
           onElementsChange(updated, true);
@@ -1579,11 +1676,12 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
             type: 'text',
             x: inlineTextPos.x,
             y: inlineTextPos.y,
-            text: inlineTextVal.trim(),
-            fontSize: Math.max(16, activeSize * 4.5),
+            text: trimmed,
+            width: dims.width,
+            fontSize,
             color: activeColor,
           };
-          onElementsChange([...elements, newText], true);
+          onElementsChange([...elementsRef.current, newText], true);
           onSelectElementId(newId);
           if (onSelectElementIds) onSelectElementIds(new Set([newId]));
           setActiveTool?.('select');
@@ -1888,6 +1986,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
                 } else if (e.key === 'Escape') {
                   setInlineTextPos(null);
                   setInlineTextVal('');
+                  editingTextIdRef.current = null;
                 }
               }}
               placeholder="Type dispatch... (Shift+Enter for newline)"
@@ -1899,7 +1998,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
                 resize: 'none',
                 overflow: 'hidden',
               }}
-              className="bg-paper-aged/90 dark:bg-stone-900/90 border-2 border-amber-600 dark:border-amber-400 rounded-none px-2.5 py-1.5 outline-none font-editorial font-bold shadow-2xl"
+              className="bg-paper-light dark:bg-stone-900 border-2 border-amber-600 dark:border-amber-400 rounded-none px-2.5 py-1.5 outline-none font-editorial font-bold shadow-2xl"
             />
           </div>
         )}

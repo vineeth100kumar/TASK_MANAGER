@@ -193,6 +193,18 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     setShowStickyFlyout(false);
   };
 
+  const selectSticky = () => {
+    if (activeTool === 'sticky') {
+      setShowStickyFlyout((prev) => !prev);
+    } else {
+      setActiveTool('sticky');
+      setShowStickyFlyout(true);
+    }
+    setShowPenFlyout(false);
+    setShowHighlighterFlyout(false);
+    setShowShapeFlyout(false);
+  };
+
   const isNight = edition === 'night';
   const containerClass = isNight
     ? 'bg-[#141418] border-stone-700 text-stone-200'
@@ -756,14 +768,9 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
       <div className="relative">
         <button
           type="button"
-          onClick={() => {
-            setShowStickyFlyout((prev) => !prev);
-            setShowPenFlyout(false);
-            setShowHighlighterFlyout(false);
-            setShowShapeFlyout(false);
-          }}
+          onClick={selectSticky}
           className={`p-2 rounded-[1px] border transition-colors ${
-            showStickyFlyout ? btnActiveClass : `border-transparent ${btnHoverClass}`
+            activeTool === 'sticky' || showStickyFlyout ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
           title="Add Clipping Note (S)"
         >
@@ -786,6 +793,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                   onClick={() => {
                     onAddSticky(sc.color);
                     setShowStickyFlyout(false);
+                    setActiveTool('select');
                   }}
                   className="h-8 rounded-[1px] border border-black/30 shadow-xs flex items-center justify-center hover:scale-105 active:scale-95 transition-transform text-[9px] font-ledger font-bold text-black/70"
                   style={{ backgroundColor: sc.hex }}

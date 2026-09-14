@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, Zap, CheckCircle2, GripHorizontal } from 'lucide-react';
 import { StickyElement, StickyColor } from '../../types';
 import { TapeStrip } from '../newspaper/TapeStrip';
@@ -10,6 +10,7 @@ interface StickyNoteOverlayProps {
   onUpdate: (updated: Partial<StickyElement>) => void;
   onDelete: () => void;
   onConvertToTask: (sticky: StickyElement) => void;
+  onCommitHistory?: () => void;
   zoom: number;
 }
 
@@ -74,10 +75,19 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
   onUpdate,
   onDelete,
   onConvertToTask,
+  onCommitHistory,
   zoom,
 }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  useEffect(() => {
+    if (isSelected && sticky.text === '') {
+      textareaRef.current?.focus();
+    }
+  }, [isSelected, sticky.text]);
+
   const dragStartRef = useRef<{ startX: number; startY: number; origX: number; origY: number; origW: number; origH: number }>({
     startX: 0,
     startY: 0,
@@ -127,6 +137,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
         // Ignored
       }
       setIsDragging(false);
+      onCommitHistory?.();
     }
   };
 
@@ -170,6 +181,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
         // Ignored
       }
       setIsResizing(false);
+      onCommitHistory?.();
     }
   };
 
@@ -239,8 +251,10 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
       {/* Note Content Area */}
       <div className="flex-1 p-2.5 flex flex-col">
         <textarea
+          ref={textareaRef}
           value={sticky.text}
           onChange={(e) => onUpdate({ text: e.target.value })}
+          onBlur={() => onCommitHistory?.()}
           placeholder="Draft thoughts, priorities or brainstorm notes..."
           style={{
             color: palette.text,

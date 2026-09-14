@@ -9,6 +9,7 @@ import {
   Trash2,
   Zap,
   Image as ImageIcon,
+  StickyNote,
   X,
 } from 'lucide-react';
 import { WhiteboardTool, ShapeType } from '../../types';
@@ -116,6 +117,18 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
           >
             <Type className="w-5 h-5" />
             <span className="text-[10px] font-ledger uppercase">Text</span>
+          </button>
+
+          <button
+            onClick={() => selectAndClose('sticky')}
+            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+              activeTool === 'sticky'
+                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
+                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+            }`}
+          >
+            <StickyNote className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            <span className="text-[10px] font-ledger uppercase">Note</span>
           </button>
 
           <button
