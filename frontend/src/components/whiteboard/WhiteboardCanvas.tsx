@@ -170,6 +170,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
     // Multi-touch Gesture & Pinch State
     const isPinchGestureActiveRef = useRef(false);
+    const isTouchHandlingPinchRef = useRef(false);
+    const pinchEndTimestampRef = useRef<number>(0);
     const pinchStateRef = useRef<{
       lastDist: number;
       lastCenter: { x: number; y: number };
@@ -183,9 +185,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     const lastPanTimeRef = useRef<number>(0);
     const lastPanPosRef = useRef<{ x: number; y: number }>({ x: 0, y: 0 });
     const viewStateRef = useRef(viewState);
-    useEffect(() => {
-      viewStateRef.current = viewState;
-    }, [viewState]);
+    viewStateRef.current = viewState;
 
     const elementsRef = useRef<WhiteboardElement[]>(elements);
     useEffect(() => {
@@ -956,6 +956,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     // GESTURE ABORT & ACTION PURGE
     // -------------------------------------------------------------
     const abortInProgressActions = useCallback(() => {
+      isPanningRef.current = false;
       isDrawingRef.current = false;
       isErasingRef.current = false;
       lastEraserPointRef.current = null;
@@ -992,6 +993,14 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         } catch {}
       }
 
+      // Ignore touches during pinch end cooldown
+      if (Date.now() - pinchEndTimestampRef.current < 200) {
+        return;
+      }
+      if (isPinchGestureActiveRef.current) {
+        return;
+      }
+
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       // If we have <= 1 active pointer or this is mouse/pen, any previous pinch is cleared
@@ -1009,15 +1018,15 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       // Cancel any running momentum pan
       if (momentumRafRef.current) cancelAnimationFrame(momentumRafRef.current);
 
-      // Multi-pointer pinch detection (only for multi-touch gestures!)
-      if (activePointersRef.current.size >= 2 && e.pointerType === 'touch') {
+      // Multi-pointer pinch detection fallback (only when TouchEvents aren't handling it)
+      if (!isTouchHandlingPinchRef.current && activePointersRef.current.size >= 2 && e.pointerType === 'touch') {
         isPinchGestureActiveRef.current = true;
         abortInProgressActions();
 
         const pts = Array.from(activePointersRef.current.values());
         const dist = Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
         const center = { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2 };
-        pinchStateRef.current = { lastDist: dist, lastCenter: center };
+        pinchStateRef.current = { lastDist: Math.max(10, dist), lastCenter: center };
         return;
       }
 
@@ -1192,10 +1201,19 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const handlePointerMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
+      if (Date.now() - pinchEndTimestampRef.current < 200) {
+        return;
+      }
+
+      // If native TouchEvents are handling pinch/touches, don't interfere with pointermove
+      if (isTouchHandlingPinchRef.current && e.pointerType === 'touch') {
+        return;
+      }
+
       activePointersRef.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
 
       // Multi-pointer Pinch Zoom fallback for PointerEvent platforms (touch only)
-      if (activePointersRef.current.size >= 2 && e.pointerType === 'touch' && containerRef.current) {
+      if (!isTouchHandlingPinchRef.current && activePointersRef.current.size >= 2 && e.pointerType === 'touch' && containerRef.current) {
         isPinchGestureActiveRef.current = true;
         abortInProgressActions();
 
@@ -1205,7 +1223,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
         if (pinchStateRef.current && pinchStateRef.current.lastDist > 0) {
           const { lastDist, lastCenter } = pinchStateRef.current;
-          const scaleFactor = dist / lastDist;
+          const scaleFactor = dist / Math.max(10, lastDist);
           const currentView = viewStateRef.current;
           const newZoom = Math.min(3.5, Math.max(0.15, currentView.zoom * scaleFactor));
           const rect = containerRef.current.getBoundingClientRect();
@@ -1213,17 +1231,22 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           const lastCy = lastCenter.y - rect.top;
           const currCx = center.x - rect.left;
           const currCy = center.y - rect.top;
-          const zoomRatio = newZoom / currentView.zoom;
-          const newPanX = currCx - (lastCx - currentView.panX) * zoomRatio;
-          const newPanY = currCy - (lastCy - currentView.panY) * zoomRatio;
-          onViewStateChange({ zoom: newZoom, panX: newPanX, panY: newPanY });
+
+          const worldAnchorX = (lastCx - currentView.panX) / currentView.zoom;
+          const worldAnchorY = (lastCy - currentView.panY) / currentView.zoom;
+          const newPanX = currCx - worldAnchorX * newZoom;
+          const newPanY = currCy - worldAnchorY * newZoom;
+
+          const nextView = { zoom: newZoom, panX: newPanX, panY: newPanY };
+          viewStateRef.current = nextView;
+          onViewStateChange(nextView);
         }
         pinchStateRef.current = { lastDist: dist, lastCenter: center };
         return;
       }
 
       // If a multi-touch pinch is active (>= 2 touches), ignore single pointer movements
-      if (isPinchGestureActiveRef.current && activePointersRef.current.size >= 2) return;
+      if (isPinchGestureActiveRef.current) return;
 
       // When down to <= 1 pointer, ensure pinch is reset
       if (activePointersRef.current.size <= 1) {
@@ -1359,12 +1382,18 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
       activePointersRef.current.delete(e.pointerId);
 
+      if (Date.now() - pinchEndTimestampRef.current < 200) {
+        abortInProgressActions();
+        return;
+      }
+
       // If a pinch gesture was active, reset immediately when pointers drop to <= 1
       if (isPinchGestureActiveRef.current) {
         abortInProgressActions();
         if (activePointersRef.current.size <= 1) {
           isPinchGestureActiveRef.current = false;
           pinchStateRef.current = null;
+          pinchEndTimestampRef.current = Date.now();
         }
         return;
       }
@@ -1544,37 +1573,66 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       if (activePointersRef.current.size <= 1) {
         isPinchGestureActiveRef.current = false;
         pinchStateRef.current = null;
+        pinchEndTimestampRef.current = Date.now();
       }
       abortInProgressActions();
     };
 
-    // Wheel zoom & pan
-    const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
-      e.preventDefault();
-      if (e.ctrlKey || e.metaKey) {
-        const rect = e.currentTarget.getBoundingClientRect();
-        const mouseX = e.clientX - rect.left;
-        const mouseY = e.clientY - rect.top;
+    // Non-passive wheel listener for smooth trackpad pinch-zoom & pan
+    useEffect(() => {
+      const container = containerRef.current;
+      if (!container) return;
 
-        const zoomFactor = e.deltaY < 0 ? 1.08 : 0.92;
-        const newZoom = Math.min(3.5, Math.max(0.15, viewState.zoom * zoomFactor));
+      const handleNativeWheel = (e: WheelEvent) => {
+        // ALWAYS prevent default to stop page-level browser zoom or page scroll bounce
+        e.preventDefault();
 
-        const newPanX = mouseX - (mouseX - viewState.panX) * (newZoom / viewState.zoom);
-        const newPanY = mouseY - (mouseY - viewState.panY) * (newZoom / viewState.zoom);
+        // Trackpad pinch-to-zoom or Ctrl+Wheel
+        if (e.ctrlKey || e.metaKey) {
+          const rect = container.getBoundingClientRect();
+          const mouseX = e.clientX - rect.left;
+          const mouseY = e.clientY - rect.top;
 
-        onViewStateChange({
-          panX: newPanX,
-          panY: newPanY,
-          zoom: newZoom,
-        });
-      } else {
-        onViewStateChange({
-          ...viewState,
-          panX: viewState.panX - e.deltaX,
-          panY: viewState.panY - e.deltaY,
-        });
-      }
-    };
+          // Normalize deltaY based on deltaMode (0: pixels, 1: lines, 2: pages)
+          let delta = e.deltaY;
+          if (e.deltaMode === 1) delta *= 20;
+          else if (e.deltaMode === 2) delta *= 60;
+
+          // Continuous exponential zoom factor for buttery smooth trackpad scaling
+          const zoomIntensity = 0.003;
+          let factor = Math.exp(-delta * zoomIntensity);
+          factor = Math.max(0.65, Math.min(1.45, factor));
+
+          const currentView = viewStateRef.current;
+          const newZoom = Math.min(3.5, Math.max(0.15, currentView.zoom * factor));
+
+          // Anchor zoom at the exact cursor coordinates
+          const worldX = (mouseX - currentView.panX) / currentView.zoom;
+          const worldY = (mouseY - currentView.panY) / currentView.zoom;
+          const newPanX = mouseX - worldX * newZoom;
+          const newPanY = mouseY - worldY * newZoom;
+
+          const nextView = { zoom: newZoom, panX: newPanX, panY: newPanY };
+          viewStateRef.current = nextView;
+          onViewStateChange(nextView);
+        } else {
+          // Standard two-finger trackpad pan or wheel scroll
+          const currentView = viewStateRef.current;
+          const nextView = {
+            ...currentView,
+            panX: currentView.panX - e.deltaX,
+            panY: currentView.panY - e.deltaY,
+          };
+          viewStateRef.current = nextView;
+          onViewStateChange(nextView);
+        }
+      };
+
+      container.addEventListener('wheel', handleNativeWheel, { passive: false });
+      return () => {
+        container.removeEventListener('wheel', handleNativeWheel);
+      };
+    }, [onViewStateChange]);
 
     // Prevent iOS Safari page-level pinch zoom & scroll bounce
     useEffect(() => {
@@ -1603,6 +1661,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         if (e.touches.length >= 2) {
           e.preventDefault();
           isPinchGestureActiveRef.current = true;
+          isTouchHandlingPinchRef.current = true;
           abortInProgressActions();
 
           const t0 = e.touches[0];
@@ -1612,11 +1671,11 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
             x: (t0.clientX + t1.clientX) / 2,
             y: (t0.clientY + t1.clientY) / 2,
           };
-          pinchStateRef.current = { lastDist: dist, lastCenter: center };
+          pinchStateRef.current = { lastDist: Math.max(10, dist), lastCenter: center };
         } else if (e.touches.length === 1) {
-          isPinchGestureActiveRef.current = false;
-          pinchStateRef.current = null;
-          if (stylusOnly || activeTool === 'hand' || spacePressedRef.current) {
+          if (isPinchGestureActiveRef.current || Date.now() - pinchEndTimestampRef.current < 200) {
+            e.preventDefault();
+          } else if (stylusOnly || activeTool === 'hand' || spacePressedRef.current) {
             e.preventDefault();
           }
         }
@@ -1625,6 +1684,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       const handleTouchMove = (e: TouchEvent) => {
         if (e.touches.length >= 2) {
           e.preventDefault();
+          isPinchGestureActiveRef.current = true;
+          isTouchHandlingPinchRef.current = true;
+
           const t0 = e.touches[0];
           const t1 = e.touches[1];
           const dist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
@@ -1635,7 +1697,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
           if (pinchStateRef.current && pinchStateRef.current.lastDist > 0) {
             const { lastDist, lastCenter } = pinchStateRef.current;
-            const scaleFactor = dist / lastDist;
+            const scaleFactor = dist / Math.max(10, lastDist);
             const currentView = viewStateRef.current;
             const newZoom = Math.min(3.5, Math.max(0.15, currentView.zoom * scaleFactor));
 
@@ -1645,20 +1707,19 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
             const currCx = center.x - rect.left;
             const currCy = center.y - rect.top;
 
-            const zoomRatio = newZoom / currentView.zoom;
-            const newPanX = currCx - (lastCx - currentView.panX) * zoomRatio;
-            const newPanY = currCy - (lastCy - currentView.panY) * zoomRatio;
+            const worldAnchorX = (lastCx - currentView.panX) / currentView.zoom;
+            const worldAnchorY = (lastCy - currentView.panY) / currentView.zoom;
+            const newPanX = currCx - worldAnchorX * newZoom;
+            const newPanY = currCy - worldAnchorY * newZoom;
 
-            onViewStateChange({
-              zoom: newZoom,
-              panX: newPanX,
-              panY: newPanY,
-            });
+            const nextView = { zoom: newZoom, panX: newPanX, panY: newPanY };
+            viewStateRef.current = nextView;
+            onViewStateChange(nextView);
           }
 
           pinchStateRef.current = { lastDist: dist, lastCenter: center };
         } else if (e.touches.length === 1) {
-          if (isPinchGestureActiveRef.current) {
+          if (isPinchGestureActiveRef.current || Date.now() - pinchEndTimestampRef.current < 200) {
             e.preventDefault();
           } else if (stylusOnly || activeTool === 'hand' || spacePressedRef.current) {
             e.preventDefault();
@@ -1670,9 +1731,12 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         if (e.touches.length <= 1) {
           pinchStateRef.current = null;
           isPinchGestureActiveRef.current = false;
-          if (e.touches.length === 0) {
-            abortInProgressActions();
-          }
+          pinchEndTimestampRef.current = Date.now();
+        }
+        if (e.touches.length === 0) {
+          isTouchHandlingPinchRef.current = false;
+          activePointersRef.current.clear();
+          abortInProgressActions();
         }
       };
 
@@ -2008,12 +2072,16 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       },
 
       resetView: () => {
-        onViewStateChange({ panX: 0, panY: 0, zoom: 1 });
+        const next = { panX: 0, panY: 0, zoom: 1 };
+        viewStateRef.current = next;
+        onViewStateChange(next);
       },
 
       fitToContent: () => {
         if (elements.length === 0) {
-          onViewStateChange({ panX: 0, panY: 0, zoom: 1 });
+          const next = { panX: 0, panY: 0, zoom: 1 };
+          viewStateRef.current = next;
+          onViewStateChange(next);
           return;
         }
         let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
@@ -2034,53 +2102,72 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           } else if (el.type === 'text') {
             minX = Math.min(minX, el.x);
             minY = Math.min(minY, el.y);
-            maxX = Math.max(maxX, el.x + 180);
-            maxY = Math.max(maxY, el.y + 40);
+            maxX = Math.max(maxX, el.x + (el.width || 180));
+            maxY = Math.max(maxY, el.y + (el.fontSize || 16) * 2);
           }
         });
 
+        if (!isFinite(minX) || !isFinite(minY)) {
+          const next = { panX: 0, panY: 0, zoom: 1 };
+          viewStateRef.current = next;
+          onViewStateChange(next);
+          return;
+        }
+
+        const padding = 80;
         const canvas = canvasRef.current;
         if (!canvas) return;
-        const pad = 80;
-        const w = Math.max(100, maxX - minX + pad * 2);
-        const h = Math.max(100, maxY - minY + pad * 2);
 
-        const zoomX = canvas.clientWidth / w;
-        const zoomY = canvas.clientHeight / h;
+        const contentW = Math.max(100, maxX - minX + padding * 2);
+        const contentH = Math.max(100, maxY - minY + padding * 2);
+
+        const zoomX = canvas.clientWidth / contentW;
+        const zoomY = canvas.clientHeight / contentH;
         const targetZoom = Math.min(1.5, Math.max(0.2, Math.min(zoomX, zoomY)));
 
         const targetPanX = canvas.clientWidth / 2 - ((minX + maxX) / 2) * targetZoom;
         const targetPanY = canvas.clientHeight / 2 - ((minY + maxY) / 2) * targetZoom;
 
-        onViewStateChange({
+        const next = {
           panX: targetPanX,
           panY: targetPanY,
           zoom: targetZoom,
-        });
+        };
+        viewStateRef.current = next;
+        onViewStateChange(next);
       },
 
       zoomIn: () => {
         const canvas = canvasRef.current;
         const cx = canvas ? canvas.clientWidth / 2 : 0;
         const cy = canvas ? canvas.clientHeight / 2 : 0;
-        const newZoom = Math.min(3.5, viewState.zoom * 1.25);
-        const newPanX = cx - (cx - viewState.panX) * (newZoom / viewState.zoom);
-        const newPanY = cy - (cy - viewState.panY) * (newZoom / viewState.zoom);
-        onViewStateChange({ panX: newPanX, panY: newPanY, zoom: newZoom });
+        const currentView = viewStateRef.current;
+        const newZoom = Math.min(3.5, currentView.zoom * 1.25);
+        const newPanX = cx - (cx - currentView.panX) * (newZoom / currentView.zoom);
+        const newPanY = cy - (cy - currentView.panY) * (newZoom / currentView.zoom);
+        const next = { panX: newPanX, panY: newPanY, zoom: newZoom };
+        viewStateRef.current = next;
+        onViewStateChange(next);
       },
 
       zoomOut: () => {
         const canvas = canvasRef.current;
         const cx = canvas ? canvas.clientWidth / 2 : 0;
         const cy = canvas ? canvas.clientHeight / 2 : 0;
-        const newZoom = Math.max(0.15, viewState.zoom / 1.25);
-        const newPanX = cx - (cx - viewState.panX) * (newZoom / viewState.zoom);
-        const newPanY = cy - (cy - viewState.panY) * (newZoom / viewState.zoom);
-        onViewStateChange({ panX: newPanX, panY: newPanY, zoom: newZoom });
+        const currentView = viewStateRef.current;
+        const newZoom = Math.max(0.15, currentView.zoom / 1.25);
+        const newPanX = cx - (cx - currentView.panX) * (newZoom / currentView.zoom);
+        const newPanY = cy - (cy - currentView.panY) * (newZoom / currentView.zoom);
+        const next = { panX: newPanX, panY: newPanY, zoom: newZoom };
+        viewStateRef.current = next;
+        onViewStateChange(next);
       },
 
-      getViewState: () => viewState,
-      setViewState: (view: ViewState) => onViewStateChange(view),
+      getViewState: () => viewStateRef.current,
+      setViewState: (view: ViewState) => {
+        viewStateRef.current = view;
+        onViewStateChange(view);
+      },
       editTextElement: (id: string) => {
         const el = elements.find((item) => item.id === id);
         if (el && el.type === 'text') {
@@ -2130,7 +2217,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
             currentEraserScreenPosRef.current = null;
             renderCanvas();
           }}
-          onWheel={handleWheel}
           onDoubleClick={handleDoubleClick}
           className="absolute inset-0 block w-full h-full touch-none"
           style={{ touchAction: 'none' }}

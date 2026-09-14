@@ -757,9 +757,10 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           insertImageFile(file);
         }
       }}
-      className={`relative w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] overflow-hidden select-none ${
+      className={`relative w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] overflow-hidden select-none touch-none ${
         edition === 'night' ? 'bg-[#141311]' : 'bg-[#F5F1E8]'
       }`}
+      style={{ touchAction: 'none' }}
     >
       {/* Hidden File Input for Image Upload */}
       <input

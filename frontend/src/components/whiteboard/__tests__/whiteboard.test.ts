@@ -83,6 +83,37 @@ function computeIncrementalPinchStep(
   return { zoom: newZoom, panX: newPanX, panY: newPanY };
 }
 
+// Trackpad Continuous Pinch-to-Zoom & Pan engine math
+function computeWheelZoom(
+  cursor: { x: number; y: number },
+  containerRect: { left: number; top: number },
+  currentPan: { x: number; y: number },
+  currentZoom: number,
+  deltaY: number,
+  isCtrlKey: boolean
+) {
+  if (!isCtrlKey) {
+    return {
+      zoom: currentZoom,
+      panX: currentPan.x,
+      panY: currentPan.y - deltaY,
+    };
+  }
+  const mouseX = cursor.x - containerRect.left;
+  const mouseY = cursor.y - containerRect.top;
+  const zoomIntensity = 0.003;
+  let factor = Math.exp(-deltaY * zoomIntensity);
+  factor = Math.max(0.65, Math.min(1.45, factor));
+  const newZoom = Math.min(3.5, Math.max(0.15, currentZoom * factor));
+
+  const worldX = (mouseX - currentPan.x) / currentZoom;
+  const worldY = (mouseY - currentPan.y) / currentZoom;
+  const newPanX = mouseX - worldX * newZoom;
+  const newPanY = mouseY - worldY * newZoom;
+
+  return { zoom: newZoom, panX: newPanX, panY: newPanY };
+}
+
 // Velocity taper factor math
 function computeVelocityTaper(p0: Point, p1: Point): number {
   if (!p0.t || !p1.t) return 1.0;
@@ -210,6 +241,81 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(isDrawing).toBe(false);
       expect(currentPoints).toHaveLength(0);
       expect(shapeStart).toBeNull();
+    });
+
+    it('handles two-finger pinch-in (zooming out) while preserving midpoint world coordinates', () => {
+      const lastCenter = { x: 300, y: 300 };
+      const currCenter = { x: 300, y: 300 }; // fingers brought closer together
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 100, y: 100 };
+      const currentZoom = 2.0;
+      const scaleFactor = 0.5; // fingers halved in distance -> zoom out to 1.0
+
+      const res = computeIncrementalPinchStep(lastCenter, currCenter, rect, currentPan, currentZoom, scaleFactor);
+      expect(res.zoom).toBe(1.0);
+
+      // Verify world coordinate under the midpoint is invariant
+      const worldBefore = screenToWorld(300, 300, currentPan.x, currentPan.y, currentZoom);
+      const worldAfter = screenToWorld(300, 300, res.panX, res.panY, res.zoom);
+      expect(worldAfter.x).toBeCloseTo(worldBefore.x, 5);
+      expect(worldAfter.y).toBeCloseTo(worldBefore.y, 5);
+    });
+
+    it('handles trackpad continuous pinch-out (deltaY < 0, ctrlKey) smoothly zooming in around mouse cursor', () => {
+      const cursor = { x: 400, y: 300 };
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 50, y: 50 };
+      const currentZoom = 1.0;
+      const deltaY = -15; // pinch out -> zoom in
+
+      const res = computeWheelZoom(cursor, rect, currentPan, currentZoom, deltaY, true);
+      expect(res.zoom).toBeGreaterThan(1.0);
+
+      // World position at cursor must be preserved
+      const worldBefore = screenToWorld(cursor.x, cursor.y, currentPan.x, currentPan.y, currentZoom);
+      const worldAfter = screenToWorld(cursor.x, cursor.y, res.panX, res.panY, res.zoom);
+      expect(worldAfter.x).toBeCloseTo(worldBefore.x, 5);
+      expect(worldAfter.y).toBeCloseTo(worldBefore.y, 5);
+    });
+
+    it('handles trackpad continuous pinch-in (deltaY > 0, ctrlKey) smoothly zooming out around mouse cursor', () => {
+      const cursor = { x: 500, y: 200 };
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 80, y: 60 };
+      const currentZoom = 2.0;
+      const deltaY = 20; // pinch in -> zoom out
+
+      const res = computeWheelZoom(cursor, rect, currentPan, currentZoom, deltaY, true);
+      expect(res.zoom).toBeLessThan(2.0);
+
+      // World position at cursor must be preserved
+      const worldBefore = screenToWorld(cursor.x, cursor.y, currentPan.x, currentPan.y, currentZoom);
+      const worldAfter = screenToWorld(cursor.x, cursor.y, res.panX, res.panY, res.zoom);
+      expect(worldAfter.x).toBeCloseTo(worldBefore.x, 5);
+      expect(worldAfter.y).toBeCloseTo(worldBefore.y, 5);
+    });
+
+    it('clamps zoom cleanly at minimum 0.15 and maximum 3.5 limits', () => {
+      const cursor = { x: 200, y: 200 };
+      const rect = { left: 0, top: 0 };
+      const currentPan = { x: 0, y: 0 };
+
+      // Huge zoom in
+      const zoomInResult = computeWheelZoom(cursor, rect, currentPan, 3.4, -500, true);
+      expect(zoomInResult.zoom).toBe(3.5);
+
+      // Huge zoom out
+      const zoomOutResult = computeWheelZoom(cursor, rect, currentPan, 0.2, 500, true);
+      expect(zoomOutResult.zoom).toBe(0.15);
+    });
+
+    it('rejects single-finger input during the 200ms pinch cooldown window to prevent ghost strokes', () => {
+      const pinchEndTimestamp = 1000;
+      const shouldIgnoreEvent = (eventTime: number) => eventTime - pinchEndTimestamp < 200;
+
+      expect(shouldIgnoreEvent(1050)).toBe(true);  // 50ms after lifting first finger -> ignored!
+      expect(shouldIgnoreEvent(1180)).toBe(true);  // 180ms after lifting first finger -> ignored!
+      expect(shouldIgnoreEvent(1250)).toBe(false); // 250ms after lifting -> clean normal inking resumes!
     });
   });
 
