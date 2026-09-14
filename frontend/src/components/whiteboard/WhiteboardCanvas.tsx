@@ -147,10 +147,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       viewStateRef.current = viewState;
     }, [viewState]);
 
-    // Apple Pencil refs
-    const lastPenTapRef = useRef<number>(0);
-    const toolBeforePencilRef = useRef<WhiteboardTool>('pen');
-
     // Selection Drag & Resize refs
     const dragElementIdRef = useRef<string | null>(null);
     const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
@@ -713,27 +709,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       // Cancel any running momentum pan
       if (momentumRafRef.current) cancelAnimationFrame(momentumRafRef.current);
 
-      // Apple Pencil 2 Double-Tap & Barrel Button
-      if (e.pointerType === 'pen') {
-        if (e.button === 5) {
-          toolBeforePencilRef.current = activeTool;
-          if (setActiveTool) setActiveTool('eraser');
-          return;
-        }
-        const now = Date.now();
-        if (now - lastPenTapRef.current < 300) {
-          if (activeTool === 'eraser') {
-            if (setActiveTool) setActiveTool(toolBeforePencilRef.current);
-          } else {
-            toolBeforePencilRef.current = activeTool;
-            if (setActiveTool) setActiveTool('eraser');
-          }
-          lastPenTapRef.current = 0;
-          return;
-        }
-        lastPenTapRef.current = now;
-      }
-
       // Multi-touch pinch detection (anchor around midpoint)
       if (activePointersRef.current.size === 2) {
         const pts = Array.from(activePointersRef.current.values());
@@ -767,7 +742,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       worldPoint.pressure = e.pressure !== undefined && e.pressure > 0 ? e.pressure : 0.5;
       worldPoint.t = Date.now();
 
-      if (activeTool === 'laser') {
+      const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
+      if (isEraser) {
+        eraseIntersecting(worldPoint);
+      } else if (activeTool === 'laser') {
         isDrawingRef.current = true;
         laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
         renderCanvas();
@@ -778,8 +756,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       } else if (activeTool === 'shape') {
         shapeStartRef.current = worldPoint;
         shapeCurrentRef.current = worldPoint;
-      } else if (activeTool === 'eraser') {
-        eraseIntersecting(worldPoint);
       } else if (activeTool === 'text') {
         setInlineTextPos(worldPoint);
         setInlineTextVal('');
@@ -923,7 +899,10 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       }
 
       // Tool Drawing
-      if (activeTool === 'laser' && isDrawingRef.current) {
+      const isEraser = activeTool === 'eraser' || (e.pointerType as string) === 'eraser';
+      if (isEraser && (e.buttons === 1 || e.pressure > 0)) {
+        eraseIntersecting(worldPoint);
+      } else if (activeTool === 'laser' && isDrawingRef.current) {
         laserPointsRef.current.push({ x: worldPoint.x, y: worldPoint.y, time: Date.now() });
         renderCanvas();
       } else if (isDrawingRef.current && (activeTool === 'pen' || activeTool === 'highlighter')) {
@@ -932,8 +911,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       } else if (activeTool === 'shape' && shapeStartRef.current) {
         shapeCurrentRef.current = worldPoint;
         renderCanvas();
-      } else if (activeTool === 'eraser' && (e.buttons === 1 || e.pressure > 0)) {
-        eraseIntersecting(worldPoint);
       }
     };
 
@@ -941,11 +918,6 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       activePointersRef.current.delete(e.pointerId);
       if (activePointersRef.current.size < 2) {
         initialPinchDistRef.current = null;
-      }
-
-      // Apple Pencil barrel button restore
-      if (e.pointerType === 'pen' && e.button === 5 && setActiveTool) {
-        setActiveTool(toolBeforePencilRef.current);
       }
 
       // Apply Decaying Momentum Pan
