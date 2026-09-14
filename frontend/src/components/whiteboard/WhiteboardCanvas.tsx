@@ -21,6 +21,7 @@ export interface WhiteboardCanvasRef {
   zoomOut: () => void;
   getViewState: () => ViewState;
   setViewState: (view: ViewState) => void;
+  editTextElement: (id: string) => void;
 }
 
 interface WhiteboardCanvasProps {
@@ -154,9 +155,11 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
     // Selection Drag & Resize refs
     const dragElementIdRef = useRef<string | null>(null);
-    const dragOffsetRef = useRef<{ dx: number; dy: number }>({ dx: 0, dy: 0 });
+    const dragStartWorldRef = useRef<Point | null>(null);
+    const dragSnapshotElementsRef = useRef<WhiteboardElement[] | null>(null);
     const resizeHandleRef = useRef<string | null>(null);
-    const resizeOriginRef = useRef<{ el: ShapeElement; startPt: Point } | null>(null);
+    const resizeOriginRef = useRef<{ el: ShapeElement | ImageElement; startPt: Point } | null>(null);
+    const editingTextIdRef = useRef<string | null>(null);
 
     // Lasso refs
     const lassoStartRef = useRef<Point | null>(null);
@@ -194,7 +197,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     // -------------------------------------------------------------
     // HIT TEST & HANDLE POSITIONS
     // -------------------------------------------------------------
-    const getHandlePositions = (el: ShapeElement) => {
+    const getHandlePositions = (el: ShapeElement | ImageElement) => {
       const { x, y, width: w, height: h } = el;
       return [
         { id: 'nw', x, y },
@@ -209,7 +212,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     };
 
     const hitTest = useCallback((el: WhiteboardElement, p: Point): boolean => {
-      if (el.type === 'shape' || el.type === 'image') {
+      if (el.type === 'shape' || el.type === 'image' || el.type === 'sticky') {
         const minX = Math.min(el.x, el.x + el.width);
         const maxX = Math.max(el.x, el.x + el.width);
         const minY = Math.min(el.y, el.y + el.height);
@@ -217,7 +220,9 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return p.x >= minX && p.x <= maxX && p.y >= minY && p.y <= maxY;
       }
       if (el.type === 'text') {
-        return p.x >= el.x && p.x <= el.x + (el.width || 180) && p.y >= el.y && p.y <= el.y + el.fontSize * 1.5;
+        const lines = el.text.split('\n');
+        const h = lines.length * el.fontSize * 1.35;
+        return p.x >= el.x && p.x <= el.x + (el.width || 180) && p.y >= el.y && p.y <= el.y + h;
       }
       if (el.type === 'stroke') {
         for (let i = 0; i < el.points.length - 1; i++) {
@@ -342,6 +347,8 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
           drawText(ctx, el, isSelected);
         } else if (el.type === 'image') {
           drawImage(ctx, el, isSelected);
+        } else if (el.type === 'sticky') {
+          drawSticky(ctx, el, isSelected);
         }
       });
 
@@ -467,6 +474,33 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
     // -------------------------------------------------------------
     // VECTOR DRAWING PRIMITIVES (Pressure & Velocity Taper)
     // -------------------------------------------------------------
+    const drawSticky = (ctx: CanvasRenderingContext2D, sticky: any, isSelected: boolean) => {
+      ctx.save();
+      ctx.fillStyle = sticky.color === 'pink' ? '#fbcfe8' : sticky.color === 'blue' ? '#bfdbfe' : sticky.color === 'green' ? '#bbf7d0' : '#fef08a';
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.12)';
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 3;
+      ctx.fillRect(sticky.x, sticky.y, sticky.width, sticky.height);
+      ctx.shadowColor = 'transparent';
+
+      ctx.fillStyle = '#1c1917';
+      ctx.font = '500 13px serif';
+      ctx.textBaseline = 'top';
+      const lines = (sticky.text || '').split('\n');
+      lines.forEach((line: string, idx: number) => {
+        ctx.fillText(line, sticky.x + 10, sticky.y + 14 + idx * 18, sticky.width - 20);
+      });
+
+      if (isSelected) {
+        ctx.strokeStyle = '#3b82f6';
+        ctx.lineWidth = 1.5 / viewState.zoom;
+        ctx.setLineDash([4 / viewState.zoom, 4 / viewState.zoom]);
+        ctx.strokeRect(sticky.x - 4, sticky.y - 4, sticky.width + 8, sticky.height + 8);
+        ctx.setLineDash([]);
+      }
+      ctx.restore();
+    };
+
     const drawStroke = (ctx: CanvasRenderingContext2D, stroke: StrokeElement) => {
       const { points, color, size, isHighlighter, opacity } = stroke;
       if (points.length < 1) return;
@@ -652,6 +686,18 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         ctx.lineWidth = 1.5 / viewState.zoom;
         ctx.setLineDash([4 / viewState.zoom, 4 / viewState.zoom]);
         ctx.strokeRect(imgEl.x - 4, imgEl.y - 4, imgEl.width + 8, imgEl.height + 8);
+        ctx.setLineDash([]);
+
+        const handles = getHandlePositions(imgEl);
+        handles.forEach((h) => {
+          ctx.fillStyle = '#3b82f6';
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5 / viewState.zoom;
+          ctx.beginPath();
+          ctx.arc(h.x, h.y, 5 / viewState.zoom, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        });
         ctx.restore();
       }
     };
@@ -804,17 +850,21 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         setInlineTextVal('');
         setTimeout(() => textInputRef.current?.focus(), 50);
       } else if (activeTool === 'select') {
-        // 1. Check if clicking on an active shape resize handle
+        // 1. Check if clicking on an active shape or image resize handle
         if (selectedElementId) {
           const sel = elements.find((el) => el.id === selectedElementId);
-          if (sel && sel.type === 'shape' && sel.shapeType !== 'line' && sel.shapeType !== 'arrow') {
-            const handles = getHandlePositions(sel);
+          if (
+            sel &&
+            (sel.type === 'image' ||
+              (sel.type === 'shape' && sel.shapeType !== 'line' && sel.shapeType !== 'arrow'))
+          ) {
+            const handles = getHandlePositions(sel as ShapeElement | ImageElement);
             const hitH = handles.find(
-              (h) => Math.hypot(worldPoint.x - h.x, worldPoint.y - h.y) < 12 / viewState.zoom
+              (h) => Math.hypot(worldPoint.x - h.x, worldPoint.y - h.y) < 14 / viewState.zoom
             );
             if (hitH) {
               resizeHandleRef.current = hitH.id;
-              resizeOriginRef.current = { el: { ...sel }, startPt: worldPoint };
+              resizeOriginRef.current = { el: { ...sel } as ShapeElement | ImageElement, startPt: worldPoint };
               return;
             }
           }
@@ -823,16 +873,23 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         // 2. Hit-test elements for drag-move
         const hit = elements.slice().reverse().find((el) => hitTest(el, worldPoint));
         if (hit) {
-          onSelectElementId(hit.id);
-          if (onSelectElementIds) onSelectElementIds(new Set([hit.id]));
-          dragElementIdRef.current = hit.id;
-          if (hit.type === 'shape' || hit.type === 'text' || hit.type === 'image') {
-            dragOffsetRef.current = { dx: worldPoint.x - hit.x, dy: worldPoint.y - hit.y };
+          const isAlreadySelected = selectedElementIds && selectedElementIds.has(hit.id);
+          if (!isAlreadySelected) {
+            onSelectElementId(hit.id);
+            if (onSelectElementIds) onSelectElementIds(new Set([hit.id]));
           }
+          dragElementIdRef.current = hit.id;
+          dragStartWorldRef.current = worldPoint;
+          dragSnapshotElementsRef.current = elements.map((el) => ({
+            ...el,
+            points: el.type === 'stroke' ? el.points.map((p) => ({ ...p })) : undefined,
+          })) as WhiteboardElement[];
         } else {
           onSelectElementId(null);
           if (onSelectElementIds) onSelectElementIds(new Set());
           dragElementIdRef.current = null;
+          dragStartWorldRef.current = null;
+          dragSnapshotElementsRef.current = null;
           // Start lasso multi-select
           lassoStartRef.current = worldPoint;
           lassoCurrentRef.current = worldPoint;
@@ -924,19 +981,42 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
         return;
       }
 
-      // Element Drag Move
-      if (dragElementIdRef.current && activeTool === 'select') {
-        const id = dragElementIdRef.current;
-        const moved = elements.map((item) => {
-          if (item.id !== id || (item.type !== 'shape' && item.type !== 'text' && item.type !== 'image')) {
-            return item;
+      // Element Drag Move (Single or Multi-select across all element types)
+      if (dragStartWorldRef.current && dragSnapshotElementsRef.current && activeTool === 'select') {
+        const dx = worldPoint.x - dragStartWorldRef.current.x;
+        const dy = worldPoint.y - dragStartWorldRef.current.y;
+        const movingIds =
+          selectedElementIds && selectedElementIds.size > 0
+            ? selectedElementIds
+            : new Set(dragElementIdRef.current ? [dragElementIdRef.current] : []);
+
+        const moved = dragSnapshotElementsRef.current.map((item) => {
+          if (!movingIds.has(item.id)) return item;
+
+          if (
+            item.type === 'shape' ||
+            item.type === 'text' ||
+            item.type === 'image' ||
+            item.type === 'sticky'
+          ) {
+            return {
+              ...item,
+              x: Math.round(item.x + dx),
+              y: Math.round(item.y + dy),
+            };
+          } else if (item.type === 'stroke') {
+            return {
+              ...item,
+              points: item.points.map((p) => ({
+                ...p,
+                x: Math.round(p.x + dx),
+                y: Math.round(p.y + dy),
+              })),
+            };
           }
-          return {
-            ...item,
-            x: Math.round(worldPoint.x - dragOffsetRef.current.dx),
-            y: Math.round(worldPoint.y - dragOffsetRef.current.dy),
-          };
+          return item;
         });
+
         onElementsChange(moved, false);
         return;
       }
@@ -1012,9 +1092,11 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       }
 
       // Commit Drag Move
-      if (dragElementIdRef.current) {
+      if (dragStartWorldRef.current) {
         onElementsChange(elements, true);
         dragElementIdRef.current = null;
+        dragStartWorldRef.current = null;
+        dragSnapshotElementsRef.current = null;
         return;
       }
 
@@ -1298,29 +1380,64 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
       renderCanvas();
     }, [renderCanvas]);
 
-    // Multi-line Text Submission
+    // Multi-line Text Submission (Create or In-Place Edit)
     const handleTextSubmit = () => {
       if (inlineTextPos && inlineTextVal.trim()) {
-        const newText: TextElement = {
-          id: `text_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-          type: 'text',
-          x: inlineTextPos.x,
-          y: inlineTextPos.y,
-          text: inlineTextVal.trim(),
-          fontSize: Math.max(16, activeSize * 4.5),
-          color: activeColor,
-        };
-        onElementsChange([...elements, newText], true);
+        if (editingTextIdRef.current) {
+          const targetId = editingTextIdRef.current;
+          const updated = elements.map((item) =>
+            item.id === targetId && item.type === 'text'
+              ? { ...item, text: inlineTextVal.trim() }
+              : item
+          );
+          onElementsChange(updated, true);
+        } else {
+          const newId = `text_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+          const newText: TextElement = {
+            id: newId,
+            type: 'text',
+            x: inlineTextPos.x,
+            y: inlineTextPos.y,
+            text: inlineTextVal.trim(),
+            fontSize: Math.max(16, activeSize * 4.5),
+            color: activeColor,
+          };
+          onElementsChange([...elements, newText], true);
+          onSelectElementId(newId);
+          if (onSelectElementIds) onSelectElementIds(new Set([newId]));
+          setActiveTool?.('select');
+        }
       }
       setInlineTextPos(null);
       setInlineTextVal('');
+      editingTextIdRef.current = null;
     };
 
-    // Double-click to create sticky or text
+    // Double-click to edit text or create sticky note
     const handleDoubleClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
       if (isPinchGestureActiveRef.current) return;
       const rect = e.currentTarget.getBoundingClientRect();
       const worldPoint = screenToWorld(e.clientX - rect.left, e.clientY - rect.top);
+
+      // 1. If double-clicking an existing text element, edit it inline!
+      const hitText = elements
+        .slice()
+        .reverse()
+        .find((el): el is TextElement => el.type === 'text' && hitTest(el, worldPoint));
+      if (hitText) {
+        editingTextIdRef.current = hitText.id;
+        onSelectElementId(hitText.id);
+        if (onSelectElementIds) onSelectElementIds(new Set([hitText.id]));
+        setInlineTextPos({ x: hitText.x, y: hitText.y });
+        setInlineTextVal(hitText.text);
+        setTimeout(() => {
+          textInputRef.current?.focus();
+          textInputRef.current?.select();
+        }, 50);
+        return;
+      }
+
+      // 2. Otherwise invoke canvas double click (e.g. sticky note)
       if (onCanvasDoubleClick) {
         onCanvasDoubleClick(worldPoint);
       }
@@ -1512,6 +1629,18 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
 
       getViewState: () => viewState,
       setViewState: (view: ViewState) => onViewStateChange(view),
+      editTextElement: (id: string) => {
+        const el = elements.find((item) => item.id === id);
+        if (el && el.type === 'text') {
+          editingTextIdRef.current = el.id;
+          setInlineTextPos({ x: el.x, y: el.y });
+          setInlineTextVal(el.text);
+          setTimeout(() => {
+            textInputRef.current?.focus();
+            textInputRef.current?.select();
+          }, 50);
+        }
+      },
     }));
 
     return (

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { api } from '../../services/api';
 import {
   Whiteboard,
@@ -6,6 +6,7 @@ import {
   WhiteboardElement,
   StickyElement,
   ImageElement,
+  TextElement,
   WhiteboardTool,
   WhiteboardGridType,
   ShapeType,
@@ -20,6 +21,7 @@ import { WhiteboardHeader } from './WhiteboardHeader';
 import { WhiteboardMinimap } from './WhiteboardMinimap';
 import { WhiteboardBottomSheet } from './WhiteboardBottomSheet';
 import { StickyNoteOverlay } from './StickyNoteOverlay';
+import { WhiteboardFloatingBar } from './WhiteboardFloatingBar';
 import { useToast } from '../../context/ToastContext';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 
@@ -263,6 +265,8 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     const nextElements = [...board.elements, newSticky];
     handleElementsChange(nextElements, true);
     setSelectedElementId(newSticky.id);
+    setSelectedElementIds(new Set([newSticky.id]));
+    setActiveTool('select');
   };
 
   const handleConvertToTask = async (sticky: StickyElement) => {
@@ -334,6 +338,9 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           };
 
           handleElementsChange([...board.elements, newImg], true);
+          setSelectedElementId(newImg.id);
+          setSelectedElementIds(new Set([newImg.id]));
+          setActiveTool('select');
           toast.success('Image clipping placed onto canvas');
         };
         img.src = dataUrl;
@@ -520,7 +527,151 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     }
   };
 
-  // Keyboard Shortcuts (Undo / Redo / Delete)
+  // -------------------------------------------------------------
+  // 8. SELECTION MANIPULATION (Floating Bar & In-Place Editing)
+  // -------------------------------------------------------------
+  const currentSelectedElements = useMemo(() => {
+    if (!board) return [];
+    if (selectedElementIds && selectedElementIds.size > 0) {
+      return board.elements.filter((el) => selectedElementIds.has(el.id));
+    }
+    if (selectedElementId) {
+      const el = board.elements.find((item) => item.id === selectedElementId);
+      return el ? [el] : [];
+    }
+    return [];
+  }, [board, selectedElementId, selectedElementIds]);
+
+  const handleUpdateSelectedElements = useCallback(
+    (updated: WhiteboardElement[]) => {
+      if (!board) return;
+      const updateMap = new Map(updated.map((u) => [u.id, u]));
+      const nextElements = board.elements.map((el) => updateMap.get(el.id) || el);
+      handleElementsChange(nextElements, true);
+    },
+    [board, handleElementsChange]
+  );
+
+  const handleDeleteSelectedElements = useCallback(() => {
+    if (!board || currentSelectedElements.length === 0) return;
+    const deleteIds = new Set(currentSelectedElements.map((el) => el.id));
+    const nextElements = board.elements.filter((el) => !deleteIds.has(el.id));
+    handleElementsChange(nextElements, true);
+    setSelectedElementId(null);
+    setSelectedElementIds(new Set());
+    toast.success(`Deleted ${currentSelectedElements.length} element${currentSelectedElements.length > 1 ? 's' : ''}`);
+  }, [board, currentSelectedElements, handleElementsChange, toast]);
+
+  const handleDuplicateSelectedElements = useCallback(() => {
+    if (!board || currentSelectedElements.length === 0) return;
+    const offset = 24 / viewState.zoom;
+    const newSelectedIds = new Set<string>();
+    const duplicated: WhiteboardElement[] = currentSelectedElements.map((el) => {
+      const newId = `${el.type}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+      newSelectedIds.add(newId);
+      if (el.type === 'shape' || el.type === 'text' || el.type === 'image' || el.type === 'sticky') {
+        return {
+          ...el,
+          id: newId,
+          x: el.x + offset,
+          y: el.y + offset,
+        };
+      } else if (el.type === 'stroke') {
+        return {
+          ...el,
+          id: newId,
+          points: el.points.map((p) => ({
+            ...p,
+            x: p.x + offset,
+            y: p.y + offset,
+          })),
+        };
+      }
+      return { ...(el as any), id: newId };
+    });
+
+    handleElementsChange([...board.elements, ...duplicated], true);
+    setSelectedElementIds(newSelectedIds);
+    if (newSelectedIds.size === 1) {
+      setSelectedElementId(Array.from(newSelectedIds)[0]);
+    }
+    toast.success(`Duplicated ${currentSelectedElements.length} element${currentSelectedElements.length > 1 ? 's' : ''}`);
+  }, [board, currentSelectedElements, viewState.zoom, handleElementsChange, toast]);
+
+  const handleBringToFront = useCallback(() => {
+    if (!board || currentSelectedElements.length === 0) return;
+    const targetIds = new Set(currentSelectedElements.map((el) => el.id));
+    const nonSelected = board.elements.filter((el) => !targetIds.has(el.id));
+    const selected = board.elements.filter((el) => targetIds.has(el.id));
+    handleElementsChange([...nonSelected, ...selected], true);
+  }, [board, currentSelectedElements, handleElementsChange]);
+
+  const handleSendToBack = useCallback(() => {
+    if (!board || currentSelectedElements.length === 0) return;
+    const targetIds = new Set(currentSelectedElements.map((el) => el.id));
+    const nonSelected = board.elements.filter((el) => !targetIds.has(el.id));
+    const selected = board.elements.filter((el) => targetIds.has(el.id));
+    handleElementsChange([...selected, ...nonSelected], true);
+  }, [board, currentSelectedElements, handleElementsChange]);
+
+  const handleEditText = useCallback((textEl: TextElement) => {
+    canvasRef.current?.editTextElement(textEl.id);
+  }, []);
+
+  const handleToolbarColorChange = useCallback(
+    (newColor: string) => {
+      setActiveColor(newColor);
+      if (currentSelectedElements.length > 0 && board) {
+        const selectedIds = new Set(currentSelectedElements.map((e) => e.id));
+        const next = board.elements.map((el) => {
+          if (selectedIds.has(el.id) && (el.type === 'shape' || el.type === 'stroke' || el.type === 'text')) {
+            return { ...el, color: newColor };
+          }
+          return el;
+        });
+        handleElementsChange(next, true);
+      }
+    },
+    [currentSelectedElements, board, handleElementsChange]
+  );
+
+  const handleToolbarSizeChange = useCallback(
+    (newSize: number) => {
+      setActiveSize(newSize);
+      if (currentSelectedElements.length > 0 && board) {
+        const selectedIds = new Set(currentSelectedElements.map((e) => e.id));
+        const next = board.elements.map((el) => {
+          if (selectedIds.has(el.id)) {
+            if (el.type === 'stroke') return { ...el, size: newSize };
+            if (el.type === 'shape') return { ...el, strokeWidth: newSize };
+            if (el.type === 'text') return { ...el, fontSize: Math.max(16, newSize * 4.5) };
+          }
+          return el;
+        });
+        handleElementsChange(next, true);
+      }
+    },
+    [currentSelectedElements, board, handleElementsChange]
+  );
+
+  const handleToolbarFillChange = useCallback(
+    (newFill: string | null) => {
+      setActiveFillColor(newFill);
+      if (currentSelectedElements.length > 0 && board) {
+        const selectedIds = new Set(currentSelectedElements.map((e) => e.id));
+        const next = board.elements.map((el) => {
+          if (selectedIds.has(el.id) && el.type === 'shape') {
+            return { ...el, fillColor: newFill ?? undefined };
+          }
+          return el;
+        });
+        handleElementsChange(next, true);
+      }
+    },
+    [currentSelectedElements, board, handleElementsChange]
+  );
+
+  // Keyboard Shortcuts (Undo / Redo / Delete / Duplicate)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (
@@ -539,22 +690,26 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       ) {
         e.preventDefault();
         handleRedo();
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') {
+        e.preventDefault();
+        handleDuplicateSelectedElements();
       } else if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (selectedElementId && board) {
-          const next = board.elements.filter((el) => el.id !== selectedElementId);
-          handleElementsChange(next, true);
-          setSelectedElementId(null);
-        } else if (selectedElementIds.size > 0 && board) {
-          const next = board.elements.filter((el) => !selectedElementIds.has(el.id));
-          handleElementsChange(next, true);
-          setSelectedElementIds(new Set());
+        if (currentSelectedElements.length > 0) {
+          e.preventDefault();
+          handleDeleteSelectedElements();
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [handleUndo, handleRedo, selectedElementId, selectedElementIds, board, handleElementsChange]);
+  }, [
+    handleUndo,
+    handleRedo,
+    handleDuplicateSelectedElements,
+    handleDeleteSelectedElements,
+    currentSelectedElements.length,
+  ]);
 
   if (loading || !board) {
     return (
@@ -657,6 +812,21 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         onCanvasDoubleClick={(pt) => handleAddSticky('yellow', pt)}
       />
 
+      {/* FLOATING CONTEXTUAL ACTION BAR FOR SELECTED ELEMENTS */}
+      {currentSelectedElements.length > 0 && (
+        <WhiteboardFloatingBar
+          selectedElements={currentSelectedElements}
+          viewState={viewState}
+          onUpdateElements={handleUpdateSelectedElements}
+          onDeleteElements={handleDeleteSelectedElements}
+          onDuplicateElements={handleDuplicateSelectedElements}
+          onBringToFront={handleBringToFront}
+          onSendToBack={handleSendToBack}
+          onEditText={handleEditText}
+          edition={edition}
+        />
+      )}
+
       {/* 3. STICKY NOTES DOM OVERLAY */}
       <div className="absolute inset-0 pointer-events-none overflow-hidden">
         <div
@@ -709,13 +879,13 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         activeTool={activeTool}
         setActiveTool={setActiveTool}
         activeColor={activeColor}
-        setActiveColor={setActiveColor}
+        setActiveColor={handleToolbarColorChange}
         activeSize={activeSize}
-        setActiveSize={setActiveSize}
+        setActiveSize={handleToolbarSizeChange}
         activeShape={activeShape}
         setActiveShape={setActiveShape}
         activeFillColor={activeFillColor}
-        setActiveFillColor={setActiveFillColor}
+        setActiveFillColor={handleToolbarFillChange}
         highlighterColor={highlighterColor}
         setHighlighterColor={setHighlighterColor}
         highlighterSize={highlighterSize}

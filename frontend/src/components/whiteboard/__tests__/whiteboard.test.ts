@@ -313,4 +313,207 @@ describe('Whiteboard Vector Engine Math', () => {
       expect(validColors).toContain('orange');
     });
   });
+
+  describe('Element Moving, Resizing, and In-Place Editing', () => {
+    it('translates shapes, images, text, and sticky notes by dx and dy', () => {
+      const shape: WhiteboardElement = {
+        id: 'shape_1',
+        type: 'shape',
+        shapeType: 'rectangle',
+        x: 100,
+        y: 150,
+        width: 200,
+        height: 120,
+        color: '#1c1917',
+        strokeWidth: 2,
+      };
+
+      const dx = 45;
+      const dy = -30;
+
+      const movedShape = {
+        ...shape,
+        x: shape.x + dx,
+        y: shape.y + dy,
+      };
+
+      expect(movedShape.x).toBe(145);
+      expect(movedShape.y).toBe(120);
+      expect(movedShape.width).toBe(200);
+      expect(movedShape.height).toBe(120);
+    });
+
+    it('translates freehand stroke by offsetting all constituent points', () => {
+      const stroke: StrokeElement = {
+        id: 'stroke_1',
+        type: 'stroke',
+        points: [
+          { x: 10, y: 20, pressure: 0.6, t: 1000 },
+          { x: 30, y: 50, pressure: 0.8, t: 1020 },
+          { x: 70, y: 90, pressure: 0.5, t: 1040 },
+        ],
+        color: '#dc2626',
+        size: 4,
+      };
+
+      const dx = 15;
+      const dy = 25;
+
+      const movedStroke: StrokeElement = {
+        ...stroke,
+        points: stroke.points.map((p) => ({
+          ...p,
+          x: p.x + dx,
+          y: p.y + dy,
+        })),
+      };
+
+      expect(movedStroke.points[0]).toEqual({ x: 25, y: 45, pressure: 0.6, t: 1000 });
+      expect(movedStroke.points[1]).toEqual({ x: 45, y: 75, pressure: 0.8, t: 1020 });
+      expect(movedStroke.points[2]).toEqual({ x: 85, y: 115, pressure: 0.5, t: 1040 });
+    });
+
+    it('translates multi-selected elements together in lockstep', () => {
+      const elements: WhiteboardElement[] = [
+        {
+          id: 'text_1',
+          type: 'text',
+          x: 50,
+          y: 60,
+          text: 'Headline Dispatch',
+          fontSize: 24,
+          color: '#1c1917',
+        },
+        {
+          id: 'stroke_1',
+          type: 'stroke',
+          points: [{ x: 50, y: 90 }, { x: 120, y: 90 }],
+          color: '#b45309',
+          size: 3,
+        },
+        {
+          id: 'unselected_shape',
+          type: 'shape',
+          shapeType: 'rectangle',
+          x: 500,
+          y: 500,
+          width: 80,
+          height: 80,
+          color: '#000',
+          strokeWidth: 2,
+        },
+      ];
+
+      const selectedIds = new Set(['text_1', 'stroke_1']);
+      const dx = 100;
+      const dy = 50;
+
+      const moved = elements.map((item) => {
+        if (!selectedIds.has(item.id)) return item;
+        if (item.type === 'shape' || item.type === 'text' || item.type === 'image' || item.type === 'sticky') {
+          return { ...item, x: item.x + dx, y: item.y + dy };
+        } else if (item.type === 'stroke') {
+          return {
+            ...item,
+            points: item.points.map((p) => ({ ...p, x: p.x + dx, y: p.y + dy })),
+          };
+        }
+        return item;
+      });
+
+      // text moved
+      expect((moved[0] as any).x).toBe(150);
+      expect((moved[0] as any).y).toBe(110);
+      // stroke moved
+      expect((moved[1] as StrokeElement).points[0]).toEqual({ x: 150, y: 140 });
+      // unselected shape remained untouched
+      expect((moved[2] as any).x).toBe(500);
+      expect((moved[2] as any).y).toBe(500);
+    });
+
+    it('computes accurate 8 resize handles for shapes and images', () => {
+      const getHandlePositions = (el: { x: number; y: number; width: number; height: number }) => {
+        const { x, y, width: w, height: h } = el;
+        return [
+          { id: 'nw', x, y },
+          { id: 'n', x: x + w / 2, y },
+          { id: 'ne', x: x + w, y },
+          { id: 'e', x: x + w, y: y + h / 2 },
+          { id: 'se', x: x + w, y: y + h },
+          { id: 's', x: x + w / 2, y: y + h },
+          { id: 'sw', x, y: y + h },
+          { id: 'w', x, y: y + h / 2 },
+        ];
+      };
+
+      const img = { x: 100, y: 200, width: 300, height: 200 };
+      const handles = getHandlePositions(img);
+
+      expect(handles).toHaveLength(8);
+      expect(handles.find((h) => h.id === 'nw')).toEqual({ id: 'nw', x: 100, y: 200 });
+      expect(handles.find((h) => h.id === 'se')).toEqual({ id: 'se', x: 400, y: 400 });
+      expect(handles.find((h) => h.id === 'n')).toEqual({ id: 'n', x: 250, y: 200 });
+      expect(handles.find((h) => h.id === 'e')).toEqual({ id: 'e', x: 400, y: 300 });
+    });
+
+    it('resizes elements properly with minimum dimension clamping', () => {
+      let x = 100, y = 100, width = 150, height = 150;
+      const dx = -200; // dragged far inwards to the left
+      const dy = -200; // dragged far upwards
+
+      // Southeast resize with min dimension 20
+      width = Math.max(20, width + dx);
+      height = Math.max(20, height + dy);
+
+      expect(width).toBe(20);
+      expect(height).toBe(20);
+    });
+
+    it('duplicates selected elements with appropriate position offset', () => {
+      const original: WhiteboardElement = {
+        id: 'shape_orig',
+        type: 'shape',
+        shapeType: 'diamond',
+        x: 120,
+        y: 180,
+        width: 100,
+        height: 100,
+        color: '#2563eb',
+        strokeWidth: 2,
+      };
+
+      const offset = 24; // offset at zoom 1
+      const newId = 'shape_dup_123';
+      const duplicate: WhiteboardElement = {
+        ...original,
+        id: newId,
+        x: original.x + offset,
+        y: original.y + offset,
+      };
+
+      expect(duplicate.id).not.toBe(original.id);
+      expect((duplicate as any).x).toBe(144);
+      expect((duplicate as any).y).toBe(204);
+      expect((duplicate as any).color).toBe(original.color);
+    });
+
+    it('reorders layers correctly for bring to front and send to back', () => {
+      const el1 = { id: '1', type: 'shape' } as WhiteboardElement;
+      const el2 = { id: '2', type: 'shape' } as WhiteboardElement;
+      const el3 = { id: '3', type: 'shape' } as WhiteboardElement;
+      const list = [el1, el2, el3];
+
+      const targetIds = new Set(['1']);
+
+      // Bring to front
+      const nonSelected = list.filter((el) => !targetIds.has(el.id));
+      const selected = list.filter((el) => targetIds.has(el.id));
+      const broughtToFront = [...nonSelected, ...selected];
+      expect(broughtToFront.map((e) => e.id)).toEqual(['2', '3', '1']);
+
+      // Send to back (from broughtToFront, send 1 to back)
+      const sentToBack = [...selected, ...nonSelected];
+      expect(sentToBack.map((e) => e.id)).toEqual(['1', '2', '3']);
+    });
+  });
 });
