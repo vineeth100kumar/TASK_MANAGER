@@ -8,8 +8,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .config import API_SECRET, ENV, ALLOWED_ORIGINS
+from .config import API_SECRET, ENV, ALLOWED_ORIGINS, LEGACY_SHORTCUTS_SECRET
 from .auth import verify_auth_token, assert_api_secret_configured
+
 from .database import init_database, DB_PATH, db_pool
 from .routers import items, finance, dashboard, ai, shortcuts, push, weather, planner, whiteboards
 from .services.ws_manager import ws_manager
@@ -76,11 +77,14 @@ app.include_router(whiteboards.router, dependencies=auth_dep)
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
     if API_SECRET:
-        if not token or not secrets.compare_digest(token, API_SECRET):
+        matches_primary = bool(token and secrets.compare_digest(token, API_SECRET))
+        matches_legacy = bool(token and LEGACY_SHORTCUTS_SECRET and secrets.compare_digest(token, LEGACY_SHORTCUTS_SECRET))
+        if not matches_primary and not matches_legacy:
             await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
             return
 
     await ws_manager.connect(websocket)
+
     try:
         while True:
             # Keep-alive ping/pong
