@@ -56,8 +56,8 @@ LEGACY_SHORTCUTS_SECRET: str = "sage_rpi5_secret_ios_key_2026"
 
 ENV: str = os.environ.get("ENV", "development")
 
-FRONTEND_ORIGIN_RAW: str = os.environ.get("FRONTEND_ORIGIN", "http://localhost:5173,http://localhost")
-ALLOWED_ORIGINS: List[str] = [origin.strip() for origin in FRONTEND_ORIGIN_RAW.split(",") if origin.strip()]
+FRONTEND_ORIGIN_RAW: str = os.environ.get("FRONTEND_ORIGIN", "*")
+ALLOWED_ORIGINS: List[str] = [origin.strip() for origin in FRONTEND_ORIGIN_RAW.split(",") if origin.strip()] or ["*"]
 
 DEFAULT_LAT: float = float(os.environ.get("DEFAULT_LAT", "28.6139"))
 DEFAULT_LON: float = float(os.environ.get("DEFAULT_LON", "77.2090"))
