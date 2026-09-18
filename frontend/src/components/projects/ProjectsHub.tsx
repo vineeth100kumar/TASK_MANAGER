@@ -500,7 +500,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                 </label>
                 <textarea
                   rows={2}
-                  placeholder="Goals, target completion date, or strategic focus..."
+                  placeholder="Optional: Leave blank to auto-generate strategic scope upon saving..."
                   value={newProjectDesc}
                   onChange={e => setNewProjectDesc(e.target.value)}
                   className="w-full bg-paper-base dark:bg-zinc-800 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-2 text-sm text-stone-900 dark:text-white focus:outline-none focus:border-amber-600 resize-none"

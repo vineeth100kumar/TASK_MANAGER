@@ -203,7 +203,13 @@ def heuristic_improve_title(raw: str, entity_type: str = "task") -> str:
 
     return smart_title(t) if t else raw
 
-def synthesize_domain_task(title: str, context: Optional[str] = None, entity_type: Optional[str] = "task") -> Dict[str, Any]:
+def synthesize_domain_task(
+    title: str,
+    context: Optional[str] = None,
+    entity_type: Optional[str] = "task",
+    project_name: Optional[str] = None,
+    previous_tasks: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """
     Expert domain synthesizer: creates authentic, high-value, domain-specific
     objectives, performance targets, definitions of done, and logical subtasks.
@@ -211,7 +217,19 @@ def synthesize_domain_task(title: str, context: Optional[str] = None, entity_typ
     """
     refined_title = heuristic_improve_title(title, entity_type or "task")
     tl = title.lower()
-    ctx_line = f"\n\n### Context & Notes\n{context}" if context and context.strip() else ""
+
+    proj_section = ""
+    if project_name or (previous_tasks and len(previous_tasks) > 0):
+        lines = ["\n\n### Project Context & Alignment"]
+        if project_name:
+            lines.append(f"Part of project **{project_name}**.")
+        if previous_tasks and len(previous_tasks) > 0:
+            lines.append("Builds upon preceding deliverables in this project:")
+            for pt in previous_tasks[:5]:
+                lines.append(f"- {pt}")
+        proj_section = "\n".join(lines)
+
+    ctx_line = f"{proj_section}\n\n### Context & Notes\n{context}" if (context and context.strip()) else proj_section
 
     # Priority determination
     priority = "medium"
@@ -760,22 +778,37 @@ def synthesize_domain_task(title: str, context: Optional[str] = None, entity_typ
         "category": "Personal"
     }
 
-async def improve_task_data(title: str, context: Optional[str] = None, entity_type: Optional[str] = "task") -> Dict[str, Any]:
+async def improve_task_data(
+    title: str,
+    context: Optional[str] = None,
+    entity_type: Optional[str] = "task",
+    project_name: Optional[str] = None,
+    previous_tasks: Optional[List[str]] = None
+) -> Dict[str, Any]:
     """
     Improvises raw task data into an executive title, structured description,
     definition of done, sequential subtasks, energy level, and duration estimate.
+    Incorporates project and previous task trajectory when provided.
     """
+    project_prompt_context = ""
+    if project_name:
+        project_prompt_context += f'\n    Linked Project: "{project_name}"'
+    if previous_tasks and len(previous_tasks) > 0:
+        prev_str = ", ".join(f'"{t}"' for t in previous_tasks[:5])
+        project_prompt_context += f'\n    Preceding Tasks in This Project: [{prev_str}]'
+
     prompt = f"""
     You are an executive productivity strategist for Sage Life OS.
     Transform the following user task into a polished, executive-ready action item.
 
     Task Title: "{title}"
     Additional Context: "{context or ''}"
-    Entity Type: "{entity_type or 'task'}"
+    Entity Type: "{entity_type or 'task'}"{project_prompt_context}
 
     CRITICAL QUALITY CONSTRAINTS:
     - Never output generic bureaucratic filler or boilerplate (e.g. forbid clichés like "Complete X efficiently with high quality", "All associated checklist items verified and executed", "Any outcomes documented or filed").
     - Provide rich, authentic, domain-specific guidance (e.g. for running/fitness mention pacing, heart-rate zones, hydration, dynamic warmup, stretches; for coding mention tests, edge cases, git commits; for finance mention invoice verification, payment receipts, ledger updates).
+    - If Linked Project or Preceding Tasks are provided, explicitly align the Objective, Strategy, and Definition of Done to build upon those preceding deliverables.
     - Craft 3 to 5 clear, actionable, chronological micro-steps in the subtasks checklist.
 
     Instructions:
@@ -825,7 +858,7 @@ async def improve_task_data(title: str, context: Optional[str] = None, entity_ty
         pass
 
     # Instant Domain-Aware Heuristic Synthesis Fallback (<5ms execution)
-    return synthesize_domain_task(title, context, entity_type)
+    return synthesize_domain_task(title, context, entity_type, project_name, previous_tasks)
 
 async def organize_board_data(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
     """
@@ -896,6 +929,124 @@ async def organize_board_data(tasks: List[Dict[str, Any]]) -> Dict[str, Any]:
         "missing_subtasks_count": len(need_subtasks)
     }
 
-async def auto_fill_task_details(title: str, context: Optional[str] = None) -> Dict[str, Any]:
-    """Expands a task title into a detailed description and 3-5 subtask checklist."""
-    return await improve_task_data(title, context)
+async def auto_fill_task_details(
+    title: str,
+    context: Optional[str] = None,
+    project_name: Optional[str] = None,
+    previous_tasks: Optional[List[str]] = None,
+    entity_type: Optional[str] = "task"
+) -> Dict[str, Any]:
+    """Expands a task title into a detailed description and 3-5 subtask checklist with project context."""
+    return await improve_task_data(title, context, entity_type, project_name, previous_tasks)
+
+def synthesize_project_description(
+    project_name: str,
+    existing_tasks: Optional[List[str]] = None,
+    context: Optional[str] = None
+) -> str:
+    """
+    Synthesizes an authentic, structured Markdown scope for a project/dossier.
+    """
+    clean_name = project_name.strip()
+    if not clean_name:
+        clean_name = "Strategic Initiative"
+
+    tasks_block = ""
+    if existing_tasks and len(existing_tasks) > 0:
+        tasks_block = "\n".join(f"- {t}" for t in existing_tasks[:6])
+    else:
+        name_lower = clean_name.lower()
+        if any(w in name_lower for w in ["pi", "homelab", "lab", "server", "infra", "nas", "host"]):
+            tasks_block = (
+                "- Hardware provisioning, storage configuration & OS base installation\n"
+                "- Network hardening, static IP allocation & SSH key authentication\n"
+                "- Core services deployment (Reverse proxy, DNS, automated backups)\n"
+                "- System metrics monitoring, telemetry & service health verification"
+            )
+        elif any(w in name_lower for w in ["run", "marathon", "fitness", "workout", "health", "gym"]):
+            tasks_block = (
+                "- Baseline endurance benchmarking & target pacing formulation\n"
+                "- Progressive weekly training schedule (aerobic, intervals & recovery)\n"
+                "- Nutrition, hydration & active recovery routine establishment\n"
+                "- Performance milestone assessments & event day execution"
+            )
+        elif any(w in name_lower for w in ["finance", "tax", "budget", "ledger", "money", "invest"]):
+            tasks_block = (
+                "- Account audit, balances reconciliation & spending categorization\n"
+                "- Monthly budget guardrails formulation across primary cost centers\n"
+                "- Recurring bills, subscriptions & obligations consolidation\n"
+                "- Surplus allocation & savings target tracking"
+            )
+        elif any(w in name_lower for w in ["code", "app", "web", "software", "api", "feature", "dev"]):
+            tasks_block = (
+                "- Technical specification, architecture design & schema modeling\n"
+                "- Core backend API endpoints & state services implementation\n"
+                "- Responsive frontend UI, interactions & error handling integration\n"
+                "- Automated test verification, deployment & release documentation"
+            )
+        else:
+            tasks_block = (
+                f"- Define foundational requirements and milestones for {clean_name}\n"
+                f"- Coordinate and execute core phase deliverables sequentially\n"
+                f"- Review outputs, eliminate blockers, and optimize workflow\n"
+                f"- Final verification and archival of completed deliverables"
+            )
+
+    ctx_block = f"\n\n### Strategic Focus\n{context}" if context and context.strip() else ""
+
+    return (
+        f"### Strategic Objective\n"
+        f"Executive initiative for **{clean_name}** to establish a focused, high-leverage roadmap "
+        f"with clear milestones and trackable outcomes.\n\n"
+        f"### Core Scope & Deliverables\n"
+        f"{tasks_block}\n\n"
+        f"### Definition of Success\n"
+        f"- All primary milestone deliverables completed and verified within Sage OS.\n"
+        f"- Zero unresolved blockers or orphaned dependencies across linked work items.\n"
+        f"- Strategic objectives documented and archived upon final completion."
+        f"{ctx_block}"
+    )
+
+async def generate_project_description(
+    project_name: str,
+    existing_tasks: Optional[List[str]] = None,
+    context: Optional[str] = None
+) -> str:
+    """Generates project description via Ollama LLM with heuristic fallback."""
+    prompt = f"""
+    You are an executive strategist for Sage Life OS.
+    Write a crisp, authoritative project dossier description for: "{project_name}".
+    Existing / Linked Deliverables: {existing_tasks or []}
+    Context: "{context or ''}"
+
+    Output clear Markdown with:
+    ### Strategic Objective
+    1-2 sentences stating the vision and core value proposition.
+
+    ### Core Scope & Deliverables
+    3-4 bullet points detailing key work streams or deliverables.
+
+    ### Definition of Success
+    2-3 concrete criteria defining a successful conclusion.
+
+    Output ONLY the Markdown content. No conversational preamble.
+    """
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.post(
+                f"{OLLAMA_HOST}/api/generate",
+                json={
+                    "model": OLLAMA_MODEL,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.3}
+                }
+            )
+            if resp.status_code == 200:
+                text = resp.json().get("response", "").strip()
+                if text and len(text) > 40:
+                    return text
+    except Exception:
+        pass
+
+    return synthesize_project_description(project_name, existing_tasks, context)

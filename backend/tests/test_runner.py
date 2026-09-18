@@ -306,6 +306,88 @@ class TestSageBackend(unittest.TestCase):
             config.API_SECRET = original_secret
             auth.API_SECRET = original_secret
 
+    def test_auto_generated_task_and_project_descriptions(self):
+        from fastapi.testclient import TestClient
+        import app.config as config
+        import app.auth as auth
+
+        original_secret = config.API_SECRET
+        config.API_SECRET = "test_api_secret_789"
+        auth.API_SECRET = "test_api_secret_789"
+
+        try:
+            from app.main import app
+            with TestClient(app) as client:
+                headers = {"Authorization": "Bearer test_api_secret_789"}
+
+                # 1. Test project creation with NO description -> auto-generated
+                proj_res = client.post("/api/v1/items/projects", json={
+                    "name": "Autonomous Agent Pipeline",
+                    "color": "#10b981"
+                }, headers=headers)
+                self.assertEqual(proj_res.status_code, 200)
+                proj_data = proj_res.json()
+                self.assertTrue(proj_data["description"])
+                self.assertIn("Autonomous Agent Pipeline", proj_data["description"])
+                self.assertIn("Core Scope", proj_data["description"])
+                project_id = proj_data["id"]
+
+                # 2. Test project update endpoint (PATCH /projects/{id})
+                update_res = client.patch(f"/api/v1/items/projects/{project_id}", json={
+                    "description": "Updated project description with custom roadmap."
+                }, headers=headers)
+                self.assertEqual(update_res.status_code, 200)
+                self.assertEqual(update_res.json()["description"], "Updated project description with custom roadmap.")
+
+                # 3. Create initial task in the project with NO description -> auto-generated
+                task1_res = client.post("/api/v1/items", json={
+                    "title": "Design System Architecture",
+                    "project_id": project_id
+                }, headers=headers)
+                self.assertEqual(task1_res.status_code, 200)
+                task1_data = task1_res.json()
+                self.assertTrue(task1_data["description"])
+                self.assertIn("Project Context & Alignment", task1_data["description"])
+                self.assertIn("Autonomous Agent Pipeline", task1_data["description"])
+                self.assertGreater(len(task1_data["subtasks"]), 0)
+
+                # 4. Create second task in the project with NO description -> should incorporate previous task!
+                task2_res = client.post("/api/v1/items", json={
+                    "title": "Deploy API Microservices",
+                    "project_id": project_id
+                }, headers=headers)
+                self.assertEqual(task2_res.status_code, 200)
+                task2_data = task2_res.json()
+                self.assertTrue(task2_data["description"])
+                self.assertIn("Project Context & Alignment", task2_data["description"])
+                self.assertIn("Design System Architecture", task2_data["description"]) # Preceding deliverable referenced!
+
+                # 5. Test AI generate-project-description endpoint directly
+                ai_proj_res = client.post("/api/v1/ai/generate-project-description", json={
+                    "name": "Hardware Thermal Benchmarking"
+                }, headers=headers)
+                self.assertEqual(ai_proj_res.status_code, 200)
+                self.assertTrue(ai_proj_res.json()["success"])
+                self.assertIn("Hardware Thermal Benchmarking", ai_proj_res.json()["data"]["description"])
+
+                # 6. Test AI auto-fill endpoint with project_id
+                auto_fill_res = client.post("/api/v1/ai/auto-fill", json={
+                    "title": "Configure Fan Curves",
+                    "project_id": project_id
+                }, headers=headers)
+                self.assertEqual(auto_fill_res.status_code, 200)
+                self.assertTrue(auto_fill_res.json()["success"])
+                self.assertIn("Project Context & Alignment", auto_fill_res.json()["data"]["description"])
+                self.assertIn("Deploy API Microservices", auto_fill_res.json()["data"]["description"])
+
+                # Cleanup test project & items
+                client.delete(f"/api/v1/items/{task1_data['id']}", headers=headers)
+                client.delete(f"/api/v1/items/{task2_data['id']}", headers=headers)
+                client.delete(f"/api/v1/items/projects/{project_id}", headers=headers)
+        finally:
+            config.API_SECRET = original_secret
+            auth.API_SECRET = original_secret
+
 if __name__ == "__main__":
     unittest.main()
 

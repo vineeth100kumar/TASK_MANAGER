@@ -363,7 +363,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
     if (!newTitle.trim()) return;
     setIsAiPolishing(true);
     try {
-      const res = await api.improveTask(newTitle, newDescription, newType);
+      const res = await api.improveTask(newTitle, newDescription, newType, newProjectId || undefined);
       if (res.success && res.data) {
         setNewTitle(res.data.improved_title);
         setNewDescription(res.data.description);
@@ -382,7 +382,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const handleAiAutoFill = async (item: WorkItem) => {
     setIsAiExpanding(true);
     try {
-      const res = await api.autoFillTask(item.title, item.description || undefined);
+      const res = await api.autoFillTask(item.title, item.description || undefined, item.project_id || undefined);
       if (res.success && res.data) {
         const updates: WorkItemUpdatePayload = {
           description: res.data.description,
@@ -1307,7 +1307,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   rows={2}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="Optional context or notes..."
+                  placeholder="Optional: Leave blank to auto-generate based on project context upon saving..."
                   className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                 />
               </div>

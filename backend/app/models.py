@@ -81,6 +81,11 @@ class ProjectCreate(BaseModel):
     color: str = "#3b82f6"
     description: Optional[str] = None
 
+class ProjectUpdate(BaseModel):
+    name: Optional[str] = None
+    color: Optional[str] = None
+    description: Optional[str] = None
+
 class ProjectResponse(BaseModel):
     id: str
     name: str

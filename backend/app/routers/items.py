@@ -8,12 +8,13 @@ from typing import List, Optional, Dict
 from ..database import get_db
 from ..models import (
     WorkItemCreate, WorkItemUpdate, WorkItemResponse,
-    SubtaskResponse, ProjectCreate, ProjectResponse,
+    SubtaskResponse, ProjectCreate, ProjectUpdate, ProjectResponse,
     MilestoneCreate, MilestoneResponse
 )
 from ..services.item_serializer import load_item
 from ..services.recurrence import calculate_next_occurrence
 from ..services.ws_manager import ws_manager
+from ..services.ai_engine import auto_fill_task_details, generate_project_description
 
 router = APIRouter(prefix="/api/v1/items", tags=["Items & Milestones"])
 
@@ -118,6 +119,34 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
         calc = calculate_next_occurrence(item.repeat_rule)
         if calc:
             next_occurrence = calc.isoformat()
+
+    # Automate description generation if not provided, incorporating project and previous tasks context
+    if not item.description or not item.description.strip():
+        project_name = None
+        previous_tasks = []
+        if item.project_id:
+            async with db.execute("SELECT name FROM projects WHERE id = ?", (item.project_id,)) as p_cur:
+                p_row = await p_cur.fetchone()
+                if p_row:
+                    project_name = p_row["name"]
+            async with db.execute(
+                "SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 5",
+                (item.project_id,)
+            ) as t_cur:
+                t_rows = await t_cur.fetchall()
+                previous_tasks = [r["title"] for r in t_rows if r["title"]]
+
+        generated = await auto_fill_task_details(
+            title=item.title,
+            context=item.context_tags,
+            project_name=project_name,
+            previous_tasks=previous_tasks,
+            entity_type=item.entity_type
+        )
+        if generated.get("description"):
+            item.description = generated["description"]
+        if not item.subtasks and generated.get("subtasks"):
+            item.subtasks = generated["subtasks"]
             
     query = """
         INSERT INTO work_items (
@@ -434,14 +463,60 @@ async def list_projects(db: aiosqlite.Connection = Depends(get_db)):
 async def create_project(proj: ProjectCreate, db: aiosqlite.Connection = Depends(get_db)):
     p_id = f"proj_{uuid.uuid4().hex[:8]}"
     now_iso = datetime.datetime.now().isoformat()
+    desc = proj.description
+    if not desc or not desc.strip():
+        desc = await generate_project_description(proj.name)
     await db.execute(
         "INSERT INTO projects (id, name, color, description, created_at) VALUES (?, ?, ?, ?, ?)",
-        (p_id, proj.name, proj.color, proj.description, now_iso)
+        (p_id, proj.name, proj.color, desc, now_iso)
     )
     await db.commit()
     return ProjectResponse(
-        id=p_id, name=proj.name, color=proj.color, description=proj.description,
+        id=p_id, name=proj.name, color=proj.color, description=desc,
         created_at=now_iso, total_task_count=0, completed_task_count=0, progress_percentage=0
+    )
+
+@router.patch("/projects/{project_id}", response_model=ProjectResponse)
+async def update_project(project_id: str, updates: ProjectUpdate, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)) as cursor:
+        existing = await cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+    update_dict = updates.model_dump(exclude_unset=True)
+    if update_dict:
+        fields = []
+        values = []
+        for k, v in update_dict.items():
+            fields.append(f"{k} = ?")
+            values.append(v)
+        values.append(project_id)
+        sql = f"UPDATE projects SET {', '.join(fields)} WHERE id = ?"
+        await db.execute(sql, values)
+        await db.commit()
+
+    async with db.execute("SELECT * FROM projects WHERE id = ?", (project_id,)) as cursor:
+        updated = await cursor.fetchone()
+
+    # Batch count linked tasks
+    async with db.execute(
+        "SELECT COUNT(*) as total, SUM(is_completed) as completed FROM work_items WHERE project_id = ?",
+        (project_id,)
+    ) as count_cur:
+        c_row = await count_cur.fetchone()
+        total = c_row["total"] or 0 if c_row else 0
+        completed = c_row["completed"] or 0 if c_row else 0
+        pct = int((completed / total) * 100) if total > 0 else 0
+
+    return ProjectResponse(
+        id=updated["id"],
+        name=updated["name"],
+        color=updated["color"],
+        description=updated["description"],
+        created_at=updated["created_at"],
+        total_task_count=total,
+        completed_task_count=completed,
+        progress_percentage=pct
     )
 
 @router.delete("/projects/{project_id}")

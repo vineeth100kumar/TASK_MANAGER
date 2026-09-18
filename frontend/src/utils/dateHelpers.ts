@@ -169,7 +169,7 @@ export function formatTimeOfDay(iso?: string | null): string | null {
   const moment = new Date(iso);
   if (isNaN(moment.getTime())) return null;
   return moment
-    .toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
+    .toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
     .toLowerCase();
 }
 

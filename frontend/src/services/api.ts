@@ -98,6 +98,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(proj),
     }),
+  updateProject: (id: string, updates: Partial<{ name: string; color: string; description: string }>) =>
+    fetchJson<Project>(`/api/v1/items/projects/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
+    }),
   deleteProject: (id: string) =>
     fetchJson<{ success: boolean; id: string }>(`/api/v1/items/projects/${id}`, {
       method: 'DELETE',
@@ -270,15 +275,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ natural_language }),
     }),
-  autoFillTask: (title: string, context?: string) =>
+  autoFillTask: (title: string, context?: string, projectId?: string) =>
     fetchJson<{
       success: boolean;
       data: { description: string; subtasks: string[]; estimated_minutes: number; priority: string };
     }>('/api/v1/ai/auto-fill', {
       method: 'POST',
-      body: JSON.stringify({ title, context }),
+      body: JSON.stringify({ title, context, project_id: projectId }),
     }),
-  improveTask: (title: string, context?: string, entity_type?: string) =>
+  improveTask: (title: string, context?: string, entity_type?: string, projectId?: string) =>
     fetchJson<{
       success: boolean;
       data: {
@@ -292,7 +297,15 @@ export const api = {
       };
     }>('/api/v1/ai/improve-task', {
       method: 'POST',
-      body: JSON.stringify({ title, context, entity_type }),
+      body: JSON.stringify({ title, context, entity_type, project_id: projectId }),
+    }),
+  generateProjectDescription: (name: string) =>
+    fetchJson<{
+      success: boolean;
+      data: { description: string };
+    }>('/api/v1/ai/generate-project-description', {
+      method: 'POST',
+      body: JSON.stringify({ name }),
     }),
   organizeBoard: (tasks?: any[]) =>
     fetchJson<{

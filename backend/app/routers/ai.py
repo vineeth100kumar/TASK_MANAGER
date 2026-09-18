@@ -3,7 +3,10 @@ from pydantic import BaseModel
 from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 
-from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
+from ..services.ai_engine import (
+    generate_greeting, parse_brain_dump, auto_fill_task_details,
+    improve_task_data, organize_board_data, generate_project_description
+)
 from ..services.ai_runtime import status as ai_runtime_status
 from ..services.capture_service import (
     claim_capture, commit_capture, read_capture, release_capture, remember_capture,
@@ -21,11 +24,18 @@ class BrainDumpRequest(BaseModel):
 class AutoFillRequest(BaseModel):
     title: str
     context: Optional[str] = None
+    project_id: Optional[str] = None
 
 class ImproveTaskRequest(BaseModel):
     title: str
     context: Optional[str] = None
     entity_type: Optional[str] = "task"
+    project_id: Optional[str] = None
+
+class ProjectDescriptionRequest(BaseModel):
+    name: str
+    project_id: Optional[str] = None
+    context: Optional[str] = None
 
 class OrganizeBoardRequest(BaseModel):
     tasks: Optional[List[Dict[str, Any]]] = None
@@ -168,16 +178,61 @@ async def _project_names(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
         return [{"id": r["id"], "name": r["name"]} for r in await cursor.fetchall()]
 
 @router.post("/auto-fill")
-async def auto_fill(req: AutoFillRequest):
-    """Expands a task title into a detailed description and 3-5 subtask checklist."""
-    details = await auto_fill_task_details(req.title, req.context)
+async def auto_fill(req: AutoFillRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """Expands a task title into a detailed description and 3-5 subtask checklist, with project awareness."""
+    proj_name = None
+    prev_tasks = []
+    if req.project_id:
+        async with db.execute("SELECT name FROM projects WHERE id = ?", (req.project_id,)) as p_cur:
+            p_row = await p_cur.fetchone()
+            if p_row:
+                proj_name = p_row["name"]
+        async with db.execute("SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 5", (req.project_id,)) as t_cur:
+            t_rows = await t_cur.fetchall()
+            prev_tasks = [r["title"] for r in t_rows]
+
+    details = await auto_fill_task_details(
+        req.title, req.context,
+        project_name=proj_name,
+        previous_tasks=prev_tasks
+    )
     return {"success": True, "data": details}
 
 @router.post("/improve-task")
-async def improve_task(req: ImproveTaskRequest):
-    """Refines a task title, description, subtasks, priority, energy, and estimates."""
-    result = await improve_task_data(req.title, req.context, req.entity_type)
+async def improve_task(req: ImproveTaskRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """Refines a task title, description, subtasks, priority, energy, and estimates with project awareness."""
+    proj_name = None
+    prev_tasks = []
+    if req.project_id:
+        async with db.execute("SELECT name FROM projects WHERE id = ?", (req.project_id,)) as p_cur:
+            p_row = await p_cur.fetchone()
+            if p_row:
+                proj_name = p_row["name"]
+        async with db.execute("SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 5", (req.project_id,)) as t_cur:
+            t_rows = await t_cur.fetchall()
+            prev_tasks = [r["title"] for r in t_rows]
+
+    result = await improve_task_data(
+        req.title, req.context, req.entity_type,
+        project_name=proj_name,
+        previous_tasks=prev_tasks
+    )
     return {"success": True, "data": result}
+
+@router.post("/generate-project-description")
+async def generate_proj_desc(
+    req: ProjectDescriptionRequest,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    """Generates an executive project scope and deliverables dossier."""
+    existing_tasks = []
+    if req.project_id:
+        async with db.execute("SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 10", (req.project_id,)) as t_cur:
+            t_rows = await t_cur.fetchall()
+            existing_tasks = [r["title"] for r in t_rows]
+            
+    desc = await generate_project_description(req.name, existing_tasks, req.context)
+    return {"success": True, "description": desc}
 
 @router.post("/organize-board")
 async def organize_board(
