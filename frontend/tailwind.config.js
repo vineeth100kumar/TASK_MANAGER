@@ -203,6 +203,17 @@ export default {
       transitionTimingFunction: {
         // Motion that settles rather than bounces.
         'settle': 'cubic-bezier(0.32, 0.72, 0, 1)',
+        // The one spring. Overshoots ~2% and comes back, so a thing that
+        // lands feels like it landed. Used for state, never for arrival.
+        'spring': 'linear(0, 0.128 3.1%, 0.479 8.4%, 0.752 13.7%, 0.898 18.4%, 0.976 23.6%, 1.014 29.6%, 1.022 37.2%, 1.006 60.9%, 1)',
+      },
+
+      boxShadow: {
+        // Three stops, defined per theme in index.css: shadow in light,
+        // a light rim in dark, where a shadow would be invisible.
+        'lift-1': 'var(--lift-1)',
+        'lift-2': 'var(--lift-2)',
+        'lift-3': 'var(--lift-3)',
       },
     },
   },

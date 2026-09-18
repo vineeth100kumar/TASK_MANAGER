@@ -99,8 +99,8 @@ export const ListRow: React.FC<ListRowProps> = ({
         dragElastic={0.4}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
-        className={`relative z-10 flex items-start gap-3 px-1 py-3 touch-pan-y transition-colors duration-150 ${
-          isHighlighted || isSelected ? 'bg-accent-500/8' : 'bg-ground'
+        className={`relative z-10 flex items-start gap-3 px-1 py-3 touch-pan-y rounded-lg transition-colors duration-200 ease-settle ${
+          isHighlighted || isSelected ? 'bg-accent-500/8' : 'bg-ground md:hover:bg-sunken/60'
         }`}
         style={{ minHeight: 44 }}
       >

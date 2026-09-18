@@ -3,6 +3,40 @@
 @tailwind utilities;
 
 /*
+ * The typeface travels with the app.
+ *
+ * Self-hosted rather than fetched from Google, because the Pi is usually off
+ * the internet and a webfont request that never resolves is a blank screen.
+ * Inter is variable: one file carries every weight, and its optical-size axis
+ * thins the letterforms as they grow, so the large titles look drawn rather
+ * than scaled up.
+ *
+ * Two files. The Latin subset is everything the app normally renders; the
+ * second holds one glyph, the rupee, which sits outside the Latin range and
+ * appears on every money screen. Splitting it that way keeps the common case
+ * at 73 kB instead of 206 kB.
+ */
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-latin.woff2') format('woff2');
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA,
+                 U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122,
+                 U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url('/fonts/inter-rupee.woff2') format('woff2');
+  unicode-range: U+20B9;
+}
+
+/*
  * Tokens. Day and night are the same names resolving to different values —
  * never two hand-written sets of rules. Values are RGB channels so Tailwind's
  * opacity modifiers (bg-surface/60) keep working.
@@ -21,6 +55,15 @@
     --c-done:      28 122  74;  /* #1C7A4A means done, nothing else */
     --c-danger:   179  38  30;  /* #B3261E destructive only */
 
+    /*
+     * Elevation, as three stops rather than a border on everything. A screen
+     * spends the top stop once, on the thing it wants you to look at. In light,
+     * elevation is shadow.
+     */
+    --lift-1: 0 1px 2px rgb(16 18 24 / 0.05), 0 1px 1px rgb(16 18 24 / 0.04);
+    --lift-2: 0 8px 24px -6px rgb(16 18 24 / 0.13), 0 2px 6px -1px rgb(16 18 24 / 0.07);
+    --lift-3: 0 24px 60px -12px rgb(16 18 24 / 0.28), 0 8px 20px -8px rgb(16 18 24 / 0.16);
+
     color-scheme: light;
   }
 
@@ -37,6 +80,14 @@
     --c-done:      76 201 138;  /* #4CC98A */
     --c-danger:   255 107  96;  /* #FF6B60 */
 
+    /*
+     * On a dark ground a shadow is invisible, so lift has to be drawn as
+     * light instead. This is why iOS dark mode still reads as layered.
+     */
+    --lift-1: 0 0 0 1px rgb(255 255 255 / 0.04);
+    --lift-2: 0 0 0 1px rgb(255 255 255 / 0.06), 0 8px 24px -6px rgb(0 0 0 / 0.6);
+    --lift-3: 0 0 0 1px rgb(255 255 255 / 0.08), 0 24px 60px -12px rgb(0 0 0 / 0.8);
+
     color-scheme: dark;
   }
 
@@ -46,9 +97,13 @@
 
   body {
     @apply bg-ground text-ink;
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'SF Pro Text',
+                 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-optical-sizing: auto;
     font-size: 16px;
     line-height: 1.4;
     text-rendering: optimizeLegibility;
+    -webkit-font-smoothing: antialiased;
   }
 
   /* Digits that sit in columns line up. */
@@ -71,6 +126,10 @@
       transition-duration: 0.01ms !important;
       scroll-behavior: auto !important;
     }
+    .enter > * {
+      opacity: 1 !important;
+      transform: none !important;
+    }
   }
 }
 
@@ -83,15 +142,37 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  /*
+   * Content arrives in reading order rather than all at once. 45ms apart is
+   * enough to read as a sequence and short enough that the whole screen has
+   * settled before you could have acted on it.
+   */
+  .enter > * {
+    opacity: 0;
+    transform: translateY(7px);
+    animation: enter-rise 620ms theme('transitionTimingFunction.settle') forwards;
+    animation-delay: calc(var(--i, 0) * 45ms);
+  }
+
+  @keyframes enter-rise {
+    to { opacity: 1; transform: none; }
+  }
 }
 
 @layer components {
   /*
-   * Surfaces, not cards. A single radius and a recessed fill; elevation is
-   * spent on the one thing that needs lifting so it still means something.
+   * Surfaces, not cards. Elevation is spent on the one thing that needs
+   * lifting so it still means something.
    */
   .surface {
-    @apply bg-surface border border-hairline rounded-surface;
+    @apply bg-surface rounded-surface;
+    box-shadow: var(--lift-1);
+  }
+
+  .surface-raised {
+    @apply bg-surface rounded-surface;
+    box-shadow: var(--lift-2);
   }
 
   .surface-sunken {
@@ -100,8 +181,44 @@
 
   /* A row in a list. 44px minimum, separated by a hairline, not a box each. */
   .row {
-    @apply flex items-start gap-3 py-3 border-b border-hairline last:border-b-0;
+    @apply flex items-start gap-3 py-3 border-b border-hairline last:border-b-0 rounded-lg;
     min-height: theme('spacing.tap');
+    transition: background-color 180ms theme('transitionTimingFunction.settle');
+  }
+
+  /* There is only something to reward where there is a pointer. */
+  @media (hover: hover) {
+    .row-interactive:hover {
+      background-color: rgb(var(--c-ink) / 0.04);
+    }
+  }
+
+  /*
+   * A placeholder sweeps rather than pulses. A pulse says "something is
+   * blinking"; a sweep says "something is on its way", which is the truth
+   * while the Pi is answering.
+   */
+  .shimmer {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .shimmer::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgb(var(--c-surface) / 0.7),
+      transparent
+    );
+    transform: translateX(-100%);
+    animation: shimmer-sweep 1500ms ease-in-out infinite;
+  }
+
+  @keyframes shimmer-sweep {
+    to { transform: translateX(100%); }
   }
 
   /* Section label: sentence case, not shouting. */
@@ -118,25 +235,54 @@
   .field {
     @apply w-full bg-sunken text-ink text-body rounded-control px-3.5 py-2.5
            border border-transparent placeholder:text-ink-3
-           focus:border-accent-500 focus:outline-none transition-colors;
+           focus:border-accent-500 focus:outline-none;
     min-height: theme('spacing.tap');
+    transition: border-color 200ms theme('transitionTimingFunction.settle'),
+                background-color 200ms theme('transitionTimingFunction.settle');
   }
 
-  /* The round checkbox used wherever something can be completed. */
+  /*
+   * The round checkbox used wherever something can be completed.
+   *
+   * The tick is drawn rather than revealed: the short leg grows first, then
+   * the long one, which reads as a stroke being made. The circle overshoots
+   * and settles, so completing something feels like it landed.
+   */
   .check {
     @apply w-[22px] h-[22px] rounded-full border-[1.5px] border-ink-3 shrink-0
-           grid place-items-center transition-colors duration-150 ease-settle
-           cursor-pointer;
+           grid place-items-center cursor-pointer;
+    transition: background-color 220ms theme('transitionTimingFunction.settle'),
+                border-color 220ms theme('transitionTimingFunction.settle'),
+                transform 340ms theme('transitionTimingFunction.spring');
   }
+
+  /*
+   * The borders stay transparent until the box is checked. A zero-sized box
+   * with a 2px border is still a visible 2px dot, which showed up in the
+   * middle of every empty circle on a dark ground.
+   */
+  .check::after {
+    content: '';
+    width: 0;
+    height: 0;
+    border-left: 2px solid transparent;
+    border-bottom: 2px solid transparent;
+    border-bottom-left-radius: 1px;
+    transform: rotate(-45deg) translate(1px, -1px);
+    transition: height 110ms ease-out 70ms,
+                width 150ms ease-out 170ms,
+                border-color 80ms linear 60ms;
+  }
+
   .check[data-checked='true'] {
     @apply border-accent-500 bg-accent-500;
+    transform: scale(1.06);
   }
+
   .check[data-checked='true']::after {
-    content: '';
     width: 9px;
     height: 5px;
-    border-left: 2px solid #fff;
-    border-bottom: 2px solid #fff;
-    transform: rotate(-45deg) translate(1px, -1px);
+    border-left-color: #fff;
+    border-bottom-color: #fff;
   }
 }
