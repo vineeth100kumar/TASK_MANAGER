@@ -143,337 +143,307 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
     { id: 'stretched', emoji: '🤯', label: 'Stretched' },
   ];
 
+  const card =
+    'p-4 rounded-surface bg-sunken';
+
+  const primary =
+    'flex items-center justify-center gap-2 h-11 px-5 rounded-control bg-accent-500 ' +
+    'hover:bg-accent-600 text-white text-meta font-semibold ' +
+    'active:scale-[0.98] transition-all duration-200 ease-spring ' +
+    'disabled:opacity-40 disabled:pointer-events-none';
+
+  const quiet =
+    'flex items-center gap-1.5 h-11 px-3 rounded-control text-meta text-ink-2 ' +
+    'hover:text-ink hover:bg-sunken transition-colors duration-150';
+
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl bg-surface rounded-control border border-ink-base/25 dark:border-paper-light/20 shadow-lg overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-base/15 dark:border-paper-light/15 bg-paper-aged dark:bg-sunken">
-          <div className="flex items-center gap-3">
-            <div className={`w-10 h-10 rounded border flex items-center justify-center ${
-              mode === 'morning' 
-                ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-600/30' 
-                : 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 border-indigo-600/30'
-            }`}>
-              {mode === 'morning' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
-            </div>
-            <div>
-              <div className="text-caption text-ink-muted dark:text-stone-400">
-                {mode === 'morning' ? 'Morning plan' : 'Evening review'}
-              </div>
-              <h2 className="text-lg font-bold text-ink-base dark:text-paper-light">
-                {mode === 'morning' ? 'Morning Edition — Daily Kickoff' : 'Evening Edition — Debrief & Close'}
-              </h2>
-              <p className="text-meta italic text-ink-muted dark:text-stone-400">
-                {mode === 'morning' ? 'Eliminate decision fatigue • 60-second clarity plan' : 'Celebrate wins • Zero-guilt night reset'}
-              </p>
-            </div>
+    <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm sm:p-4">
+      <div className="relative w-full sm:max-w-lg bg-surface rounded-t-surface sm:rounded-surface shadow-lift-3 overflow-hidden flex flex-col max-h-[92vh] pb-safe sm:pb-0">
+        {/* Handle, so the sheet reads as a sheet on a phone */}
+        <div className="sm:hidden pt-2.5 pb-1 flex justify-center shrink-0">
+          <span className="w-9 h-1 rounded-full bg-hairline" />
+        </div>
+
+        <header className="flex items-start justify-between gap-3 px-5 pt-4 sm:pt-5 pb-4 shrink-0">
+          <div className="min-w-0">
+            <span className="label flex items-center gap-1.5">
+              {mode === 'morning' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}
+              {mode === 'morning' ? 'Morning plan' : 'Evening review'}
+            </span>
+            <h2 className="text-title font-semibold text-ink mt-1">
+              {mode === 'morning' ? 'Plan the day' : 'Close the day'}
+            </h2>
+            <p className="text-meta text-ink-2 mt-1">
+              {mode === 'morning'
+                ? 'Three things worth doing. A minute, at most.'
+                : 'What landed, and what moves to tomorrow.'}
+            </p>
           </div>
-          
-          <div className="flex items-center gap-2">
+
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={() => {
                 setMode(mode === 'morning' ? 'evening' : 'morning');
                 setStep(1);
               }}
-              className="px-2.5 py-1 text-meta rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-white dark:bg-stone-800 hover:bg-paper-aged dark:hover:bg-stone-700 text-ink-base dark:text-paper-light transition-colors"
+              className="px-2.5 h-8 rounded-control text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors duration-150"
             >
-              Switch to {mode === 'morning' ? 'Evening' : 'Morning'}
+              {mode === 'morning' ? 'Evening' : 'Morning'}
             </button>
-            <button 
+            <button
               onClick={onClose}
-              aria-label="Close wizard"
-              className="p-1.5 rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-paper-light transition-colors"
+              aria-label="Close"
+              className="w-8 h-8 grid place-items-center rounded-control text-ink-3 hover:text-ink hover:bg-sunken transition-colors duration-150"
             >
-              <X className="w-5 h-5" />
+              <X className="w-[18px] h-[18px]" />
             </button>
           </div>
-        </div>
+        </header>
 
-        {/* Body Content */}
-        <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
+        <div className="px-5 pb-5 overflow-y-auto flex-1 no-scrollbar">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-ink-muted dark:text-stone-400">
-              <div className="w-8 h-8 border border-amber-600 dark:border-amber-400 border-t-transparent rounded-full animate-spin" />
-              <p className="text-sm italic">Synthesizing daily mission parameters...</p>
+            /* The Pi takes a moment. Say what is happening rather than spinning silently. */
+            <div className="flex flex-col items-center justify-center py-14 gap-3">
+              <span className="w-6 h-6 rounded-full border-2 border-accent-500 border-t-transparent animate-spin" />
+              <p className="text-meta text-ink-3">Reading your day</p>
             </div>
           ) : mode === 'morning' ? (
-            // ==========================================
-            // MORNING WIZARD STEPS
-            // ==========================================
-            <div>
+            <div className="enter">
               {step === 1 && (
-                <div className="space-y-6 animate-in fade-in">
-                  <div className="p-4 rounded border border-amber-600/30 bg-amber-500/10">
-                    <div className="flex items-center justify-between">
+                <div className="space-y-5">
+                  {kickoffData?.streak_days ? (
+                    <div className={`${card} flex items-center gap-3`} style={{ ['--i' as string]: 0 }}>
+                      <Flame className="w-5 h-5 text-late-500 dark:text-late-400 shrink-0" />
                       <div>
-                        <span className="text-caption font-bold text-amber-700 dark:text-amber-400">
-                          EDITION HEADLINE
-                        </span>
-                        <h3 className="text-xl font-bold text-ink-base dark:text-paper-light mt-0.5">
-                          Good Morning, Chief
-                        </h3>
-                        <p className="text-meta italic text-ink-muted dark:text-stone-300 mt-1">
-                          Today is a fresh canvas. Win the morning, win the day.
+                        <p className="text-body text-ink">
+                          {kickoffData.streak_days} days in a row
                         </p>
+                        <p className="text-meta text-ink-3 mt-0.5">Worth keeping.</p>
                       </div>
-                      {kickoffData?.streak_days ? (
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-amber-600/40 bg-amber-500/15 text-amber-800 dark:text-amber-300">
-                          <Flame className="w-4 h-4 fill-amber-500 text-amber-600" />
-                          <span className="text-meta font-bold">{kickoffData.streak_days} DAY STREAK</span>
-                        </div>
-                      ) : null}
                     </div>
-                  </div>
+                  ) : null}
 
-                  {/* Scheduled Events Today */}
-                  <div>
-                    <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-caption font-bold text-ink-muted dark:text-stone-400 flex items-center gap-1.5">
-                        <Calendar className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-                        Today's Scheduled Events ({kickoffData?.today_events?.length || 0})
-                      </h4>
-                    </div>
+                  <div style={{ ['--i' as string]: 1 }}>
+                    <h3 className="label mb-2 flex items-center gap-1.5">
+                      <Calendar className="w-3.5 h-3.5" />
+                      {kickoffData?.today_events?.length
+                        ? `${kickoffData.today_events.length} scheduled`
+                        : 'Nothing scheduled'}
+                    </h3>
+
                     {kickoffData?.today_events && kickoffData.today_events.length > 0 ? (
-                      <div className="space-y-1.5">
-                        {kickoffData.today_events.map(ev => (
-                          <div key={ev.id} className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-700 bg-paper-aged/50 dark:bg-stone-800/60 text-sm">
-                            <span className="text-ink-base dark:text-stone-200 font-medium">{ev.title}</span>
-                            <span className="text-meta text-amber-700 dark:text-amber-400 font-bold">
-                              {ev.start_at ? new Date(ev.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}
+                      <div>
+                        {kickoffData.today_events.map((ev) => (
+                          <div key={ev.id} className="row">
+                            <span className="text-body text-ink flex-1 min-w-0">{ev.title}</span>
+                            <span className="text-meta text-ink-2 tabular shrink-0">
+                              {ev.start_at
+                                ? new Date(ev.start_at).toLocaleTimeString([], {
+                                    hour: 'numeric',
+                                    minute: '2-digit',
+                                  })
+                                : 'All day'}
                             </span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-meta italic text-ink-muted dark:text-stone-500 p-3 rounded border border-ink-base/10 dark:border-stone-800 bg-paper-aged/30 dark:bg-stone-800/30">
-                        No calendar blocks scheduled yet. Open canvas for deep focus!
+                      <p className="text-meta text-ink-3">
+                        The day is yours to shape.
                       </p>
                     )}
                   </div>
 
-                  {/* Step 1 Footer */}
-                  <div className="pt-4 flex justify-end">
-                    <button
-                      onClick={() => setStep(2)}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded bg-ink-base hover:bg-sunken text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base font-bold text-meta transition-all shadow-sm"
-                    >
-                      Pick Top 3 Big Rocks <ArrowRight className="w-4 h-4" />
+                  <div className="pt-1 flex justify-end" style={{ ['--i' as string]: 2 }}>
+                    <button onClick={() => setStep(2)} className={primary}>
+                      Pick your three <ArrowRight className="w-4 h-4" />
                     </button>
                   </div>
                 </div>
               )}
 
               {step === 2 && (
-                <div className="space-y-5 animate-in fade-in">
-                  <div>
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-base font-bold text-ink-base dark:text-paper-light flex items-center gap-2">
-                        <Target className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-                        Select Today's Top 3 "Big Rocks"
+                <div className="space-y-4">
+                  <div style={{ ['--i' as string]: 0 }}>
+                    <div className="flex items-baseline justify-between gap-3">
+                      <h3 className="text-lead font-semibold text-ink">
+                        Three things
                       </h3>
-                      <span className={`text-meta px-2 py-0.5 rounded font-bold ${
-                        selectedBigRocks.length === 3 
-                          ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40' 
-                          : 'bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400 border border-ink-base/15 dark:border-stone-700'
-                      }`}>
-                        {selectedBigRocks.length} / 3 selected
+                      <span className="text-meta text-ink-3 tabular shrink-0">
+                        {selectedBigRocks.length} of 3
                       </span>
                     </div>
-                    <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-1">
-                      If you only get these 3 things done today, your day will be an absolute triumph.
+                    <p className="text-meta text-ink-2 mt-1">
+                      If only these get done, the day still counts.
                     </p>
                   </div>
 
-                  {/* Task Candidates */}
-                  <div className="space-y-2 max-h-[45vh] overflow-y-auto pr-1 custom-scrollbar">
+                  <div className="max-h-[46vh] overflow-y-auto no-scrollbar" style={{ ['--i' as string]: 1 }}>
                     {kickoffData?.active_tasks && kickoffData.active_tasks.length > 0 ? (
-                      kickoffData.active_tasks.map(task => {
+                      kickoffData.active_tasks.map((task) => {
                         const isSelected = selectedBigRocks.includes(task.id);
+                        const full = selectedBigRocks.length >= 3 && !isSelected;
                         return (
-                          <div
+                          <button
                             key={task.id}
                             onClick={() => toggleBigRock(task.id)}
-                            className={`flex items-center justify-between p-3 rounded border transition-all cursor-pointer ${
-                              isSelected
-                                ? 'bg-amber-500/15 border-amber-600/50 text-ink-base dark:text-paper-light shadow-sm'
-                                : 'bg-paper-aged/40 dark:bg-stone-800/40 border-ink-base/15 dark:border-stone-800 text-ink-muted dark:text-stone-300 hover:bg-paper-aged/70'
+                            disabled={full}
+                            className={`row row-interactive w-full text-left px-1 ${
+                              full ? 'opacity-40 cursor-not-allowed' : ''
                             }`}
                           >
-                            <div className="flex items-center gap-3 flex-1 min-w-0 pr-3">
-                              <div className={`w-5 h-5 rounded flex items-center justify-center border transition-colors ${
-                                isSelected 
-                                  ? 'bg-amber-600 border-amber-600 text-white' 
-                                  : 'border-ink-base/30 dark:border-zinc-600 bg-paper-white dark:bg-zinc-800'
-                              }`}>
-                                {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
-                              </div>
-                              <span className="text-sm font-medium truncate">{task.title}</span>
-                            </div>
-                            <div className="flex items-center gap-2">
+                            <span
+                              role="checkbox"
+                              aria-checked={isSelected}
+                              data-checked={isSelected}
+                              className="check mt-0.5"
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className={`block text-body ${isSelected ? 'text-ink' : 'text-ink-2'}`}>
+                                {task.title}
+                              </span>
                               {task.priority === 'urgent' && (
-                                <span className="text-caption px-2 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30 font-bold">
+                                <span className="block text-meta text-late-500 dark:text-late-400 mt-0.5">
                                   Urgent
                                 </span>
                               )}
-                              {task.priority === 'high' && (
-                                <span className="text-caption px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 font-bold">
-                                  High
-                                </span>
-                              )}
-                              {task.due_date && (
-                                <span className="text-caption text-ink-muted dark:text-stone-400">
-                                  {task.due_date}
-                                </span>
-                              )}
-                            </div>
-                          </div>
+                            </span>
+                          </button>
                         );
                       })
                     ) : (
-                      <p className="text-sm italic text-ink-muted dark:text-stone-500 text-center py-6">
-                        No pending tasks found. Add some tasks first!
+                      <p className="text-meta text-ink-3 py-6 text-center">
+                        Nothing to choose from yet. Add a task first.
                       </p>
                     )}
                   </div>
 
-                  {/* Step 2 Footer */}
-                  <div className="pt-3 flex items-center justify-between border-t border-ink-base/15 dark:border-stone-800">
-                    <button
-                      onClick={() => setStep(1)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-meta rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-stone-100 transition-colors"
-                    >
-                      <ArrowLeft className="w-3.5 h-3.5" /> Back
+                  <div className="pt-3 flex items-center justify-between border-t border-hairline">
+                    <button onClick={() => setStep(1)} className={quiet}>
+                      <ArrowLeft className="w-4 h-4" /> Back
                     </button>
-                    <button
-                      onClick={handleFinishMorning}
-                      disabled={submitting}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-meta shadow-md transition-all disabled:opacity-50"
-                    >
-                      {submitting ? 'LOCKING IN...' : '🚀 LOCK IN & START DAY'}
+                    <button onClick={handleFinishMorning} disabled={submitting} className={primary}>
+                      {submitting ? 'Saving' : 'Start the day'}
                     </button>
                   </div>
                 </div>
               )}
             </div>
           ) : (
-            // ==========================================
-            // EVENING DEBRIEF STEPS
-            // ==========================================
-            <div>
+            <div className="enter">
               {step === 1 && (
-                <div className="space-y-6 animate-in fade-in">
-                  <div className="p-4 rounded border border-indigo-500/30 bg-indigo-500/10">
-                    <span className="text-caption font-bold text-indigo-700 dark:text-indigo-400">
-                      Evening review
-                    </span>
-                    <h3 className="text-xl font-bold text-ink-base dark:text-paper-light mt-0.5">
-                      Closing the Loop
-                    </h3>
-                    <p className="text-meta italic text-ink-muted dark:text-stone-300 mt-1">
-                      Check off your wins, leave nothing lingering in your head, and sleep peacefully.
-                    </p>
-                  </div>
-
-                  {/* Mood Selector */}
-                  <div>
-                    <label className="block text-caption font-bold text-ink-muted dark:text-stone-400 mb-2">
-                      HOW WAS YOUR ENERGY & FOCUS TODAY?
-                    </label>
+                <div className="space-y-6">
+                  <div style={{ ['--i' as string]: 0 }}>
+                    <label className="label block mb-2">How did today feel?</label>
                     <div className="grid grid-cols-5 gap-2">
-                      {moods.map(m => (
+                      {moods.map((m) => (
                         <button
                           key={m.id}
                           onClick={() => setSelectedMood(m.id)}
-                          className={`p-3 rounded border flex flex-col items-center gap-1.5 transition-all ${
+                          aria-pressed={selectedMood === m.id}
+                          className={`py-2.5 rounded-control flex flex-col items-center gap-1.5 border transition-all duration-200 ease-spring ${
                             selectedMood === m.id
-                              ? 'bg-indigo-500/20 border-indigo-500/50 text-ink-base dark:text-white shadow-sm'
-                              : 'bg-paper-aged/40 dark:bg-stone-800/40 border-ink-base/15 dark:border-stone-800 text-ink-muted dark:text-stone-400 hover:bg-paper-aged/70'
+                              ? 'bg-accent-500/10 border-accent-500/40 scale-[1.03]'
+                              : 'bg-sunken border-transparent hover:bg-hairline/60'
                           }`}
                         >
-                          <span className="text-2xl">{m.emoji}</span>
-                          <span className="text-caption font-medium">{m.label}</span>
+                          <span className="text-xl leading-none">{m.emoji}</span>
+                          <span
+                            className={`text-caption ${
+                              selectedMood === m.id ? 'text-ink' : 'text-ink-3'
+                            }`}
+                          >
+                            {m.label}
+                          </span>
                         </button>
                       ))}
                     </div>
                   </div>
 
-                  {/* One-Line Reflection */}
-                  <div>
-                    <label className="block text-caption font-bold text-ink-muted dark:text-stone-400 mb-1.5">
-                      1-LINE REFLECTION OR NOTEWORTHY WIN
+                  <div style={{ ['--i' as string]: 1 }}>
+                    <label htmlFor="sage-reflection" className="label block mb-1.5">
+                      Anything worth remembering?
                     </label>
                     <textarea
+                      id="sage-reflection"
                       value={reflectionText}
-                      onChange={e => setReflectionText(e.target.value)}
-                      placeholder="e.g. Shipped the deployment pipeline, hit 5k run pacing target..."
+                      onChange={(e) => setReflectionText(e.target.value)}
+                      placeholder="Optional. One line is plenty."
                       rows={2}
-                      className="w-full bg-paper-aged/50 dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 rounded p-3 text-meta text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none shadow-inner"
+                      className="field resize-none"
                     />
                   </div>
 
-                  {/* Zero-Guilt Migration Toggle */}
-                  <div className="p-4 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/40 dark:bg-stone-800/50 flex items-center justify-between">
-                    <div>
-                      <span className="text-sm font-bold text-ink-base dark:text-paper-light flex items-center gap-1.5">
-                        <RotateCcw className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
-                        Zero-Guilt Task Migration
+                  <div className={`${card} flex items-center justify-between gap-4`} style={{ ['--i' as string]: 2 }}>
+                    <div className="min-w-0">
+                      <span className="text-body text-ink flex items-center gap-1.5">
+                        <RotateCcw className="w-4 h-4 text-ink-3 shrink-0" />
+                        Move what is left to tomorrow
                       </span>
-                      <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-0.5">
-                        Automatically roll all unfinished tasks due today into tomorrow's docket.
+                      <p className="text-meta text-ink-2 mt-0.5">
+                        Nothing is lost, and nothing stays overdue.
                       </p>
                     </div>
                     <button
                       type="button"
+                      role="switch"
+                      aria-checked={autoMigrate}
+                      aria-label="Move unfinished tasks to tomorrow"
                       onClick={() => setAutoMigrate(!autoMigrate)}
-                      className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${autoMigrate ? 'bg-indigo-600' : 'bg-paper-aged dark:bg-zinc-700 border border-ink-base/20 dark:border-transparent'}`}
+                      className={`relative inline-flex h-[31px] w-[51px] shrink-0 items-center rounded-full transition-colors duration-200 ease-settle ${
+                        autoMigrate ? 'bg-accent-500' : 'bg-hairline'
+                      }`}
                     >
-                      <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${autoMigrate ? 'translate-x-6' : 'translate-x-1'}`} />
+                      <span
+                        className={`inline-block h-[27px] w-[27px] transform rounded-full bg-white shadow-lift-1 transition-transform duration-300 ease-spring ${
+                          autoMigrate ? 'translate-x-[22px]' : 'translate-x-0.5'
+                        }`}
+                      />
                     </button>
                   </div>
 
-                  {/* Step 1 Footer */}
-                  <div className="pt-2 flex justify-end">
-                    <button
-                      onClick={handleFinishEvening}
-                      disabled={submitting}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-meta shadow-md transition-all disabled:opacity-50"
-                    >
-                      {submitting ? 'SUBMITTING...' : 'COMPLETE DEBRIEF & REST 🌙'}
+                  <div className="flex justify-end" style={{ ['--i' as string]: 3 }}>
+                    <button onClick={handleFinishEvening} disabled={submitting} className={primary}>
+                      {submitting ? 'Saving' : 'Close the day'}
                     </button>
                   </div>
                 </div>
               )}
 
               {step === 3 && (
-                <div className="py-8 text-center space-y-5 animate-in zoom-in-95">
-                  <div className="w-16 h-16 rounded-full bg-indigo-500/20 border border-indigo-500/40 text-indigo-600 dark:text-indigo-400 flex items-center justify-center mx-auto">
-                    <CheckCircle2 className="w-8 h-8" />
+                <div className="py-8 text-center space-y-6">
+                  <div className="w-14 h-14 rounded-full bg-done-500/12 text-done-500 dark:text-done-400 grid place-items-center mx-auto">
+                    <CheckCircle2 className="w-7 h-7" />
                   </div>
+
                   <div>
-                    <h3 className="text-2xl font-bold text-ink-base dark:text-paper-light">
-                      Day Officially Closed
-                    </h3>
-                    <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-1 max-w-sm mx-auto">
-                      {debriefSummary?.migrated 
-                        ? `${debriefSummary.migrated} tasks smoothly migrated to tomorrow. Zero guilt, full reset.`
-                        : 'All clear! Outstanding work today.'}
+                    <h3 className="text-title font-semibold text-ink">That is the day</h3>
+                    <p className="text-meta text-ink-2 mt-1.5 max-w-xs mx-auto">
+                      {debriefSummary?.migrated
+                        ? `${debriefSummary.migrated} ${
+                            debriefSummary.migrated === 1 ? 'task moves' : 'tasks move'
+                          } to tomorrow.`
+                        : 'Nothing left over.'}
                     </p>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
-                    <div className="p-3 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/50 dark:bg-stone-800/80">
-                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{debriefSummary?.completed || 0}</div>
-                      <div className="text-caption text-ink-muted dark:text-stone-400">Completed Today</div>
+
+                  <div className="flex justify-center gap-10">
+                    <div>
+                      <div className="text-display font-bold text-ink tabular leading-none">
+                        {debriefSummary?.completed || 0}
+                      </div>
+                      <div className="text-meta text-ink-3 mt-1.5">Done today</div>
                     </div>
-                    <div className="p-3 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/50 dark:bg-stone-800/80">
-                      <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{debriefSummary?.migrated || 0}</div>
-                      <div className="text-caption text-ink-muted dark:text-stone-400">Migrated to Tomorrow</div>
+                    <div>
+                      <div className="text-display font-bold text-ink tabular leading-none">
+                        {debriefSummary?.migrated || 0}
+                      </div>
+                      <div className="text-meta text-ink-3 mt-1.5">Tomorrow</div>
                     </div>
                   </div>
-                  <button
-                    onClick={onClose}
-                    className="px-6 py-2 rounded bg-paper-aged dark:bg-stone-800 hover:bg-paper-white dark:hover:bg-stone-700 text-ink-base dark:text-paper-light text-meta font-bold border border-ink-base/20 dark:border-stone-700 transition-colors"
-                  >
-                    Close Survey
+
+                  <button onClick={onClose} className={`${primary} mx-auto`}>
+                    Good night
                   </button>
                 </div>
               )}

@@ -15,7 +15,7 @@
  *                             but a dead Pi still opens the app.
  */
 
-const VERSION = 'sage-v1';
+const VERSION = 'sage-v2';
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 
@@ -67,7 +67,13 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Build output: /assets/index-<hash>.js. The hash makes a cache hit safe.
-  if (url.pathname.startsWith('/assets/') || url.pathname.startsWith('/icons/')) {
+  // Fonts ship with the app and never change without a new filename, so they
+  // are cached the same way — the typeface is fetched once, then never again.
+  if (
+    url.pathname.startsWith('/assets/') ||
+    url.pathname.startsWith('/icons/') ||
+    url.pathname.startsWith('/fonts/')
+  ) {
     event.respondWith(
       caches.match(request).then(
         (cached) =>

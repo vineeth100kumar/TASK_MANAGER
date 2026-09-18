@@ -19,7 +19,7 @@ export const Button: React.FC<ButtonProps> = ({
 }) => {
   const baseClasses =
     'inline-flex items-center justify-center font-medium rounded-control ' +
-    'transition-all duration-150 ease-settle active:scale-[0.98] ' +
+    'transition-all duration-200 ease-spring active:scale-[0.97] ' +
     'disabled:opacity-40 disabled:pointer-events-none select-none';
 
   const sizeClasses = {

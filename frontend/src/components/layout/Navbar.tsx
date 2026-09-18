@@ -59,7 +59,7 @@ interface NavbarProps {
 
 const iconButton =
   'w-9 h-9 flex items-center justify-center rounded-control text-ink-2 ' +
-  'hover:text-ink hover:bg-sunken active:scale-95 transition-all duration-150 ease-settle';
+  'hover:text-ink hover:bg-sunken active:scale-95 transition-all duration-200 ease-spring';
 
 export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
@@ -239,7 +239,7 @@ export const Navbar: React.FC<NavbarProps> = ({
 
           <button
             onClick={onOpenQuickCapture}
-            className="flex items-center gap-1.5 h-9 pl-2.5 pr-3.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium active:scale-[0.98] transition-all duration-150 ease-settle"
+            className="flex items-center gap-1.5 h-9 pl-2.5 pr-3.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium active:scale-[0.98] transition-all duration-200 ease-spring"
           >
             <Plus className="w-4 h-4" />
             <span>Add</span>
@@ -255,7 +255,7 @@ export const Navbar: React.FC<NavbarProps> = ({
       <div className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-ground/90 backdrop-blur-xl border-t border-hairline pb-safe">
         <button
           onClick={onOpenQuickCapture}
-          className="mx-3 mt-2 mb-1 w-[calc(100%-1.5rem)] flex items-center gap-2.5 px-3.5 h-11 rounded-control bg-sunken text-ink-3 text-body active:scale-[0.99] transition-transform duration-150 ease-settle"
+          className="mx-3 mt-2 mb-1 w-[calc(100%-1.5rem)] flex items-center gap-2.5 px-3.5 h-11 rounded-control bg-sunken text-ink-3 text-body active:scale-[0.99] transition-transform duration-200 ease-spring"
         >
           <Plus className="w-[18px] h-[18px] text-accent-500" />
           <span>Add to today</span>

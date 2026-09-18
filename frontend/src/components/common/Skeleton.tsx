@@ -11,7 +11,7 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   className = '',
   count = 1
 }) => {
-  const baseClasses = 'animate-pulse bg-sunken rounded-control';
+  const baseClasses = 'shimmer bg-sunken rounded-control';
 
   const variantClasses = {
     card: 'h-32 w-full',
