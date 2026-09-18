@@ -111,7 +111,9 @@ async def evening_debrief(payload: DailyReflectionCreate, db: aiosqlite.Connecti
         "SELECT COUNT(*) FROM work_items WHERE is_completed = 0 AND status NOT IN ('done','archived')"
     ) as cursor:
         planned_count = (await cursor.fetchone())[0]
-    await db.execute(
+    # rowcount is what actually moved. Counting everything due tomorrow
+    # afterwards also counted tasks that were already scheduled for tomorrow.
+    migrate_cursor = await db.execute(
         """UPDATE work_items SET due_date = ?, updated_at = ?
            WHERE is_completed = 0
              AND status IN ('todo','in_progress','inbox')
@@ -119,11 +121,7 @@ async def evening_debrief(payload: DailyReflectionCreate, db: aiosqlite.Connecti
              AND entity_type = 'task'""",
         (tomorrow, now_iso, today)
     )
-    async with db.execute(
-        "SELECT COUNT(*) FROM work_items WHERE due_date = ? AND status IN ('todo','in_progress','inbox') AND is_completed = 0",
-        (tomorrow,)
-    ) as cursor:
-        migrated_count = (await cursor.fetchone())[0]
+    migrated_count = migrate_cursor.rowcount or 0
     big_rocks_json = json.dumps(payload.big_rocks or [])
     refl_id = f"refl_{uuid.uuid4().hex[:10]}"
     async with db.execute("SELECT id FROM daily_reflections WHERE date = ?", (today,)) as cursor:

@@ -188,11 +188,17 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
     now_iso = datetime.datetime.now().isoformat()
     fields = []
     values = []
-    
+
     update_dict = updates.model_dump(exclude_unset=True)
     new_subtasks = update_dict.pop("subtasks", None)
-    
+
+    # Moving a reminder means it should ring again at its new time.
+    if "remind_at" in update_dict:
+        fields.append("reminder_sent_at = ?")
+        values.append(None)
+
     # Handle completion & recurrence
+    spawned_next: Optional[str] = None
     if "is_completed" in update_dict:
         is_done = update_dict["is_completed"]
         fields.append("is_completed = ?")
@@ -204,16 +210,17 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
             fields.append("status = ?")
             values.append("done")
             
-            # Recurrence check: If recurring, schedule the next cycle!
+            # Recurrence: the completed item stays as history and the next
+            # cycle becomes its own item. Previously this marked the item done
+            # and pushed its own due_date forward, so a recurring task
+            # disappeared for good the first time it was ticked off.
             repeat_rule = existing["repeat_rule"]
             if repeat_rule:
                 next_date = calculate_next_occurrence(repeat_rule)
                 if next_date:
                     fields.append("next_occurrence = ?")
                     values.append(next_date.isoformat())
-                    # Auto-advance due_date to next cycle and reset status if desired
-                    fields.append("due_date = ?")
-                    values.append(next_date.strftime("%Y-%m-%d"))
+                    spawned_next = await _spawn_next_occurrence(db, existing, next_date, now_iso)
         else:
             fields.append("completed_at = ?")
             values.append(None)
@@ -297,7 +304,68 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
     )
     
     await ws_manager.broadcast({"type": "ITEM_UPDATED", "data": res.model_dump()})
+    if spawned_next:
+        await ws_manager.broadcast({"type": "ITEM_CREATED", "data": {"id": spawned_next}})
     return res
+
+
+async def _spawn_next_occurrence(
+    db: aiosqlite.Connection,
+    completed_row: aiosqlite.Row,
+    next_date: datetime.datetime,
+    now_iso: str,
+) -> str:
+    """Create the next cycle of a recurring item, with its subtasks unticked."""
+    new_id = f"item_{uuid.uuid4().hex[:12]}"
+    day_shift = None
+    if completed_row["start_at"]:
+        try:
+            previous_start = datetime.datetime.fromisoformat(completed_row["start_at"])
+            day_shift = datetime.datetime.combine(next_date.date(), previous_start.time())
+        except ValueError:
+            day_shift = None
+
+    remind_at = None
+    if completed_row["remind_at"] and day_shift:
+        try:
+            previous_remind = datetime.datetime.fromisoformat(completed_row["remind_at"])
+            previous_start = datetime.datetime.fromisoformat(completed_row["start_at"])
+            remind_at = (day_shift - (previous_start - previous_remind)).isoformat()
+        except ValueError:
+            remind_at = None
+
+    await db.execute(
+        """
+        INSERT INTO work_items (
+            id, title, description, entity_type, status, priority, energy,
+            due_date, start_at, end_at, remind_at, repeat_rule,
+            project_id, milestone_id, estimated_minutes, actual_minutes,
+            depends_on, context_tags, is_completed, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)
+        """,
+        (
+            new_id, completed_row["title"], completed_row["description"],
+            completed_row["entity_type"], completed_row["priority"], completed_row["energy"],
+            next_date.strftime("%Y-%m-%d"),
+            day_shift.isoformat() if day_shift else None,
+            None, remind_at, completed_row["repeat_rule"],
+            completed_row["project_id"], completed_row["milestone_id"],
+            completed_row["estimated_minutes"], completed_row["depends_on"] or "[]",
+            completed_row["context_tags"] or "", now_iso, now_iso,
+        ),
+    )
+
+    async with db.execute(
+        "SELECT title, position FROM subtasks WHERE work_item_id = ? ORDER BY position ASC",
+        (completed_row["id"],),
+    ) as cursor:
+        for sub_row in await cursor.fetchall():
+            await db.execute(
+                "INSERT INTO subtasks (id, work_item_id, title, is_completed, position, created_at) "
+                "VALUES (?, ?, ?, 0, ?, ?)",
+                (f"sub_{uuid.uuid4().hex[:10]}", new_id, sub_row["title"], sub_row["position"], now_iso),
+            )
+    return new_id
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, db: aiosqlite.Connection = Depends(get_db)):

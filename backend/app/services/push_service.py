@@ -1,3 +1,4 @@
+import asyncio
 import json
 import os
 import datetime
@@ -9,9 +10,16 @@ VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "DEMO_PRIVATE_KEY")
 VAPID_CLAIMS = {"sub": "mailto:admin@raspberrypi.local"}
 
 async def send_web_push(subscription: Dict[str, str], title: str, body: str, url: str = "/"):
-    """Dispatches a Web Push notification to an iOS PWA or PC browser."""
+    """
+    Dispatches a Web Push notification to an iOS PWA or PC browser.
+
+    pywebpush is synchronous and talks to a push service over the network, so
+    it runs on a worker thread. Called directly it would block the event loop
+    for the length of that request, per subscription -- on a Pi serving a
+    reminder to three devices that is the whole API stalled.
+    """
     try:
-        from pywebpush import webpush, WebPushException
+        from pywebpush import webpush
         payload = json.dumps({
             "title": title,
             "body": body,
@@ -19,8 +27,9 @@ async def send_web_push(subscription: Dict[str, str], title: str, body: str, url
             "badge": "/icons/icon-192x192.png",
             "data": {"url": url}
         })
-        
-        webpush(
+
+        await asyncio.to_thread(
+            webpush,
             subscription_info={
                 "endpoint": subscription["endpoint"],
                 "keys": {
@@ -45,13 +54,19 @@ async def check_due_reminders(db_path: str, ws_manager=None):
     try:
         async with aiosqlite.connect(db_path) as db:
             db.row_factory = aiosqlite.Row
-            # Find uncompleted items with remind_at <= now
+            # This connection is outside the pool, so it needs its own timeout
+            # or it gives up the moment a write is in flight elsewhere.
+            await db.execute("PRAGMA busy_timeout = 10000;")
+            # Items whose reminder is due and has not already been sent. Without
+            # the reminder_sent_at check every due reminder fired again on each
+            # 60-second pass, for as long as the item stayed incomplete.
             query = """
-                SELECT id, title, entity_type, remind_at 
-                FROM work_items 
-                WHERE is_completed = 0 
-                  AND remind_at IS NOT NULL 
+                SELECT id, title, entity_type, remind_at
+                FROM work_items
+                WHERE is_completed = 0
+                  AND remind_at IS NOT NULL
                   AND remind_at <= ?
+                  AND reminder_sent_at IS NULL
             """
             async with db.execute(query, (now_iso,)) as cursor:
                 due_items = await cursor.fetchall()
@@ -86,5 +101,12 @@ async def check_due_reminders(db_path: str, ws_manager=None):
                                 "entity_type": item["entity_type"]
                             }
                         })
+
+                    await db.execute(
+                        "UPDATE work_items SET reminder_sent_at = ? WHERE id = ?",
+                        (now_iso, item["id"])
+                    )
+
+                await db.commit()
     except Exception as e:
         print(f"Reminder worker error: {e}")

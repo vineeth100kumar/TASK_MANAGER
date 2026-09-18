@@ -1,5 +1,6 @@
 import os
 import asyncio
+import datetime
 import aiosqlite
 from typing import AsyncGenerator, Optional
 
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS work_items (
     
     is_completed INTEGER DEFAULT 0,
     completed_at TEXT,
+    reminder_sent_at TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -197,6 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
 CREATE INDEX IF NOT EXISTS idx_work_items_milestone ON work_items(milestone_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_context_tags ON work_items(context_tags);
+CREATE INDEX IF NOT EXISTS idx_work_items_reminders ON work_items(remind_at, reminder_sent_at, is_completed);
 CREATE INDEX IF NOT EXISTS idx_subtasks_work_item ON subtasks(work_item_id);
 CREATE INDEX IF NOT EXISTS idx_subtasks_pos ON subtasks(position);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_account ON finance_transactions(account_id);
@@ -282,6 +285,18 @@ async def _run_migrations(db: aiosqlite.Connection):
     if "context_tags" not in columns:
         await db.execute("ALTER TABLE work_items ADD COLUMN context_tags TEXT DEFAULT ''")
         print("Migration: added context_tags column to work_items")
+
+    # v2.13.0: Track which reminders have already fired, so the 60-second worker
+    # stops re-notifying the same item for as long as it stays incomplete.
+    if "reminder_sent_at" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN reminder_sent_at TEXT")
+        # Anything already overdue on an existing database is history, not a
+        # backlog of notifications to deliver on the next tick.
+        await db.execute(
+            "UPDATE work_items SET reminder_sent_at = ? WHERE remind_at IS NOT NULL AND remind_at <= ?",
+            (datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat())
+        )
+        print("Migration: added reminder_sent_at column to work_items")
 
     # v2.3.1: Add is_upi_default column to finance_accounts if it doesn't exist
     async with db.execute("PRAGMA table_info(finance_accounts)") as fa_cursor:
