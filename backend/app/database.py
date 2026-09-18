@@ -320,22 +320,35 @@ async def init_database():
 
         # Seed default financial accounts if none exist
         async with db.execute("SELECT COUNT(*) FROM finance_accounts") as cursor:
-            count = (await cursor.fetchone())[0]
-            if count == 0:
-                accounts = [
-                    ("acc_bank_1", "Primary Bank Account", "bank", 0.0, "INR"),
-                    ("acc_cash_1", "Cash in Hand", "cash", 0.0, "INR"),
-                    ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 0.0, "INR"),
-                ]
-                await db.executemany(
-                    "INSERT INTO finance_accounts (id, name, account_type, balance, currency) VALUES (?, ?, ?, ?, ?)",
-                    accounts,
-                )
+            account_count = (await cursor.fetchone())[0]
+        if account_count == 0:
+            accounts = [
+                ("acc_bank_1", "Primary Bank Account", "bank", 0.0, "INR"),
+                ("acc_cash_1", "Cash in Hand", "cash", 0.0, "INR"),
+                ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 0.0, "INR"),
+            ]
+            await db.executemany(
+                "INSERT INTO finance_accounts (id, name, account_type, balance, currency) VALUES (?, ?, ?, ?, ?)",
+                accounts,
+            )
 
-                await db.executemany(
-                    "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
-                    categories,
-                )
+        # Seed default spend categories independently, so databases created while
+        # this block was broken get them backfilled on the next boot.
+        async with db.execute("SELECT COUNT(*) FROM finance_categories") as cursor:
+            category_count = (await cursor.fetchone())[0]
+        if category_count == 0:
+            categories = [
+                ("cat_food", "Food & Dining", "Utensils", 8000.0),
+                ("cat_groceries", "Groceries", "ShoppingCart", 6000.0),
+                ("cat_transport", "Transport & Fuel", "Car", 3000.0),
+                ("cat_bills", "Utilities & Bills", "Zap", 4500.0),
+                ("cat_entertainment", "Entertainment & Subs", "Film", 2000.0),
+                ("cat_shopping", "Shopping", "Bag", 4000.0),
+            ]
+            await db.executemany(
+                "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
+                categories,
+            )
 
         await db.commit()
 
