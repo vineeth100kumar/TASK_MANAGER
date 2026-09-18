@@ -189,6 +189,17 @@ CREATE TABLE IF NOT EXISTS whiteboards (
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
+
+-- One row per quick capture the app has sent, so the same capture can never be
+-- acted on twice. A phone on a tunnel retries; a person taps twice; the model
+-- takes long enough that the client gives up and asks again. Each of those
+-- arrives carrying the request_id of the first attempt, and is answered with
+-- what that attempt already created rather than creating it again.
+CREATE TABLE IF NOT EXISTS capture_requests (
+    request_id TEXT PRIMARY KEY,
+    created_at TEXT NOT NULL,
+    response TEXT
+);
 """
 
 SCHEMA_INDEXES_SQL = """
@@ -209,6 +220,7 @@ CREATE INDEX IF NOT EXISTS idx_finance_tx_type_date ON finance_transactions(type
 CREATE INDEX IF NOT EXISTS idx_recurring_bills_active ON recurring_bills(is_active, due_day_of_month);
 CREATE INDEX IF NOT EXISTS idx_daily_reflections_date ON daily_reflections(date);
 CREATE INDEX IF NOT EXISTS idx_whiteboards_project ON whiteboards(project_id);
+CREATE INDEX IF NOT EXISTS idx_capture_requests_created ON capture_requests(created_at);
 """
 
 # Backwards compatibility

@@ -17,12 +17,25 @@ const DEFAULT_TIMEOUT_MS = 15000;
 async function fetchJson<T>(url: string, options?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   const token = getApiSecret();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let timedOut = false;
+  const timeoutId = setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+
+  // A caller's own signal has to be chained rather than replace this one, or
+  // passing a signal quietly removes the timeout and a stalled request hangs
+  // forever.
+  const callerSignal = options?.signal;
+  if (callerSignal) {
+    if (callerSignal.aborted) controller.abort();
+    else callerSignal.addEventListener('abort', () => controller.abort(), { once: true });
+  }
 
   try {
     const res = await fetch(`${BASE_URL}${url}`, {
       ...options,
-      signal: options?.signal || controller.signal,
+      signal: controller.signal,
       headers: {
         'Content-Type': 'application/json',
         ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
@@ -36,7 +49,14 @@ async function fetchJson<T>(url: string, options?: RequestInit, timeoutMs = DEFA
     return res.json();
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds: ${url}`);
+      if (!timedOut) {
+        const cancelled: any = new Error(`Request cancelled: ${url}`);
+        cancelled.cancelled = true;
+        throw cancelled;
+      }
+      const timeout: any = new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds: ${url}`);
+      timeout.timedOut = true;
+      throw timeout;
     }
     throw err;
   } finally {
@@ -219,7 +239,13 @@ export const api = {
   // budget the backend just told us to expect.
   capture: (
     text: string,
-    opts: { commit?: boolean; useAi?: boolean; timeoutMs?: number; signal?: AbortSignal } = {}
+    opts: {
+      commit?: boolean;
+      useAi?: boolean;
+      timeoutMs?: number;
+      signal?: AbortSignal;
+      requestId?: string;
+    } = {}
   ) =>
     fetchJson<CaptureResult>(
       '/api/v1/ai/capture',
@@ -229,6 +255,10 @@ export const api = {
           text,
           commit: opts.commit !== false,
           use_ai: opts.useAi !== false,
+          // The same id on every attempt at one capture, so a retry is
+          // answered with what the first attempt created rather than
+          // creating a second copy of everything.
+          ...(opts.requestId ? { request_id: opts.requestId } : {}),
         }),
         ...(opts.signal ? { signal: opts.signal } : {}),
       },

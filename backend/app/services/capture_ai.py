@@ -25,7 +25,7 @@ import httpx
 
 from . import ai_runtime
 from .ai_engine import OLLAMA_HOST, OLLAMA_MODEL, safe_parse_json
-from .capture_engine import CapturedItem, parse_capture, split_segments
+from .capture_engine import CapturedItem, dedupe_items, parse_capture, split_segments
 
 # None means "ask ai_runtime", which learns the budget from what this Pi
 # actually does. A number overrides it, which is what the tests use.
@@ -305,7 +305,10 @@ def reconcile(
             time_is_ambiguous=base.time_is_ambiguous,
         ))
 
-    return results or baseline
+    # A 1.5B model asked for a list will sometimes emit the same item twice,
+    # and two identical rows in the task list is worse than a missed one. The
+    # note said it once, so it is created once.
+    return dedupe_items(results) if results else baseline
 
 
 def _text_has_time(text: str) -> bool:

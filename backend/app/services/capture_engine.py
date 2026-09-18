@@ -9,8 +9,8 @@ The whole engine is deterministic, pure Python and has no I/O, so it runs in
 well under a millisecond on a Raspberry Pi and works with Ollama stopped. It is
 the source of truth for anything structured: dates, times, recurrence, money and
 durations are never handed to a 1.5B model, which gets them wrong often enough
-to be worse than useless. The local model is only ever asked to polish a title,
-and only when the caller opts in.
+to be worse than useless. `capture_ai` lets the model read the note, then checks
+everything it returns against this parse and replaces whatever does not hold up.
 
 The entry point is `parse_capture(text)`.
 """
@@ -1111,4 +1111,51 @@ def parse_capture(text: str, now: Optional[datetime.datetime] = None,
 
     items = [parse_segment(segment, now, projects) for segment in split_segments(raw)]
     items = [i for i in items if i.title and i.title != "Untitled item"] or items
-    return CaptureResult(items=items, raw_text=raw)
+    kept = [i for i in items if not _is_dangling_verb(i)]
+    return CaptureResult(items=dedupe_items(kept or items), raw_text=raw)
+
+
+def _is_dangling_verb(item: "CapturedItem") -> bool:
+    """
+    A leftover verb that carries nothing of its own.
+
+    "going out with cousins at 7.30 so finish and leave office by 6.30pm"
+    splits on "and", which strands "finish" as its own segment. On its own it
+    is a word, not a thing to do, and a task called "Finish" is noise in the
+    list. A single verb that claimed no date, time, money or recurrence is
+    that case; anything with an object or a schedule is kept.
+    """
+    words = re.findall(r"[a-z]+", item.title.lower())
+    if len(words) != 1:
+        return False
+    if item.due_date or item.start_at or item.end_at or item.remind_at:
+        return False
+    if item.expense or item.repeat_rule:
+        return False
+    return words[0] in ACTION_VERBS or words[0] in TASK_VERBS
+
+
+def item_signature(item: "CapturedItem") -> tuple:
+    """
+    What makes two captured items the same thing.
+
+    The same words at the same moment are one item, however many readings of
+    the note produced them. Two items that share a title but sit at different
+    times ("call mum at 5 and again at 8") are not the same thing and both
+    survive.
+    """
+    title = re.sub(r"\s+", " ", (item.title or "").strip().lower())
+    return (title, item.entity_type, item.due_date, item.start_at, item.remind_at)
+
+
+def dedupe_items(items: Sequence["CapturedItem"]) -> List["CapturedItem"]:
+    """Drop repeats, keeping the first reading of each."""
+    seen = set()
+    unique: List[CapturedItem] = []
+    for item in items:
+        signature = item_signature(item)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        unique.append(item)
+    return unique

@@ -384,6 +384,8 @@ export interface CaptureResult {
   items: CapturedItem[];
   transactions?: { id: string; amount: number; payment_mode: string; description: string }[];
   detail?: string;
+  /** True when this capture had already been acted on and nothing new was created. */
+  duplicate?: boolean;
 }
 
 /** What the Pi's local model is doing right now. */

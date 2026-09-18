@@ -24,22 +24,27 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
   // One call does the whole job now: the Pi reads the note, creates the items
   // and logs any spend in a single transaction, then tells every device. The
   // old loop made a round trip per item while the Pi was at its busiest.
-  const { capture, isCapturing, expectedSeconds, elapsedSeconds, usedFallback } = useCapture();
+  const { capture, isCapturing, expectedSeconds, elapsedSeconds, usedFallback, error } = useCapture();
 
   const handleProcess = async () => {
-    if (!text.trim()) return;
+    if (!text.trim() || isCapturing) return;
     setExtractedItems(null);
 
     try {
       const items = await capture(text);
       if (items.length) {
         setExtractedItems(items);
+        // Clear the note once it has been filed. The items below are the
+        // receipt, and an empty box makes filing the same note twice by
+        // accident impossible.
+        setText('');
         toast.success(`Captured ${items.length} item${items.length === 1 ? '' : 's'}`);
         onItemsCreated();
       } else {
         toast.warning('Nothing to capture in that note.');
       }
     } catch (e: any) {
+      // The note stays in the box, so nothing typed is ever lost to a failure.
       console.error('Capture failed:', e);
       toast.error('Could not reach the Pi. Check the connection.');
     }
@@ -94,6 +99,12 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
               {expectedSeconds ? `, usually about ${Math.round(expectedSeconds)}s` : ''}.
               The app may be slow to respond until it finishes.
             </span>
+          </div>
+        )}
+
+        {error && !isCapturing && (
+          <div className="text-xs text-rose-600 dark:text-rose-400">
+            {error}. Your note is still here; try again when the Pi is back.
           </div>
         )}
 
