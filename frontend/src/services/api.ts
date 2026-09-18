@@ -311,11 +311,20 @@ export const api = {
     }),
 
   // Web Push
+  getVapidPublicKey: () =>
+    fetchJson<{ public_key: string }>('/api/v1/push/vapid-public-key'),
+
   subscribePush: (sub: { endpoint: string; p256dh: string; auth: string; device_name?: string }) =>
     fetchJson<{ success: boolean; id: string }>('/api/v1/push/subscribe', {
       method: 'POST',
       body: JSON.stringify(sub),
     }),
+
+  unsubscribePush: (endpoint: string) =>
+    fetchJson<{ success: boolean }>(
+      `/api/v1/push/subscribe?endpoint=${encodeURIComponent(endpoint)}`,
+      { method: 'DELETE' }
+    ),
 
   // Whiteboards / Drawing Boards
   getWhiteboards: (projectId?: string) => {

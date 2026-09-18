@@ -30,11 +30,27 @@ async def subscribe(sub: PushSubscriptionCreate, db: aiosqlite.Connection = Depe
     await db.commit()
     
     # Send welcome / test notification
+    # One notification straight away, so turning it on is visibly confirmed
+    # rather than something you have to wait until tomorrow to trust.
     await send_web_push(
         {"endpoint": sub.endpoint, "p256dh": sub.p256dh, "auth": sub.auth},
-        title="Sage Notifications Active",
-        body="You will now receive recurring reminders and budget alerts here.",
-        url="/dashboard"
+        title="Reminders are on",
+        body="This is what one looks like.",
+        url="/",
+        tag="sage-welcome"
     )
     
     return {"success": True, "id": sub_id}
+
+
+@router.delete("/subscribe")
+async def unsubscribe(endpoint: str, db: aiosqlite.Connection = Depends(get_db)):
+    """
+    Forgets a subscription.
+
+    Without this, turning reminders off in the browser left the row behind and
+    the Pi went on pushing to a dead endpoint every time a reminder fell due.
+    """
+    await db.execute("DELETE FROM push_subscriptions WHERE endpoint = ?", (endpoint,))
+    await db.commit()
+    return {"success": True}
