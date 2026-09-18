@@ -23,13 +23,13 @@ from typing import Any, Dict, List, Optional, Sequence
 
 import httpx
 
+from . import ai_runtime
 from .ai_engine import OLLAMA_HOST, OLLAMA_MODEL, safe_parse_json
 from .capture_engine import CapturedItem, parse_capture, split_segments
 
-# A Pi 5 running qwen2.5:1.5b answers a short extraction in a few seconds. The
-# user has pressed a button and is waiting, so this is a real budget, not a
-# background one.
-DEFAULT_TIMEOUT_SECONDS = 20.0
+# None means "ask ai_runtime", which learns the budget from what this Pi
+# actually does. A number overrides it, which is what the tests use.
+DEFAULT_TIMEOUT_SECONDS: Optional[float] = None
 
 VALID_ENTITY_TYPES = {"task", "event", "reminder"}
 VALID_PRIORITIES = {"low", "medium", "high", "urgent"}
@@ -98,26 +98,40 @@ async def extract_with_ollama(
     text: str,
     now: datetime.datetime,
     projects: Sequence[Dict[str, Any]],
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: Optional[float] = None,
 ) -> Optional[List[Dict[str, Any]]]:
-    """Ask the local model to read the note. Returns None whenever it cannot help."""
-    try:
-        async with httpx.AsyncClient(timeout=timeout_seconds) as client:
-            resp = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": build_prompt(text, now, projects),
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": 0.0, "num_predict": 700},
-                },
-            )
-        if resp.status_code != 200:
+    """
+    Ask the local model to read the note. Returns None whenever it cannot help.
+
+    Runs inside an `ai_runtime.inference` block, which serialises model calls,
+    tells every connected client the Pi is busy, and feeds the time this took
+    back into the timeout estimate for next time.
+    """
+    prompt = build_prompt(text, now, projects)
+
+    async with ai_runtime.inference(label="capture", input_chars=len(text)) as run:
+        budget = timeout_seconds if timeout_seconds is not None else run.timeout
+        try:
+            async with httpx.AsyncClient(timeout=budget) as client:
+                resp = await client.post(
+                    f"{OLLAMA_HOST}/api/generate",
+                    json={
+                        "model": OLLAMA_MODEL,
+                        "prompt": prompt,
+                        "format": "json",
+                        "stream": False,
+                        "options": {"temperature": 0.0, "num_predict": 700},
+                    },
+                )
+            if resp.status_code != 200:
+                run.record_failure(f"http_{resp.status_code}")
+                return None
+            data = safe_parse_json(resp.json().get("response", ""))
+        except Exception as exc:
+            # A timeout or a stopped Ollama is not an error the caller sees:
+            # the deterministic parse answers instead.
+            run.record_failure(type(exc).__name__)
             return None
-        data = safe_parse_json(resp.json().get("response", ""))
-    except Exception:
-        return None
 
     if isinstance(data, dict):
         items = data.get("items")
@@ -339,13 +353,14 @@ async def understand(
     now: Optional[datetime.datetime] = None,
     projects: Optional[Sequence[Dict[str, Any]]] = None,
     use_ai: bool = True,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: Optional[float] = DEFAULT_TIMEOUT_SECONDS,
 ) -> List[CapturedItem]:
     """
     Read a capture with the local model, checked against the deterministic parse.
 
     Set use_ai=False for the hints shown while someone is still typing, where
-    the answer has to be instant.
+    the answer has to be instant. Leave timeout_seconds as None to use the
+    budget ai_runtime has learned for this Pi.
     """
     now = now or datetime.datetime.now()
     projects = list(projects or [])

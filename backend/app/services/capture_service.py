@@ -16,6 +16,7 @@ import aiosqlite
 
 from .capture_ai import DEFAULT_TIMEOUT_SECONDS, understand
 from .capture_engine import CapturedItem
+from .item_serializer import load_item
 from .ws_manager import ws_manager
 
 async def load_projects(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
@@ -29,7 +30,7 @@ async def read_capture(
     text: str,
     now: Optional[datetime.datetime] = None,
     use_ai: bool = True,
-    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: Optional[float] = DEFAULT_TIMEOUT_SECONDS,
 ) -> List[CapturedItem]:
     """
     Understand a capture without writing anything.
@@ -64,6 +65,7 @@ async def commit_capture(
 
     now_iso = now.isoformat()
     created: List[Dict[str, Any]] = []
+    created_ids: List[str] = []
     transactions: List[Dict[str, Any]] = []
 
     for item in items:
@@ -84,6 +86,8 @@ async def commit_capture(
                 item.estimated_minutes, item.context_tags, now_iso, now_iso,
             ),
         )
+        created_ids.append(item_id)
+        # What the capture understood, for the confirmation the user sees.
         record = item.to_dict()
         record["id"] = item_id
         created.append(record)
@@ -95,8 +99,14 @@ async def commit_capture(
 
     await db.commit()
 
-    for record in created:
-        await ws_manager.broadcast({"type": "ITEM_CREATED", "data": record})
+    # Announce the rows as they were actually written, in the full item shape.
+    # The frontend drops whatever arrives straight into its task list, so a
+    # partial payload leaves a half-built object there for something else to
+    # trip over later.
+    for item_id in created_ids:
+        stored = await load_item(db, item_id)
+        if stored:
+            await ws_manager.broadcast({"type": "ITEM_CREATED", "data": stored})
     for transaction in transactions:
         await ws_manager.broadcast({"type": "FINANCE_TRANSACTION_CREATED", "data": transaction})
 

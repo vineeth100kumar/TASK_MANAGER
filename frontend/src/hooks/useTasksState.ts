@@ -442,12 +442,30 @@ export function useTasksState({
     }
   }, [milestones, startSync, endSync, pushHistoryAction, toast]);
 
+  // A broadcast is stored in the list as-is, so anything missing here shows up
+  // later as a crash somewhere unrelated. Fill in what a work item must have.
+  const normalizeItem = (data: any): WorkItem | null => {
+    if (!data || typeof data !== 'object' || !data.id) return null;
+    return {
+      ...data,
+      subtasks: Array.isArray(data.subtasks) ? data.subtasks : [],
+      depends_on: Array.isArray(data.depends_on) ? data.depends_on : [],
+      is_completed: Boolean(data.is_completed),
+      status: data.status || 'todo',
+      priority: data.priority || 'medium',
+      energy: data.energy || 'medium',
+      entity_type: data.entity_type || 'task',
+      estimated_minutes: data.estimated_minutes ?? 30,
+      actual_minutes: data.actual_minutes ?? 0,
+    } as WorkItem;
+  };
+
   // Handle selective WebSocket event for tasks
   const handleWsTaskEvent = useCallback((event: { type: string; data: any }): boolean => {
     switch (event.type) {
       case 'ITEM_CREATED': {
-        const item = event.data as WorkItem;
-        if (item && item.id) {
+        const item = normalizeItem(event.data);
+        if (item) {
           setItems(prev => {
             if (prev.some(i => i.id === item.id)) return prev;
             return [item, ...prev];
@@ -456,9 +474,9 @@ export function useTasksState({
         return true;
       }
       case 'ITEM_UPDATED': {
-        const updated = event.data as WorkItem;
-        if (updated && updated.id) {
-          setItems(prev => prev.map(i => i.id === updated.id ? updated : i));
+        const updated = normalizeItem(event.data);
+        if (updated) {
+          setItems(prev => prev.map(i => i.id === updated.id ? { ...i, ...updated } : i));
         }
         return true;
       }
@@ -474,7 +492,9 @@ export function useTasksState({
         if (id !== undefined) {
           setItems(prev => prev.map(item => ({
             ...item,
-            subtasks: item.subtasks.map(s => s.id === id ? { ...s, is_completed } : s)
+            // An item that arrived without subtasks would throw here, so this
+            // tolerates a payload that is not a full work item.
+            subtasks: (item.subtasks || []).map(s => s.id === id ? { ...s, is_completed } : s)
           })));
         }
         return true;

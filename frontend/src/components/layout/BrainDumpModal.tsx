@@ -1,9 +1,10 @@
 import React, { useState } from 'react';
-import { Sparkles, ArrowRight, CheckCircle2, Radio } from 'lucide-react';
-import { api } from '../../services/api';
+import { Sparkles, ArrowRight, CheckCircle2, Radio, Loader2 } from 'lucide-react';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { useToast } from '../../context/ToastContext';
+import { useCapture } from '../../hooks/useCapture';
+import { CapturedItem } from '../../types';
 
 interface BrainDumpModalProps {
   isOpen: boolean;
@@ -18,62 +19,29 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
 }) => {
   const toast = useToast();
   const [text, setText] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [extractedItems, setExtractedItems] = useState<any[] | null>(null);
+  const [extractedItems, setExtractedItems] = useState<CapturedItem[] | null>(null);
+
+  // One call does the whole job now: the Pi reads the note, creates the items
+  // and logs any spend in a single transaction, then tells every device. The
+  // old loop made a round trip per item while the Pi was at its busiest.
+  const { capture, isCapturing, expectedSeconds, elapsedSeconds, usedFallback } = useCapture();
 
   const handleProcess = async () => {
     if (!text.trim()) return;
-    setIsProcessing(true);
     setExtractedItems(null);
 
     try {
-      const res = await api.parseBrainDump(text);
-      if (res.success && res.items) {
-        setExtractedItems(res.items);
-
-        // Save each item
-        for (const item of res.items) {
-          await api.createItem({
-            title: item.title,
-            description: item.description,
-            due_date: item.due_date,
-            start_at: item.start_at,
-            priority: item.priority || 'medium',
-            entity_type: item.entity_type || 'task',
-            status: 'todo',
-          });
-
-          // If an expense was detected in the brain dump, log it automatically!
-          if (item.expense && item.expense.amount > 0) {
-            try {
-              const summary = await api.getFinanceSummary();
-              const primaryAccount = summary.accounts[0];
-              if (primaryAccount) {
-                await api.createTransaction({
-                  account_id: primaryAccount.id,
-                  type: 'expense',
-                  amount: item.expense.amount,
-                  payment_mode: item.expense.payment_mode || 'upi',
-                  description: item.title,
-                  date: new Date().toISOString().split('T')[0],
-                });
-              }
-            } catch (err) {
-              console.error('Failed to auto-log detected expense', err);
-            }
-          }
-        }
-
-        toast.success(`Decoded & filed ${res.items.length} item(s)`);
+      const items = await capture(text);
+      if (items.length) {
+        setExtractedItems(items);
+        toast.success(`Captured ${items.length} item${items.length === 1 ? '' : 's'}`);
         onItemsCreated();
       } else {
-        toast.warning('No actionable dispatches detected in the wire text.');
+        toast.warning('Nothing to capture in that note.');
       }
     } catch (e: any) {
-      console.error('Failed to parse brain dump:', e);
-      toast.error('Failed to parse brain dump. Check connection to Raspberry Pi.');
-    } finally {
-      setIsProcessing(false);
+      console.error('Capture failed:', e);
+      toast.error('Could not reach the Pi. Check the connection.');
     }
   };
 
@@ -104,8 +72,8 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
           </span>
           <Button
             onClick={handleProcess}
-            isLoading={isProcessing}
-            disabled={!text.trim()}
+            isLoading={isCapturing}
+            disabled={!text.trim() || isCapturing}
             variant="primary"
             size="sm"
             icon={<ArrowRight className="w-3.5 h-3.5" />}
@@ -113,6 +81,27 @@ export const BrainDumpModal: React.FC<BrainDumpModalProps> = ({
             Transmit & File
           </Button>
         </div>
+
+        {/* While the model runs, the Pi is busy and slow to answer anything
+            else. Say so plainly, with the time passing, rather than leaving a
+            spinner that reads as a hang. */}
+        {isCapturing && (
+          <div className="flex items-center gap-2 text-xs text-ink-muted dark:text-stone-400 bg-paper-aged/40 dark:bg-[#0b0b0e] border border-ink-base/15 dark:border-stone-800 rounded-lg p-2.5">
+            <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
+            <span>
+              Reading your note on the Pi
+              {elapsedSeconds > 0 && ` — ${elapsedSeconds}s`}
+              {expectedSeconds ? `, usually about ${Math.round(expectedSeconds)}s` : ''}.
+              The app may be slow to respond until it finishes.
+            </span>
+          </div>
+        )}
+
+        {usedFallback && extractedItems && (
+          <div className="text-[10px] text-ink-muted dark:text-stone-500">
+            The model was unavailable, so this was read without it. Dates and times are still exact.
+          </div>
+        )}
 
         {extractedItems && (
           <div className="bg-paper-aged/40 dark:bg-[#0b0b0e] border border-ink-base/15 dark:border-stone-800 rounded-lg p-3 space-y-2 max-h-48 overflow-y-auto">

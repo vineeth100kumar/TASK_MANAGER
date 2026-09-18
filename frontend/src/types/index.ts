@@ -343,3 +343,66 @@ export interface WhiteboardListItem {
   updated_at: string;
 }
 
+
+// ---------------------------------------------------------------------------
+// Natural-language capture & local AI state
+// ---------------------------------------------------------------------------
+
+export interface CaptureToken {
+  type: 'date' | 'time' | 'priority' | 'project' | 'tag' | 'estimate' | 'entity' | 'repeat' | 'expense';
+  text: string;
+  display: string;
+}
+
+export interface CapturedItem {
+  id?: string;
+  title: string;
+  source_text: string;
+  entity_type: EntityType;
+  status: TaskStatus;
+  priority: TaskPriority;
+  energy: TaskEnergy;
+  description?: string | null;
+  due_date?: string | null;
+  start_at?: string | null;
+  end_at?: string | null;
+  remind_at?: string | null;
+  repeat_rule?: string | null;
+  estimated_minutes: number;
+  context_tags: string;
+  project_id?: string | null;
+  project_name?: string | null;
+  expense?: { amount: number; payment_mode: string; description?: string } | null;
+  tokens: CaptureToken[];
+  /** The hour had no am/pm and was inferred, so it is worth showing plainly. */
+  time_is_ambiguous: boolean;
+}
+
+export interface CaptureResult {
+  success: boolean;
+  committed: boolean;
+  items: CapturedItem[];
+  transactions?: { id: string; amount: number; payment_mode: string; description: string }[];
+  detail?: string;
+}
+
+/** What the Pi's local model is doing right now. */
+export interface AiStatus {
+  busy: boolean;
+  active_requests: number;
+  /** False until the model has answered once since boot; the first call is slow. */
+  warm: boolean;
+  typical_seconds: number | null;
+  next_timeout_seconds: number;
+  consecutive_failures: number;
+  last_error: string | null;
+  samples: number;
+}
+
+/** Pushed over the WebSocket when the model starts and stops. */
+export interface AiBusyEvent {
+  busy: boolean;
+  label: string;
+  expected_seconds: number;
+  elapsed_seconds?: number;
+}

@@ -11,6 +11,7 @@ from ..models import (
     SubtaskResponse, ProjectCreate, ProjectResponse,
     MilestoneCreate, MilestoneResponse
 )
+from ..services.item_serializer import load_item
 from ..services.recurrence import calculate_next_occurrence
 from ..services.ws_manager import ws_manager
 
@@ -305,7 +306,10 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
     
     await ws_manager.broadcast({"type": "ITEM_UPDATED", "data": res.model_dump()})
     if spawned_next:
-        await ws_manager.broadcast({"type": "ITEM_CREATED", "data": {"id": spawned_next}})
+        # The full item, not just its id: the frontend stores this object as-is.
+        stored = await load_item(db, spawned_next)
+        if stored:
+            await ws_manager.broadcast({"type": "ITEM_CREATED", "data": stored})
     return res
 
 

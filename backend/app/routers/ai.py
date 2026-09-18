@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 
 from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
+from ..services.ai_runtime import status as ai_runtime_status
 from ..services.capture_service import commit_capture, read_capture
 from ..services.weather_service import get_current_weather
 from ..config import DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME
@@ -83,6 +84,17 @@ async def get_greeting(
             "urgent": urgent_count
         }
     }
+
+@router.get("/status")
+async def ai_status():
+    """
+    Whether the Pi is currently running the model, and how long it usually takes.
+
+    The WebSocket announces starts and stops, but only to clients that were
+    already connected. A phone waking up mid-capture reads this instead, so it
+    can show that the Pi is thinking rather than that something is wrong.
+    """
+    return ai_runtime_status()
 
 @router.post("/capture")
 async def capture(req: CaptureRequest, db: aiosqlite.Connection = Depends(get_db)):
