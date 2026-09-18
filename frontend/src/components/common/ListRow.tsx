@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { motion, PanInfo } from 'framer-motion';
-import { Check, Trash2, Lock, Sparkles, RotateCw, Calendar, Tag, Folder } from 'lucide-react';
+import { Check, Trash2, Sparkles, RotateCw, Folder } from 'lucide-react';
 import { WorkItem, Project } from '../../types';
 import { haptics } from '../../utils/haptics';
 import { formatRelativeDate, isOverdue, isDueToday } from '../../utils/dateHelpers';
@@ -23,6 +23,14 @@ export interface ListRowProps {
   onReschedule?: (item: WorkItem, newDate: string | null) => void;
 }
 
+/*
+ * A task, as a row in a list rather than a bordered card.
+ *
+ * The task's own title is the largest thing in it. Its metadata is one quiet
+ * line underneath, and only the two states that need attention — overdue and
+ * blocked — carry any colour. Row actions stay hidden until hover on desktop;
+ * on touch, the swipe gestures are the primary route and remain unchanged.
+ */
 export const ListRow: React.FC<ListRowProps> = ({
   item,
   projects = [],
@@ -37,12 +45,12 @@ export const ListRow: React.FC<ListRowProps> = ({
   onDelete,
   onClick,
   onRefine,
-  onReschedule
+  onReschedule,
 }) => {
   const [dragOffset, setDragOffset] = useState(0);
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
 
-  const matchedProject = item.project_id ? projects.find(p => p.id === item.project_id) : undefined;
+  const matchedProject = item.project_id ? projects.find((p) => p.id === item.project_id) : undefined;
   const overdue = isOverdue(item.due_date, item.is_completed);
   const dueToday = isDueToday(item.due_date);
 
@@ -53,11 +61,9 @@ export const ListRow: React.FC<ListRowProps> = ({
   const handleDragEnd = (_e: MouseEvent | TouchEvent | PointerEvent, info: PanInfo) => {
     const threshold = 65;
     if (info.offset.x >= threshold) {
-      // Swipe Right -> Toggle Complete
       haptics.medium();
       onToggleComplete(item);
     } else if (info.offset.x <= -threshold) {
-      // Swipe Left -> Delete
       haptics.warning();
       onDelete(item.id);
     }
@@ -65,177 +71,142 @@ export const ListRow: React.FC<ListRowProps> = ({
   };
 
   return (
-    <div className="relative overflow-hidden rounded-none group select-none border border-stone-300 dark:border-stone-800/80 mb-2 shadow-xs">
-      {/* Background action reveals */}
-      <div className="absolute inset-0 flex items-center justify-between px-4 text-white font-medium text-xs pointer-events-none rounded-none">
-        {/* Left reveal: Swipe Right Complete */}
-        <div
-          className={`flex items-center space-x-2 transition-opacity duration-150 ${
+    <div className="relative overflow-hidden group select-none border-b border-hairline last:border-b-0">
+      {/* What the swipe will do, revealed as you drag */}
+      <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
+        <span
+          className={`flex items-center gap-1.5 text-meta font-medium text-done-500 dark:text-done-400 transition-opacity duration-150 ${
             dragOffset > 20 ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <div className="w-7 h-7 rounded-none bg-emerald-600 flex items-center justify-center border border-emerald-400">
-            <Check className="w-4 h-4 text-white stroke-[3]" />
-          </div>
-          <span className="font-ledger font-bold text-emerald-600 dark:text-emerald-400 text-xs uppercase tracking-wider">
-            {item.is_completed ? 'Mark Active' : 'Complete'}
-          </span>
-        </div>
+          <Check className="w-4 h-4" strokeWidth={2.5} />
+          {item.is_completed ? 'Reopen' : 'Done'}
+        </span>
 
-        {/* Right reveal: Swipe Left Delete */}
-        <div
-          className={`flex items-center space-x-2 transition-opacity duration-150 ${
+        <span
+          className={`flex items-center gap-1.5 text-meta font-medium text-danger-600 dark:text-danger-400 transition-opacity duration-150 ${
             dragOffset < -20 ? 'opacity-100' : 'opacity-0'
           }`}
         >
-          <span className="font-ledger font-bold text-rose-600 dark:text-rose-400 text-xs uppercase tracking-wider">Delete</span>
-          <div className="w-7 h-7 rounded-none bg-rose-600 flex items-center justify-center border border-rose-400">
-            <Trash2 className="w-4 h-4 text-white" />
-          </div>
-        </div>
+          Delete
+          <Trash2 className="w-4 h-4" />
+        </span>
       </div>
 
-      {/* Foreground Interactive Card */}
       <motion.div
         drag="x"
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.4}
         onDrag={handleDrag}
         onDragEnd={handleDragEnd}
-        className={`relative z-10 flex items-center justify-between p-3 rounded-none border-b transition-colors touch-pan-y ${
-          isHighlighted
-            ? 'bg-amber-100/60 dark:bg-[#18181f] border-amber-500/80'
-            : isSelected
-            ? 'bg-amber-100 dark:bg-amber-950/30 border-amber-500/60'
-            : item.is_completed
-            ? 'bg-stone-100 dark:bg-[#0f0f12] border-stone-200 dark:border-stone-800/50 text-stone-400 dark:text-stone-500'
-            : isBlocked
-            ? 'bg-amber-50/50 dark:bg-[#141418] border-amber-600/30 text-stone-800 dark:text-stone-300'
-            : 'bg-paper-white dark:bg-[#131317] border-stone-200 dark:border-stone-800 hover:border-stone-400 dark:hover:border-stone-700 text-stone-900 dark:text-stone-200'
+        className={`relative z-10 flex items-start gap-3 px-1 py-3 touch-pan-y transition-colors duration-150 ${
+          isHighlighted || isSelected ? 'bg-accent-500/8' : 'bg-ground'
         }`}
+        style={{ minHeight: 44 }}
       >
-        <div className="flex items-center space-x-3.5 flex-1 min-w-0">
-          {/* Multi-select checkbox or Task complete checkbox */}
-          {isSelectMode ? (
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                haptics.light();
-                onToggleSelect?.(item.id);
-              }}
-              className="p-1 -m-1 cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                checked={isSelected}
-                onChange={() => {}}
-                className="w-4 h-4 rounded-none accent-amber-500 cursor-pointer shrink-0"
-              />
-            </div>
-          ) : (
-            <div
-              onClick={(e) => {
-                e.stopPropagation();
-                haptics.light();
-                onToggleComplete(item);
-              }}
-              className="p-1 -m-1 cursor-pointer"
-            >
-              <input
-                type="checkbox"
-                checked={item.is_completed}
-                onChange={() => {}}
-                className="w-4 h-4 rounded-none accent-amber-500 cursor-pointer shrink-0"
-              />
-            </div>
-          )}
+        {/* Complete, or select when in multi-select mode */}
+        {isSelectMode ? (
+          <button
+            role="checkbox"
+            aria-checked={isSelected}
+            aria-label={isSelected ? `Deselect ${item.title}` : `Select ${item.title}`}
+            data-checked={isSelected}
+            onClick={(e) => {
+              e.stopPropagation();
+              haptics.light();
+              onToggleSelect?.(item.id);
+            }}
+            className="check mt-0.5"
+          />
+        ) : (
+          <button
+            role="checkbox"
+            aria-checked={item.is_completed}
+            aria-label={item.is_completed ? `Mark ${item.title} as not done` : `Mark ${item.title} as done`}
+            data-checked={item.is_completed}
+            onClick={(e) => {
+              e.stopPropagation();
+              haptics.light();
+              onToggleComplete(item);
+            }}
+            className="check mt-0.5"
+          />
+        )}
 
-          {/* Task Info Content */}
-          <div
-            onClick={() => onClick(item)}
-            className="cursor-pointer min-w-0 flex-1 py-0.5"
-          >
-            <div className="flex items-center gap-1.5">
-              {isBlocked && (
-                <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-600 dark:text-amber-500 shrink-0 font-ledger text-[10px] font-bold">
-                  [BLOCKED]
-                </span>
-              )}
-              <p className={`font-editorial text-sm font-semibold tracking-tight text-stone-900 dark:text-stone-100 truncate ${item.is_completed ? 'line-through text-stone-400 dark:text-stone-500 italic' : ''}`}>
-                {item.title}
-              </p>
-            </div>
+        <div onClick={() => onClick(item)} className="cursor-pointer min-w-0 flex-1">
+          <p className={`text-body ${item.is_completed ? 'text-ink-3 line-through' : 'text-ink'}`}>
+            {item.title}
+          </p>
 
-            {/* Badges / Meta Info */}
-            <div className="flex items-center space-x-2 mt-1 text-[10px] font-ledger text-stone-500 dark:text-stone-400 flex-wrap gap-y-1">
-              {/* Due Date with Quick Reschedule */}
-              {item.due_date && (
-                <div className="relative inline-block">
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setIsRescheduleOpen(prev => !prev);
-                    }}
-                    className={`flex items-center space-x-1 px-1.5 py-0.5 rounded-none text-[9px] font-ledger uppercase tracking-wider border transition-colors ${
-                      overdue
-                        ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800 font-bold'
-                        : dueToday
-                        ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
-                        : 'bg-stone-100 dark:bg-stone-900 text-stone-700 dark:text-stone-300 border-stone-300 dark:border-stone-700 hover:border-stone-400'
-                    }`}
-                  >
-                    <Calendar className="w-2.5 h-2.5" />
-                    <span>{formatRelativeDate(item.due_date)}</span>
-                  </button>
+          {/* One quiet line of metadata, not a row of boxes */}
+          <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-0.5 text-meta text-ink-3">
+            {isBlocked && (
+              <span
+                title={`Blocked by ${blockerTitles.join(', ')}`}
+                className="text-late-500 dark:text-late-400"
+              >
+                Blocked
+              </span>
+            )}
 
-                  <ReschedulePopover
-                    isOpen={isRescheduleOpen}
-                    onClose={() => setIsRescheduleOpen(false)}
-                    currentDueDate={item.due_date}
-                    onSelectDate={(newDate) => onReschedule?.(item, newDate)}
-                  />
-                </div>
-              )}
-
-              {/* Project Badge */}
-              {matchedProject && (
-                <span
-                  className="flex items-center space-x-1 text-[9px] font-ledger uppercase tracking-wider px-1.5 py-0.5 rounded-none border border-stone-300 dark:border-stone-700 bg-stone-100 dark:bg-stone-900 text-stone-700 dark:text-stone-300"
+            {item.due_date && (
+              <span className="relative inline-block">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsRescheduleOpen((prev) => !prev);
+                  }}
+                  className={`hover:text-ink transition-colors ${
+                    overdue
+                      ? 'text-late-500 dark:text-late-400 font-medium'
+                      : dueToday
+                      ? 'text-ink-2'
+                      : ''
+                  }`}
                 >
-                  <Folder className="w-2.5 h-2.5 text-amber-600 dark:text-amber-500" />
-                  <span>{matchedProject.name}</span>
-                </span>
-              )}
+                  {formatRelativeDate(item.due_date)}
+                </button>
 
-              {/* Context Tag */}
-              {item.context_tags && (
-                <span className="flex items-center space-x-1 text-[9px] font-ledger uppercase tracking-wider text-stone-600 dark:text-stone-400 bg-stone-100 dark:bg-stone-900 px-1.5 py-0.5 rounded-none border border-stone-300 dark:border-stone-800">
-                  <Tag className="w-2.5 h-2.5 text-stone-400" />
-                  <span>{item.context_tags}</span>
-                </span>
-              )}
+                <ReschedulePopover
+                  isOpen={isRescheduleOpen}
+                  onClose={() => setIsRescheduleOpen(false)}
+                  currentDueDate={item.due_date}
+                  onSelectDate={(newDate) => onReschedule?.(item, newDate)}
+                />
+              </span>
+            )}
 
-              {/* Recurring rule */}
-              {item.repeat_rule && (
-                <span className="text-amber-600 dark:text-amber-400 text-[9px] flex items-center space-x-0.5 font-ledger uppercase">
-                  <RotateCw className="w-2.5 h-2.5" />
-                  <span>{item.repeat_rule}</span>
-                </span>
-              )}
+            {matchedProject && (
+              <span className="flex items-center gap-1 min-w-0">
+                <Folder className="w-3.5 h-3.5 shrink-0" />
+                <span className="truncate">{matchedProject.name}</span>
+              </span>
+            )}
 
-              {/* Subtasks Count */}
-              {item.subtasks && item.subtasks.length > 0 && (
-                <span className="text-[9px] text-stone-500 dark:text-stone-400 font-ledger">
-                  [{item.subtasks.filter(s => s.is_completed).length}/{item.subtasks.length}]
-                </span>
-              )}
-            </div>
+            {item.context_tags && <span className="truncate">{item.context_tags}</span>}
+
+            {item.repeat_rule && (
+              <span className="flex items-center gap-1">
+                <RotateCw className="w-3.5 h-3.5" />
+                {item.repeat_rule}
+              </span>
+            )}
+
+            {item.subtasks && item.subtasks.length > 0 && (
+              <span className="tabular">
+                {item.subtasks.filter((s) => s.is_completed).length}/{item.subtasks.length}
+              </span>
+            )}
+
+            {item.priority === 'urgent' && !item.is_completed && (
+              <span className="text-late-500 dark:text-late-400 font-medium">Urgent</span>
+            )}
           </div>
         </div>
 
-        {/* Right side actions */}
-        <div className="flex items-center space-x-2 shrink-0 ml-2">
+        {/* Quiet until you reach for them */}
+        <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity duration-150">
           {onRefine && (
             <button
               onClick={(e) => {
@@ -245,42 +216,26 @@ export const ListRow: React.FC<ListRowProps> = ({
               }}
               disabled={isRefining}
               title="Polish with AI"
-              aria-label="Polish with AI"
-              className="min-w-[30px] min-h-[30px] flex items-center justify-center text-stone-500 hover:text-amber-600 dark:hover:text-amber-400 p-1 border border-stone-300 dark:border-stone-800 rounded-none hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+              aria-label={`Polish ${item.title} with AI`}
+              className="w-9 h-9 flex items-center justify-center rounded-control text-ink-3 hover:text-ink hover:bg-sunken transition-colors"
             >
               {isRefining ? (
-                <RotateCw className="w-3.5 h-3.5 animate-spin text-amber-500" />
+                <RotateCw className="w-4 h-4 animate-spin text-accent-500" />
               ) : (
-                <Sparkles className="w-3.5 h-3.5" />
+                <Sparkles className="w-4 h-4" />
               )}
             </button>
           )}
 
-          {/* Priority Badge */}
-          <span
-            className={`text-[9px] uppercase font-ledger font-bold px-1.5 py-0.5 rounded-none border ${
-              item.priority === 'urgent'
-                ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-700'
-                : item.priority === 'high'
-                ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950 dark:text-amber-300 dark:border-amber-700'
-                : item.priority === 'low'
-                ? 'bg-stone-100 text-stone-600 border-stone-300 dark:bg-stone-900 dark:text-stone-400 dark:border-stone-800'
-                : 'bg-stone-100 text-stone-700 border-stone-300 dark:bg-stone-900 dark:text-stone-300 dark:border-stone-700'
-            }`}
-          >
-            {item.priority}
-          </span>
-
-          {/* Desktop delete icon */}
           <button
             onClick={(e) => {
               e.stopPropagation();
               onDelete(item.id);
             }}
-            aria-label={`Delete task: ${item.title}`}
-            className="min-w-[30px] min-h-[30px] flex items-center justify-center text-stone-500 hover:text-rose-600 dark:hover:text-rose-400 p-1 border border-stone-300 dark:border-stone-800 rounded-none hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+            aria-label={`Delete ${item.title}`}
+            className="w-9 h-9 flex items-center justify-center rounded-control text-ink-3 hover:text-danger-600 dark:hover:text-danger-400 hover:bg-sunken transition-colors"
           >
-            <Trash2 className="w-3.5 h-3.5" />
+            <Trash2 className="w-4 h-4" />
           </button>
         </div>
       </motion.div>

@@ -80,7 +80,7 @@ export const PullToRefresh: React.FC<PullToRefreshProps> = ({
         className="flex items-center justify-center overflow-hidden transition-all duration-150"
         style={{ height: `${pullDistance}px`, opacity: pullDistance / PULL_THRESHOLD }}
       >
-        <div className="flex items-center space-x-2 text-xs font-medium text-blue-400 bg-zinc-900/90 border border-zinc-800 px-3 py-1 rounded-full shadow-lg">
+        <div className="flex items-center space-x-2 text-meta font-medium text-blue-400 bg-surface/90 border border-hairline px-3 py-1 rounded-full shadow-lg">
           <RefreshCw
             className={`w-3.5 h-3.5 text-blue-400 ${
               isRefreshing ? 'animate-spin' : ''

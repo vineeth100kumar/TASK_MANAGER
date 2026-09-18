@@ -1,6 +1,6 @@
 {
   "short_name": "Sage",
-  "name": "Sage Life & Task OS",
+  "name": "Sage",
   "icons": [
     {
       "src": "/icons/icon-192.svg",
@@ -14,8 +14,9 @@
     }
   ],
   "start_url": "/",
-  "background_color": "#09090b",
-  "theme_color": "#09090b",
+  "background_color": "#F6F6F8",
+  "theme_color": "#F6F6F8",
   "display": "standalone",
-  "orientation": "portrait-primary"
+  "orientation": "portrait-primary",
+  "description": "Tasks, projects and money, on your own Raspberry Pi."
 }

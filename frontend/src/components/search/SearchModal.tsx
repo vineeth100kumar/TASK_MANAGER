@@ -54,12 +54,12 @@ export const SearchModal: React.FC<SearchModalProps> = ({
 
   // Actions
   const actions = [
-    { id: 'act_brain_dump', title: 'The Wire — Transmit Brain Dump', category: 'Dispatch', icon: <Sparkles className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenBrainDump?.() },
-    { id: 'act_morning', title: 'Morning Edition — Daily Kickoff', category: 'Survey', icon: <Sun className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenWizard?.('morning') },
-    { id: 'act_evening', title: 'Evening Edition — Debrief & Ledger Close', category: 'Survey', icon: <Moon className="w-4 h-4 text-indigo-400" />, onSelect: () => onOpenWizard?.('evening') },
-    { id: 'act_nav_tasks', title: 'Section II — Action Docket & Calendar', category: 'Desk', icon: <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />, onSelect: () => onNavigateTab?.('tasks') },
-    { id: 'act_nav_projects', title: 'Section IV — Dossiers & Projects Hub', category: 'Desk', icon: <Folder className="w-4 h-4 text-purple-600 dark:text-purple-400" />, onSelect: () => onNavigateTab?.('projects') },
-    { id: 'act_nav_finance', title: 'Section V — Treasury & Financial Ledger', category: 'Desk', icon: <Wallet className="w-4 h-4 text-amber-600 dark:text-amber-400" />, onSelect: () => onNavigateTab?.('finance') }
+    { id: 'act_brain_dump', title: 'Quick capture', category: 'Capture', icon: <Sparkles className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenBrainDump?.() },
+    { id: 'act_morning', title: 'Morning Edition — Daily Kickoff', category: 'Routine', icon: <Sun className="w-4 h-4 text-amber-500" />, onSelect: () => onOpenWizard?.('morning') },
+    { id: 'act_evening', title: 'Evening review', category: 'Routine', icon: <Moon className="w-4 h-4 text-indigo-400" />, onSelect: () => onOpenWizard?.('evening') },
+    { id: 'act_nav_tasks', title: 'Tasks', category: 'Go to', icon: <CheckSquare className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />, onSelect: () => onNavigateTab?.('tasks') },
+    { id: 'act_nav_projects', title: 'Section IV — Dossiers & Projects Hub', category: 'Go to', icon: <Folder className="w-4 h-4 text-purple-600 dark:text-purple-400" />, onSelect: () => onNavigateTab?.('projects') },
+    { id: 'act_nav_finance', title: 'Money', category: 'Go to', icon: <Wallet className="w-4 h-4 text-amber-600 dark:text-amber-400" />, onSelect: () => onNavigateTab?.('finance') }
   ].filter(a => !q || a.title.toLowerCase().includes(q));
 
   const allResults = [
@@ -67,7 +67,7 @@ export const SearchModal: React.FC<SearchModalProps> = ({
       type: 'docket' as const,
       id: t.id,
       title: t.title,
-      sub: t.due_date ? `Due ${t.due_date}` : 'Unscheduled clipping',
+      sub: t.due_date ? `Due ${t.due_date}` : 'Unscheduled bg-surface',
       icon: <CheckSquare className="w-4 h-4 text-amber-600 dark:text-amber-400" />,
       action: () => onSelectTask?.(t)
     })),
@@ -116,11 +116,11 @@ export const SearchModal: React.FC<SearchModalProps> = ({
         <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2 px-1">
           <div className="flex items-center gap-2">
             <BookOpen className="w-4 h-4 text-ink-muted dark:text-stone-400" />
-            <span className="text-[10px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400 font-bold">
+            <span className="text-caption text-ink-muted dark:text-stone-400 font-bold">
               THE SAGE DAILY • ARCHIVE & INDEX REGISTRY
             </span>
           </div>
-          <kbd className="hidden sm:inline text-[9px] font-ledger px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400">
+          <kbd className="hidden sm:inline text-caption px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400">
             ESC TO DISMISS
           </kbd>
         </div>
@@ -137,14 +137,14 @@ export const SearchModal: React.FC<SearchModalProps> = ({
               setSelectedIndex(0);
             }}
             placeholder="Search action dockets, dossiers, or press commands... (Cmd+K)"
-            className="flex-1 bg-transparent text-xs sm:text-sm font-editorial text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none"
+            className="flex-1 bg-transparent text-meta sm:text-sm text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none"
           />
         </div>
 
         {/* Results List */}
         <div className="max-h-[380px] overflow-y-auto space-y-1 pr-1 custom-scrollbar">
           {allResults.length === 0 ? (
-            <div className="text-center py-8 text-xs font-editorial italic text-ink-muted dark:text-stone-500">
+            <div className="text-center py-8 text-meta italic text-ink-muted dark:text-stone-500">
               No archival records matching "{query}"
             </div>
           ) : (
@@ -167,13 +167,13 @@ export const SearchModal: React.FC<SearchModalProps> = ({
                     {item.icon}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-xs font-editorial font-bold truncate text-ink-base dark:text-paper-light">{item.title}</p>
-                    <p className="text-[10px] font-ledger text-ink-muted dark:text-stone-400">{item.sub}</p>
+                    <p className="text-meta font-bold truncate text-ink-base dark:text-paper-light">{item.title}</p>
+                    <p className="text-caption text-ink-muted dark:text-stone-400">{item.sub}</p>
                   </div>
                 </div>
 
                 <div className="flex items-center space-x-2 text-ink-muted dark:text-stone-400">
-                  <span className="text-[9px] uppercase font-ledger px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-stone-700 bg-paper-aged dark:bg-stone-900">
+                  <span className="text-caption px-1.5 py-0.5 rounded border border-ink-base/20 dark:border-stone-700 bg-paper-aged dark:bg-stone-900">
                     {item.type}
                   </span>
                   <ArrowRight className="w-3.5 h-3.5 opacity-60" />

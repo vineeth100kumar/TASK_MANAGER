@@ -77,7 +77,7 @@ export const Modal: React.FC<ModalProps> = ({
   return (
     <>
       <div
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-150 overflow-y-auto"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 bg-ink/25 dark:bg-black/55 backdrop-blur-sm animate-in fade-in duration-150 overflow-y-auto"
         onClick={handleAttemptClose}
         role="dialog"
         aria-modal="true"
@@ -89,30 +89,24 @@ export const Modal: React.FC<ModalProps> = ({
           tabIndex={-1}
           onClick={e => e.stopPropagation()}
           style={{ marginBottom: 'var(--keyboard-offset, 0px)' }}
-          className={`w-full ${MAX_WIDTH_CLASSES[maxWidth] || maxWidth} clipping clipping-white border-2 border-stone-300 dark:border-stone-700 rounded-none p-5 sm:p-6 shadow-2xl space-y-4 animate-in slide-in-from-bottom-6 sm:zoom-in-95 duration-150 max-h-[92vh] sm:max-h-[88vh] overflow-y-auto focus:outline-none relative ${className}`}
+          className={`w-full ${MAX_WIDTH_CLASSES[maxWidth] || maxWidth} bg-surface border border-hairline rounded-t-surface sm:rounded-surface p-5 sm:p-6 shadow-lg space-y-4 animate-in slide-in-from-bottom-4 sm:zoom-in-95 duration-200 ease-settle max-h-[92vh] sm:max-h-[88vh] overflow-y-auto focus:outline-none relative ${className}`}
         >
-          {/* Scotch tape on top right */}
-          <div className="tape-strip top-0 right-6 transform -rotate-2" />
-
-          {/* Editorial Dispatch Header Bar */}
-          <div className="-mx-5 -mt-5 sm:-mx-6 sm:-mt-6 px-4 py-1.5 bg-paper-aged dark:bg-[#181612] border-b border-stone-300 dark:border-stone-800 text-[9px] font-ledger uppercase tracking-widest text-amber-700 dark:text-amber-500 flex justify-between items-center">
-            <span>OFFICIAL SAGE DISPATCH &bull; SUBSCRIBER FORM</span>
-            <span className="text-stone-500">ESC TO DISMISS</span>
-          </div>
+          {/* Grab handle — the sheet comes from the edge it will return to */}
+          <div className="sm:hidden w-9 h-1 rounded-full bg-hairline mx-auto -mt-1 mb-1" />
 
           {(title || !hideCloseButton) && (
-            <div className="flex items-start justify-between gap-3 border-b border-stone-200 dark:border-stone-800 pb-3">
+            <div className="flex items-start justify-between gap-3 border-b border-hairline pb-3">
               <div>
                 {title && (
                   <div className="flex items-center gap-2">
-                    {icon && <span className="shrink-0 text-amber-600 dark:text-amber-500">{icon}</span>}
-                    <h2 id="modal-dialog-title" className="font-editorial text-lg sm:text-xl font-bold text-stone-900 dark:text-stone-100 tracking-tight">
+                    {icon && <span className="shrink-0 text-ink-3">{icon}</span>}
+                    <h2 id="modal-dialog-title" className="text-title font-semibold text-ink">
                       {title}
                     </h2>
                   </div>
                 )}
                 {description && (
-                  <p id="modal-dialog-desc" className="font-editorial italic text-xs text-stone-600 dark:text-stone-400 mt-0.5">
+                  <p id="modal-dialog-desc" className="text-meta text-ink-2 mt-1">
                     {description}
                   </p>
                 )}
@@ -121,10 +115,10 @@ export const Modal: React.FC<ModalProps> = ({
                 <button
                   type="button"
                   onClick={handleAttemptClose}
-                  className="text-stone-500 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 p-1.5 border border-stone-300 dark:border-stone-800 hover:bg-black/5 dark:hover:bg-stone-800 rounded-none transition-colors shrink-0"
+                  className="w-9 h-9 flex items-center justify-center text-ink-3 hover:text-ink hover:bg-sunken rounded-control transition-colors shrink-0 -mr-1.5 -mt-1.5"
                   aria-label="Close modal"
                 >
-                  <X className="w-3.5 h-3.5" />
+                  <X className="w-[18px] h-[18px]" />
                 </button>
               )}
             </div>

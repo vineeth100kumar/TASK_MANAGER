@@ -239,7 +239,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   );
 
   // -------------------------------------------------------------
-  // 5. STICKY NOTES DISPATCH & CREATION
+  // 5. STICKY NOTES
   // -------------------------------------------------------------
   const handleAddSticky = (color: StickyColor, customPos?: Point) => {
     if (!board) return;
@@ -294,7 +294,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         handleElementsChange(nextElements, true);
       }
 
-      toast.success('Dispatched to Docket: Task created!');
+      toast.success('Task created');
       if (onTaskCreated) onTaskCreated();
     } catch (err) {
       console.error('Failed to convert sticky to task:', err);
@@ -342,7 +342,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           setSelectedElementId(newImg.id);
           setSelectedElementIds(new Set([newImg.id]));
           setActiveTool('select');
-          toast.success('Image clipping placed onto canvas');
+          toast.success('Image bg-surface placed onto canvas');
         };
         img.src = dataUrl;
       } catch (err) {
@@ -731,12 +731,12 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     return (
       <div
         className={`w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center ${
-          edition === 'night' ? 'bg-[#141311] text-stone-300' : 'bg-[#F5F1E8] text-ink-primary'
+          edition === 'night' ? 'bg-[#141311] text-ink-2' : 'bg-[#F5F1E8] text-ink-primary'
         }`}
       >
-        <div className="w-8 h-8 border-2 border-amber-600 border-t-transparent rounded-full animate-spin mb-3" />
-        <p className="text-xs font-ledger uppercase tracking-wider font-bold">
-          Synchronizing Drafting Room from Pi...
+        <div className="w-8 h-8 border border-amber-600 border-t-transparent rounded-full animate-spin mb-3" />
+        <p className="text-meta font-bold">
+          Loading the whiteboard…
         </p>
       </div>
     );

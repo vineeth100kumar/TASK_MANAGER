@@ -11,12 +11,12 @@ export const Skeleton: React.FC<SkeletonProps> = ({
   className = '',
   count = 1
 }) => {
-  const baseClasses = 'animate-pulse bg-stone-900 border border-stone-800 rounded-none';
+  const baseClasses = 'animate-pulse bg-sunken rounded-control';
 
   const variantClasses = {
     card: 'h-32 w-full',
     row: 'h-12 w-full',
-    text: 'h-3.5 w-3/4',
+    text: 'h-4 w-3/4',
     circle: 'w-8 h-8'
   };
 

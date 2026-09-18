@@ -2,148 +2,141 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+ * Tokens. Day and night are the same names resolving to different values —
+ * never two hand-written sets of rules. Values are RGB channels so Tailwind's
+ * opacity modifiers (bg-surface/60) keep working.
+ */
+@layer base {
+  :root {
+    --c-ground:   246 246 248;  /* #F6F6F8 page behind everything */
+    --c-surface:  255 255 255;  /* #FFFFFF raised: sheets, rows, bars */
+    --c-sunken:   236 236 239;  /* #ECECEF recessed: fields, the one lifted card */
+    --c-hairline: 223 223 228;  /* #DFDFE4 separators */
+    --c-ink:       22  23  26;  /* #16171A primary text */
+    --c-ink-2:     92  95 102;  /* #5C5F66 secondary text */
+    --c-ink-3:    142 145 153;  /* #8E9199 tertiary text, icons at rest */
+    --c-accent:    10 108 255;  /* #0A6CFF the one accent */
+    --c-late:     168 100  27;  /* #A8641B means late, nothing else */
+    --c-done:      28 122  74;  /* #1C7A4A means done, nothing else */
+    --c-danger:   179  38  30;  /* #B3261E destructive only */
+
+    color-scheme: light;
+  }
+
+  .dark {
+    --c-ground:    14  15  18;  /* #0E0F12 */
+    --c-surface:   23  24  28;  /* #17181C */
+    --c-sunken:    31  33  38;  /* #1F2126 */
+    --c-hairline:  42  44  50;  /* #2A2C32 */
+    --c-ink:      242 243 245;  /* #F2F3F5 */
+    --c-ink-2:    158 162 170;  /* #9EA2AA */
+    --c-ink-3:    107 111 120;  /* #6B6F78 */
+    --c-accent:    77 155 255;  /* #4D9BFF lifted so it holds on a dark ground */
+    --c-late:     217 160  91;  /* #D9A05B */
+    --c-done:      76 201 138;  /* #4CC98A */
+    --c-danger:   255 107  96;  /* #FF6B60 */
+
+    color-scheme: dark;
+  }
+
+  html, body, #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ground text-ink;
+    font-size: 16px;
+    line-height: 1.4;
+    text-rendering: optimizeLegibility;
+  }
+
+  /* Digits that sit in columns line up. */
+  .tabular, table, time {
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Keyboard focus is always visible. */
+  :focus-visible {
+    outline: 2px solid rgb(var(--c-accent));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Motion explains; it never performs. Honour the system setting. */
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
+
 @layer utilities {
-  .pt-safe {
-    padding-top: max(env(safe-area-inset-top), 12px);
-  }
-  .pb-safe {
-    padding-bottom: max(env(safe-area-inset-bottom), 16px);
-  }
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
+  .pt-safe { padding-top: max(env(safe-area-inset-top), 12px); }
+  .pb-safe { padding-bottom: max(env(safe-area-inset-bottom), 12px); }
+
+  .no-scrollbar::-webkit-scrollbar { display: none; }
   .no-scrollbar {
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
-  .double-rule {
-    border-top: 3px double #3a3a40;
-    border-bottom: 1px solid #3a3a40;
-  }
-  .single-rule {
-    border-top: 1px solid #27272c;
-  }
-  .col-rule {
-    border-right: 1px solid #27272c;
-  }
-  .drop-cap::first-letter {
-    font-family: 'Newsreader', Georgia, serif;
-    float: left;
-    font-size: 3.6rem;
-    line-height: 0.8;
-    padding-top: 4px;
-    padding-right: 8px;
-    padding-bottom: 2px;
-    color: #d97706;
-    font-weight: 700;
-  }
 }
 
 @layer components {
-  /* Cork board background */
-  .board-bg {
-    background-color: #E8E0D0;
-    background-image: repeating-linear-gradient(
-      0deg, transparent, transparent 27px,
-      rgba(0,0,0,0.035) 27px, rgba(0,0,0,0.035) 28px
-    );
+  /*
+   * Surfaces, not cards. A single radius and a recessed fill; elevation is
+   * spent on the one thing that needs lifting so it still means something.
+   */
+  .surface {
+    @apply bg-surface border border-hairline rounded-surface;
   }
 
-  /* Base clipping card — all data sections extend this */
-  .clipping {
-    background: #F5F1E8;
-    color: #1A1814;
-    border: 0.5px solid rgba(0,0,0,0.15);
-    position: relative;
-  }
-  .clipping-aged   { background: #EDE3C8; }
-  .clipping-cream  { background: #F7F2E5; }
-  .clipping-white  { background: #FAFAF8; }
-
-  /* Night edition overrides */
-  [data-edition="night"] .board-bg {
-    background-color: #141311;
-    background-image: repeating-linear-gradient(
-      0deg, transparent, transparent 27px,
-      rgba(255,255,255,0.02) 27px, rgba(255,255,255,0.02) 28px
-    );
-  }
-  [data-edition="night"] .clipping        { background: #1C1A16; border-color: rgba(255,255,255,0.1); color: #EDECE8; }
-  [data-edition="night"] .clipping-aged   { background: #211F19; }
-  [data-edition="night"] .clipping-cream  { background: #1E1C17; }
-  [data-edition="night"] .clipping-white  { background: #242118; }
-  [data-edition="night"] .hed             { color: #EDECE8; }
-  [data-edition="night"] .byline          { color: #9E9D96; }
-  [data-edition="night"] .dateline        { color: #EDECE8; }
-  [data-edition="night"] .clip-rule       { background: #EDECE8; }
-  [data-edition="night"] .clip-rule-thin  { background: #5A5650; }
-  [data-edition="night"] .clip-rule-double {
-    border-top-color: #EDECE8;
-    border-bottom-color: #EDECE8;
-  }
-  [data-edition="night"] .torn-top {
-    background: repeating-linear-gradient(
-      90deg,
-      transparent 0px, transparent 4px,
-      #141311 4px, #141311 5px
-    );
-  }
-  [data-edition="night"] .torn-bottom {
-    background: repeating-linear-gradient(
-      90deg,
-      transparent 0px, transparent 3px,
-      #141311 3px, #141311 6px,
-      transparent 6px, transparent 8px,
-      #141311 8px, #141311 9px
-    );
+  .surface-sunken {
+    @apply bg-sunken rounded-surface;
   }
 
-  /* Column rules */
-  .clip-rule        { width: 100%; height: 1.5px; background: #1A1814; margin: 6px 0; }
-  .clip-rule-thin   { height: 0.5px; background: #8A8780; margin: 4px 0; }
-  .clip-rule-double {
-    border-top: 1.5px solid #1A1814;
-    border-bottom: 0.5px solid #1A1814;
-    padding-top: 3px;
-    margin: 6px 0;
+  /* A row in a list. 44px minimum, separated by a hairline, not a box each. */
+  .row {
+    @apply flex items-start gap-3 py-3 border-b border-hairline last:border-b-0;
+    min-height: theme('spacing.tap');
   }
 
-  /* Tape strip decoration */
-  .tape-strip {
-    position: absolute;
-    background: rgba(255,255,200,0.55);
-    border: 0.5px solid rgba(200,190,100,0.3);
-    width: 36px;
-    height: 14px;
-    pointer-events: none;
+  /* Section label: sentence case, not shouting. */
+  .label {
+    @apply text-meta font-semibold text-ink-3;
   }
 
-  /* Torn edge effect (top) */
-  .torn-top {
-    height: 8px;
-    margin: -1px -1px 0;
-    background: repeating-linear-gradient(
-      90deg,
-      transparent 0px, transparent 4px,
-      #E8E0D0 4px, #E8E0D0 5px
-    );
+  /* The large title at the top of a screen. */
+  .screen-title {
+    @apply text-display font-bold text-ink;
   }
 
-  /* Torn edge effect (bottom) */
-  .torn-bottom {
-    height: 8px;
-    margin: 0 -1px -1px;
-    background: repeating-linear-gradient(
-      90deg,
-      transparent 0px, transparent 3px,
-      #E8E0D0 3px, #E8E0D0 6px,
-      transparent 6px, transparent 8px,
-      #E8E0D0 8px, #E8E0D0 9px
-    );
+  /* Text input / select / textarea, shared by every form in the app. */
+  .field {
+    @apply w-full bg-sunken text-ink text-body rounded-control px-3.5 py-2.5
+           border border-transparent placeholder:text-ink-3
+           focus:border-accent-500 focus:outline-none transition-colors;
+    min-height: theme('spacing.tap');
   }
 
-  /* Typography helpers */
-  .hed    { font-family: 'Newsreader', Georgia, serif; color: #1A1814; font-weight: 700; line-height: 1.05; }
-  .byline { font-family: Arial, sans-serif; font-size: 10px; color: #666; letter-spacing: 0.06em; text-transform: uppercase; }
-  .dateline { font-family: Arial, sans-serif; font-size: 9px; font-weight: bold; color: #1A1814; letter-spacing: 0.08em; text-transform: uppercase; }
+  /* The round checkbox used wherever something can be completed. */
+  .check {
+    @apply w-[22px] h-[22px] rounded-full border-[1.5px] border-ink-3 shrink-0
+           grid place-items-center transition-colors duration-150 ease-settle
+           cursor-pointer;
+  }
+  .check[data-checked='true'] {
+    @apply border-accent-500 bg-accent-500;
+  }
+  .check[data-checked='true']::after {
+    content: '';
+    width: 9px;
+    height: 5px;
+    border-left: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+    transform: rotate(-45deg) translate(1px, -1px);
+  }
 }

@@ -1,25 +1,28 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/icons/icon-192.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    
-    <!-- iOS PWA Web App Meta Tags -->
+
+    <!-- iOS PWA -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Sage OS" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Sage" />
     <link rel="apple-touch-icon" href="/icons/icon-192.svg" />
     <link rel="manifest" href="/manifest.json" />
-    
-    <title>Sage — Life & Task OS</title>
-    
-    <!-- Google Fonts for The Sage Daily Editorial Design -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;900&family=Newsreader:ital,opsz,wght@0,6..72,400;0,6..72,600;0,6..72,700;1,6..72,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
-    
-    <!-- Apple Safe Area Inset Support -->
+
+    <!-- Matches --ground in both themes, so the status bar never disagrees with the app -->
+    <meta name="theme-color" content="#f6f6f8" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#0e0f12" media="(prefers-color-scheme: dark)" />
+
+    <title>Sage</title>
+
+    <!--
+      No web fonts. The system face (SF on Apple, Roboto on Android, Segoe on Windows)
+      is already on the device: nothing to download, nothing to block first paint, and
+      nothing that breaks when the Pi is off the internet.
+    -->
     <style>
       :root {
         --sat: env(safe-area-inset-top);
@@ -27,16 +30,39 @@
         --sab: env(safe-area-inset-bottom);
         --sal: env(safe-area-inset-left);
       }
+      html, body {
+        height: 100%;
+      }
       body {
+        margin: 0;
         overscroll-behavior-y: none;
         -webkit-tap-highlight-color: transparent;
-        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+          Roboto, Helvetica, Arial, sans-serif;
       }
     </style>
-    <script type="module" crossorigin src="/assets/index-B13lkUIw.js"></script>
-    <link rel="stylesheet" crossorigin href="/assets/index-Co2gYmqj.css">
+
+    <!-- Resolve the theme before first paint so the app never flashes the wrong ground -->
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem('sage_theme');
+          if (saved !== 'light' && saved !== 'dark') {
+            saved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          document.documentElement.classList.toggle('dark', saved === 'dark');
+          document.documentElement.style.backgroundColor = saved === 'dark' ? '#0e0f12' : '#f6f6f8';
+        } catch (e) {
+          /* private mode or blocked storage — fall through to the light default */
+        }
+      })();
+    </script>
+    <script type="module" crossorigin src="/assets/index-CzP4SnzX.js"></script>
+    <link rel="modulepreload" crossorigin href="/assets/motion-BwLpCJQ6.js">
+    <link rel="modulepreload" crossorigin href="/assets/react-BsOvDYUW.js">
+    <link rel="stylesheet" crossorigin href="/assets/index--kOoaUZQ.css">
   </head>
-  <body class="bg-zinc-950 text-zinc-100 antialiased selection:bg-blue-500 selection:text-white">
+  <body class="antialiased">
     <div id="root"></div>
   </body>
 </html>
