@@ -486,7 +486,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
   return (
     <PullToRefresh onRefresh={onRefresh} className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
-      {/* 0ms Local Natural-Language Quick Add Bar (Telegram Dispatch) */}
+      {/* Natural-language quick add */}
       <QuickAddBar
         projects={projects}
         onQuickAdd={(itemData) => onCreateItem?.(itemData)}
@@ -494,29 +494,30 @@ export const TasksView: React.FC<TasksViewProps> = ({
       />
 
       {/* Header & Controls */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b-2 border-stone-300 dark:border-stone-800 pb-3">
+      <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4 pb-1">
         <div>
-          <div className="text-[10px] font-ledger uppercase tracking-widest text-amber-700 dark:text-amber-500 font-bold mb-0.5">
-            SECTION II &bull; ACTION DOCKET
-          </div>
-          <h1 className="font-editorial text-2xl sm:text-3xl font-bold text-stone-900 dark:text-stone-100 uppercase tracking-tight">
-            Clippings & Actionables
-          </h1>
-          <p className="text-[11px] font-ledger text-stone-600 dark:text-stone-400 uppercase tracking-wider mt-0.5">
-            TOTAL CLIPPINGS: {items.length} &bull; OVERDUE: {smartGroups.overdue.length} &bull; TODAY'S DOCKET: {smartGroups.today.length}
+          <h1 className="screen-title">Tasks</h1>
+          <p className="text-meta text-ink-3 mt-0.5">
+            {[
+              `${items.length} total`,
+              smartGroups.overdue.length > 0 ? `${smartGroups.overdue.length} overdue` : null,
+              smartGroups.today.length > 0 ? `${smartGroups.today.length} due today` : null,
+            ]
+              .filter(Boolean)
+              .join(' · ')}
           </p>
         </div>
 
         <div className="flex items-center space-x-2 flex-wrap gap-y-2">
           {/* View Toggle (List vs Kanban vs Timeline) */}
-          <div className="bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-none p-0.5 flex items-center">
+          <div className="bg-sunken rounded-control p-0.5 flex items-center">
             <button
               onClick={() => setViewMode('list')}
               aria-label="List View"
-              className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
+              className={`px-2 py-1 rounded-control text-meta transition-colors ${
                 viewMode === 'list' 
-                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                  ? 'bg-surface text-ink font-medium shadow-sm'
+                  : 'text-ink-2 hover:text-ink'
               }`}
               title="List View"
             >
@@ -525,22 +526,22 @@ export const TasksView: React.FC<TasksViewProps> = ({
             <button
               onClick={() => setViewMode('kanban')}
               aria-label="Kanban Board View"
-              className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
+              className={`px-2 py-1 rounded-control text-meta transition-colors ${
                 viewMode === 'kanban' 
-                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                  ? 'bg-surface text-ink font-medium shadow-sm'
+                  : 'text-ink-2 hover:text-ink'
               }`}
               title="Kanban Board"
             >
-              Desks
+              Board
             </button>
             <button
               onClick={() => setViewMode('timeline')}
               aria-label="Daily Timeline Calendar"
-              className={`px-2 py-1 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors ${
+              className={`px-2 py-1 rounded-control text-meta transition-colors ${
                 viewMode === 'timeline' 
-                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold' 
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200'
+                  ? 'bg-surface text-ink font-medium shadow-sm'
+                  : 'text-ink-2 hover:text-ink'
               }`}
               title="Daily Timeline Calendar"
             >
@@ -553,10 +554,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
             <button
               onClick={() => setSmartGrouping(!smartGrouping)}
               title={smartGrouping ? "Smart Grouping Enabled (Overdue, Today, Upcoming)" : "Flat List (Smart Grouping Off)"}
-              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-none border text-xs font-ledger uppercase tracking-wider transition-colors ${
+              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-control border text-meta transition-colors ${
                 smartGrouping
-                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800'
-                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
+                  ? 'bg-accent-500/15 text-accent-600 dark:text-accent-300 border-transparent'
+                  : 'bg-sunken text-ink-2 border-transparent hover:text-ink'
               }`}
             >
               <SlidersHorizontal className="w-3.5 h-3.5" />
@@ -565,17 +566,17 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
 
           {/* Sort Dropdown */}
-          <div className="relative flex items-center bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-none px-2 py-1 font-ledger text-xs">
-            <ArrowUpDown className="w-3.5 h-3.5 text-stone-500 mr-1.5" />
+          <div className="relative flex items-center bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-control px-2 py-1 text-meta">
+            <ArrowUpDown className="w-3.5 h-3.5 text-ink-3 mr-1.5" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-xs text-stone-800 dark:text-stone-200 uppercase focus:outline-none cursor-pointer"
+              className="bg-transparent text-meta text-stone-800 dark:text-stone-200 focus:outline-none cursor-pointer"
             >
-              <option value="due_date" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">DUE DATE</option>
-              <option value="priority" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">PRIORITY</option>
+              <option value="due_date">Due date</option>
+              <option value="priority" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">Priority</option>
               <option value="title" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">TITLE (A-Z)</option>
-              <option value="created_at" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">NEWEST</option>
+              <option value="created_at" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">Newest</option>
             </select>
           </div>
 
@@ -589,10 +590,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   setIsSelectMode(true);
                 }
               }}
-              className={`px-2.5 py-1.5 rounded-none border text-xs font-ledger uppercase tracking-wider transition-colors ${
+              className={`px-2.5 py-1.5 rounded-control border text-meta transition-colors ${
                 isSelectMode
                   ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
+                  : 'bg-paper-aged dark:bg-stone-900 text-ink-3 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
               }`}
             >
               {isSelectMode ? 'Cancel' : 'Select'}
@@ -602,7 +603,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           {/* AI Board Organizer */}
           <button
             onClick={handleOpenBoardOrganizer}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border border-stone-300 dark:border-stone-700 rounded-none text-xs font-ledger uppercase tracking-wider transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border border-stone-300 dark:border-stone-700 rounded-control text-meta transition-colors"
           >
             <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
             <span className="hidden sm:inline">AI Organize</span>
@@ -611,10 +612,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
           {/* Manual New Item Button */}
           <button
             onClick={() => setIsCreating(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-none bg-amber-600 hover:bg-amber-500 text-stone-950 text-xs font-ledger font-bold uppercase tracking-wider border border-amber-600 transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold border border-amber-600 transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
-            <span>+ New Clipping</span>
+            <span>New task</span>
           </button>
         </div>
       </div>
@@ -623,7 +624,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       <div className="space-y-2">
         <div className="flex items-center space-x-2 overflow-x-auto no-scrollbar pb-1">
           {[
-            { id: 'all', label: 'All Items' },
+            { id: 'all', label: 'All' },
             { id: 'task', label: 'Tasks' },
             { id: 'event', label: 'Events' },
             { id: 'reminder', label: 'Reminders' },
@@ -632,10 +633,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
             <button
               key={chip.id}
               onClick={() => setFilterType(chip.id)}
-              className={`px-3 py-1.5 rounded-none text-xs font-ledger uppercase tracking-wider whitespace-nowrap transition-colors border ${
+              className={`px-3 py-1.5 rounded-control text-meta whitespace-nowrap transition-colors border ${
                 filterType === chip.id
-                  ? 'bg-stone-900 text-stone-100 dark:bg-stone-100 dark:text-stone-950 font-bold border-stone-900 dark:border-stone-100'
-                  : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 bg-paper-aged dark:bg-stone-900 border-stone-300 dark:border-stone-800'
+                  ? 'bg-accent-500 text-white font-medium border-transparent'
+                  : 'text-ink-2 hover:text-ink bg-sunken border-transparent'
               }`}
             >
               {chip.label}
@@ -644,18 +645,18 @@ export const TasksView: React.FC<TasksViewProps> = ({
         </div>
 
         {/* GTD Context Tag Filters */}
-        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-          <span className="text-stone-600 dark:text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
-            <Tag className="w-3 h-3 text-amber-600 dark:text-amber-500" /> CONTEXT:
+        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-meta">
+          <span className="text-ink-3 dark:text-stone-500 font-bold text-caption pr-1 flex items-center gap-1">
+            <Tag className="w-3.5 h-3.5" /> Context
           </span>
           {['all', '@errands', '@computer', '@phone', '@home', '@deep-work'].map((tag) => (
             <button
               key={tag}
               onClick={() => setSelectedTag(tag === 'all' ? null : tag)}
-              className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
+              className={`px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
                 (tag === 'all' && !selectedTag) || selectedTag === tag
-                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
+                  ? 'bg-accent-500 text-white font-medium border-transparent'
+                  : 'bg-sunken text-ink-2 hover:text-ink border-transparent'
               }`}
             >
               {tag === 'all' ? 'All' : tag}
@@ -665,26 +666,26 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
         {/* Project Filter Chips */}
         {projects.length > 0 && (
-          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-xs">
-            <span className="text-stone-600 dark:text-stone-500 font-ledger font-bold text-[9px] uppercase tracking-wider pr-1 flex items-center gap-1">
-              <Folder className="w-3 h-3 text-amber-600 dark:text-amber-500" /> PROJECT:
+          <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pb-1 text-meta">
+            <span className="text-ink-3 dark:text-stone-500 font-bold text-caption pr-1 flex items-center gap-1">
+              <Folder className="w-3.5 h-3.5" /> Project
             </span>
             <button
               onClick={() => setSelectedProjectId('all')}
-              className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
+              className={`px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
                 selectedProjectId === 'all'
-                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
+                  ? 'bg-accent-500 text-white font-medium border-transparent'
+                  : 'bg-sunken text-ink-2 hover:text-ink border-transparent'
               }`}
             >
               All Projects
             </button>
             <button
               onClick={() => setSelectedProjectId('inbox')}
-              className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
+              className={`px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
                 selectedProjectId === 'inbox'
-                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                  : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
+                  ? 'bg-accent-500 text-white font-medium border-transparent'
+                  : 'bg-sunken text-ink-2 hover:text-ink border-transparent'
               }`}
             >
               Inbox (Unassigned)
@@ -693,13 +694,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <button
                 key={p.id}
                 onClick={() => setSelectedProjectId(p.id)}
-                className={`px-2 py-0.5 rounded-none text-[10px] font-ledger uppercase transition-colors whitespace-nowrap border ${
+                className={`px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
                   selectedProjectId === p.id
                     ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                    : 'bg-paper-aged dark:bg-stone-900 text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
+                    : 'bg-paper-aged dark:bg-stone-900 text-ink-3 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
                 }`}
               >
-                <span className="w-1.5 h-1.5 rounded-none" style={{ backgroundColor: p.color || '#d97706' }} />
+                <span className="w-1.5 h-1.5 rounded-control" style={{ backgroundColor: p.color || '#d97706' }} />
                 <span>{p.name}</span>
               </button>
             ))}
@@ -711,27 +712,27 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {filterType === 'milestone' ? (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {milestones.length === 0 ? (
-            <div className="col-span-2 text-center py-12 text-zinc-400 text-xs">
+            <div className="col-span-2 text-center py-12 text-ink-2 text-meta">
               No milestones created yet.
             </div>
           ) : (
             milestones.map((m) => (
-              <div key={m.id} className="bg-zinc-900 border border-zinc-800 p-5 rounded-2xl space-y-3">
+              <div key={m.id} className="bg-surface border border-hairline p-5 rounded-2xl space-y-3">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-zinc-100">{m.title}</h3>
-                    <p className="text-xs text-zinc-400 mt-0.5">Target Due Date: {m.due_date}</p>
+                    <h3 className="text-sm font-semibold text-ink">{m.title}</h3>
+                    <p className="text-meta text-ink-2 mt-0.5">Target Due Date: {m.due_date}</p>
                   </div>
-                  <span className="text-[10px] uppercase font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
+                  <span className="text-caption font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
                     {m.status}
                   </span>
                 </div>
                 <div className="space-y-1">
-                  <div className="flex justify-between text-xs text-zinc-400 font-medium">
+                  <div className="flex justify-between text-meta text-ink-2 font-medium">
                     <span>Progress ({m.completed_task_count}/{m.linked_task_count} tasks)</span>
                     <span>{m.progress_percentage}%</span>
                   </div>
-                  <div className="w-full bg-zinc-800 h-2 rounded-full overflow-hidden">
+                  <div className="w-full bg-sunken h-2 rounded-full overflow-hidden">
                     <div className="bg-blue-500 h-full rounded-full" style={{ width: `${m.progress_percentage}%` }} />
                   </div>
                 </div>
@@ -748,7 +749,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <Skeleton variant="row" count={5} />
               </div>
             ) : (
-              <div className="text-center py-12 text-zinc-400 text-xs">
+              <div className="text-center py-12 text-ink-2 text-meta">
                 No items match this filter. Use the Quick Add bar above!
               </div>
             )
@@ -760,12 +761,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <div className="space-y-2">
                   <button
                     onClick={() => toggleSectionCollapse('overdue')}
-                    className="flex items-center space-x-2 text-xs font-bold text-rose-400 uppercase tracking-wider px-1 cursor-pointer select-none"
+                    className="flex items-center gap-2 text-meta font-semibold text-late-500 dark:text-late-400 px-1 cursor-pointer select-none"
                   >
                     {collapsedSections['overdue'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    <AlertCircle className="w-4 h-4 text-rose-400" />
+                    <AlertCircle className="w-4 h-4" />
                     <span>Overdue</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-500/20 text-rose-300 font-mono">
+                    <span className="text-caption px-2 py-0.5 rounded-full bg-late-500/15 tabular">
                       {smartGroups.overdue.length}
                     </span>
                   </button>
@@ -803,12 +804,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <div className="space-y-2">
                 <button
                   onClick={() => toggleSectionCollapse('today')}
-                  className="flex items-center space-x-2 text-xs font-bold text-amber-300 uppercase tracking-wider px-1 cursor-pointer select-none"
+                  className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
                 >
                   {collapsedSections['today'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  <Sun className="w-4 h-4 text-amber-400" />
+                  <Sun className="w-4 h-4 text-ink-3" />
                   <span>Today</span>
-                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 font-mono">
+                  <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
                     {smartGroups.today.length}
                   </span>
                 </button>
@@ -816,7 +817,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 {!collapsedSections['today'] && (
                   <div className="space-y-2 pl-1">
                     {smartGroups.today.length === 0 ? (
-                      <p className="text-xs text-zinc-500 italic py-2 px-3">No tasks due today. You are all caught up!</p>
+                      <p className="text-meta text-ink-3 italic py-2 px-3">No tasks due today. You are all caught up!</p>
                     ) : (
                       smartGroups.today.map((item, idx) => {
                         const { blocked, blockerTitles } = isItemBlocked(item);
@@ -851,12 +852,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <div className="space-y-2">
                   <button
                     onClick={() => toggleSectionCollapse('upcoming')}
-                    className="flex items-center space-x-2 text-xs font-bold text-blue-400 uppercase tracking-wider px-1 cursor-pointer select-none"
+                    className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
                   >
                     {collapsedSections['upcoming'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
                     <Calendar className="w-4 h-4 text-blue-400" />
                     <span>Upcoming (Next 7 Days)</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-blue-500/20 text-blue-300 font-mono">
+                    <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
                       {smartGroups.upcoming.length}
                     </span>
                   </button>
@@ -896,12 +897,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <div className="space-y-2">
                   <button
                     onClick={() => toggleSectionCollapse('backlog')}
-                    className="flex items-center space-x-2 text-xs font-bold text-zinc-400 uppercase tracking-wider px-1 cursor-pointer select-none"
+                    className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
                   >
                     {collapsedSections['backlog'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    <Folder className="w-4 h-4 text-zinc-400" />
+                    <Folder className="w-4 h-4 text-ink-2" />
                     <span>No Date / Backlog</span>
-                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-zinc-800 text-zinc-400 font-mono">
+                    <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
                       {smartGroups.backlog.length}
                     </span>
                   </button>
@@ -965,7 +966,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
         </div>
       ) : viewMode === 'kanban' ? (
-        /* Kanban Board View styled as Press Desks */
+        /* Board view */
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
           {kanbanColumns.map((col) => {
             const colItems = sortedItems.filter(i => {
@@ -982,15 +983,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   const droppedId = e.dataTransfer.getData('text/plain');
                   handleDropOnColumn(col.id, droppedId);
                 }}
-                className="clipping clipping-aged border-2 border-stone-300 dark:border-stone-800 rounded-none p-3.5 flex flex-col transition-colors hover:border-stone-400 dark:hover:border-stone-700 relative"
-              >
-                <div className="tape-strip -top-2 right-4 transform rotate-1" />
-                <div className="flex items-center justify-between mb-3 border-b border-stone-300 dark:border-stone-800/80 pb-2">
+                className="bg-sunken border border-stone-300 dark:border-stone-800 rounded-control p-3.5 flex flex-col transition-colors hover:border-stone-400 dark:hover:border-stone-700 relative"
+              >                <div className="flex items-center justify-between mb-3 border-b border-stone-300 dark:border-stone-800/80 pb-2">
                   <div>
-                    <div className="text-[9px] font-ledger uppercase tracking-widest text-amber-700 dark:text-amber-500 font-bold">{col.desk}</div>
-                    <span className="font-editorial text-sm font-bold text-stone-900 dark:text-stone-100 uppercase tracking-wide">{col.label}</span>
+                    <div className="text-caption text-amber-700 dark:text-amber-500 font-bold">{col.desk}</div>
+                    <span className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-wide">{col.label}</span>
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 rounded-none bg-paper-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 font-ledger border border-stone-300 dark:border-stone-800">
+                  <span className="text-caption px-1.5 py-0.5 rounded-control bg-paper-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-800">
                     {colItems.length}
                   </span>
                 </div>
@@ -1007,7 +1006,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           e.dataTransfer.effectAllowed = 'move';
                         }}
                         onClick={() => setSelectedItem(item)}
-                        className={`clipping clipping-white border p-2.5 rounded-none cursor-grab active:cursor-grabbing shadow-xs transition-colors space-y-2 select-none ${
+                        className={`bg-surface border p-2.5 rounded-control cursor-grab active:cursor-grabbing shadow-sm transition-colors space-y-2 select-none ${
                           blocked
                             ? 'border-amber-600/40 opacity-80 hover:opacity-100'
                             : 'border-stone-300 dark:border-stone-800 hover:border-stone-400 dark:hover:border-stone-700'
@@ -1016,11 +1015,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         <div className="flex items-start justify-between gap-2">
                           <div className="flex items-center gap-1.5 min-w-0">
                             {blocked && (
-                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-600 dark:text-amber-500 shrink-0 font-ledger text-[9px] font-bold">
+                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-600 dark:text-amber-500 shrink-0 text-caption font-bold">
                                 [BLOCKED]
                               </span>
                             )}
-                            <span className={`font-editorial text-xs font-semibold truncate ${item.is_completed ? 'line-through text-stone-400 dark:text-stone-500 italic' : 'text-stone-900 dark:text-stone-100'}`}>
+                            <span className={` text-meta font-semibold truncate ${item.is_completed ? 'line-through text-ink-2 dark:text-stone-500 italic' : 'text-stone-900 dark:text-stone-100'}`}>
                               {item.title}
                             </span>
                           </div>
@@ -1032,7 +1031,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                               }}
                               disabled={refiningItemId === item.id}
                               title="Polish with AI"
-                              className="text-stone-500 hover:text-amber-600 dark:hover:text-amber-400 p-0.5 rounded-none transition-colors"
+                              className="text-ink-3 hover:text-amber-600 dark:hover:text-amber-400 p-0.5 rounded-control transition-colors"
                             >
                               {refiningItemId === item.id ? (
                                 <RotateCw className="w-3 h-3 animate-spin text-amber-500" />
@@ -1041,7 +1040,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                               )}
                             </button>
                             <span
-                              className={`text-[9px] uppercase font-ledger font-bold px-1 py-0.2 rounded-none border ${
+                              className={`text-caption font-bold px-1 py-0.2 rounded-control border ${
                                 item.priority === 'urgent'
                                   ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'
                                   : 'bg-paper-aged dark:bg-stone-900 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800'
@@ -1058,25 +1057,25 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             if (!p) return null;
                             return (
                               <div 
-                                className="text-[10px] px-1.5 py-0.5 rounded-none border border-stone-300 dark:border-stone-700 flex items-center gap-1 font-medium font-ledger uppercase"
+                                className="text-caption px-1.5 py-0.5 rounded-control border border-stone-300 dark:border-stone-700 flex items-center gap-1 font-medium"
                                 style={{
                                   backgroundColor: `${p.color || '#d97706'}20`,
                                   color: p.color || '#d97706'
                                 }}
                               >
-                                <span className="w-1.5 h-1.5 rounded-none" style={{ backgroundColor: p.color || '#d97706' }} />
+                                <span className="w-1.5 h-1.5 rounded-control" style={{ backgroundColor: p.color || '#d97706' }} />
                                 <span className="truncate max-w-[100px]">{p.name}</span>
                               </div>
                             );
                           })()}
                           {item.due_date && (
-                            <span className="text-[10px] text-stone-500 dark:text-zinc-400 font-ledger">
+                            <span className="text-caption text-ink-3 dark:text-zinc-400">
                               📅 {item.due_date}
                             </span>
                           )}
                           {item.context_tags && (
-                            <div className="text-[10px] text-stone-500 dark:text-zinc-400 flex items-center gap-0.5 font-ledger bg-paper-base dark:bg-zinc-800/80 px-1.5 py-0.5 rounded-none border border-stone-200 dark:border-stone-700">
-                              <Tag className="w-2.5 h-2.5 text-stone-400" />
+                            <div className="text-caption text-ink-3 dark:text-zinc-400 flex items-center gap-0.5 bg-paper-base dark:bg-zinc-800/80 px-1.5 py-0.5 rounded-control border border-stone-200 dark:border-stone-700">
+                              <Tag className="w-2.5 h-2.5 text-ink-2" />
                               <span>{item.context_tags}</span>
                             </div>
                           )}
@@ -1120,12 +1119,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
         <form onSubmit={handleCreate} className="space-y-4">
               <div>
                 <div className="flex items-center justify-between mb-1">
-                  <label className="block text-xs text-zinc-400">Title</label>
+                  <label className="block text-meta text-ink-2">Title</label>
                   <button
                     type="button"
                     onClick={handleAiPolishNewItem}
                     disabled={isAiPolishing || !newTitle.trim()}
-                    className="flex items-center space-x-1 text-[11px] text-blue-400 hover:text-blue-300 disabled:opacity-40 font-medium px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 transition-all"
+                    className="flex items-center space-x-1 text-meta text-blue-400 hover:text-blue-300 disabled:opacity-40 font-medium px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 transition-all"
                   >
                     <Sparkles className="w-3 h-3" />
                     <span>{isAiPolishing ? 'Polishing...' : '✨ AI Polish & Auto-Complete'}</span>
@@ -1137,7 +1136,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   placeholder="e.g. gym, pay wifi, meet raj tomorrow..."
                   value={newTitle}
                   onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
                 />
               </div>
 
@@ -1145,26 +1144,26 @@ export const TasksView: React.FC<TasksViewProps> = ({
               {generatedSubtasks.length > 0 && (
                 <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3 rounded border border-ink-base/15 dark:border-stone-800 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-semibold text-blue-400 flex items-center space-x-1.5">
+                    <span className="text-meta font-semibold text-blue-400 flex items-center space-x-1.5">
                       <Sparkles className="w-3 h-3" />
                       <span>AI Generated Action Checklist ({generatedSubtasks.length})</span>
                     </span>
                     <button
                       type="button"
                       onClick={() => setGeneratedSubtasks([])}
-                      className="text-[10px] text-zinc-500 hover:text-zinc-300"
+                      className="text-caption text-ink-3 hover:text-ink-2"
                     >
                       Clear
                     </button>
                   </div>
                   <div className="space-y-1">
                     {generatedSubtasks.map((st, i) => (
-                      <div key={i} className="flex items-center justify-between text-xs bg-zinc-800/60 px-2.5 py-1.5 rounded-lg border border-zinc-700/60 text-zinc-200">
+                      <div key={i} className="flex items-center justify-between text-meta bg-sunken/60 px-2.5 py-1.5 rounded-lg border border-hairline/60 text-ink">
                         <span>{st}</span>
                         <button
                           type="button"
                           onClick={() => setGeneratedSubtasks(generatedSubtasks.filter((_, idx) => idx !== i))}
-                          className="text-zinc-500 hover:text-red-400"
+                          className="text-ink-3 hover:text-red-400"
                         >
                           <X className="w-3 h-3" />
                         </button>
@@ -1176,11 +1175,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Type</label>
+                  <label className="block text-meta text-ink-2 mb-1">Type</label>
                   <select
                     value={newType}
                     onChange={(e) => setNewType(e.target.value as EntityType)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                   >
                     <option value="task">Task</option>
                     <option value="event">Event</option>
@@ -1189,11 +1188,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Priority</label>
+                  <label className="block text-meta text-ink-2 mb-1">Priority</label>
                   <select
                     value={newPriority}
                     onChange={(e) => setNewPriority(e.target.value as TaskPriority)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                   >
                     <option value="low">Low</option>
                     <option value="medium">Medium</option>
@@ -1205,21 +1204,21 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Due Date</label>
+                  <label className="block text-meta text-ink-2 mb-1">Due Date</label>
                   <input
                     type="date"
                     value={newDueDate}
                     onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Recurrence (Optional)</label>
+                  <label className="block text-meta text-ink-2 mb-1">Recurrence (Optional)</label>
                   <select
                     value={newRepeatRule}
                     onChange={(e) => setNewRepeatRule(e.target.value)}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                   >
                     <option value="">None (One-time)</option>
                     <option value="daily">Daily</option>
@@ -1233,14 +1232,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
               {/* Project & Milestone Assignment */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Project</label>
+                  <label className="block text-meta text-ink-2 mb-1">Project</label>
                   <select
                     value={newProjectId}
                     onChange={(e) => {
                       setNewProjectId(e.target.value);
                       setNewMilestoneId('');
                     }}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
                   >
                     <option value="">No Project (Inbox)</option>
                     {projects.map(p => (
@@ -1250,12 +1249,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs text-zinc-400 mb-1">Milestone (Optional)</label>
+                  <label className="block text-meta text-ink-2 mb-1">Milestone (Optional)</label>
                   <select
                     value={newMilestoneId}
                     onChange={(e) => setNewMilestoneId(e.target.value)}
                     disabled={!newProjectId}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500 disabled:opacity-40"
                   >
                     <option value="">None</option>
                     {milestones
@@ -1269,30 +1268,30 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
               {/* Estimated Duration Quick Select */}
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Estimated Duration</label>
+                <label className="block text-meta text-ink-2 mb-1">Estimated Duration</label>
                 <div className="flex flex-wrap gap-1.5 items-center">
                   {[15, 30, 45, 60, 90, 120].map(mins => (
                     <button
                       key={mins}
                       type="button"
                       onClick={() => setNewEstimatedMinutes(mins)}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all ${
+                      className={`px-2.5 py-1 rounded-lg text-meta font-mono transition-all ${
                         newEstimatedMinutes === mins
                           ? 'bg-blue-600 text-white font-bold shadow-sm'
-                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200'
+                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
                       }`}
                     >
                       {mins < 60 ? `${mins}m` : `${mins / 60}h${mins % 60 ? `${mins % 60}m` : ''}`}
                     </button>
                   ))}
-                  <div className="flex items-center gap-1 text-xs text-zinc-400 ml-1">
+                  <div className="flex items-center gap-1 text-meta text-ink-2 ml-1">
                     <input
                       type="number"
                       min={5}
                       max={480}
                       value={newEstimatedMinutes}
                       onChange={e => setNewEstimatedMinutes(Math.max(5, parseInt(e.target.value) || 30))}
-                      className="w-16 bg-zinc-800 border border-zinc-700 rounded-lg px-2 py-1 text-xs text-zinc-100 text-right"
+                      className="w-16 bg-sunken border border-hairline rounded-lg px-2 py-1 text-meta text-ink text-right"
                     />
                     <span>min</span>
                   </div>
@@ -1300,28 +1299,28 @@ export const TasksView: React.FC<TasksViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">Description</label>
+                <label className="block text-meta text-ink-2 mb-1">Description</label>
                 <textarea
                   rows={2}
                   value={newDescription}
                   onChange={(e) => setNewDescription(e.target.value)}
                   placeholder="Optional context or notes..."
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-3 py-2 text-xs text-zinc-100"
+                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
                 />
               </div>
 
               <div>
-                <label className="block text-xs text-zinc-400 mb-1">GTD Context Tag (Optional)</label>
+                <label className="block text-meta text-ink-2 mb-1">GTD Context Tag (Optional)</label>
                 <div className="flex flex-wrap gap-1.5">
                   {['@errands', '@computer', '@phone', '@home', '@deep-work'].map(tag => (
                     <button
                       key={tag}
                       type="button"
                       onClick={() => setNewContextTags(newContextTags === tag ? '' : tag)}
-                      className={`px-2 py-0.5 rounded-lg text-xs font-mono transition-all ${
+                      className={`px-2 py-0.5 rounded-lg text-meta font-mono transition-all ${
                         newContextTags === tag
                           ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold'
-                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200'
+                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
                       }`}
                     >
                       {tag}
@@ -1334,13 +1333,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsCreating(false)}
-                  className="px-4 py-2 rounded-lg text-xs text-zinc-400 hover:text-zinc-200"
+                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold"
+                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold"
                 >
                   Save Item
                 </button>
@@ -1351,13 +1350,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {/* Item Detail & AI Auto-Fill Modal / Drawer */}
       {selectedItem && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-zinc-900 border border-zinc-800 rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-2xl max-h-[85vh] overflow-y-auto">
+          <div className="bg-surface border border-hairline rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-lg max-h-[85vh] overflow-y-auto">
             <div className="flex items-start justify-between">
               <div>
-                <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider">
+                <span className="text-caption font-mono text-blue-400">
                   {selectedItem.entity_type} • {selectedItem.priority}
                 </span>
-                <h2 className="text-base font-bold text-zinc-100 mt-0.5">{selectedItem.title}</h2>
+                <h2 className="text-base font-bold text-ink mt-0.5">{selectedItem.title}</h2>
               </div>
               <div className="flex items-center gap-2">
                 <button
@@ -1367,7 +1366,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     setDeletingItemId(id);
                   }}
                   aria-label={`Delete task: ${selectedItem.title}`}
-                  className="p-1.5 text-zinc-400 hover:text-rose-400 hover:bg-zinc-800 rounded-lg transition-colors"
+                  className="p-1.5 text-ink-2 hover:text-rose-400 hover:bg-sunken rounded-lg transition-colors"
                   title="Delete task"
                 >
                   <Trash2 className="w-4 h-4" />
@@ -1375,7 +1374,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <button
                   onClick={() => setSelectedItem(null)}
                   aria-label="Close task details"
-                  className="text-zinc-400 hover:text-zinc-200 text-xs px-2 py-1 rounded-lg hover:bg-zinc-800 transition-colors"
+                  className="text-ink-2 hover:text-ink text-meta px-2 py-1 rounded-lg hover:bg-sunken transition-colors"
                 >
                   Close
                 </button>
@@ -1385,41 +1384,41 @@ export const TasksView: React.FC<TasksViewProps> = ({
             {/* Description */}
             <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3.5 rounded border border-ink-base/15 dark:border-stone-800">
               <div className="flex items-center justify-between mb-1.5">
-                <span className="text-xs font-semibold text-zinc-300">Description & Context</span>
+                <span className="text-meta font-semibold text-ink-2">Description & Context</span>
                 {/* AI Detail Filling Button */}
                 <button
                   onClick={() => handleAiAutoFill(selectedItem)}
                   disabled={isAiExpanding}
-                  className="flex items-center space-x-1 text-[11px] text-blue-400 hover:text-blue-300 font-medium"
+                  className="flex items-center space-x-1 text-meta text-blue-400 hover:text-blue-300 font-medium"
                 >
                   <Sparkles className="w-3 h-3" />
                   <span>{isAiExpanding ? 'AI Generating...' : 'AI Auto-Fill Details'}</span>
                 </button>
               </div>
-              <p className="text-xs text-zinc-400 whitespace-pre-wrap">
+              <p className="text-meta text-ink-2 whitespace-pre-wrap">
                 {selectedItem.description || "No description provided. Click 'AI Auto-Fill Details' to have Raspberry Pi 5 generate one!"}
               </p>
             </div>
 
             {/* Subtasks Checklist */}
             <div className="space-y-2">
-              <span className="text-xs font-semibold text-zinc-300">Actionable Checklist</span>
+              <span className="text-meta font-semibold text-ink-2">Actionable Checklist</span>
               {selectedItem.subtasks.length === 0 ? (
-                <p className="text-xs text-zinc-400 italic">No checklist items yet.</p>
+                <p className="text-meta text-ink-2 italic">No checklist items yet.</p>
               ) : (
                 selectedItem.subtasks.map((st) => (
                   <div
                     key={st.id}
                     onClick={() => handleToggleSubtask(st.id)}
-                    className="flex items-center space-x-2.5 p-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 cursor-pointer"
+                    className="flex items-center space-x-2.5 p-2 rounded-lg bg-sunken/60 border border-hairline/60 cursor-pointer"
                   >
                     <input
                       type="checkbox"
                       checked={st.is_completed}
                       onChange={() => handleToggleSubtask(st.id)}
-                      className="w-3.5 h-3.5 rounded text-blue-600 bg-zinc-800 border-zinc-600 cursor-pointer"
+                      className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
                     />
-                    <span className={`text-xs ${st.is_completed ? 'line-through text-zinc-400' : 'text-zinc-200'}`}>
+                    <span className={`text-meta ${st.is_completed ? 'line-through text-ink-2' : 'text-ink'}`}>
                       {st.title}
                     </span>
                   </div>
@@ -1428,9 +1427,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
 
             {/* GTD Context Tags Selector */}
-            <div className="space-y-1.5 border-t border-zinc-800 pt-3">
-              <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1">
-                <Tag className="w-3 h-3 text-zinc-400" /> GTD Context Tag
+            <div className="space-y-1.5 border-t border-hairline pt-3">
+              <span className="text-meta font-semibold text-ink-2 flex items-center gap-1">
+                <Tag className="w-3 h-3 text-ink-2" /> GTD Context Tag
               </span>
               <div className="flex flex-wrap gap-1.5">
                 {['@errands', '@computer', '@phone', '@home', '@deep-work'].map(tag => {
@@ -1446,10 +1445,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         setSelectedItem({ ...selectedItem, context_tags: nextStr });
                         onUpdateItem?.(selectedItem.id, { context_tags: nextStr });
                       }}
-                      className={`px-2 py-0.5 rounded-lg text-xs font-mono transition-all ${
+                      className={`px-2 py-0.5 rounded-lg text-meta font-mono transition-all ${
                         isActive 
                           ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold'
-                          : 'bg-zinc-800 text-zinc-400 border border-zinc-700 hover:text-zinc-200'
+                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
                       }`}
                     >
                       {tag}
@@ -1460,13 +1459,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
 
             {/* Project & Milestone Reassignment Section */}
-            <div className="space-y-3 border-t border-zinc-800 pt-3">
-              <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+            <div className="space-y-3 border-t border-hairline pt-3">
+              <span className="text-meta font-semibold text-ink-2 flex items-center gap-1.5">
                 <Folder className="w-3.5 h-3.5 text-blue-400" /> Project & Milestone Assignment
               </span>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Project</label>
+                  <label className="block text-meta text-ink-2 mb-1">Project</label>
                   <select
                     value={selectedItem.project_id || ''}
                     onChange={(e) => {
@@ -1475,7 +1474,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       setSelectedItem(updated);
                       onUpdateItem?.(selectedItem.id, { project_id: val as any, milestone_id: null as any });
                     }}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink focus:outline-none focus:border-blue-500"
                   >
                     <option value="">No Project (Inbox)</option>
                     {projects.map(p => (
@@ -1484,7 +1483,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   </select>
                 </div>
                 <div>
-                  <label className="block text-[11px] text-zinc-400 mb-1">Milestone</label>
+                  <label className="block text-meta text-ink-2 mb-1">Milestone</label>
                   <select
                     value={selectedItem.milestone_id || ''}
                     onChange={(e) => {
@@ -1494,7 +1493,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       onUpdateItem?.(selectedItem.id, { milestone_id: val as any });
                     }}
                     disabled={!selectedItem.project_id}
-                    className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-blue-500 disabled:opacity-40"
+                    className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink focus:outline-none focus:border-blue-500 disabled:opacity-40"
                   >
                     <option value="">None</option>
                     {milestones
@@ -1508,8 +1507,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
               {/* Estimated Duration Quick Editor */}
               <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-zinc-400 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-zinc-500" /> Estimated Duration:
+                <span className="text-meta text-ink-2 flex items-center gap-1">
+                  <Clock className="w-3 h-3 text-ink-3" /> Estimated Duration:
                 </span>
                 <div className="flex items-center gap-1.5">
                   {[15, 30, 45, 60, 120].map(mins => (
@@ -1521,10 +1520,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
                         setSelectedItem(updated);
                         onUpdateItem?.(selectedItem.id, { estimated_minutes: mins });
                       }}
-                      className={`px-2 py-0.5 rounded text-[10px] font-mono transition-all ${
+                      className={`px-2 py-0.5 rounded text-caption font-mono transition-all ${
                         selectedItem.estimated_minutes === mins
                           ? 'bg-blue-600 text-white font-bold shadow-sm'
-                          : 'bg-zinc-800 text-zinc-400 hover:text-white'
+                          : 'bg-sunken text-ink-2 hover:text-white'
                       }`}
                     >
                       {mins < 60 ? `${mins}m` : `${mins / 60}h`}
@@ -1535,9 +1534,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
 
             {/* Task Dependencies & Blockers Section */}
-            <div className="space-y-2 border-t border-zinc-800 pt-3">
+            <div className="space-y-2 border-t border-hairline pt-3">
               <div className="flex items-center justify-between">
-                <span className="text-xs font-semibold text-zinc-300 flex items-center gap-1.5">
+                <span className="text-meta font-semibold text-ink-2 flex items-center gap-1.5">
                   <Lock className="w-3 h-3 text-amber-400" /> Task Dependencies & Blockers
                 </span>
               </div>
@@ -1547,7 +1546,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 const { blocked, blockerTitles } = isItemBlocked(selectedItem);
                 if (blocked) {
                   return (
-                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs flex items-center gap-2">
+                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-meta flex items-center gap-2">
                       <Lock className="w-4 h-4 shrink-0 text-amber-400" />
                       <span>Blocked until: <strong>{blockerTitles.join(', ')}</strong> is completed.</span>
                     </div>
@@ -1562,14 +1561,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   {selectedItem.depends_on.map(depId => {
                     const depItem = items.find(i => i.id === depId);
                     return (
-                      <div key={depId} className="flex items-center justify-between p-2 rounded-lg bg-zinc-800/60 border border-zinc-700/60 text-xs">
+                      <div key={depId} className="flex items-center justify-between p-2 rounded-lg bg-sunken/60 border border-hairline/60 text-meta">
                         <div className="flex items-center gap-2 truncate">
                           {depItem?.is_completed ? (
                             <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                           ) : (
                             <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
                           )}
-                          <span className={`truncate ${depItem?.is_completed ? 'line-through text-zinc-500' : 'text-zinc-200'}`}>
+                          <span className={`truncate ${depItem?.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
                             {depItem ? depItem.title : depId}
                           </span>
                         </div>
@@ -1580,7 +1579,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             setSelectedItem({ ...selectedItem, depends_on: newDeps });
                             onUpdateItem?.(selectedItem.id, { depends_on: newDeps });
                           }}
-                          className="text-zinc-500 hover:text-rose-400 p-0.5 rounded"
+                          className="text-ink-3 hover:text-rose-400 p-0.5 rounded"
                           title="Remove dependency"
                         >
                           <X className="w-3.5 h-3.5" />
@@ -1590,7 +1589,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   })}
                 </div>
               ) : (
-                <p className="text-xs text-zinc-500 italic">No prerequisites. This task can be started immediately.</p>
+                <p className="text-meta text-ink-3 italic">No prerequisites. This task can be started immediately.</p>
               )}
 
               {/* Add dependency dropdown */}
@@ -1608,7 +1607,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                     }
                     e.target.value = '';
                   }}
-                  className="w-full bg-zinc-800 border border-zinc-700 rounded-lg px-2.5 py-1.5 text-xs text-zinc-300 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
                 >
                   <option value="" disabled>+ Add blocker task dependency...</option>
                   {items
@@ -1623,7 +1622,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
 
             {/* Recurrence & Due Date info */}
-            <div className="flex items-center justify-between text-xs text-zinc-400 border-t border-zinc-800 pt-3">
+            <div className="flex items-center justify-between text-meta text-ink-2 border-t border-hairline pt-3">
               <span>Due: {selectedItem.due_date || 'None'}</span>
               <span>{selectedItem.repeat_rule ? `🔄 Recurrence: ${selectedItem.repeat_rule}` : 'One-time item'}</span>
             </div>
@@ -1644,42 +1643,42 @@ export const TasksView: React.FC<TasksViewProps> = ({
             {isOrganizingBoard ? (
               <div className="py-12 flex flex-col items-center justify-center space-y-3">
                 <RotateCw className="w-6 h-6 animate-spin text-blue-400" />
-                <p className="text-xs text-zinc-400">Analyzing tasks and strategic priorities...</p>
+                <p className="text-meta text-ink-2">Analyzing tasks and strategic priorities...</p>
               </div>
             ) : boardOrgData ? (
               <div className="space-y-4">
                 {/* Executive Summary Card */}
                 <div className="bg-gradient-to-br from-blue-950/40 via-zinc-900 to-zinc-900 border border-blue-500/20 rounded-xl p-3.5 space-y-1.5">
-                  <span className="text-[10px] font-mono text-blue-400 uppercase tracking-wider font-semibold">
+                  <span className="text-caption font-mono text-blue-400 font-semibold">
                     Workload Synthesis
                   </span>
-                  <p className="text-xs text-zinc-200 leading-relaxed">
+                  <p className="text-meta text-ink leading-relaxed">
                     {boardOrgData.executive_summary}
                   </p>
                 </div>
 
                 {/* Top 3 Big Rocks */}
                 <div className="space-y-2">
-                  <div className="flex items-center space-x-1.5 text-xs font-semibold text-zinc-300">
+                  <div className="flex items-center space-x-1.5 text-meta font-semibold text-ink-2">
                     <Target className="w-4 h-4 text-red-400" />
                     <span>Today's Strategic Big 3 (High Leverage)</span>
                   </div>
                   <div className="space-y-1.5">
                     {boardOrgData.big_rocks.length === 0 ? (
-                      <p className="text-xs text-zinc-400 italic">No pending tasks on the board.</p>
+                      <p className="text-meta text-ink-2 italic">No pending tasks on the board.</p>
                     ) : (
                       boardOrgData.big_rocks.map((task: any, idx: number) => (
                         <div
                           key={task.id || idx}
-                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-xs"
+                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-meta"
                         >
                           <div className="flex items-center space-x-2 min-w-0 flex-1">
-                            <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-[10px]">
+                            <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-caption">
                               {idx + 1}
                             </span>
-                            <span className="font-medium text-zinc-200 truncate">{task.title}</span>
+                            <span className="font-medium text-ink truncate">{task.title}</span>
                           </div>
-                          <span className={`text-[9px] uppercase font-bold px-2 py-0.5 rounded ml-2 ${
+                          <span className={`text-caption font-bold px-2 py-0.5 rounded ml-2 ${
                             task.priority === 'urgent' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
                           }`}>
                             {task.priority || 'medium'}
@@ -1692,15 +1691,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
                 {/* Proposed Title Polish */}
                 {boardOrgData.title_improvements && boardOrgData.title_improvements.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-zinc-800/80">
+                  <div className="space-y-2 pt-2 border-t border-hairline/80">
                     <div className="flex items-center justify-between">
-                      <span className="text-xs font-semibold text-zinc-300 flex items-center space-x-1.5">
+                      <span className="text-meta font-semibold text-ink-2 flex items-center space-x-1.5">
                         <Sparkles className="w-3.5 h-3.5 text-blue-400" />
                         <span>Recommended Title Improvements ({boardOrgData.title_improvements.length})</span>
                       </span>
                       <button
                         onClick={handleApplyAllTitleImprovements}
-                        className="text-[11px] text-blue-400 hover:text-blue-300 font-semibold px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20"
+                        className="text-meta text-blue-400 hover:text-blue-300 font-semibold px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20"
                       >
                         Polish All
                       </button>
@@ -1710,15 +1709,15 @@ export const TasksView: React.FC<TasksViewProps> = ({
                       {boardOrgData.title_improvements.map((ti: any) => (
                         <div
                           key={ti.id}
-                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-xs gap-3"
+                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-meta gap-3"
                         >
                           <div className="min-w-0 flex-1">
-                            <div className="text-[11px] text-zinc-400 line-through truncate">{ti.current_title}</div>
+                            <div className="text-meta text-ink-2 line-through truncate">{ti.current_title}</div>
                             <div className="font-semibold text-emerald-400 truncate mt-0.5">{ti.improved_title}</div>
                           </div>
                           <button
                             onClick={() => handleApplyTitleImprovement(ti.id, ti.improved_title)}
-                            className="px-2.5 py-1 rounded bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-medium shrink-0 flex items-center space-x-1"
+                            className="px-2.5 py-1 rounded bg-sunken hover:bg-hairline text-ink text-meta font-medium shrink-0 flex items-center space-x-1"
                           >
                             <Check className="w-3 h-3 text-emerald-400" />
                             <span>Apply</span>
@@ -1732,7 +1731,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <div className="flex justify-end pt-2">
                   <button
                     onClick={() => setIsBoardOrganizerOpen(false)}
-                    className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-200 text-xs font-semibold rounded-lg"
+                    className="px-4 py-2 bg-sunken hover:bg-hairline text-ink text-meta font-semibold rounded-lg"
                   >
                     Done
                   </button>

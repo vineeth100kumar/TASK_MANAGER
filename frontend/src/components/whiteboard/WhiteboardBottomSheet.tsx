@@ -59,17 +59,17 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
       {/* Slide-up sheet */}
       <div
         style={{ paddingBottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))' }}
-        className="relative z-50 clipping clipping-white rounded-t-3xl border-t-2 border-ink-base/20 dark:border-paper-light/20 p-5 space-y-4 shadow-2xl animate-in slide-in-from-bottom duration-200"
+        className="relative z-50 bg-surface rounded-t-3xl border-t border-ink-base/20 dark:border-paper-light/20 p-5 space-y-4 shadow-lg animate-in slide-in-from-bottom duration-200"
       >
         {/* Drag Handle */}
         <div className="w-12 h-1 bg-ink-base/20 dark:bg-paper-light/20 rounded-full mx-auto" />
 
         <div className="flex items-center justify-between border-b border-ink-base/10 dark:border-paper-light/10 pb-2">
           <div>
-            <span className="text-[9px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400">
+            <span className="text-caption text-ink-muted dark:text-stone-400">
               DRAFTING STUDIO • EXPANDED TOOLS
             </span>
-            <h3 className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light">
+            <h3 className="text-sm font-bold text-ink-base dark:text-paper-light">
               Studio Instrument Palette
             </h3>
           </div>
@@ -92,7 +92,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <Highlighter className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Highlighter</span>
+            <span className="text-caption">Highlighter</span>
           </button>
 
           <button
@@ -104,7 +104,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <Square className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Shapes</span>
+            <span className="text-caption">Shapes</span>
           </button>
 
           <button
@@ -116,7 +116,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <Type className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Text</span>
+            <span className="text-caption">Text</span>
           </button>
 
           <button
@@ -128,7 +128,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <StickyNote className="w-5 h-5 text-amber-600 dark:text-amber-400" />
-            <span className="text-[10px] font-ledger uppercase">Note</span>
+            <span className="text-caption">Note</span>
           </button>
 
           <button
@@ -140,7 +140,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <Zap className="w-5 h-5 text-rose-500" />
-            <span className="text-[10px] font-ledger uppercase">Laser</span>
+            <span className="text-caption">Laser</span>
           </button>
 
           <button
@@ -152,7 +152,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             }`}
           >
             <Hand className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Pan Hand</span>
+            <span className="text-caption">Pan Hand</span>
           </button>
 
           {onTriggerImageUpload && (
@@ -164,7 +164,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
               className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 hover:bg-paper-aged"
             >
               <ImageIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <span className="text-[10px] font-ledger uppercase">Add Image</span>
+              <span className="text-caption">Add Image</span>
             </button>
           )}
 
@@ -176,7 +176,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 disabled:opacity-40"
           >
             <Undo2 className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Undo</span>
+            <span className="text-caption">Undo</span>
           </button>
 
           <button
@@ -187,7 +187,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
             className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 disabled:opacity-40"
           >
             <Redo2 className="w-5 h-5" />
-            <span className="text-[10px] font-ledger uppercase">Redo</span>
+            <span className="text-caption">Redo</span>
           </button>
         </div>
 
@@ -198,7 +198,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
               onClear();
               onClose();
             }}
-            className="w-full py-2.5 rounded border border-rose-600/30 bg-rose-500/10 text-rose-700 dark:text-rose-400 font-ledger uppercase text-xs font-bold flex items-center justify-center gap-2 hover:bg-rose-500/20"
+            className="w-full py-2.5 rounded border border-rose-600/30 bg-rose-500/10 text-rose-700 dark:text-rose-400 text-meta font-bold flex items-center justify-center gap-2 hover:bg-rose-500/20"
           >
             <Trash2 className="w-4 h-4" />
             <span>Clear Board Canvas</span>

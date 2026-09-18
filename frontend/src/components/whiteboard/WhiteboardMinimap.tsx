@@ -204,8 +204,8 @@ export const WhiteboardMinimap: React.FC<WhiteboardMinimapProps> = ({
   };
 
   return (
-    <div className="clipping clipping-white rounded-none border border-ink-base/20 dark:border-paper-light/20 shadow-2xl p-1.5 space-y-1 select-none backdrop-blur-sm">
-      <div className="flex items-center justify-between px-1 text-[8px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400">
+    <div className="bg-surface rounded-control border border-ink-base/20 dark:border-paper-light/20 shadow-lg p-1.5 space-y-1 select-none backdrop-blur-sm">
+      <div className="flex items-center justify-between px-1 text-caption text-ink-muted dark:text-stone-400">
         <span>OVERVIEW MINIMAP</span>
         <span>{Math.round(viewState.zoom * 100)}%</span>
       </div>

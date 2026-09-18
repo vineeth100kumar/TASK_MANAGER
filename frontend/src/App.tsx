@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { Navbar } from './components/layout/Navbar';
 import { DashboardView } from './components/dashboard/DashboardView';
 import { TasksView } from './components/tasks/TasksView';
@@ -7,7 +7,11 @@ import { FinanceView } from './components/finance/FinanceView';
 import { ShortcutsModal } from './components/shortcuts/ShortcutsModal';
 import { BrainDumpModal } from './components/layout/BrainDumpModal';
 import { MorningEveningWizard } from './components/planner/MorningEveningWizard';
-import { WhiteboardView } from './components/whiteboard/WhiteboardView';
+// The canvas is the single largest thing in the app and most sessions never
+// open it, so the Pi should not have to send it on every load.
+const WhiteboardView = lazy(() =>
+  import('./components/whiteboard/WhiteboardView').then((m) => ({ default: m.WhiteboardView }))
+);
 import { SearchModal } from './components/search/SearchModal';
 import { CelebrationModal } from './components/common/CelebrationModal';
 
@@ -37,18 +41,31 @@ export const App: React.FC = () => {
   const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // Newspaper Edition State ('day' vs 'night')
-  const [edition, setEdition] = useState<'day' | 'night'>(() => {
-    const saved = storage.get('sage_edition');
-    if (saved === 'day' || saved === 'night') return saved;
-    const hr = new Date().getHours();
-    return hr >= 20 || hr < 6 ? 'night' : 'day';
+  /*
+   * Theme. The `dark` class on <html> is what actually drives every token, so it
+   * is the single source of truth. It used to be hardcoded in index.html and
+   * never toggled, which meant every `dark:` variant was permanently on and the
+   * light theme never actually rendered. index.html now resolves it before
+   * first paint; this keeps it in sync.
+   */
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    const saved = storage.get('sage_theme');
+    if (saved === 'light' || saved === 'dark') return saved;
+    return typeof window !== 'undefined' &&
+      window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light';
   });
 
-  const handleToggleEdition = useCallback(() => {
-    setEdition((prev) => {
-      const next = prev === 'day' ? 'night' : 'day';
-      storage.set('sage_edition', next);
+  useEffect(() => {
+    document.documentElement.classList.toggle('dark', theme === 'dark');
+    document.documentElement.style.backgroundColor = theme === 'dark' ? '#0e0f12' : '#f6f6f8';
+  }, [theme]);
+
+  const handleToggleTheme = useCallback(() => {
+    setTheme((prev) => {
+      const next = prev === 'light' ? 'dark' : 'light';
+      storage.set('sage_theme', next);
       return next;
     });
   }, []);
@@ -260,20 +277,15 @@ export const App: React.FC = () => {
   const todayTasks = items.filter(i => i.due_date === todayStr || (!i.is_completed && i.priority === 'urgent'));
 
   return (
-    <div
-      className={`min-h-screen flex flex-col font-sans relative transition-colors duration-300 ${
-        edition === 'night' ? 'bg-[#141311] text-zinc-100' : 'bg-[#E8E0D0] text-[#1A1814]'
-      }`}
-      data-edition={edition}
-    >
+    <div className="min-h-screen flex flex-col bg-ground text-ink relative">
       {/* Navigation */}
       <Navbar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         isLiveConnected={isConnected}
         isSyncing={isSyncing}
-        edition={edition}
-        onToggleEdition={handleToggleEdition}
+        theme={theme}
+        onToggleTheme={handleToggleTheme}
         onOpenQuickCapture={() => setIsBrainDumpOpen(true)}
         onOpenSearch={() => setIsSearchOpen(true)}
         onOpenWizard={(mode) => {
@@ -289,7 +301,17 @@ export const App: React.FC = () => {
       />
 
       {/* Main Content Area */}
-      <main className={`flex-1 ${activeTab === 'dashboard' || activeTab === 'whiteboard' ? '' : 'px-4 sm:px-6 md:px-8 pt-4 md:pt-6'}`}>
+      {/*
+        Bottom padding clears the mobile capture row and tab bar. The Today
+        screen and the canvas manage their own spacing.
+      */}
+      <main
+        className={`flex-1 ${
+          activeTab === 'dashboard' || activeTab === 'whiteboard'
+            ? ''
+            : 'px-5 sm:px-6 md:px-8 pt-3 md:pt-6 pb-40 md:pb-16'
+        }`}
+      >
         {activeTab === 'dashboard' && (
           <DashboardView
             isLoading={isInitialLoading}
@@ -321,13 +343,21 @@ export const App: React.FC = () => {
         )}
 
         {activeTab === 'whiteboard' && (
-          <WhiteboardView
-            initialProjectId={activeWhiteboardProjectId}
-            projects={projects}
-            edition={edition}
-            onBack={() => setActiveTab('projects')}
-            onTaskCreated={loadData}
-          />
+          <Suspense
+            fallback={
+              <div className="flex items-center justify-center py-24 text-meta text-ink-3">
+                Opening canvas…
+              </div>
+            }
+          >
+            <WhiteboardView
+              initialProjectId={activeWhiteboardProjectId}
+              projects={projects}
+              edition={theme === 'dark' ? 'night' : 'day'}
+              onBack={() => setActiveTab('projects')}
+              onTaskCreated={loadData}
+            />
+          </Suspense>
         )}
 
         {activeTab === 'projects' && (

@@ -145,12 +145,9 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="relative w-full max-w-2xl clipping clipping-white rounded-none border border-ink-base/25 dark:border-paper-light/20 shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
-        {/* Scotch Tape Strip */}
-        <div className="tape-strip top-[-8px] left-1/2 -translate-x-1/2 w-36 h-4 z-20 pointer-events-none" />
-
+      <div className="relative w-full max-w-2xl bg-surface rounded-control border border-ink-base/25 dark:border-paper-light/20 shadow-lg overflow-hidden flex flex-col max-h-[90vh]">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-base/15 dark:border-paper-light/15 bg-paper-aged dark:bg-[#181612]">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ink-base/15 dark:border-paper-light/15 bg-paper-aged dark:bg-sunken">
           <div className="flex items-center gap-3">
             <div className={`w-10 h-10 rounded border flex items-center justify-center ${
               mode === 'morning' 
@@ -160,13 +157,13 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
               {mode === 'morning' ? <Sun className="w-5 h-5" /> : <Moon className="w-5 h-5" />}
             </div>
             <div>
-              <div className="text-[9px] font-ledger uppercase tracking-widest text-ink-muted dark:text-stone-400">
-                {mode === 'morning' ? 'BROADSHEET KICKOFF SURVEY' : 'DAILY LEDGER & RETROSPECTIVE'}
+              <div className="text-caption text-ink-muted dark:text-stone-400">
+                {mode === 'morning' ? 'Morning plan' : 'Evening review'}
               </div>
-              <h2 className="text-lg font-editorial font-bold text-ink-base dark:text-paper-light">
+              <h2 className="text-lg font-bold text-ink-base dark:text-paper-light">
                 {mode === 'morning' ? 'Morning Edition — Daily Kickoff' : 'Evening Edition — Debrief & Close'}
               </h2>
-              <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-400">
+              <p className="text-meta italic text-ink-muted dark:text-stone-400">
                 {mode === 'morning' ? 'Eliminate decision fatigue • 60-second clarity plan' : 'Celebrate wins • Zero-guilt night reset'}
               </p>
             </div>
@@ -178,7 +175,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                 setMode(mode === 'morning' ? 'evening' : 'morning');
                 setStep(1);
               }}
-              className="px-2.5 py-1 text-[11px] rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-white dark:bg-stone-800 hover:bg-paper-aged dark:hover:bg-stone-700 text-ink-base dark:text-paper-light transition-colors font-ledger uppercase tracking-wider"
+              className="px-2.5 py-1 text-meta rounded border border-ink-base/20 dark:border-paper-light/20 bg-paper-white dark:bg-stone-800 hover:bg-paper-aged dark:hover:bg-stone-700 text-ink-base dark:text-paper-light transition-colors"
             >
               Switch to {mode === 'morning' ? 'Evening' : 'Morning'}
             </button>
@@ -195,8 +192,8 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
         {/* Body Content */}
         <div className="p-6 overflow-y-auto flex-1 custom-scrollbar">
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-ink-muted dark:text-stone-400 font-editorial">
-              <div className="w-8 h-8 border-2 border-amber-600 dark:border-amber-400 border-t-transparent rounded-full animate-spin" />
+            <div className="flex flex-col items-center justify-center py-16 gap-3 text-ink-muted dark:text-stone-400">
+              <div className="w-8 h-8 border border-amber-600 dark:border-amber-400 border-t-transparent rounded-full animate-spin" />
               <p className="text-sm italic">Synthesizing daily mission parameters...</p>
             </div>
           ) : mode === 'morning' ? (
@@ -209,20 +206,20 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                   <div className="p-4 rounded border border-amber-600/30 bg-amber-500/10">
                     <div className="flex items-center justify-between">
                       <div>
-                        <span className="text-[10px] font-ledger font-bold uppercase tracking-wider text-amber-700 dark:text-amber-400">
+                        <span className="text-caption font-bold text-amber-700 dark:text-amber-400">
                           EDITION HEADLINE
                         </span>
-                        <h3 className="text-xl font-editorial font-bold text-ink-base dark:text-paper-light mt-0.5">
+                        <h3 className="text-xl font-bold text-ink-base dark:text-paper-light mt-0.5">
                           Good Morning, Chief
                         </h3>
-                        <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-300 mt-1">
+                        <p className="text-meta italic text-ink-muted dark:text-stone-300 mt-1">
                           Today is a fresh canvas. Win the morning, win the day.
                         </p>
                       </div>
                       {kickoffData?.streak_days ? (
-                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-amber-600/40 bg-amber-500/15 text-amber-800 dark:text-amber-300 font-ledger">
+                        <div className="flex items-center gap-1.5 px-3 py-1.5 rounded border border-amber-600/40 bg-amber-500/15 text-amber-800 dark:text-amber-300">
                           <Flame className="w-4 h-4 fill-amber-500 text-amber-600" />
-                          <span className="text-xs font-bold">{kickoffData.streak_days} DAY STREAK</span>
+                          <span className="text-meta font-bold">{kickoffData.streak_days} DAY STREAK</span>
                         </div>
                       ) : null}
                     </div>
@@ -231,7 +228,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                   {/* Scheduled Events Today */}
                   <div>
                     <div className="flex items-center justify-between mb-2">
-                      <h4 className="text-[10px] font-ledger font-bold uppercase tracking-wider text-ink-muted dark:text-stone-400 flex items-center gap-1.5">
+                      <h4 className="text-caption font-bold text-ink-muted dark:text-stone-400 flex items-center gap-1.5">
                         <Calendar className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
                         Today's Scheduled Events ({kickoffData?.today_events?.length || 0})
                       </h4>
@@ -240,15 +237,15 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                       <div className="space-y-1.5">
                         {kickoffData.today_events.map(ev => (
                           <div key={ev.id} className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-700 bg-paper-aged/50 dark:bg-stone-800/60 text-sm">
-                            <span className="text-ink-base dark:text-stone-200 font-editorial font-medium">{ev.title}</span>
-                            <span className="text-xs text-amber-700 dark:text-amber-400 font-ledger font-bold">
+                            <span className="text-ink-base dark:text-stone-200 font-medium">{ev.title}</span>
+                            <span className="text-meta text-amber-700 dark:text-amber-400 font-bold">
                               {ev.start_at ? new Date(ev.start_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'All Day'}
                             </span>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-500 p-3 rounded border border-ink-base/10 dark:border-stone-800 bg-paper-aged/30 dark:bg-stone-800/30">
+                      <p className="text-meta italic text-ink-muted dark:text-stone-500 p-3 rounded border border-ink-base/10 dark:border-stone-800 bg-paper-aged/30 dark:bg-stone-800/30">
                         No calendar blocks scheduled yet. Open canvas for deep focus!
                       </p>
                     )}
@@ -258,7 +255,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                   <div className="pt-4 flex justify-end">
                     <button
                       onClick={() => setStep(2)}
-                      className="flex items-center gap-2 px-5 py-2.5 rounded bg-ink-base hover:bg-stone-800 text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base font-ledger font-bold text-xs uppercase tracking-wider transition-all shadow-sm"
+                      className="flex items-center gap-2 px-5 py-2.5 rounded bg-ink-base hover:bg-sunken text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base font-bold text-meta transition-all shadow-sm"
                     >
                       Pick Top 3 Big Rocks <ArrowRight className="w-4 h-4" />
                     </button>
@@ -270,11 +267,11 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                 <div className="space-y-5 animate-in fade-in">
                   <div>
                     <div className="flex items-center justify-between">
-                      <h3 className="text-base font-editorial font-bold text-ink-base dark:text-paper-light flex items-center gap-2">
+                      <h3 className="text-base font-bold text-ink-base dark:text-paper-light flex items-center gap-2">
                         <Target className="w-4 h-4 text-amber-600 dark:text-amber-400" />
                         Select Today's Top 3 "Big Rocks"
                       </h3>
-                      <span className={`text-xs px-2 py-0.5 rounded font-ledger font-bold ${
+                      <span className={`text-meta px-2 py-0.5 rounded font-bold ${
                         selectedBigRocks.length === 3 
                           ? 'bg-emerald-500/20 text-emerald-700 dark:text-emerald-400 border border-emerald-500/40' 
                           : 'bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400 border border-ink-base/15 dark:border-stone-700'
@@ -282,7 +279,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                         {selectedBigRocks.length} / 3 selected
                       </span>
                     </div>
-                    <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-400 mt-1">
+                    <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-1">
                       If you only get these 3 things done today, your day will be an absolute triumph.
                     </p>
                   </div>
@@ -310,21 +307,21 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                               }`}>
                                 {isSelected && <Check className="w-3.5 h-3.5 stroke-[3]" />}
                               </div>
-                              <span className="text-sm font-editorial font-medium truncate">{task.title}</span>
+                              <span className="text-sm font-medium truncate">{task.title}</span>
                             </div>
                             <div className="flex items-center gap-2">
                               {task.priority === 'urgent' && (
-                                <span className="text-[9px] font-ledger uppercase tracking-wider px-2 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30 font-bold">
+                                <span className="text-caption px-2 py-0.5 rounded bg-rose-500/20 text-rose-700 dark:text-rose-400 border border-rose-500/30 font-bold">
                                   Urgent
                                 </span>
                               )}
                               {task.priority === 'high' && (
-                                <span className="text-[9px] font-ledger uppercase tracking-wider px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 font-bold">
+                                <span className="text-caption px-2 py-0.5 rounded bg-amber-500/20 text-amber-700 dark:text-amber-400 border border-amber-500/30 font-bold">
                                   High
                                 </span>
                               )}
                               {task.due_date && (
-                                <span className="text-[10px] text-ink-muted dark:text-stone-400 font-ledger">
+                                <span className="text-caption text-ink-muted dark:text-stone-400">
                                   {task.due_date}
                                 </span>
                               )}
@@ -333,7 +330,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                         );
                       })
                     ) : (
-                      <p className="text-sm font-editorial italic text-ink-muted dark:text-stone-500 text-center py-6">
+                      <p className="text-sm italic text-ink-muted dark:text-stone-500 text-center py-6">
                         No pending tasks found. Add some tasks first!
                       </p>
                     )}
@@ -343,14 +340,14 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                   <div className="pt-3 flex items-center justify-between border-t border-ink-base/15 dark:border-stone-800">
                     <button
                       onClick={() => setStep(1)}
-                      className="flex items-center gap-1.5 px-3 py-2 text-xs font-ledger uppercase rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-stone-100 transition-colors"
+                      className="flex items-center gap-1.5 px-3 py-2 text-meta rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-stone-100 transition-colors"
                     >
                       <ArrowLeft className="w-3.5 h-3.5" /> Back
                     </button>
                     <button
                       onClick={handleFinishMorning}
                       disabled={submitting}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-ledger font-bold text-xs uppercase tracking-wider shadow-md transition-all disabled:opacity-50"
+                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-meta shadow-md transition-all disabled:opacity-50"
                     >
                       {submitting ? 'LOCKING IN...' : '🚀 LOCK IN & START DAY'}
                     </button>
@@ -366,20 +363,20 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
               {step === 1 && (
                 <div className="space-y-6 animate-in fade-in">
                   <div className="p-4 rounded border border-indigo-500/30 bg-indigo-500/10">
-                    <span className="text-[10px] font-ledger font-bold uppercase tracking-wider text-indigo-700 dark:text-indigo-400">
-                      EVENING DEBRIEF & NIGHT LEDGER
+                    <span className="text-caption font-bold text-indigo-700 dark:text-indigo-400">
+                      Evening review
                     </span>
-                    <h3 className="text-xl font-editorial font-bold text-ink-base dark:text-paper-light mt-0.5">
+                    <h3 className="text-xl font-bold text-ink-base dark:text-paper-light mt-0.5">
                       Closing the Loop
                     </h3>
-                    <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-300 mt-1">
+                    <p className="text-meta italic text-ink-muted dark:text-stone-300 mt-1">
                       Check off your wins, leave nothing lingering in your head, and sleep peacefully.
                     </p>
                   </div>
 
                   {/* Mood Selector */}
                   <div>
-                    <label className="block text-[10px] font-ledger font-bold uppercase tracking-wider text-ink-muted dark:text-stone-400 mb-2">
+                    <label className="block text-caption font-bold text-ink-muted dark:text-stone-400 mb-2">
                       HOW WAS YOUR ENERGY & FOCUS TODAY?
                     </label>
                     <div className="grid grid-cols-5 gap-2">
@@ -394,7 +391,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                           }`}
                         >
                           <span className="text-2xl">{m.emoji}</span>
-                          <span className="text-[10px] font-ledger uppercase font-medium">{m.label}</span>
+                          <span className="text-caption font-medium">{m.label}</span>
                         </button>
                       ))}
                     </div>
@@ -402,7 +399,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
 
                   {/* One-Line Reflection */}
                   <div>
-                    <label className="block text-[10px] font-ledger font-bold uppercase tracking-wider text-ink-muted dark:text-stone-400 mb-1.5">
+                    <label className="block text-caption font-bold text-ink-muted dark:text-stone-400 mb-1.5">
                       1-LINE REFLECTION OR NOTEWORTHY WIN
                     </label>
                     <textarea
@@ -410,18 +407,18 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                       onChange={e => setReflectionText(e.target.value)}
                       placeholder="e.g. Shipped the deployment pipeline, hit 5k run pacing target..."
                       rows={2}
-                      className="w-full bg-paper-aged/50 dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 rounded p-3 text-xs font-editorial text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none shadow-inner"
+                      className="w-full bg-paper-aged/50 dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 rounded p-3 text-meta text-ink-base dark:text-paper-light placeholder-ink-muted/50 dark:placeholder-stone-500 focus:outline-none focus:border-indigo-500 transition-colors resize-none shadow-inner"
                     />
                   </div>
 
                   {/* Zero-Guilt Migration Toggle */}
                   <div className="p-4 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/40 dark:bg-stone-800/50 flex items-center justify-between">
                     <div>
-                      <span className="text-sm font-editorial font-bold text-ink-base dark:text-paper-light flex items-center gap-1.5">
+                      <span className="text-sm font-bold text-ink-base dark:text-paper-light flex items-center gap-1.5">
                         <RotateCcw className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
                         Zero-Guilt Task Migration
                       </span>
-                      <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-400 mt-0.5">
+                      <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-0.5">
                         Automatically roll all unfinished tasks due today into tomorrow's docket.
                       </p>
                     </div>
@@ -439,7 +436,7 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                     <button
                       onClick={handleFinishEvening}
                       disabled={submitting}
-                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-ledger font-bold text-xs uppercase tracking-wider shadow-md transition-all disabled:opacity-50"
+                      className="flex items-center gap-2 px-6 py-2.5 rounded bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-meta shadow-md transition-all disabled:opacity-50"
                     >
                       {submitting ? 'SUBMITTING...' : 'COMPLETE DEBRIEF & REST 🌙'}
                     </button>
@@ -453,10 +450,10 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                     <CheckCircle2 className="w-8 h-8" />
                   </div>
                   <div>
-                    <h3 className="text-2xl font-editorial font-bold text-ink-base dark:text-paper-light">
+                    <h3 className="text-2xl font-bold text-ink-base dark:text-paper-light">
                       Day Officially Closed
                     </h3>
-                    <p className="text-xs font-editorial italic text-ink-muted dark:text-stone-400 mt-1 max-w-sm mx-auto">
+                    <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-1 max-w-sm mx-auto">
                       {debriefSummary?.migrated 
                         ? `${debriefSummary.migrated} tasks smoothly migrated to tomorrow. Zero guilt, full reset.`
                         : 'All clear! Outstanding work today.'}
@@ -464,17 +461,17 @@ export const MorningEveningWizard: React.FC<MorningEveningWizardProps> = ({
                   </div>
                   <div className="grid grid-cols-2 gap-3 max-w-xs mx-auto">
                     <div className="p-3 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/50 dark:bg-stone-800/80">
-                      <div className="text-2xl font-ledger font-bold text-emerald-600 dark:text-emerald-400">{debriefSummary?.completed || 0}</div>
-                      <div className="text-[10px] font-ledger uppercase text-ink-muted dark:text-stone-400">Completed Today</div>
+                      <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">{debriefSummary?.completed || 0}</div>
+                      <div className="text-caption text-ink-muted dark:text-stone-400">Completed Today</div>
                     </div>
                     <div className="p-3 rounded border border-ink-base/15 dark:border-stone-700/50 bg-paper-aged/50 dark:bg-stone-800/80">
-                      <div className="text-2xl font-ledger font-bold text-indigo-600 dark:text-indigo-400">{debriefSummary?.migrated || 0}</div>
-                      <div className="text-[10px] font-ledger uppercase text-ink-muted dark:text-stone-400">Migrated to Tomorrow</div>
+                      <div className="text-2xl font-bold text-indigo-600 dark:text-indigo-400">{debriefSummary?.migrated || 0}</div>
+                      <div className="text-caption text-ink-muted dark:text-stone-400">Migrated to Tomorrow</div>
                     </div>
                   </div>
                   <button
                     onClick={onClose}
-                    className="px-6 py-2 rounded bg-paper-aged dark:bg-stone-800 hover:bg-paper-white dark:hover:bg-stone-700 text-ink-base dark:text-paper-light text-xs font-ledger font-bold uppercase tracking-wider border border-ink-base/20 dark:border-stone-700 transition-colors"
+                    className="px-6 py-2 rounded bg-paper-aged dark:bg-stone-800 hover:bg-paper-white dark:hover:bg-stone-700 text-ink-base dark:text-paper-light text-meta font-bold border border-ink-base/20 dark:border-stone-700 transition-colors"
                   >
                     Close Survey
                   </button>

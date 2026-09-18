@@ -168,7 +168,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
 
   const isNight = edition === 'night';
   const barBg = isNight
-    ? 'bg-[#1C1B18]/95 border-amber-900/40 text-stone-200'
+    ? 'bg-[#1C1B18]/95 border-amber-900/40 text-ink'
     : 'bg-[#FBF8F1]/95 border-amber-900/20 text-ink-primary';
 
   return (
@@ -179,14 +179,14 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
         top: `${topPos}px`,
         zIndex: 60,
       }}
-      className={`flex items-center gap-1 px-2 py-1 border shadow-2xl backdrop-blur-md transition-all animate-in fade-in zoom-in-95 duration-100 ${barBg}`}
+      className={`flex items-center gap-1 px-2 py-1 border shadow-lg backdrop-blur-md transition-all animate-in fade-in zoom-in-95 duration-100 ${barBg}`}
     >
       {/* 1. In-Place Text Editing (if text element selected) */}
       {hasText && firstText && onEditText && (
         <button
           type="button"
           onClick={() => onEditText(firstText)}
-          className="flex items-center gap-1 px-2 py-1 text-xs font-ledger font-bold uppercase tracking-wider hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
+          className="flex items-center gap-1 px-2 py-1 text-meta font-bold hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
           title="Edit Text"
         >
           <Edit3 size={13} className="text-amber-600" />
@@ -199,7 +199,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
         <button
           type="button"
           onClick={() => onEditShapeText(firstShape)}
-          className="flex items-center gap-1 px-2 py-1 text-xs font-ledger font-bold uppercase tracking-wider hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
+          className="flex items-center gap-1 px-2 py-1 text-meta font-bold hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
           title={firstShape.text ? 'Edit Shape Text' : 'Add Text to Shape'}
         >
           <Type size={13} className="text-amber-600" />
@@ -215,7 +215,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
             setShowColorPicker((prev) => !prev);
             setShowFillPicker(false);
           }}
-          className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px] ${showColorPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
+          className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-control ${showColorPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
           title="Change Color"
         >
           <Palette size={14} />
@@ -223,7 +223,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
 
         {showColorPicker && (
           <div
-            className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-2xl flex items-center gap-1.5 z-70 ${barBg}`}
+            className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-lg flex items-center gap-1.5 z-70 ${barBg}`}
           >
             {PRESET_COLORS.map((c) => (
               <button
@@ -247,7 +247,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
               setShowFillPicker((prev) => !prev);
               setShowColorPicker(false);
             }}
-            className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px] ${showFillPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
+            className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-control ${showFillPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
             title="Change Fill Tone"
           >
             <Droplet size={14} />
@@ -255,7 +255,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
 
           {showFillPicker && (
             <div
-              className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-2xl flex items-center gap-1.5 z-70 ${barBg}`}
+              className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-lg flex items-center gap-1.5 z-70 ${barBg}`}
             >
               {PRESET_FILLS.map((f, idx) => (
                 <button
@@ -275,7 +275,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={() => handleAdjustSize(-1)}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
         title="Decrease Size"
       >
         <Minus size={13} />
@@ -283,7 +283,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={() => handleAdjustSize(1)}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
         title="Increase Size"
       >
         <Plus size={13} />
@@ -295,7 +295,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={onBringToFront}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
         title="Bring to Front"
       >
         <ArrowUp size={13} />
@@ -303,7 +303,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={onSendToBack}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
         title="Send to Back"
       >
         <ArrowDown size={13} />
@@ -313,7 +313,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={onDuplicateElements}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
         title="Duplicate (Ctrl+D)"
       >
         <Copy size={13} />
@@ -325,7 +325,7 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={onDeleteElements}
-        className="p-1.5 hover:bg-red-500/20 text-red-600 dark:text-red-400 transition-colors rounded-[1px]"
+        className="p-1.5 hover:bg-red-500/20 text-red-600 dark:text-red-400 transition-colors rounded-control"
         title="Delete (Backspace / Del)"
       >
         <Trash2 size={13} />
