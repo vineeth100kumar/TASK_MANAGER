@@ -47,6 +47,7 @@ import {
   isDueToday,
   itemMoment,
   formatWhen,
+  compareBySchedule,
   timeInputValue,
   withTimeOfDay
 } from '../../utils/dateHelpers';
@@ -174,11 +175,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
       if (sortBy === 'created_at') {
         return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
       }
-      // Default: due_date
-      if (!a.due_date && !b.due_date) return 0;
-      if (!a.due_date) return 1;
-      if (!b.due_date) return -1;
-      return a.due_date.localeCompare(b.due_date);
+      // Default: when it happens, which includes the time of day. Sorting on
+      // the date alone left everything due today in an arbitrary order.
+      return compareBySchedule(a, b);
     });
   }, [filteredItems, sortBy]);
 

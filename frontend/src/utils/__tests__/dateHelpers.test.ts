@@ -8,6 +8,8 @@ import {
   isOverdue,
   itemMoment,
   formatWhen,
+  compareBySchedule,
+  isPastDue,
   timeInputValue,
   withTimeOfDay,
   isDueToday,
@@ -207,5 +209,52 @@ describe('time of day', () => {
       start_at: null,
       remind_at: null,
     });
+  });
+});
+
+describe('the order a day happens in', () => {
+  const at = (entity_type: any, time: string | null, priority: any = 'medium') => ({
+    entity_type,
+    priority,
+    due_date: '2026-09-18',
+    start_at: time,
+    remind_at: time,
+    is_completed: false,
+  });
+
+  it('puts the earlier thing first', () => {
+    // The screenshot: a 19:30 outing was shown as "Next" above an 18:30
+    // deadline that comes an hour before it.
+    const outing = at('event', '2026-09-18T19:30:00');
+    const deadline = at('reminder', '2026-09-18T18:30:00');
+
+    expect([outing, deadline].sort(compareBySchedule)[0]).toBe(deadline);
+  });
+
+  it('puts things with a time before things without one', () => {
+    const timed = at('reminder', '2026-09-18T18:30:00');
+    const untimed = at('task', null);
+
+    expect([untimed, timed].sort(compareBySchedule)[0]).toBe(timed);
+  });
+
+  it('falls back to priority when neither has a time', () => {
+    const low = at('task', null, 'low');
+    const urgent = at('task', null, 'urgent');
+
+    expect([low, urgent].sort(compareBySchedule)[0]).toBe(urgent);
+  });
+
+  it('counts an item late once its time has gone by, not the next day', () => {
+    const item = at('reminder', '2026-09-18T18:30:00');
+
+    expect(isPastDue(item, new Date('2026-09-18T19:00:00'))).toBe(true);
+    expect(isPastDue(item, new Date('2026-09-18T18:00:00'))).toBe(false);
+  });
+
+  it('never calls a finished item late', () => {
+    const done = { ...at('reminder', '2026-09-18T18:30:00'), is_completed: true };
+
+    expect(isPastDue(done, new Date('2026-09-18T23:00:00'))).toBe(false);
   });
 });

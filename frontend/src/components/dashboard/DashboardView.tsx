@@ -8,7 +8,7 @@ import {
   WeatherData,
 } from '../../types';
 import { Skeleton } from '../common/Skeleton';
-import { isOverdue } from '../../utils/dateHelpers';
+import { compareBySchedule, isPastDue, itemMoment } from '../../utils/dateHelpers';
 import { haptics } from '../../utils/haptics';
 
 interface DashboardViewProps {
@@ -26,8 +26,9 @@ const rupees = (n: number) => `₹${(n ?? 0).toLocaleString('en-IN')}`;
 
 /** "Yesterday", "4:00 PM", "Fri" — whichever is the useful thing to know. */
 const whenLabel = (task: WorkItem): string | null => {
-  if (task.start_at) {
-    const d = new Date(task.start_at);
+  const moment = itemMoment(task);
+  if (moment) {
+    const d = new Date(moment);
     if (!Number.isNaN(d.getTime())) {
       return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
     }
@@ -49,7 +50,7 @@ const whenLabel = (task: WorkItem): string | null => {
 };
 
 const TaskRow: React.FC<{ task: WorkItem; onToggle: (t: WorkItem) => void }> = ({ task, onToggle }) => {
-  const late = isOverdue(task.due_date, task.is_completed);
+  const late = isPastDue(task);
   const when = whenLabel(task);
   const urgent = task.priority === 'urgent' && !task.is_completed;
 
@@ -100,18 +101,18 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const streak = performance?.streak_days ?? 0;
   const weather = weatherData || greetingData?.weather;
 
-  const outstanding = todayTasks.filter((t) => !t.is_completed);
+  // A day happens in order, so the screen shows it in order. Without this the
+  // list arrived in whatever order the database handed it over, and "Next"
+  // could be the thing after the one that is actually next.
+  const outstanding = todayTasks.filter((t) => !t.is_completed).sort(compareBySchedule);
   const finished = todayTasks.filter((t) => t.is_completed);
 
   /*
-   * The one thing to do next: the most overdue item, else the most urgent, else
-   * the first on the list. This is the single most useful sentence on the
+   * The one thing to do next: anything whose time has already gone by, else
+   * whatever is soonest. This is the single most useful sentence on the
    * screen, so it goes at the top where the masthead used to be.
    */
-  const next =
-    outstanding.find((t) => isOverdue(t.due_date, t.is_completed)) ??
-    outstanding.find((t) => t.priority === 'urgent') ??
-    outstanding[0];
+  const next = outstanding.find((t) => isPastDue(t)) ?? outstanding[0];
 
   // Whatever is already shown as Next does not repeat in the list below it.
   const rest = outstanding.filter((t) => t.id !== next?.id);
@@ -166,7 +167,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <p className="text-lead font-semibold text-ink mt-0.5">{next.title}</p>
             <p className="text-meta text-ink-2 mt-0.5">
               {[
-                isOverdue(next.due_date, next.is_completed) ? 'Overdue' : whenLabel(next),
+                isPastDue(next)
+                  ? (whenLabel(next) ? `Was due ${whenLabel(next)}` : 'Overdue')
+                  : whenLabel(next),
                 next.estimated_minutes ? `about ${next.estimated_minutes} min` : null,
               ]
                 .filter(Boolean)
