@@ -320,7 +320,7 @@ class TestSageBackend(unittest.TestCase):
             with TestClient(app) as client:
                 headers = {"Authorization": "Bearer test_api_secret_789"}
 
-                # 1. Test project creation with NO description -> auto-generated
+                # 1. Test project creation with NO description -> auto-generated (1 paragraph, zero # or *)
                 proj_res = client.post("/api/v1/items/projects", json={
                     "name": "Autonomous Agent Pipeline",
                     "color": "#10b981"
@@ -328,8 +328,9 @@ class TestSageBackend(unittest.TestCase):
                 self.assertEqual(proj_res.status_code, 200)
                 proj_data = proj_res.json()
                 self.assertTrue(proj_data["description"])
+                self.assertNotIn("#", proj_data["description"])
+                self.assertNotIn("*", proj_data["description"])
                 self.assertIn("Autonomous Agent Pipeline", proj_data["description"])
-                self.assertIn("Core Scope", proj_data["description"])
                 project_id = proj_data["id"]
 
                 # 2. Test project update endpoint (PATCH /projects/{id})
@@ -339,7 +340,7 @@ class TestSageBackend(unittest.TestCase):
                 self.assertEqual(update_res.status_code, 200)
                 self.assertEqual(update_res.json()["description"], "Updated project description with custom roadmap.")
 
-                # 3. Create initial task in the project with NO description -> auto-generated
+                # 3. Create initial task in the project with NO description -> auto-generated (1 paragraph, zero # or *)
                 task1_res = client.post("/api/v1/items", json={
                     "title": "Design System Architecture",
                     "project_id": project_id
@@ -347,11 +348,12 @@ class TestSageBackend(unittest.TestCase):
                 self.assertEqual(task1_res.status_code, 200)
                 task1_data = task1_res.json()
                 self.assertTrue(task1_data["description"])
-                self.assertIn("Project Context & Alignment", task1_data["description"])
+                self.assertNotIn("#", task1_data["description"])
+                self.assertNotIn("*", task1_data["description"])
                 self.assertIn("Autonomous Agent Pipeline", task1_data["description"])
                 self.assertGreater(len(task1_data["subtasks"]), 0)
 
-                # 4. Create second task in the project with NO description -> should incorporate previous task!
+                # 4. Create second task in the project with NO description -> incorporates previous task without # or *
                 task2_res = client.post("/api/v1/items", json={
                     "title": "Deploy API Microservices",
                     "project_id": project_id
@@ -359,26 +361,32 @@ class TestSageBackend(unittest.TestCase):
                 self.assertEqual(task2_res.status_code, 200)
                 task2_data = task2_res.json()
                 self.assertTrue(task2_data["description"])
-                self.assertIn("Project Context & Alignment", task2_data["description"])
+                self.assertNotIn("#", task2_data["description"])
+                self.assertNotIn("*", task2_data["description"])
                 self.assertIn("Design System Architecture", task2_data["description"]) # Preceding deliverable referenced!
 
-                # 5. Test AI generate-project-description endpoint directly
+                # 5. Test AI generate-project-description endpoint directly (1 paragraph, zero # or *)
                 ai_proj_res = client.post("/api/v1/ai/generate-project-description", json={
                     "name": "Hardware Thermal Benchmarking"
                 }, headers=headers)
                 self.assertEqual(ai_proj_res.status_code, 200)
                 self.assertTrue(ai_proj_res.json()["success"])
-                self.assertIn("Hardware Thermal Benchmarking", ai_proj_res.json()["data"]["description"])
+                ai_desc = ai_proj_res.json()["data"]["description"]
+                self.assertNotIn("#", ai_desc)
+                self.assertNotIn("*", ai_desc)
+                self.assertIn("Hardware Thermal Benchmarking", ai_desc)
 
-                # 6. Test AI auto-fill endpoint with project_id
+                # 6. Test AI auto-fill endpoint with project_id (1 paragraph, zero # or *)
                 auto_fill_res = client.post("/api/v1/ai/auto-fill", json={
                     "title": "Configure Fan Curves",
                     "project_id": project_id
                 }, headers=headers)
                 self.assertEqual(auto_fill_res.status_code, 200)
                 self.assertTrue(auto_fill_res.json()["success"])
-                self.assertIn("Project Context & Alignment", auto_fill_res.json()["data"]["description"])
-                self.assertIn("Deploy API Microservices", auto_fill_res.json()["data"]["description"])
+                af_desc = auto_fill_res.json()["data"]["description"]
+                self.assertNotIn("#", af_desc)
+                self.assertNotIn("*", af_desc)
+                self.assertIn("Deploy API Microservices", af_desc)
 
                 # Cleanup test project & items
                 client.delete(f"/api/v1/items/{task1_data['id']}", headers=headers)

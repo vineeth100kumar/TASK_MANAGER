@@ -203,6 +203,51 @@ def heuristic_improve_title(raw: str, entity_type: str = "task") -> str:
 
     return smart_title(t) if t else raw
 
+def clean_plain_paragraph(text: str) -> str:
+    """Ensures text is a single, cohesive plain-text paragraph with zero markdown formatting (#, *, etc.)."""
+    if not text:
+        return ""
+    # Strip markdown headers and common header prefixes
+    text = re.sub(r'#+\s*(?:Objective|Engineering Standards|Definition of Done|Target Performance & Form|Training Protocol|Guidelines|Details|Execution Strategy|Project Context & Alignment|Context & Notes|Strategic Objective|Core Scope & Deliverables|Definition of Success|Strategic Focus|Operational Safeguards|Action Items|Culinary Standards|Shopping Protocol|Safety Verification|Deep Work Protocol|Craft Guidelines)[:\s]*', '', text, flags=re.I)
+    text = re.sub(r'#+\s*', '', text)
+    # Remove markdown bold/italics
+    text = re.sub(r'[*_]{1,3}', '', text)
+    # Remove list bullet markers
+    # Collapse newlines and whitespace into single spaces
+    text = re.sub(r'\s*\n+\s*', ' ', text)
+    text = re.sub(r'\s{2,}', ' ', text)
+    return text.strip()
+
+def compose_task_description(
+    main_summary: str,
+    project_name: Optional[str] = None,
+    previous_tasks: Optional[List[str]] = None,
+    context: Optional[str] = None
+) -> str:
+    """Combines task summary with project lineage into ONE clean, human-readable paragraph with zero # or *."""
+    parts = [main_summary.rstrip(". ")]
+
+    if project_name and previous_tasks:
+        recent = [t.strip().rstrip(". ") for t in previous_tasks[:3] if t.strip()]
+        if len(recent) == 1:
+            prev_clause = f", following up on '{recent[0]}'"
+        elif len(recent) == 2:
+            prev_clause = f", following up on '{recent[0]}' and '{recent[1]}'"
+        else:
+            prev_clause = f", following up on '{recent[0]}', '{recent[1]}', and '{recent[2]}'"
+        parts.append(f"This task is part of project '{project_name}'{prev_clause} to maintain momentum on overall milestones")
+    elif project_name:
+        parts.append(f"This task is part of project '{project_name}' and advances its core milestones")
+    elif previous_tasks:
+        recent = [f"'{t.strip().rstrip('. ')}'" for t in previous_tasks[:2] if t.strip()]
+        parts.append(f"This task builds upon recent progress including {' and '.join(recent)}")
+
+    if context and context.strip():
+        parts.append(f"Note: {context.strip().rstrip('. ')}")
+
+    combined = ". ".join(p.strip() for p in parts if p.strip()) + "."
+    return clean_plain_paragraph(combined)
+
 def synthesize_domain_task(
     title: str,
     context: Optional[str] = None,
@@ -212,24 +257,10 @@ def synthesize_domain_task(
 ) -> Dict[str, Any]:
     """
     Expert domain synthesizer: creates authentic, high-value, domain-specific
-    objectives, performance targets, definitions of done, and logical subtasks.
-    Zero robotic boilerplate or bureaucratic filler.
+    one-paragraph descriptions and logical subtasks with zero markdown hashes or asterisks.
     """
     refined_title = heuristic_improve_title(title, entity_type or "task")
     tl = title.lower()
-
-    proj_section = ""
-    if project_name or (previous_tasks and len(previous_tasks) > 0):
-        lines = ["\n\n### Project Context & Alignment"]
-        if project_name:
-            lines.append(f"Part of project **{project_name}**.")
-        if previous_tasks and len(previous_tasks) > 0:
-            lines.append("Builds upon preceding deliverables in this project:")
-            for pt in previous_tasks[:5]:
-                lines.append(f"- {pt}")
-        proj_section = "\n".join(lines)
-
-    ctx_line = f"{proj_section}\n\n### Context & Notes\n{context}" if (context and context.strip()) else proj_section
 
     # Priority determination
     priority = "medium"
@@ -259,21 +290,14 @@ def synthesize_domain_task(
 
     # 1. RUNNING / CARDIO
     if is_running:
+        desc = compose_task_description(
+            "Execute an energizing cardio running session to build cardiovascular endurance, increase aerobic capacity, and clear mental fatigue. "
+            "Maintain a steady Zone 2 or 3 pacing rhythm with an upright posture and compact cadence, and finish with a five-minute cool-down walk followed by lower-body mobility stretches and hydration",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title if ("Run" in refined_title or "Cardio" in refined_title) else "Complete Cardio Running Session",
-            "description": (
-                "### Objective\n"
-                "Execute an energizing running session to build cardiovascular endurance, increase aerobic capacity, and clear mental fatigue.\n\n"
-                "### Target Performance & Form\n"
-                "- **Pacing**: Steady aerobic Zone 2/3 rhythm (sustainable conversational breathing).\n"
-                "- **Biomechanics**: Upright spine, relaxed shoulders, compact arm swing, and soft midfoot strike (~165-175 spm cadence).\n"
-                "- **Environment**: Safe pedestrian route with planned hydration checkpoints.\n\n"
-                "### Definition of Done\n"
-                "- Target distance or duration completed without abrupt exhaustion.\n"
-                "- 5-minute cool-down walk followed by dedicated lower-body mobility (calves, hamstrings, quads, hip flexors).\n"
-                "- Hydration and electrolytes replenished; workout stats recorded."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Lace up running shoes & prepare water / electrolyte bottle",
                 "5-minute dynamic warm-up (leg swings, high knees, ankle rotations)",
@@ -289,21 +313,14 @@ def synthesize_domain_task(
 
     # 2. GYM / STRENGTH / WORKOUT
     if is_gym:
+        desc = compose_task_description(
+            f"Complete a focused progressive overload strength training session for {refined_title} targeting muscular density and physical resilience. "
+            "Prioritize heavy compound multi-joint movements with controlled pacing before moving to secondary accessories, maintaining strict core bracing throughout each set",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title if "Workout" in refined_title else f"Execute Strength Session: {refined_title}",
-            "description": (
-                "### Objective\n"
-                "Complete a focused progressive overload resistance training session to build muscular strength, density, and physical resilience.\n\n"
-                "### Training Protocol\n"
-                "- **Tempo & Control**: Controlled 2-3s eccentric descent with explosive, controlled concentric drive.\n"
-                "- **Compound Priority**: Execute heavy compound multi-joint movements before secondary accessories.\n"
-                "- **Rest Periods**: 90-120s between compound sets; 60s for isolation accessories.\n\n"
-                "### Definition of Done\n"
-                "- All prescribed sets and reps logged with working weights.\n"
-                "- Core bracing maintained on every repetition with zero technical breakdowns.\n"
-                "- Post-workout protein shake consumed and mobility cool-down completed."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Pre-workout joint mobility drills and dynamic muscle warm-up",
                 "Warm-up sets gradually ramping up to target working weights",
@@ -319,19 +336,14 @@ def synthesize_domain_task(
 
     # 3. WALKING / HIKING / STEPS
     if is_walking:
+        desc = compose_task_description(
+            f"Take an outdoor brisk walk for {refined_title} to support active recovery, daily step accumulation, and mental decompression. "
+            "Maintain a purposeful stride in natural daylight and log total step count upon return",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                "### Objective\n"
-                "Engage in outdoor brisk walking for active recovery, daily step accumulation, and mental decompression.\n\n"
-                "### Guidelines\n"
-                "- Maintain a purposeful, brisk stride with eyes forward and shoulders back.\n"
-                "- Disconnect from urgent work alerts to maximize sensory decompression.\n\n"
-                "### Definition of Done\n"
-                "- Continuous brisk walk completed in natural daylight or fresh air.\n"
-                "- Daily step target achieved and logged."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Put on supportive footwear and prepare hydration",
                 "Step outside on pedestrian route away from heavy traffic",
@@ -346,19 +358,14 @@ def synthesize_domain_task(
 
     # 4. YOGA / MOBILITY / MEDITATION
     if is_yoga:
+        desc = compose_task_description(
+            f"Engage in a dedicated mobility and restorative flow session for {refined_title} to release physical tension, open tight joints, and reset posture. "
+            "Focus on deep diaphragmatic breathing through hip openers and spinal rotations to restore flexibility and mental focus",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                "### Objective\n"
-                "Release chronic muscular tension, improve joint range of motion, and down-regulate the nervous system through mindful movement.\n\n"
-                "### Practice Focus\n"
-                "- Deep nasal diaphragmatic breathing synchronized with every posture change.\n"
-                "- Avoid forcing range of motion; breathe into tight fascial restrictions.\n\n"
-                "### Definition of Done\n"
-                "- Full sequence completed in a quiet, distraction-free space.\n"
-                "- Mind relaxed and joint mobility visibly restored."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Set up yoga mat and ensure a quiet, distraction-free environment",
                 "Gentle spinal warm-up: Cat-Cow, Child's Pose, and Downward Dog",
@@ -373,21 +380,14 @@ def synthesize_domain_task(
 
     # 5. SOFTWARE / CODING / REFACTOR / BUG
     if is_coding:
+        desc = compose_task_description(
+            f"Implement and test the technical solution for {refined_title} with clean architecture, strict error handling, and complete verification. "
+            "Ensure modular function design, handle edge cases gracefully, and validate that test suites pass before committing changes",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Implement a high-reliability technical solution for **{refined_title}** with clean architecture, strict type safety, and zero regressions.\n\n"
-                "### Engineering Standards\n"
-                "- **Modularity**: Keep functions pure and decoupled with explicit error boundaries.\n"
-                "- **Resilience**: Gracefully handle edge cases, network timeouts, and cold starts.\n"
-                "- **Maintainability**: Ensure code is self-documenting with typed interfaces.\n\n"
-                "### Definition of Done\n"
-                "- Code implementation completed and formatted cleanly.\n"
-                "- Unit and integration test suites passing with zero unexpected failures.\n"
-                "- Git branch committed with concise semantic message and pushed."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 f"Inspect existing codebase and define exact scope for {refined_title}",
                 "Implement core logic changes and verify type definitions",
@@ -403,20 +403,14 @@ def synthesize_domain_task(
 
     # 6. DEVOPS / SERVER / PI / DEPLOYMENT
     if is_devops:
+        desc = compose_task_description(
+            f"Configure, deploy, or maintain server infrastructure for {refined_title} ensuring high availability and secure operations. "
+            "Verify configuration syntax and port bindings before reloading active daemons, and check system logs to ensure clean startup",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Configure, deploy, or maintain server infrastructure for **{refined_title}** ensuring high availability and secure operations.\n\n"
-                "### Operational Safeguards\n"
-                "- Verify configuration syntax and port bindings before reloading active daemons.\n"
-                "- Monitor CPU, RAM headroom, and journalctl log output for anomalies.\n\n"
-                "### Definition of Done\n"
-                "- Target service active, enabled at boot, and passing health-check probes.\n"
-                "- Zero fatal or critical error entries in journalctl logs.\n"
-                "- Auto-restart rules and persistent state verified."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Establish secure SSH session and back up active configuration files",
                 "Apply infrastructure changes or pull latest deployment artifacts",
@@ -432,20 +426,14 @@ def synthesize_domain_task(
 
     # 7. FINANCE / BILLS / TAXES / PAYMENTS
     if is_finance:
+        desc = compose_task_description(
+            f"Review, verify, and complete payment for {refined_title} to keep accounts reconciled and avoid late fees or penalties. "
+            "Confirm payment amount and recipient details, complete transaction through secure payment mode, and retain the payment receipt",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Reconcile and settle payment for **{refined_title}** to maintain flawless account standing and clean financial records.\n\n"
-                "### Execution Checklist\n"
-                "- Verify billed amount matches meter usage, billing cycle, or contracted rate.\n"
-                "- Use secure banking portal or verified payment gateway.\n\n"
-                "### Definition of Done\n"
-                "- Payment executed and confirmed by issuing provider.\n"
-                "- Digital transaction receipt / UTR reference number archived.\n"
-                "- Ledger balance and expense entry updated in Sage OS Finance."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 f"Open billing statement and verify statement total for {refined_title}",
                 "Log into banking portal or payment app and initiate payment",
@@ -461,20 +449,14 @@ def synthesize_domain_task(
 
     # 8. GROCERIES / PANTRY / SUPERMARKET
     if is_grocery:
+        desc = compose_task_description(
+            f"Restock household essentials and groceries for {refined_title} to keep the kitchen well supplied. "
+            "Check current inventory, select fresh high-quality items, and organize groceries promptly upon return",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                "### Objective\n"
-                "Restock kitchen essentials, fresh produce, and household supplies for balanced, stress-free nutrition.\n\n"
-                "### Shopping Protocol\n"
-                "- Prioritize whole foods: fresh vegetables, high-protein sources, and healthy fats.\n"
-                "- Inspect packaging integrity, expiry dates, and freshness markers.\n\n"
-                "### Definition of Done\n"
-                "- All planned pantry staples and fresh ingredients acquired.\n"
-                "- Items unpacked, washed if necessary, and neatly organized in pantry/fridge.\n"
-                "- Grocery expense entered into Sage OS Finance."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Audit refrigerator and pantry to compile prioritized shopping list",
                 "Visit local store or submit online grocery order",
@@ -490,20 +472,14 @@ def synthesize_domain_task(
 
     # 9. COOKING / MEAL PREP
     if is_cooking:
+        desc = compose_task_description(
+            f"Prepare and cook {refined_title} focusing on balanced nutrition, fresh ingredients, and efficient kitchen workflow. "
+            "Measure and prep ingredients in advance, manage heat carefully, and pack any meal portions for storage",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Prepare nourishing, delicious home-cooked meals for **{refined_title}** to maintain peak physical and mental vitality.\n\n"
-                "### Culinary Standards\n"
-                "- Prioritize lean protein, fiber-rich vegetables, and clean whole-food seasoning.\n"
-                "- Practice 'clean as you go' to keep workspace spotless.\n\n"
-                "### Definition of Done\n"
-                "- Meal cooked thoroughly to safe temperatures and seasoned to taste.\n"
-                "- Portions divided for consumption or stored in airtight meal containers.\n"
-                "- Cookware washed, counters wiped down, and kitchen fully reset."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Review recipe and prep ingredients (wash, chop, measure spices)",
                 "Preheat cookware and execute cooking steps with proper timing",
@@ -519,20 +495,14 @@ def synthesize_domain_task(
 
     # 10. DOCTOR / MEDICAL / HEALTH CHECK / DENTIST
     if is_medical:
+        desc = compose_task_description(
+            f"Attend the medical consultation or health appointment for {refined_title} to review health priorities and wellness. "
+            "Prepare relevant health records and questions beforehand, discuss with the physician, and note down recommendations or prescriptions",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Complete health assessment or medical consultation for **{refined_title}** to safeguard long-term vitality and address clinical needs.\n\n"
-                "### Preparation\n"
-                "- Note down symptoms, chronology, medications, and specific questions.\n"
-                "- Carry past reports and photo identification.\n\n"
-                "### Definition of Done\n"
-                "- Consultation completed with attending physician or specialist.\n"
-                "- Prescribed diagnostics or medications acquired.\n"
-                "- Follow-up instructions and appointments documented in calendar."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Compile medical records, diagnostic history, and questions for the doctor",
                 "Arrive at clinic/hospital 10 minutes prior to scheduled appointment",
@@ -548,20 +518,14 @@ def synthesize_domain_task(
 
     # 11. CAR / BIKE / VEHICLE SERVICE
     if is_vehicle:
+        desc = compose_task_description(
+            f"Complete routine inspection and maintenance for {refined_title} to ensure safety, reliability, and smooth performance. "
+            "Check fluid levels, tire pressures, and critical components, and retain service records",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Execute scheduled inspection, servicing, or maintenance for **{refined_title}** to guarantee mechanical safety and peak vehicle efficiency.\n\n"
-                "### Safety Verification\n"
-                "- Inspect critical safety components: brakes, tire tread & pressure, fluid levels, lighting.\n"
-                "- Ensure all replacement parts meet OEM specifications.\n\n"
-                "### Definition of Done\n"
-                "- Scheduled maintenance or repair successfully completed.\n"
-                "- Multi-point inspection cleared with zero critical warnings.\n"
-                "- Service invoice filed and next maintenance mileage logged."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Check cold tire pressures and inspect engine fluid levels",
                 "Take vehicle to certified service station or perform maintenance routine",
@@ -577,20 +541,14 @@ def synthesize_domain_task(
 
     # 12. CLEANING / LAUNDRY / DECLUTTER
     if is_cleaning:
+        desc = compose_task_description(
+            f"Clean, declutter, and organize {refined_title} to restore order and maintain a fresh living environment. "
+            "Work systematically through surfaces using appropriate cleaning supplies, dispose of waste, and return items to their proper places",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Deep clean, sanitize, and organize **{refined_title}** to create a calm, dust-free, and high-productivity environment.\n\n"
-                "### Execution Focus\n"
-                "- Declutter all horizontal surfaces before dusting or vacuuming.\n"
-                "- Use eco-friendly multi-surface disinfectant for high-touch surfaces.\n\n"
-                "### Definition of Done\n"
-                "- All clutter removed and returned to designated homes.\n"
-                "- Surfaces wiped clean, floors vacuumed/mopped, and trash emptied.\n"
-                "- Living space reset to an immaculate baseline state."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Clear all loose clutter and return stray items to proper locations",
                 "Dust high shelves and wipe down countertops with disinfectant",
@@ -606,20 +564,14 @@ def synthesize_domain_task(
 
     # 13. STUDY / READING / LEARNING / RESEARCH
     if is_learning:
+        desc = compose_task_description(
+            f"Dedicate focused study and review time for {refined_title} to master core principles and concepts. "
+            "Take concise notes on key ideas, test recall on challenging topics, and summarize actionable takeaways",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Engage in deep focused study on **{refined_title}** to master fundamental principles and build actionable mental models.\n\n"
-                "### Deep Work Protocol\n"
-                "- 50-minute distraction-free Pomodoro sprint with notifications muted.\n"
-                "- Prioritize active recall, synthesis notes, and self-testing over passive scanning.\n\n"
-                "### Definition of Done\n"
-                "- Designated chapter, research paper, or lecture module completed.\n"
-                "- Core insights articulated in personal notes using the Feynman technique.\n"
-                "- 3 actionable takeaways or problem solutions produced."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Silence notifications and prepare study material, notebook, and pen",
                 "Engage in focused reading / watching with active marginalia",
@@ -635,26 +587,20 @@ def synthesize_domain_task(
 
     # 14. WRITING / PRESENTATION / DECK
     if is_writing:
+        desc = compose_task_description(
+            f"Draft and refine content for {refined_title} with clear narrative flow, engaging structure, and concise language. "
+            "Outline the main arguments before drafting, eliminate unnecessary fluff, and polish grammar and tone before sharing",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Author high-impact, persuasive content for **{refined_title}** tailored to captivate and inform the target audience.\n\n"
-                "### Craft Guidelines\n"
-                "- Structure narrative with a compelling hook, substantiated arguments, and crisp takeaways.\n"
-                "- Ruthlessly trim passive voice and corporate jargon for punchy readability.\n\n"
-                "### Definition of Done\n"
-                "- Complete draft written with structured flow and clear headers.\n"
-                "- Proofread for rhythm, factual accuracy, and typography.\n"
-                "- Final version exported and shared with stakeholders or queued for release."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
-                "Outline core narrative arc, target audience, and 3 key takeaways",
-                "Draft uninterrupted initial pass focusing on flow without self-editing",
-                "Refine structure, tighten sentences, and verify supporting data points",
-                "Perform final proofreading sweep and check formatting / visual hierarchy",
-                "Export final deliverable and share with intended audience"
+                "Structure core thesis, target audience takeaways, and slide outline",
+                "Write primary content sections focusing on brevity and high signal",
+                "Design visual diagrams or format typography for aesthetic clarity",
+                "Proofread thoroughly for narrative pacing, clarity, and grammatical precision",
+                "Export final draft, share review copy, or schedule distribution"
             ],
             "priority": priority if priority != "medium" else "high",
             "energy": "high",
@@ -662,22 +608,16 @@ def synthesize_domain_task(
             "category": "Work"
         }
 
-    # 15. MEETINGS / 1-ON-1 / INTERVIEWS
+    # 15. MEETING / CALL / INTERVIEW / 1:1
     if is_meeting:
+        desc = compose_task_description(
+            f"Participate in the meeting or discussion for {refined_title} to align on priorities and establish clear outcomes. "
+            "Prepare agenda topics in advance, capture key decisions during the call, and track follow-up action items with assigned owners",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Conduct a high-leverage discussion on **{refined_title}** to align perspectives, resolve blockers, and establish ownership.\n\n"
-                "### Meeting Hygiene\n"
-                "- Distribute clear 3-point agenda prior to starting.\n"
-                "- Facilitate active participation and maintain crisp timekeeping.\n\n"
-                "### Definition of Done\n"
-                "- Key decisions, rationale, and open questions explicitly documented.\n"
-                "- Action items with unambiguous owners and deadlines agreed upon.\n"
-                "- Meeting notes circulated to participants within 30 minutes of closing."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Draft and review meeting agenda with clear outcome targets",
                 "Join meeting on schedule and guide discussion through key topics",
@@ -693,20 +633,14 @@ def synthesize_domain_task(
 
     # 16. TRAVEL / TRIP / PACKING / FLIGHT
     if is_travel:
+        desc = compose_task_description(
+            f"Coordinate logistics, packing, and arrangements for {refined_title} to ensure a seamless and well-prepared journey. "
+            "Confirm tickets, itineraries, and reservations in advance, and pack weather-appropriate essentials",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Coordinate logistics and packing for **{refined_title}** ensuring an effortless, well-prepared travel experience.\n\n"
-                "### Travel Readiness\n"
-                "- Confirm transport schedules, tickets, accommodation vouchers, and identification.\n"
-                "- Download offline maps and emergency contacts.\n\n"
-                "### Definition of Done\n"
-                "- All bookings, tickets, and reservations verified.\n"
-                "- Luggage packed against comprehensive essentials checklist.\n"
-                "- Digital copies of IDs and boarding passes secured on mobile device."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Review travel itinerary, flight/train timings, and terminal details",
                 "Download tickets, boarding passes, and hotel reservations offline",
@@ -722,19 +656,14 @@ def synthesize_domain_task(
 
     # 17. CELEBRATION / GIFT / BIRTHDAY
     if is_celebration:
+        desc = compose_task_description(
+            f"Organize and celebrate {refined_title} to create memorable experiences and connect with friends or family. "
+            "Confirm timings, prepare a thoughtful gift or greeting, and enjoy the occasion",
+            project_name, previous_tasks, context
+        )
         return {
             "improved_title": refined_title,
-            "description": (
-                f"### Objective\n"
-                f"Celebrate **{refined_title}** to create memorable moments and strengthen personal relationships.\n\n"
-                "### Details\n"
-                "- Focus on thoughtful personalization and genuine presence.\n\n"
-                "### Definition of Done\n"
-                "- Arrangements, venue, or reservations confirmed.\n"
-                "- Gift or greeting card prepared and presented with care.\n"
-                "- High-quality memorable experience shared together."
-                f"{ctx_line}"
-            ),
+            "description": desc,
             "subtasks": [
                 "Select and arrange a thoughtful gift, card, or personalized gesture",
                 "Confirm timing, reservation, or venue details with participants",
@@ -751,20 +680,14 @@ def synthesize_domain_task(
     clean_verb = refined_title.split()[0] if refined_title.split() else "Complete"
     clean_subject = " ".join(refined_title.split()[1:]) if len(refined_title.split()) > 1 else refined_title
 
+    desc = compose_task_description(
+        f"Execute {refined_title} thoroughly with focused attention to detail and clear milestones. "
+        f"Review requirements for {clean_subject} before taking action, work systematically through the core steps, and verify results to ensure complete delivery",
+        project_name, previous_tasks, context
+    )
     return {
         "improved_title": refined_title,
-        "description": (
-            f"### Objective\n"
-            f"Execute **{refined_title}** thoroughly with focused effort and complete attention to detail.\n\n"
-            "### Execution Strategy\n"
-            f"- Define the core requirements for {clean_subject} before taking action.\n"
-            "- Work sequentially through preparation, core implementation, and final verification.\n\n"
-            "### Definition of Done\n"
-            f"- Primary deliverable for {clean_subject} verified and fully functional.\n"
-            "- No outstanding blockers or incomplete dependencies remaining.\n"
-            "- Outcome verified and logged into Sage OS."
-            f"{ctx_line}"
-        ),
+        "description": desc,
         "subtasks": [
             f"Review prerequisites and set up required tools for {clean_subject}",
             f"Execute initial phase and lay groundwork for {clean_subject}",
@@ -786,8 +709,8 @@ async def improve_task_data(
     previous_tasks: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
-    Improvises raw task data into an executive title, structured description,
-    definition of done, sequential subtasks, energy level, and duration estimate.
+    Improvises raw task data into an executive title, 1-paragraph plain description,
+    sequential subtasks, energy level, and duration estimate.
     Incorporates project and previous task trajectory when provided.
     """
     project_prompt_context = ""
@@ -805,28 +728,19 @@ async def improve_task_data(
     Additional Context: "{context or ''}"
     Entity Type: "{entity_type or 'task'}"{project_prompt_context}
 
-    CRITICAL QUALITY CONSTRAINTS:
-    - Never output generic bureaucratic filler or boilerplate (e.g. forbid clichés like "Complete X efficiently with high quality", "All associated checklist items verified and executed", "Any outcomes documented or filed").
-    - Provide rich, authentic, domain-specific guidance (e.g. for running/fitness mention pacing, heart-rate zones, hydration, dynamic warmup, stretches; for coding mention tests, edge cases, git commits; for finance mention invoice verification, payment receipts, ledger updates).
-    - If Linked Project or Preceding Tasks are provided, explicitly align the Objective, Strategy, and Definition of Done to build upon those preceding deliverables.
-    - Craft 3 to 5 clear, actionable, chronological micro-steps in the subtasks checklist.
-
-    Instructions:
-    1. improved_title: A crisp, professional, action-oriented title starting with an active imperative verb (e.g., "Schedule Dental Checkup", "Finalize Q3 Budget Report", "Execute 5km Cardio Run & Mobility"). Never include conversational fluff or dates/times in the title.
-    2. description: Formatted in clear Markdown with:
-       - **Objective**: 1 inspiring sentence on the target outcome.
-       - **Target Performance / Key Focus**: Specific domain techniques, form, or standards.
-       - **Definition of Done**: Specific, verifiable completion criteria.
-    3. subtasks: A list of 3-5 logical, chronological micro-steps to execute the task.
-    4. priority: "low" | "medium" | "high" | "urgent" based on real impact.
-    5. energy: "low" | "medium" | "high" (low for admin/errands, high for deep focus work).
-    6. estimated_minutes: Integer estimate in minutes (15, 30, 45, 60, etc.).
-    7. category: "Work" | "Personal" | "Finance" | "Health" | "Errands" | "Learning"
+    CRITICAL QUALITY & FORMAT CONSTRAINTS:
+    - description: Exactly ONE concise, cohesive, natural paragraph (2 to 3 sentences) describing what this task accomplishes, how it connects to any linked project or previous deliverables, and key execution guidance.
+    - FORBIDDEN in description: Do NOT use any markdown headings (no #, ##, ###), no bold or italic asterisks (no * or **), no bullet points. It must be a single plain-text paragraph.
+    - subtasks: A list of 3-5 logical, chronological micro-steps to execute the task.
+    - priority: "low" | "medium" | "high" | "urgent" based on real impact.
+    - energy: "low" | "medium" | "high".
+    - estimated_minutes: Integer estimate in minutes (15, 30, 45, 60, etc.).
+    - category: "Work" | "Personal" | "Finance" | "Health" | "Errands" | "Learning"
 
     Respond ONLY with valid JSON:
     {{
       "improved_title": "...",
-      "description": "...",
+      "description": "One concise paragraph explaining what needs to be done and key details without any hash symbols or asterisks.",
       "subtasks": ["Step 1", "Step 2", "Step 3"],
       "priority": "medium",
       "energy": "medium",
@@ -850,9 +764,9 @@ async def improve_task_data(
             if resp.status_code == 200:
                 data = safe_parse_json(resp.json().get("response", ""))
                 if isinstance(data, dict) and data.get("improved_title"):
-                    # Sanity check: Ensure LLM didn't return robotic boilerplate
-                    desc = data.get("description", "")
-                    if "efficiently with high quality" not in desc and "associated checklist items" not in desc:
+                    desc = clean_plain_paragraph(data.get("description", ""))
+                    if desc and "efficiently with high quality" not in desc and "associated checklist items" not in desc:
+                        data["description"] = desc
                         return data
     except Exception:
         pass
@@ -944,92 +858,72 @@ def synthesize_project_description(
     existing_tasks: Optional[List[str]] = None,
     context: Optional[str] = None
 ) -> str:
-    """
-    Synthesizes an authentic, structured Markdown scope for a project/dossier.
-    """
+    """Creates a clean, authoritative 1-paragraph project scope with zero markdown formatting (# or *)."""
     clean_name = project_name.strip()
     if not clean_name:
         clean_name = "Strategic Initiative"
 
-    tasks_block = ""
+    name_lower = clean_name.lower()
+
     if existing_tasks and len(existing_tasks) > 0:
-        tasks_block = "\n".join(f"- {t}" for t in existing_tasks[:6])
+        tasks_sample = [f"'{t.strip()}'" for t in existing_tasks[:3] if t.strip()]
+        if len(tasks_sample) == 1:
+            task_clause = f"centered around {tasks_sample[0]}"
+        else:
+            task_clause = f"encompassing key deliverables such as {', '.join(tasks_sample[:-1])} and {tasks_sample[-1]}"
+        main_summary = (
+            f"Strategic initiative for {clean_name} to coordinate focused execution across linked milestones, {task_clause}. "
+            f"Aims to deliver high-quality outcomes with clear progress tracking, zero unresolved blockers, and complete alignment with Sage OS goals."
+        )
     else:
-        name_lower = clean_name.lower()
         if any(w in name_lower for w in ["pi", "homelab", "lab", "server", "infra", "nas", "host"]):
-            tasks_block = (
-                "- Hardware provisioning, storage configuration & OS base installation\n"
-                "- Network hardening, static IP allocation & SSH key authentication\n"
-                "- Core services deployment (Reverse proxy, DNS, automated backups)\n"
-                "- System metrics monitoring, telemetry & service health verification"
+            main_summary = (
+                f"Infrastructure initiative for {clean_name} covering hardware configuration, network security, and automated service deployment. "
+                f"Focuses on maintaining high system uptime, robust telemetry, and resilient long-term operation."
             )
         elif any(w in name_lower for w in ["run", "marathon", "fitness", "workout", "health", "gym"]):
-            tasks_block = (
-                "- Baseline endurance benchmarking & target pacing formulation\n"
-                "- Progressive weekly training schedule (aerobic, intervals & recovery)\n"
-                "- Nutrition, hydration & active recovery routine establishment\n"
-                "- Performance milestone assessments & event day execution"
+            main_summary = (
+                f"Health and fitness initiative for {clean_name} to establish progressive training routines, nutrition habits, and recovery standards. "
+                f"Aims to build endurance and physical resilience through consistent, measurable daily workouts."
             )
         elif any(w in name_lower for w in ["finance", "tax", "budget", "ledger", "money", "invest"]):
-            tasks_block = (
-                "- Account audit, balances reconciliation & spending categorization\n"
-                "- Monthly budget guardrails formulation across primary cost centers\n"
-                "- Recurring bills, subscriptions & obligations consolidation\n"
-                "- Surplus allocation & savings target tracking"
+            main_summary = (
+                f"Financial management initiative for {clean_name} to audit account balances, set monthly spending guardrails, and track savings targets. "
+                f"Ensures accurate bookkeeping and disciplined financial growth over time."
             )
-        elif any(w in name_lower for w in ["code", "app", "web", "software", "api", "feature", "dev"]):
-            tasks_block = (
-                "- Technical specification, architecture design & schema modeling\n"
-                "- Core backend API endpoints & state services implementation\n"
-                "- Responsive frontend UI, interactions & error handling integration\n"
-                "- Automated test verification, deployment & release documentation"
+        elif any(w in name_lower for w in ["code", "app", "web", "software", "api", "feature", "dev", "task"]):
+            main_summary = (
+                f"Engineering initiative for {clean_name} to build and maintain technical architecture, backend APIs, and responsive user interfaces. "
+                f"Focuses on disciplined development, rigorous testing, and reliable deployment with zero regressions."
             )
         else:
-            tasks_block = (
-                f"- Define foundational requirements and milestones for {clean_name}\n"
-                f"- Coordinate and execute core phase deliverables sequentially\n"
-                f"- Review outputs, eliminate blockers, and optimize workflow\n"
-                f"- Final verification and archival of completed deliverables"
+            main_summary = (
+                f"Project roadmap for {clean_name} to establish clear objectives, track sequential deliverables, and maintain steady progress. "
+                f"Designed to eliminate blockers, organize actionable tasks, and achieve successful project completion."
             )
 
-    ctx_block = f"\n\n### Strategic Focus\n{context}" if context and context.strip() else ""
+    if context and context.strip():
+        main_summary += f" Strategic focus: {context.strip().rstrip('. ')}."
 
-    return (
-        f"### Strategic Objective\n"
-        f"Executive initiative for **{clean_name}** to establish a focused, high-leverage roadmap "
-        f"with clear milestones and trackable outcomes.\n\n"
-        f"### Core Scope & Deliverables\n"
-        f"{tasks_block}\n\n"
-        f"### Definition of Success\n"
-        f"- All primary milestone deliverables completed and verified within Sage OS.\n"
-        f"- Zero unresolved blockers or orphaned dependencies across linked work items.\n"
-        f"- Strategic objectives documented and archived upon final completion."
-        f"{ctx_block}"
-    )
+    return clean_plain_paragraph(main_summary)
 
 async def generate_project_description(
     project_name: str,
     existing_tasks: Optional[List[str]] = None,
     context: Optional[str] = None
 ) -> str:
-    """Generates project description via Ollama LLM with heuristic fallback."""
+    """Generates project description via Ollama LLM with heuristic fallback (1 plain paragraph, zero # or *)."""
     prompt = f"""
     You are an executive strategist for Sage Life OS.
-    Write a crisp, authoritative project dossier description for: "{project_name}".
+    Write a crisp, authoritative project description for: "{project_name}".
     Existing / Linked Deliverables: {existing_tasks or []}
     Context: "{context or ''}"
 
-    Output clear Markdown with:
-    ### Strategic Objective
-    1-2 sentences stating the vision and core value proposition.
-
-    ### Core Scope & Deliverables
-    3-4 bullet points detailing key work streams or deliverables.
-
-    ### Definition of Success
-    2-3 concrete criteria defining a successful conclusion.
-
-    Output ONLY the Markdown content. No conversational preamble.
+    REQUIREMENTS:
+    - Output exactly ONE concise paragraph (2 to 4 sentences).
+    - FORBIDDEN: Do NOT use any markdown headers (no #, ##, ###), no bold or asterisks (no * or **), no bullet lists.
+    - Write in clean, plain English describing the objective, core deliverables, and definition of success.
+    - Output ONLY the plain text paragraph. No preamble or conversational filler.
     """
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
@@ -1039,13 +933,14 @@ async def generate_project_description(
                     "model": OLLAMA_MODEL,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.3}
+                    "options": {"temperature": 0.2}
                 }
             )
             if resp.status_code == 200:
                 text = resp.json().get("response", "").strip()
-                if text and len(text) > 40:
-                    return text
+                cleaned = clean_plain_paragraph(text)
+                if cleaned and len(cleaned) > 40:
+                    return cleaned
     except Exception:
         pass
 
