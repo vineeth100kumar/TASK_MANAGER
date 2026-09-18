@@ -87,182 +87,39 @@ async def generate_greeting(
     else:
         return f"Night owl hours! Wrap up any lingering thoughts in your inbox so tomorrow starts on your terms."
 
-async def parse_brain_dump(natural_language: str) -> List[Dict[str, Any]]:
+async def parse_brain_dump(
+    natural_language: str,
+    projects: Optional[List[Dict[str, Any]]] = None,
+) -> List[Dict[str, Any]]:
     """
     Converts unstructured input into structured task, event, or reminder entities.
-    Accurately extracts dates, times, priorities, and explicit financial transactions.
-    Times like 'at 11.30 am' are strictly classified as event times, NEVER expenses!
+
+    This is now a thin wrapper over the capture engine, which reads the note
+    with the local Ollama model and checks its dates, times and amounts against
+    a deterministic parse of the same words. The old hand-rolled prompt used to
+    return a single item and needed a patch to stop it reading "11.30 am" as a
+    spend of 11.30; the capture engine splits multi-part notes properly and
+    only ever accepts an amount the text actually contains.
     """
-    now = datetime.datetime.now()
-    today = now.strftime("%Y-%m-%d")
-    tomorrow = (now + datetime.timedelta(days=1)).strftime("%Y-%m-%d")
-    
-    prompt = f"""
-    You are an intelligent data extraction AI for Sage OS.
-    Extract distinct actionable items from user text.
-    Today's date is {today}, tomorrow is {tomorrow}. Current time is {now.strftime("%H:%M")}.
+    from .capture_ai import understand
 
-    CRITICAL RULES:
-    1. Distinguish between EVENT TIMES and EXPENSES:
-       - "11.30 am", "at 5pm", "10:00" are event TIMES, NOT money! Expense MUST be null.
-       - An expense ONLY exists if money is explicitly mentioned with currency or payment action (e.g. "Rs 500", "₹120", "$50", "paid 250 via upi").
-    2. Entity types:
-       - "event" for meetings, parties, ceremonies, namings, birthdays, appointments, calls, flights.
-       - "reminder" for alerts or time-sensitive notes ("remind me to...").
-       - "task" for action items and to-dos.
-    3. If a specific time is mentioned (e.g. "at 11.30 am"), put it in "start_at" formatted as "YYYY-MM-DDTHH:MM:SS".
-
-    Respond ONLY with a valid JSON array of objects:
-    [
-      {{
-        "title": "Clear action title",
-        "description": "Optional notes or details",
-        "due_date": "YYYY-MM-DD or null",
-        "start_at": "YYYY-MM-DDTHH:MM:SS or null",
-        "priority": "low" | "medium" | "high" | "urgent",
-        "entity_type": "task" | "event" | "reminder",
-        "estimated_minutes": 30,
-        "expense": {{
-            "amount": 2500.0,
-            "payment_mode": "upi" | "debit_card" | "cash" | "net_banking",
-            "category": "Utilities & Bills"
-        }} or null
-      }}
+    items = await understand(natural_language, projects=projects or [])
+    return [
+        {
+            "title": item.title,
+            "description": item.description,
+            "due_date": item.due_date,
+            "start_at": item.start_at,
+            "remind_at": item.remind_at,
+            "priority": item.priority,
+            "entity_type": item.entity_type,
+            "estimated_minutes": item.estimated_minutes,
+            "repeat_rule": item.repeat_rule,
+            "context_tags": item.context_tags,
+            "expense": item.expense,
+        }
+        for item in items
     ]
-
-    User input: "{natural_language}"
-    """
-    
-    try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": 0.0}
-                }
-            )
-            if resp.status_code == 200:
-                parsed = safe_parse_json(resp.json().get("response", ""))
-                if isinstance(parsed, list) and len(parsed) > 0:
-                    # Sanity check: Ensure times weren't accidentally captured as expenses
-                    for item in parsed:
-                        if item.get("expense"):
-                            exp_amt = item["expense"].get("amount")
-                            if exp_amt in [11.3, 11.30, 10.3, 9.3, 12.3] and re.search(r"\b" + str(exp_amt) + r"\s*(?:am|pm)?\b", natural_language, re.I):
-                                if "am" in natural_language.lower() or "pm" in natural_language.lower() or "at " in natural_language.lower():
-                                    item["expense"] = None
-                    return parsed
-                elif isinstance(parsed, dict) and parsed:
-                    return [parsed]
-    except Exception:
-        pass
-
-    # Heuristic Rule-Based Fallback (Bulletproof NLP Extraction)
-    text = natural_language.strip()
-    text_lower = text.lower()
-    
-    # 1. Determine entity_type
-    event_keywords = [
-        "event", "naming", "ceremony", "wedding", "party", "birthday",
-        "meeting", "meet", "appointment", "call", "interview", "doctor",
-        "dinner", "lunch", "breakfast", "flight", "concert", "webinar"
-    ]
-    reminder_keywords = ["remind", "reminder", "alarm"]
-    
-    entity_type = "task"
-    if any(k in text_lower for k in event_keywords):
-        entity_type = "event"
-    elif any(k in text_lower for k in reminder_keywords):
-        entity_type = "reminder"
-
-    # 2. Extract priority
-    priority = "medium"
-    if any(w in text_lower for w in ["urgent", "asap", "critical", "emergency"]):
-        priority = "urgent"
-    elif any(w in text_lower for w in ["high", "important", "must"]):
-        priority = "high"
-    elif any(w in text_lower for w in ["low", "someday", "later"]):
-        priority = "low"
-
-    # 3. Extract Time (e.g. at 11.30 am, 11:30 am, at 4 pm)
-    time_str = None
-    start_at = None
-    time_match = re.search(r"(?:at\s+)?(\b\d{1,2})(?::|\.)(\d{2})\s*(am|pm)?\b", text, re.I)
-    if not time_match:
-        time_match = re.search(r"(?:at\s+)?(\b\d{1,2})\s*(am|pm)\b", text, re.I)
-        if time_match:
-            hr = int(time_match.group(1))
-            mn = 0
-            meridiem = time_match.group(2).lower()
-            if meridiem == "pm" and hr < 12:
-                hr += 12
-            elif meridiem == "am" and hr == 12:
-                hr = 0
-            time_str = f"{hr:02d}:{mn:02d}:00"
-    else:
-        hr = int(time_match.group(1))
-        mn = int(time_match.group(2))
-        meridiem = (time_match.group(3) or "").lower()
-        if meridiem == "pm" and hr < 12:
-            hr += 12
-        elif meridiem == "am" and hr == 12:
-            hr = 0
-        time_str = f"{hr:02d}:{mn:02d}:00"
-
-    # 4. Extract Date
-    due_date = None
-    if "today" in text_lower:
-        due_date = today
-    elif "tomorrow" in text_lower:
-        due_date = tomorrow
-    elif entity_type == "event" and time_str:
-        # Default event with specific time to today
-        due_date = today
-
-    if due_date and time_str:
-        start_at = f"{due_date}T{time_str}"
-
-    # 5. Extract Expense (Strict check - MUST have explicit currency/spending keywords, never times!)
-    expense = None
-    exp_patterns = [
-        r"(?:rs\.?|inr|₹|\$)\s*(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm|hrs|hours|mins|minutes|o'clock))",
-        r"(\d+(?:\.\d{1,2})?)\s*(?:rs\.?|inr|rupees|\$|bucks)(?!\s*(?:am|pm))",
-        r"(?:paid|pay|spent|spend|cost|fee|bill|bought)\s+(?:of\s+)?(?:rs\.?|inr|₹|\$)?\s*(\d+(?:\.\d{1,2})?)(?!\s*(?:am|pm))",
-        r"(\d+(?:\.\d{1,2})?)\s*(?:via|through|by|on|in)\s*(?:upi|gpay|phonepe|paytm|cash|card|debit)"
-    ]
-    for pat in exp_patterns:
-        m = re.search(pat, text, re.I)
-        if m:
-            amt = float(m.group(1))
-            mode = "upi"
-            if "cash" in text_lower:
-                mode = "cash"
-            elif "card" in text_lower or "debit" in text_lower:
-                mode = "debit_card"
-            expense = {
-                "amount": amt,
-                "payment_mode": mode,
-                "category": "General Expense"
-            }
-            break
-
-    # Polish the title to make it executive and actionable
-    polished_title = heuristic_improve_title(text, entity_type)
-
-    return [{
-        "title": polished_title,
-        "description": f"Captured via AI Brain Dump. Original note: \"{text}\"" + (f" (Scheduled for {time_str})" if time_str else ""),
-        "due_date": due_date,
-        "start_at": start_at,
-        "priority": priority,
-        "entity_type": entity_type,
-        "estimated_minutes": 60 if entity_type == "event" else 30,
-        "expense": expense
-    }]
 
 def heuristic_improve_title(raw: str, entity_type: str = "task") -> str:
     """Refines raw, messy, or conversational text into a crisp, executive action title."""

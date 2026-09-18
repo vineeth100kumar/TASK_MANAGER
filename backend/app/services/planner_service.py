@@ -15,7 +15,10 @@ def compute_big_rock_suggestions(tasks: list, limit: int = 5) -> list:
         score += energy_bonus.get(t.get("energy", "medium"), 0)
         due = t.get("due_date")
         if due:
-            if due <= today:
+            # Overdue outranks due-today. The old order tested `due <= today`
+            # first, so the due-today branch below it could never run and both
+            # scored the same.
+            if due < today:
                 score += 20
             elif due == today:
                 score += 15

@@ -4,6 +4,8 @@ from fastapi import APIRouter, Depends, Query
 from typing import Optional, List, Dict, Any
 
 from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
+from ..services.ai_runtime import status as ai_runtime_status
+from ..services.capture_service import commit_capture, read_capture
 from ..services.weather_service import get_current_weather
 from ..config import DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME
 from ..database import get_db
@@ -25,6 +27,18 @@ class ImproveTaskRequest(BaseModel):
 
 class OrganizeBoardRequest(BaseModel):
     tasks: Optional[List[Dict[str, Any]]] = None
+
+class CaptureRequest(BaseModel):
+    text: str
+    # False returns what was understood without writing anything, which is what
+    # the capture bar calls while the user is still typing.
+    commit: bool = True
+    # Let the local Ollama model do the reading. Turn it off for the
+    # keystroke-by-keystroke hints, where the answer has to be instant, or when
+    # the Pi is busy: the deterministic parser answers on its own in under a
+    # millisecond.
+    use_ai: bool = True
+    log_expenses: bool = True
 
 @router.get("/greeting")
 async def get_greeting(
@@ -71,11 +85,54 @@ async def get_greeting(
         }
     }
 
+@router.get("/status")
+async def ai_status():
+    """
+    Whether the Pi is currently running the model, and how long it usually takes.
+
+    The WebSocket announces starts and stops, but only to clients that were
+    already connected. A phone waking up mid-capture reads this instead, so it
+    can show that the Pi is thinking rather than that something is wrong.
+    """
+    return ai_runtime_status()
+
+@router.post("/capture")
+async def capture(req: CaptureRequest, db: aiosqlite.Connection = Depends(get_db)):
+    """
+    Understand a line of ordinary writing and act on it.
+
+    "going out with cousins at 7.30pm so leave office by 6.30pm" becomes an
+    event at 19:30 and a reminder at 18:30. The local Ollama model reads the
+    note; its dates, times and amounts are checked against a deterministic
+    parse of the same words before anything is written, and if Ollama is down
+    that parse answers on its own. With commit=false nothing is written, so the
+    same call drives the live hints under the capture bar.
+    """
+    text = (req.text or "").strip()
+    if not text:
+        return {"success": False, "committed": False, "items": [], "detail": "Nothing to capture"}
+
+    items = await read_capture(db, text, use_ai=req.use_ai)
+    if not req.commit:
+        return {"success": True, "committed": False, "items": [i.to_dict() for i in items]}
+
+    result = await commit_capture(db, text, log_expenses=req.log_expenses, items=items)
+    return {
+        "success": bool(result["created"]),
+        "committed": True,
+        "items": result["created"],
+        "transactions": result["transactions"],
+    }
+
 @router.post("/parse-brain-dump")
-async def parse_dump(req: BrainDumpRequest):
+async def parse_dump(req: BrainDumpRequest, db: aiosqlite.Connection = Depends(get_db)):
     """Extracts structured tasks, due dates, priority, and optional financial transactions."""
-    extracted = await parse_brain_dump(req.natural_language)
+    extracted = await parse_brain_dump(req.natural_language, projects=await _project_names(db))
     return {"success": True, "items": extracted}
+
+async def _project_names(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
+    async with db.execute("SELECT id, name FROM projects") as cursor:
+        return [{"id": r["id"], "name": r["name"]} for r in await cursor.fetchall()]
 
 @router.post("/auto-fill")
 async def auto_fill(req: AutoFillRequest):

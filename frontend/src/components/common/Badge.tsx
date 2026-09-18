@@ -11,6 +11,11 @@ export interface BadgeProps {
   children?: React.ReactNode;
 }
 
+/*
+ * Badges are sentence case and mostly quiet. Colour is reserved for the two
+ * states that need attention — urgent and blocked — so a screen full of badges
+ * does not read as a screen full of alarms.
+ */
 export const Badge: React.FC<BadgeProps> = ({
   variant = 'neutral',
   priority,
@@ -18,61 +23,56 @@ export const Badge: React.FC<BadgeProps> = ({
   color,
   size = 'xs',
   className = '',
-  children
+  children,
 }) => {
-  const sizeClass = size === 'xs' ? 'text-[9px] px-1.5 py-0.5' : 'text-[11px] px-2.5 py-0.5';
+  const base = 'inline-flex items-center rounded-md font-medium whitespace-nowrap';
+  const sizeClass = size === 'xs' ? 'text-caption px-1.5 py-0.5' : 'text-meta px-2 py-0.5';
+  const quiet = 'bg-sunken text-ink-2';
+
+  const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, ' ');
 
   if (variant === 'priority' && priority) {
-    const priorityStyles: Record<TaskPriority, string> = {
-      urgent: 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border border-rose-500/30',
-      high: 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30',
-      medium: 'bg-blue-500/15 text-blue-800 dark:text-blue-300 border border-blue-500/30',
-      low: 'bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400 border border-ink-base/20 dark:border-stone-700'
+    const styles: Record<TaskPriority, string> = {
+      urgent: 'bg-late-500/12 text-late-600 dark:text-late-300',
+      high: quiet,
+      medium: quiet,
+      low: quiet,
     };
     return (
-      <span className={`inline-flex items-center uppercase font-bold rounded font-ledger tracking-wider ${sizeClass} ${priorityStyles[priority]} ${className}`}>
-        {children || priority}
+      <span className={`${base} ${sizeClass} ${styles[priority]} ${className}`}>
+        {children || cap(priority)}
       </span>
     );
   }
 
   if (variant === 'status' && status) {
-    const statusStyles: Record<string, string> = {
-      done: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30',
-      achieved: 'bg-emerald-500/15 text-emerald-800 dark:text-emerald-300 border border-emerald-500/30',
-      todo: 'bg-blue-500/15 text-blue-800 dark:text-blue-300 border border-blue-500/30',
-      in_progress: 'bg-indigo-500/15 text-indigo-800 dark:text-indigo-300 border border-indigo-500/30',
-      blocked: 'bg-rose-500/15 text-rose-800 dark:text-rose-300 border border-rose-500/30',
-      pending: 'bg-amber-500/15 text-amber-800 dark:text-amber-300 border border-amber-500/30',
-      inbox: 'bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400 border border-ink-base/20 dark:border-stone-700',
-      archived: 'bg-paper-aged dark:bg-stone-800 text-ink-muted/70 dark:text-stone-500 border border-ink-base/15 dark:border-stone-700'
+    const styles: Record<string, string> = {
+      done: 'bg-done-500/12 text-done-600 dark:text-done-400',
+      achieved: 'bg-done-500/12 text-done-600 dark:text-done-400',
+      blocked: 'bg-late-500/12 text-late-600 dark:text-late-300',
+      in_progress: 'bg-accent-500/12 text-accent-600 dark:text-accent-400',
+      todo: quiet,
+      pending: quiet,
+      inbox: quiet,
+      archived: 'bg-sunken text-ink-3',
     };
     return (
-      <span className={`inline-flex items-center uppercase font-bold rounded font-ledger tracking-wider ${sizeClass} ${statusStyles[status] || 'bg-paper-aged dark:bg-stone-800 text-ink-muted dark:text-stone-400'} ${className}`}>
-        {children || status}
+      <span className={`${base} ${sizeClass} ${styles[status] || quiet} ${className}`}>
+        {children || cap(status)}
       </span>
     );
   }
 
+  // Project colours are the user's own choice, so they stay as set — shown as a
+  // dot beside quiet text rather than tinting the whole badge.
   if (variant === 'custom' && color) {
     return (
-      <span
-        className={`inline-flex items-center gap-1 font-medium font-ledger rounded border ${sizeClass} ${className}`}
-        style={{
-          backgroundColor: `${color}15`,
-          borderColor: `${color}40`,
-          color: color
-        }}
-      >
-        <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: color }} />
+      <span className={`${base} ${sizeClass} ${quiet} gap-1.5 ${className}`}>
+        <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: color }} />
         {children}
       </span>
     );
   }
 
-  return (
-    <span className={`inline-flex items-center rounded bg-paper-aged dark:bg-stone-800 text-ink-base dark:text-stone-300 border border-ink-base/20 dark:border-stone-700 font-ledger uppercase tracking-wider ${sizeClass} ${className}`}>
-      {children}
-    </span>
-  );
+  return <span className={`${base} ${sizeClass} ${quiet} ${className}`}>{children}</span>;
 };

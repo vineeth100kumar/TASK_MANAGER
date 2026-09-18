@@ -1,5 +1,6 @@
 import os
 import asyncio
+import datetime
 import aiosqlite
 from typing import AsyncGenerator, Optional
 
@@ -70,6 +71,7 @@ CREATE TABLE IF NOT EXISTS work_items (
     
     is_completed INTEGER DEFAULT 0,
     completed_at TEXT,
+    reminder_sent_at TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
@@ -197,6 +199,7 @@ CREATE INDEX IF NOT EXISTS idx_work_items_priority ON work_items(priority);
 CREATE INDEX IF NOT EXISTS idx_work_items_milestone ON work_items(milestone_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_project ON work_items(project_id);
 CREATE INDEX IF NOT EXISTS idx_work_items_context_tags ON work_items(context_tags);
+CREATE INDEX IF NOT EXISTS idx_work_items_reminders ON work_items(remind_at, reminder_sent_at, is_completed);
 CREATE INDEX IF NOT EXISTS idx_subtasks_work_item ON subtasks(work_item_id);
 CREATE INDEX IF NOT EXISTS idx_subtasks_pos ON subtasks(position);
 CREATE INDEX IF NOT EXISTS idx_finance_tx_account ON finance_transactions(account_id);
@@ -283,6 +286,18 @@ async def _run_migrations(db: aiosqlite.Connection):
         await db.execute("ALTER TABLE work_items ADD COLUMN context_tags TEXT DEFAULT ''")
         print("Migration: added context_tags column to work_items")
 
+    # v2.13.0: Track which reminders have already fired, so the 60-second worker
+    # stops re-notifying the same item for as long as it stays incomplete.
+    if "reminder_sent_at" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN reminder_sent_at TEXT")
+        # Anything already overdue on an existing database is history, not a
+        # backlog of notifications to deliver on the next tick.
+        await db.execute(
+            "UPDATE work_items SET reminder_sent_at = ? WHERE remind_at IS NOT NULL AND remind_at <= ?",
+            (datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat())
+        )
+        print("Migration: added reminder_sent_at column to work_items")
+
     # v2.3.1: Add is_upi_default column to finance_accounts if it doesn't exist
     async with db.execute("PRAGMA table_info(finance_accounts)") as fa_cursor:
         fa_cols = {row["name"] for row in await fa_cursor.fetchall()}
@@ -320,22 +335,35 @@ async def init_database():
 
         # Seed default financial accounts if none exist
         async with db.execute("SELECT COUNT(*) FROM finance_accounts") as cursor:
-            count = (await cursor.fetchone())[0]
-            if count == 0:
-                accounts = [
-                    ("acc_bank_1", "Primary Bank Account", "bank", 0.0, "INR"),
-                    ("acc_cash_1", "Cash in Hand", "cash", 0.0, "INR"),
-                    ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 0.0, "INR"),
-                ]
-                await db.executemany(
-                    "INSERT INTO finance_accounts (id, name, account_type, balance, currency) VALUES (?, ?, ?, ?, ?)",
-                    accounts,
-                )
+            account_count = (await cursor.fetchone())[0]
+        if account_count == 0:
+            accounts = [
+                ("acc_bank_1", "Primary Bank Account", "bank", 0.0, "INR"),
+                ("acc_cash_1", "Cash in Hand", "cash", 0.0, "INR"),
+                ("acc_wallet_1", "UPI / Digital Wallet", "wallet", 0.0, "INR"),
+            ]
+            await db.executemany(
+                "INSERT INTO finance_accounts (id, name, account_type, balance, currency) VALUES (?, ?, ?, ?, ?)",
+                accounts,
+            )
 
-                await db.executemany(
-                    "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
-                    categories,
-                )
+        # Seed default spend categories independently, so databases created while
+        # this block was broken get them backfilled on the next boot.
+        async with db.execute("SELECT COUNT(*) FROM finance_categories") as cursor:
+            category_count = (await cursor.fetchone())[0]
+        if category_count == 0:
+            categories = [
+                ("cat_food", "Food & Dining", "Utensils", 8000.0),
+                ("cat_groceries", "Groceries", "ShoppingCart", 6000.0),
+                ("cat_transport", "Transport & Fuel", "Car", 3000.0),
+                ("cat_bills", "Utilities & Bills", "Zap", 4500.0),
+                ("cat_entertainment", "Entertainment & Subs", "Film", 2000.0),
+                ("cat_shopping", "Shopping", "Bag", 4000.0),
+            ]
+            await db.executemany(
+                "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
+                categories,
+            )
 
         await db.commit()
 

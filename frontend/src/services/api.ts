@@ -2,16 +2,22 @@ import {
   WorkItem, WorkItemUpdatePayload, Milestone, Project, DailyPerformance,
   FinanceSummary, Transaction, AiGreetingResponse,
   FinanceAccount, WeatherData, DailyReflection, KickoffData, DebriefResult,
-  RecurringBill, BudgetGuardrail, Whiteboard, WhiteboardListItem, WhiteboardElement, ViewState
+  RecurringBill, BudgetGuardrail, Whiteboard, WhiteboardListItem, WhiteboardElement, ViewState,
+  AiStatus, CaptureResult
 } from '../types';
 import { getApiSecret, DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME } from '../config';
 
 const BASE_URL = '';
 
-async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
+// Most calls to the Pi are a few milliseconds, so a short ceiling catches a
+// dead backend quickly. Anything that waits on the local model needs its own,
+// far longer budget -- see captureTimeoutMs below.
+const DEFAULT_TIMEOUT_MS = 15000;
+
+async function fetchJson<T>(url: string, options?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS): Promise<T> {
   const token = getApiSecret();
   const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 15000);
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     const res = await fetch(`${BASE_URL}${url}`, {
@@ -30,7 +36,7 @@ async function fetchJson<T>(url: string, options?: RequestInit): Promise<T> {
     return res.json();
   } catch (err: any) {
     if (err.name === 'AbortError') {
-      throw new Error(`Request timed out after 15 seconds: ${url}`);
+      throw new Error(`Request timed out after ${Math.round(timeoutMs / 1000)} seconds: ${url}`);
     }
     throw err;
   } finally {
@@ -203,6 +209,31 @@ export const api = {
   // Local AI Services
   getAiGreeting: (name = DEFAULT_USER_NAME) =>
     fetchJson<AiGreetingResponse>(`/api/v1/ai/greeting?name=${encodeURIComponent(name)}`),
+
+  // Ask the Pi how long the model is currently taking, so the client can wait
+  // as long as the backend intends to rather than cutting it off early.
+  getAiStatus: () => fetchJson<AiStatus>('/api/v1/ai/status'),
+
+  // Natural-language capture. Inference on a Pi pegs the CPU, so this call can
+  // legitimately take tens of seconds on a cold model; the caller passes the
+  // budget the backend just told us to expect.
+  capture: (
+    text: string,
+    opts: { commit?: boolean; useAi?: boolean; timeoutMs?: number; signal?: AbortSignal } = {}
+  ) =>
+    fetchJson<CaptureResult>(
+      '/api/v1/ai/capture',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          text,
+          commit: opts.commit !== false,
+          use_ai: opts.useAi !== false,
+        }),
+        ...(opts.signal ? { signal: opts.signal } : {}),
+      },
+      opts.timeoutMs ?? 60000
+    ),
 
   parseBrainDump: (natural_language: string) =>
     fetchJson<{ success: boolean; items: any[] }>('/api/v1/ai/parse-brain-dump', {

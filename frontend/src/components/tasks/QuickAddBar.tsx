@@ -41,19 +41,17 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({
   };
 
   return (
-    <div className="w-full clipping clipping-white border-2 border-stone-300 dark:border-stone-800 rounded-none p-3 shadow-sm space-y-2.5 transition-all focus-within:border-amber-600/70 relative">
-      {/* Scotch tape */}
-      <div className="tape-strip -top-2 left-6 transform -rotate-1" />
+    <div className="w-full bg-surface border border-hairline rounded-surface p-3 space-y-2.5 transition-colors focus-within:border-accent-500/60">
 
-      <div className="flex justify-between items-center text-[9px] font-ledger uppercase tracking-widest text-stone-500 dark:text-stone-400 border-b border-stone-200 dark:border-stone-800/80 pb-1.5">
-        <span>TELEGRAM DISPATCH ENTRY &bull; 0MS CLIENT NLP</span>
-        <span className="text-amber-700 dark:text-amber-500">FORMAT: "Title tomorrow 5pm #project !high @context ~30m"</span>
+      <div className="flex justify-between items-center gap-4 text-caption text-ink-3 pb-0.5">
+        <span>Dates, projects and priorities are picked up as you type</span>
+        <span className="hidden md:inline font-mono">tomorrow 5pm #project !high @context ~30m</span>
       </div>
 
       <form onSubmit={handleSubmit} className="flex items-center gap-2 pt-0.5">
-        <div className="w-7 h-7 rounded-none bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-700 text-amber-700 dark:text-amber-500 flex items-center justify-center shrink-0">
-          <Plus className="w-4 h-4" />
-        </div>
+        <span className="text-accent-500 shrink-0 pl-0.5">
+          <Plus className="w-[18px] h-[18px]" />
+        </span>
 
         <input
           ref={inputRef}
@@ -62,44 +60,43 @@ export const QuickAddBar: React.FC<QuickAddBarProps> = ({
           onChange={(e) => setInput(e.target.value)}
           onFocus={() => setIsFocused(true)}
           onBlur={() => setTimeout(() => setIsFocused(false), 200)}
-          placeholder='Draft clipping: "Review quarterly taxes tomorrow 5pm #Finance !high @audit ~45m"'
-          className="flex-1 bg-transparent text-xs font-ledger text-stone-900 dark:text-stone-100 placeholder-stone-400 dark:placeholder-stone-600 focus:outline-none rounded-none"
+          placeholder='e.g. Review quarterly taxes tomorrow 5pm #Finance !high @audit ~45m'
+          className="flex-1 bg-transparent text-body text-ink placeholder:text-ink-3 focus:outline-none"
         />
 
         <div className="flex items-center space-x-1.5 shrink-0">
           <button
             type="button"
             onClick={onOpenAiBrainDump}
-            title="Open The Wire for unstructured notes"
-            className="flex items-center space-x-1 px-2.5 py-1.5 rounded-none bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border border-stone-300 dark:border-stone-700 text-xs font-ledger uppercase tracking-wider transition-colors"
+            title="Open quick capture for unstructured notes"
+            className="flex items-center gap-1.5 h-9 px-2.5 rounded-control text-ink-2 hover:text-ink hover:bg-sunken text-meta transition-colors"
           >
-            <Sparkles className="w-3 h-3 text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">The Wire</span>
+            <Sparkles className="w-4 h-4" />
+            <span className="hidden sm:inline">Capture</span>
           </button>
 
           <button
             type="submit"
             disabled={!parsed.title}
-            className={`flex items-center justify-center px-3 py-1.5 rounded-none transition-colors border text-xs font-ledger uppercase font-bold tracking-wider ${
+            className={`flex items-center justify-center gap-1 h-9 px-3.5 rounded-control text-meta font-medium transition-all duration-150 ease-settle ${
               parsed.title
-                ? 'bg-amber-600 hover:bg-amber-500 text-stone-950 border-amber-600 font-black'
-                : 'bg-paper-aged dark:bg-stone-900 text-stone-400 dark:text-stone-600 border-stone-300 dark:border-stone-800 cursor-not-allowed'
+                ? 'bg-accent-500 hover:bg-accent-600 text-white active:scale-[0.98]'
+                : 'bg-sunken text-ink-3 cursor-not-allowed'
             }`}
           >
-            <ArrowRight className="w-3.5 h-3.5 mr-1" />
-            <span>DISPATCH</span>
+            <span>Add</span>
           </button>
         </div>
       </form>
 
       {/* Live Interactive Token Preview Pills */}
       {parsed.tokens.length > 0 && (
-        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-stone-200 dark:border-stone-800/80 text-[10px] font-ledger">
-          <span className="text-stone-500 font-bold uppercase tracking-wider shrink-0 text-[9px]">DETECTED:</span>
+        <div className="flex items-center space-x-1.5 overflow-x-auto no-scrollbar pt-1 border-t border-stone-200 dark:border-stone-800/80 text-caption">
+          <span className="text-ink-3 shrink-0 text-caption">Detected</span>
           {parsed.tokens.map((token, idx) => (
             <span
               key={idx}
-              className={`px-1.5 py-0.5 rounded-none uppercase whitespace-nowrap border ${
+              className={`px-1.5 py-0.5 rounded-control whitespace-nowrap border ${
                 token.type === 'priority'
                   ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/60 dark:text-rose-300 dark:border-rose-800'
                   : token.type === 'project'

@@ -1,7 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Trash2, Zap, CheckCircle2, GripHorizontal } from 'lucide-react';
 import { StickyElement, StickyColor } from '../../types';
-import { TapeStrip } from '../newspaper/TapeStrip';
 
 interface StickyNoteOverlayProps {
   sticky: StickyElement;
@@ -198,22 +197,14 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
         boxShadow: isSelected
           ? '0 12px 28px -4px rgba(0,0,0,0.35), 0 0 0 2px #1A1814'
           : '0 6px 16px -2px rgba(0,0,0,0.2), 0 1px 3px rgba(0,0,0,0.1)',
-        transform: isDragging ? 'scale(1.02)' : 'rotate(-0.6deg)',
+        transform: isDragging ? 'scale(1.02)' : 'none',
       }}
       onClick={(e) => {
         e.stopPropagation();
         onSelect();
       }}
-      className="rounded-[1px] border border-black/25 flex flex-col pointer-events-auto transition-transform select-none group relative"
+      className="rounded-lg border border-black/15 flex flex-col pointer-events-auto transition-transform select-none group relative"
     >
-      {/* Decorative Scotch Tape Anchor */}
-      <TapeStrip
-        rotate={-2}
-        className="-top-2 left-1/2 -translate-x-1/2 z-20 shadow-sm"
-        width={42}
-        height={13}
-      />
-
       {/* Top Header Drag Handle */}
       <div
         onPointerDown={handleDragStart}
@@ -225,8 +216,8 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
       >
         <div className="flex items-center gap-1.5">
           <GripHorizontal size={13} style={{ color: palette.text, opacity: 0.5 }} />
-          <span className="font-ledger text-[8px] uppercase tracking-wider text-black/40 font-bold">
-            NOTE DISPATCH
+          <span className="text-caption text-black/40 font-bold">
+            Note
           </span>
         </div>
         <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
@@ -238,7 +229,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
                 e.stopPropagation();
                 onUpdate({ color: sc.color });
               }}
-              className={`w-2.5 h-2.5 rounded-[1px] border border-black/30 transition-transform ${
+              className={`w-2.5 h-2.5 rounded-control border border-black/30 transition-transform ${
                 sticky.color === sc.color ? 'scale-125 ring-1 ring-black/60' : 'hover:scale-110'
               }`}
               style={{ backgroundColor: sc.hex }}
@@ -260,7 +251,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
             color: palette.text,
             caretColor: palette.text,
           }}
-          className="w-full flex-1 resize-none bg-transparent border-none outline-none font-editorial text-sm font-semibold leading-snug placeholder:opacity-40 select-text"
+          className="w-full flex-1 resize-none bg-transparent border-none outline-none text-sm font-semibold leading-snug placeholder:opacity-40 select-text"
         />
       </div>
 
@@ -272,11 +263,11 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
         {/* Convert to Task Button */}
         {sticky.convertedTaskId ? (
           <div
-            className="flex items-center gap-1 text-[9px] font-ledger uppercase font-bold text-emerald-900 bg-emerald-200/80 px-1.5 py-0.5 border border-emerald-600/40 rounded-[1px]"
+            className="flex items-center gap-1 text-caption font-bold text-emerald-900 bg-emerald-200/80 px-1.5 py-0.5 border border-emerald-600/40 rounded-control"
             title="Filed as official Task on the docket"
           >
             <CheckCircle2 size={11} />
-            <span>On Docket</span>
+            <span>In tasks</span>
           </div>
         ) : (
           <button
@@ -285,12 +276,12 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
               e.stopPropagation();
               onConvertToTask(sticky);
             }}
-            className="flex items-center gap-1 text-[9px] font-ledger uppercase font-bold px-1.5 py-0.5 rounded-[1px] bg-black/10 hover:bg-black/20 active:scale-95 transition-all border border-black/15"
+            className="flex items-center gap-1 text-caption font-bold px-1.5 py-0.5 rounded-control bg-black/10 hover:bg-black/20 active:scale-95 transition-all border border-black/15"
             style={{ color: palette.text }}
             title="Convert this note into a docket task"
           >
             <Zap size={10} className="fill-current text-amber-700" />
-            <span>Dispatch Task</span>
+            <span>Make a task</span>
           </button>
         )}
 
@@ -302,7 +293,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-1 rounded-[1px] text-black/40 hover:text-rose-700 hover:bg-black/10 transition-colors"
+            className="p-1 rounded-control text-black/40 hover:text-rose-700 hover:bg-black/10 transition-colors"
             title="Delete Sticky Note"
           >
             <Trash2 size={12} />

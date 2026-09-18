@@ -16,10 +16,16 @@ async def get_today_dashboard(db: aiosqlite.Connection = Depends(get_db)):
     today_str = datetime.datetime.now().strftime("%Y-%m-%d")
     
     # 1. Real tasks scheduled or completed today
+    # priority is a text column, so ORDER BY priority DESC sorted it
+    # alphabetically -- urgent, medium, low, high -- putting high-priority work
+    # last. Rank it explicitly instead.
     query_today_tasks = """
-        SELECT * FROM work_items 
+        SELECT * FROM work_items
         WHERE (due_date = ? OR (completed_at IS NOT NULL AND completed_at LIKE ?))
-        ORDER BY is_completed ASC, priority DESC, created_at ASC
+        ORDER BY is_completed ASC,
+                 CASE priority WHEN 'urgent' THEN 0 WHEN 'high' THEN 1
+                               WHEN 'medium' THEN 2 ELSE 3 END ASC,
+                 created_at ASC
     """
     
     tasks_planned = 0
