@@ -226,3 +226,57 @@ export function withTimeOfDay(
   }
   return { due_date: date, start_at: iso, remind_at: iso };
 }
+
+const PRIORITY_ORDER: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+
+/**
+ * Whether an item's moment has already gone by.
+ *
+ * isOverdue() only knows about days, so something due at 18:30 does not read
+ * as late until tomorrow. On a screen about today that is exactly backwards:
+ * by 19:00 it is the most late thing there is.
+ */
+export function isPastDue(
+  item: Pick<WorkItem, 'entity_type' | 'due_date' | 'start_at' | 'remind_at' | 'is_completed'>,
+  now: Date = new Date()
+): boolean {
+  if (item.is_completed) return false;
+  const moment = itemMoment(item);
+  if (moment) {
+    const at = new Date(moment);
+    if (!isNaN(at.getTime())) return at.getTime() < now.getTime();
+  }
+  return isOverdue(item.due_date, item.is_completed);
+}
+
+/**
+ * Chronological order, which is the order a day actually happens in.
+ *
+ * Anything with a time comes first, soonest first, because that is what "next"
+ * means. Items with no time follow, most urgent first, since nothing about
+ * the clock can separate them.
+ */
+export function compareBySchedule(
+  a: Pick<WorkItem, 'entity_type' | 'due_date' | 'start_at' | 'remind_at' | 'priority'>,
+  b: Pick<WorkItem, 'entity_type' | 'due_date' | 'start_at' | 'remind_at' | 'priority'>
+): number {
+  const aAt = itemMoment(a);
+  const bAt = itemMoment(b);
+
+  if (aAt && bAt) {
+    const difference = new Date(aAt).getTime() - new Date(bAt).getTime();
+    if (difference !== 0) return difference;
+  } else if (aAt) {
+    return -1;
+  } else if (bAt) {
+    return 1;
+  }
+
+  const aDay = normalizeDate(a.due_date);
+  const bDay = normalizeDate(b.due_date);
+  if (aDay && bDay && aDay !== bDay) return aDay < bDay ? -1 : 1;
+  if (aDay && !bDay) return -1;
+  if (bDay && !aDay) return 1;
+
+  return (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2);
+}
