@@ -13,9 +13,12 @@
  *   - navigations             network first, falling back to the cached shell,
  *                             so a deploy on the Pi is picked up immediately
  *                             but a dead Pi still opens the app.
+ *   - push                    shown as a notification, and tapping one brings
+ *                             the open app forward rather than opening a
+ *                             second copy of it.
  */
 
-const VERSION = 'sage-v2';
+const VERSION = 'sage-v3';
 const SHELL = `${VERSION}-shell`;
 const ASSETS = `${VERSION}-assets`;
 
@@ -88,4 +91,59 @@ self.addEventListener('fetch', (event) => {
       )
     );
   }
+});
+
+/*
+ * A reminder arrives.
+ *
+ * Without this handler the Pi's push reaches the device and nothing happens:
+ * the browser wakes the worker, finds no listener, and in Chrome posts its own
+ * "This site has been updated in the background" instead. So a reminder was
+ * only ever visible if the app already happened to be open.
+ */
+self.addEventListener('push', (event) => {
+  let payload = {};
+  try {
+    payload = event.data ? event.data.json() : {};
+  } catch (e) {
+    // A push with a plain-text body rather than JSON. Show it as the message.
+    payload = { body: event.data ? event.data.text() : '' };
+  }
+
+  const title = payload.title || 'Sage';
+  const options = {
+    body: payload.body || '',
+    icon: payload.icon || '/icons/icon-192.png',
+    badge: payload.badge || '/icons/icon-192.png',
+    // Reminders for the same item replace one another rather than stacking up
+    // on the lock screen, which is what happens when the Pi retries.
+    tag: (payload.data && payload.data.tag) || 'sage-reminder',
+    renotify: true,
+    data: { url: (payload.data && payload.data.url) || '/' },
+  };
+
+  event.waitUntil(self.registration.showNotification(title, options));
+});
+
+/*
+ * Tapping one. If the app is already open somewhere, bring that window forward
+ * and tell it where to go, rather than opening a second copy of the app.
+ */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+  const target = (event.notification.data && event.notification.data.url) || '/';
+
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: 'window', includeUncontrolled: true })
+      .then((windows) => {
+        for (const client of windows) {
+          if (client.url.startsWith(self.location.origin) && 'focus' in client) {
+            client.postMessage({ type: 'NOTIFICATION_CLICK', url: target });
+            return client.focus();
+          }
+        }
+        return self.clients.openWindow(target);
+      })
+  );
 });

@@ -130,6 +130,10 @@ Environment=DATA_DIR=$REPO_DIR/data
 Environment=OLLAMA_HOST=http://localhost:11434
 Environment=OLLAMA_MODEL=qwen2.5:1.5b
 Environment=PYTHONPATH=$REPO_DIR/backend
+# Secrets that must not live in a public repository, and must survive the
+# auto-sync daemon throwing the checkout away. Optional: the leading dash means
+# the backend still starts before deploy/generate_vapid_keys.sh has been run.
+EnvironmentFile=-/etc/sage/sage.env
 ExecStart=$REPO_DIR/.venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8000 --app-dir $REPO_DIR/backend
 Restart=always
 RestartSec=3
@@ -193,4 +197,7 @@ echo "Useful Commands:"
 echo "  Backend logs:   sudo journalctl -u sage-backend -f"
 echo "  Auto-sync logs: sudo journalctl -u sage-autosync -f"
 echo "  Restart:        sudo systemctl restart sage-backend"
+echo ""
+echo "To get reminders on your phone, run this once:"
+echo "  bash $REPO_DIR/deploy/generate_vapid_keys.sh"
 echo "=============================================================================="

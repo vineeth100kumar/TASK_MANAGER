@@ -1,23 +1,21 @@
 import React, { useState } from 'react';
-import { 
-  Smartphone, 
-  Mic, 
-  Copy, 
-  Check, 
-  ExternalLink, 
-  Play, 
-  Sparkles,
-  DollarSign,
-  Radio
-} from 'lucide-react';
-import { api } from '../../services/api';
+import { Copy, Check, Bell } from 'lucide-react';
+import { usePushNotifications } from '../../hooks/usePushNotifications';
+
+/* The three things the backend will do for a shortcut, and how to reach them. */
+const ENDPOINTS = [
+  { name: 'Add a task', method: 'POST', path: '/api/v1/shortcuts/quick-task' },
+  { name: 'Log an expense', method: 'POST', path: '/api/v1/shortcuts/log-expense' },
+  { name: 'Read the day back', method: 'GET', path: '/api/v1/shortcuts/status' },
+];
 
 export const ShortcutsModal: React.FC = () => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
-  const [testTaskText, setTestTaskText] = useState('Buy organic coffee beans tomorrow 10am');
+  const [testTaskText, setTestTaskText] = useState('Buy coffee beans tomorrow 10am');
   const [testResult, setTestResult] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
 
+  const push = usePushNotifications();
   const currentHost = window.location.origin;
 
   const copyToClipboard = (text: string, field: string) => {
@@ -36,165 +34,186 @@ export const ShortcutsModal: React.FC = () => {
         body: JSON.stringify({ input_text: testTaskText }),
       });
       const data = await res.json();
-      setTestResult(data.spoken_response || 'Task successfully created via Siri API!');
-    } catch (e: any) {
-      setTestResult(`Error: ${e.message}`);
+      setTestResult(data.spoken_response || 'Task created.');
+    } catch (e: unknown) {
+      setTestResult(e instanceof Error ? `Error: ${e.message}` : 'Something went wrong.');
     } finally {
       setIsTesting(false);
     }
   };
 
+  /* What the reminders row says, which depends entirely on what the browser allows. */
+  const pushCopy: Record<string, { body: string; action: string | null }> = {
+    on: {
+      body: 'This device will be notified when something falls due.',
+      action: 'Turn off',
+    },
+    off: {
+      body: 'Get told when something falls due, even with the app closed.',
+      action: 'Turn on',
+    },
+    asking: { body: 'Waiting for the browser.', action: null },
+    denied: {
+      body: 'Your browser is blocking notifications for this site. It can only be undone in the browser’s own settings for this page.',
+      action: null,
+    },
+    unsupported: {
+      body: 'This browser cannot do notifications. On an iPhone, add Sage to the Home Screen first and open it from there.',
+      action: null,
+    },
+    unconfigured: {
+      body: 'The Pi has no notification keys yet. Run deploy/generate_vapid_keys.sh on it, add the two lines it prints to the backend environment, and restart sage-backend.',
+      action: null,
+    },
+    error: { body: push.detail || 'Something went wrong.', action: 'Try again' },
+  };
+
+  const copy = pushCopy[push.state];
+
   return (
-    <div className="space-y-6 max-w-4xl mx-auto pb-24 md:pb-12">
-      {/* Header */}
-      <div className="border-b border-ink-base/80 dark:border-paper-light/80 pb-3 pt-1">
-        <div className="flex items-center justify-between text-caption text-ink-muted dark:text-stone-400 mb-1">
-          <span>WIRE TRANSMISSION OFFICE • SEC. VI</span>
-          <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
-            PI-5 LOCAL BROADCAST ACTIVE
-          </span>
+    <div className="mx-auto max-w-2xl px-5 pt-3 pb-40 md:pb-16">
+      <header className="pt-2">
+        <h1 className="screen-title">Settings</h1>
+        <p className="text-meta text-ink-3 mt-0.5">Notifications, and talking to Sage from Siri.</p>
+      </header>
+
+      {/* ---------------------------- Reminders ---------------------------- */}
+      <section className="mt-7">
+        <h2 className="label mb-2">Reminders</h2>
+
+        <div className="surface px-4 py-3.5 flex items-start gap-3.5">
+          <Bell
+            className={`w-5 h-5 mt-0.5 shrink-0 ${
+              push.state === 'on' ? 'text-accent-500' : 'text-ink-3'
+            }`}
+          />
+
+          <div className="min-w-0 flex-1">
+            {/* Short by design: on a phone this line sits beside the button. */}
+            <p className="text-body text-ink">
+              {push.state === 'on' ? 'Reminders are on' : 'Reminders are off'}
+            </p>
+            <p className="text-meta text-ink-2 mt-0.5 leading-relaxed">{copy.body}</p>
+          </div>
+
+          {copy.action && (
+            <button
+              onClick={push.state === 'on' ? push.disable : push.enable}
+              disabled={push.state === 'asking'}
+              className={`shrink-0 h-9 px-3.5 rounded-control text-meta font-medium
+                          transition-all duration-200 ease-spring active:scale-[0.97]
+                          disabled:opacity-40 disabled:pointer-events-none ${
+                            push.state === 'on'
+                              ? 'bg-sunken text-ink-2 hover:text-ink'
+                              : 'bg-accent-500 hover:bg-accent-600 text-white'
+                          }`}
+            >
+              {copy.action}
+            </button>
+          )}
         </div>
-        <h1 className="text-2xl md:text-3xl font-bold text-ink-base dark:text-paper-light flex items-center space-x-2 tracking-tight">
-          <Radio className="w-6 h-6 text-amber-600 dark:text-amber-400" />
-          <span>Shortcuts and Siri</span>
-        </h1>
-        <p className="text-meta italic text-ink-muted dark:text-stone-400 mt-1">
-          Direct telephone dispatch and voice telegraph line linking iPhone, Apple Watch, or HomePod to your Raspberry Pi 5.
+
+        {/*
+          The iPhone caveat is worth stating up front rather than leaving someone
+          to discover that the button does nothing in a Safari tab.
+        */}
+        {(push.state === 'off' || push.state === 'unsupported') && (
+          <p className="text-meta text-ink-3 mt-2 leading-relaxed">
+            On an iPhone this only works once Sage is on the Home Screen: Share, then
+            Add to Home Screen, then open it from there.
+          </p>
+        )}
+      </section>
+
+      {/* ------------------------------ Siri ------------------------------ */}
+      <section className="mt-9">
+        <h2 className="label mb-2">Siri</h2>
+        <p className="text-meta text-ink-2 leading-relaxed">
+          Three things Sage can do by voice, through the Shortcuts app: add a task from
+          whatever you say, log an expense, and read the day back to you.
         </p>
-      </div>
 
-      {/* Siri Capabilities Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-surface p-5 space-y-2.5 relative">
-          <div className="w-8 h-8 rounded border border-blue-500/30 bg-blue-500/10 text-blue-600 dark:text-blue-400 flex items-center justify-center font-bold text-meta">
-            <Mic className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-bold text-ink-base dark:text-paper-light">"Hey Siri, Quick Task"</h3>
-          <p className="text-meta text-ink-muted dark:text-stone-400 leading-relaxed">
-            Dictate anything naturally. Local AI parses dates, priorities, and checklist steps automatically.
-          </p>
-          <div className="pt-2 text-caption text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
-            Add a task
-          </div>
-        </div>
-
-        <div className="bg-surface p-5 space-y-2.5 relative">
-          <div className="w-8 h-8 rounded border border-emerald-500/30 bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 flex items-center justify-center font-bold text-meta">
-            <DollarSign className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-bold text-ink-base dark:text-paper-light">"Hey Siri, Log Expense"</h3>
-          <p className="text-meta text-ink-muted dark:text-stone-400 leading-relaxed">
-            Say "250 rupees for lunch via UPI". It logs the disbursement and adjusts your account ledger.
-          </p>
-          <div className="pt-2 text-caption text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
-            Log an expense
-          </div>
-        </div>
-
-        <div className="bg-surface p-5 space-y-2.5 relative">
-          <div className="w-8 h-8 rounded border border-purple-500/30 bg-purple-500/10 text-purple-600 dark:text-purple-400 flex items-center justify-center font-bold text-meta">
-            <Sparkles className="w-4 h-4" />
-          </div>
-          <h3 className="text-sm font-bold text-ink-base dark:text-paper-light">"Hey Siri, Daily Status"</h3>
-          <p className="text-meta text-ink-muted dark:text-stone-400 leading-relaxed">
-            Siri reads aloud your productivity headline, pending urgent docket items, and current treasury balance.
-          </p>
-          <div className="pt-2 text-caption text-ink-muted/70 dark:text-stone-500 border-t border-ink-base/10 dark:border-paper-light/10">
-            Daily brief
-          </div>
-        </div>
-      </div>
-
-      {/* Setup Guide for iOS Shortcuts */}
-      <div className="bg-surface p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2">
-          <h2 className="text-sm font-bold text-ink-base dark:text-paper-light">
-            OPERATING INSTRUCTIONS: 2-MINUTE iOS SHORTCUT SETUP
-          </h2>
-          <span className="text-caption text-ink-muted dark:text-stone-400">
-            PROTOCOL REV 4.2
-          </span>
-        </div>
-
-        <ol className="list-decimal list-inside space-y-3.5 text-meta text-ink-base dark:text-stone-300">
-          <li className="leading-relaxed">
-            Open the <strong>Shortcuts</strong> application on your iPhone or iPad.
-          </li>
-          <li className="leading-relaxed">
-            Tap <strong>+</strong> to create a new Shortcut and designate title: <code className="bg-paper-aged dark:bg-stone-800 border border-ink-base/20 dark:border-stone-700 px-2 py-0.5 rounded text-amber-700 dark:text-amber-300 font-bold">Quick Task</code>
-          </li>
-          <li className="leading-relaxed">
-            Add action: <strong>"Ask for Input"</strong> (Type: Text, Prompt: <em>"What task would you like to add?"</em>)
-          </li>
-          <li className="leading-relaxed">
-            Add action: <strong>"Get Contents of URL"</strong>:
-            <div className="mt-2.5 space-y-2 pl-4">
-              <div className="flex items-center space-x-2">
-                <span className="text-meta text-ink-muted dark:text-stone-400">ENDPOINT:</span>
-                <code className="bg-paper-white dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 px-2.5 py-1.5 rounded text-ink-base dark:text-stone-200 text-meta truncate flex-1 shadow-inner">
-                  {currentHost}/api/v1/shortcuts/quick-task
+        <div className="surface-sunken mt-3 divide-y divide-hairline">
+          {ENDPOINTS.map((e) => (
+            <div key={e.path} className="flex items-center gap-2 px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <div className="text-meta text-ink">
+                  {e.name} <span className="text-ink-3">· {e.method}</span>
+                </div>
+                <code className="block text-caption text-ink-2 font-mono truncate mt-0.5">
+                  {currentHost}
+                  {e.path}
                 </code>
-                <button
-                  onClick={() => copyToClipboard(`${currentHost}/api/v1/shortcuts/quick-task`, 'task_url')}
-                  className="p-1.5 bg-paper-aged dark:bg-stone-800 hover:bg-paper-white dark:hover:bg-stone-700 border border-ink-base/20 dark:border-stone-700 rounded text-ink-base dark:text-stone-200 transition-colors"
-                  title="Copy URL"
-                >
-                  {copiedField === 'task_url' ? <Check className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                </button>
               </div>
-              <div className="text-meta text-ink-muted dark:text-stone-400">
-                METHOD: <strong className="text-ink-base dark:text-stone-200">POST</strong> • BODY: <strong className="text-ink-base dark:text-stone-200">JSON</strong> with key: <code className="text-amber-700 dark:text-amber-400">input_text</code> = <em>Provided Input</em>
-              </div>
+              <button
+                onClick={() => copyToClipboard(`${currentHost}${e.path}`, e.path)}
+                aria-label={`Copy the ${e.name.toLowerCase()} address`}
+                className="w-9 h-9 grid place-items-center rounded-control text-ink-3 hover:text-ink hover:bg-hairline/60 transition-colors shrink-0"
+              >
+                {copiedField === e.path ? (
+                  <Check className="w-4 h-4 text-done-500 dark:text-done-400" />
+                ) : (
+                  <Copy className="w-4 h-4" />
+                )}
+              </button>
             </div>
+          ))}
+        </div>
+
+        <ol className="mt-4 space-y-2.5 text-meta text-ink-2 list-decimal pl-4 marker:text-ink-3">
+          <li className="leading-relaxed pl-1">
+            In Shortcuts, make a new shortcut called <span className="text-ink">Quick Task</span>.
           </li>
-          <li className="leading-relaxed">
-            Add action: <strong>"Speak Text"</strong> (select <code>Contents of URL &gt; spoken_response</code>) so Siri confirms receipt verbally.
+          <li className="leading-relaxed pl-1">
+            Add <span className="text-ink">Ask for Input</span>, as text.
+          </li>
+          <li className="leading-relaxed pl-1">
+            Add <span className="text-ink">Get Contents of URL</span> with the first address above,
+            method POST, a JSON body, and one key called{' '}
+            <span className="text-ink font-mono">input_text</span> set to that input.
+          </li>
+          <li className="leading-relaxed pl-1">
+            Add <span className="text-ink">Speak Text</span> and pick{' '}
+            <span className="text-ink font-mono">spoken_response</span>, so Siri answers you.
           </li>
         </ol>
-      </div>
+      </section>
 
-      {/* Live Voice Simulator / Endpoint Tester */}
-      <div className="bg-surface p-6 space-y-4">
-        <div className="flex items-center justify-between border-b border-ink-base/15 dark:border-paper-light/15 pb-2">
-          <h2 className="text-sm font-bold text-ink-base dark:text-paper-light flex items-center space-x-2">
-            <Play className="w-4 h-4 text-amber-600 dark:text-amber-400" />
-            <span>TRANSMITTER TEST TERMINAL (LIVE WIRE SIMULATION)</span>
-          </h2>
-          <span className="text-caption text-ink-muted dark:text-stone-400">
-            STATION PI-5
-          </span>
-        </div>
+      {/* ------------------------------ Test ------------------------------ */}
+      <section className="mt-9">
+        <h2 className="label mb-2">Try it</h2>
+        <p className="text-meta text-ink-2 leading-relaxed">
+          Sends a line to the same endpoint Siri uses, so you can check it before
+          building the shortcut.
+        </p>
 
-        <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-col sm:flex-row gap-2 mt-3">
           <input
             type="text"
+            id="sage-shortcut-test"
             value={testTaskText}
             onChange={(e) => setTestTaskText(e.target.value)}
-            className="flex-1 bg-paper-aged/50 dark:bg-stone-900 border border-ink-base/20 dark:border-stone-700 rounded-lg px-3.5 py-2.5 text-meta text-ink-base dark:text-stone-100 placeholder-ink-muted/60 dark:placeholder-stone-500 focus:outline-none focus:border-amber-600 dark:focus:border-amber-400"
-            placeholder="Dictate simulated dispatch (e.g. Schedule meeting with counsel tomorrow 2pm)..."
+            className="field flex-1"
+            placeholder="Say something you would say to Siri"
           />
           <button
             onClick={runTestTask}
             disabled={isTesting}
-            className="px-4 py-2.5 bg-ink-base hover:bg-sunken text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base text-meta font-bold rounded-lg shrink-0 flex items-center justify-center space-x-1.5 transition-all shadow-sm"
+            className="h-11 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white
+                       text-meta font-semibold shrink-0 transition-all duration-200 ease-spring
+                       active:scale-[0.98] disabled:opacity-40 disabled:pointer-events-none"
           >
-            <Sparkles className="w-3.5 h-3.5" />
-            <span>{isTesting ? 'TRANSMITTING...' : 'SIMULATE SIRI'}</span>
+            {isTesting ? 'Sending' : 'Send'}
           </button>
         </div>
 
         {testResult && (
-          <div className="p-3.5 bg-paper-aged dark:bg-stone-950 border border-ink-base/20 dark:border-stone-800 rounded-lg text-meta space-y-1">
-            <span className="text-caption font-bold text-emerald-600 dark:text-emerald-400">
-              TELEGRAPH RECEIPT & SPOKEN RESPONSE:
-            </span>
-            <p className="text-ink-base dark:text-stone-200 font-medium italic text-sm">
-              "{testResult}"
-            </p>
+          <div className="surface-sunken mt-3 px-4 py-3.5">
+            <div className="text-meta text-ink-3">Sage said</div>
+            <p className="text-body text-ink mt-1">{testResult}</p>
           </div>
         )}
-      </div>
+      </section>
     </div>
   );
 };
