@@ -1,6 +1,7 @@
-import React, { useState } from 'react';
-import { Copy, Check, Bell } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Copy, Check, Bell, Home, RotateCw } from 'lucide-react';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
+import { api } from '../../services/api';
 
 /* The three things the backend will do for a shortcut, and how to reach them. */
 const ENDPOINTS = [
@@ -14,6 +15,60 @@ export const ShortcutsModal: React.FC = () => {
   const [testTaskText, setTestTaskText] = useState('Buy coffee beans tomorrow 10am');
   const [testResult, setTestResult] = useState<string | null>(null);
   const [isTesting, setIsTesting] = useState(false);
+
+  // Home Mode & Fan Quiet Hours state
+  const [homeMode, setHomeMode] = useState<boolean>(true);
+  const [isQuietHoursNow, setIsQuietHoursNow] = useState<boolean>(false);
+  const [pendingBacklog, setPendingBacklog] = useState<{ tasks: number; projects: number }>({ tasks: 0, projects: 0 });
+  const [isProcessingBacklog, setIsProcessingBacklog] = useState(false);
+  const [backlogFeedback, setBacklogFeedback] = useState<string | null>(null);
+
+  useEffect(() => {
+    api.getHomeMode().then((res) => {
+      if (res.success && res.data) {
+        setHomeMode(res.data.home_mode);
+        setIsQuietHoursNow(res.data.is_quiet_hours_now);
+        setPendingBacklog({
+          tasks: res.data.pending_tasks,
+          projects: res.data.pending_projects,
+        });
+      }
+    }).catch(() => {});
+  }, []);
+
+  const handleToggleHomeMode = async () => {
+    try {
+      const next = !homeMode;
+      const res = await api.setHomeMode(next);
+      if (res.success && res.data) {
+        setHomeMode(res.data.home_mode);
+        setIsQuietHoursNow(res.data.is_quiet_hours_now);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleRunBacklogNow = async () => {
+    setIsProcessingBacklog(true);
+    setBacklogFeedback(null);
+    try {
+      const res = await api.processBacklog(true);
+      if (res.success && res.data) {
+        setBacklogFeedback(
+          `Processed ${res.data.processed_projects} projects and ${res.data.processed_tasks} tasks.`
+        );
+        setPendingBacklog({
+          projects: res.data.pending_projects,
+          tasks: res.data.pending_tasks,
+        });
+      }
+    } catch (e) {
+      setBacklogFeedback('Failed to process backlog.');
+    } finally {
+      setIsProcessingBacklog(false);
+    }
+  };
 
   const push = usePushNotifications();
   const currentHost = window.location.origin;
@@ -74,8 +129,86 @@ export const ShortcutsModal: React.FC = () => {
     <div className="mx-auto max-w-2xl px-5 pt-3 pb-40 md:pb-16">
       <header className="pt-2">
         <h1 className="screen-title">Settings</h1>
-        <p className="text-meta text-ink-3 mt-0.5">Notifications, and talking to Sage from Siri.</p>
+        <p className="text-meta text-ink-3 mt-0.5">Notifications, device settings, and talking to Sage from Siri.</p>
       </header>
+
+      {/* ------------------- Home Mode & Fan Quiet Hours ------------------- */}
+      <section className="mt-7">
+        <h2 className="label mb-2">Raspberry Pi Quiet Mode</h2>
+
+        <div className="surface px-4 py-3.5 flex flex-col gap-3">
+          <div className="flex items-start gap-3.5">
+            <Home
+              className={`w-5 h-5 mt-0.5 shrink-0 ${
+                homeMode ? 'text-accent-500' : 'text-ink-3'
+              }`}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="flex items-center gap-2">
+                <p className="text-body font-medium text-ink">
+                  {homeMode ? 'Home Mode is active' : 'Home Mode is off'}
+                </p>
+                {homeMode && (
+                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-600 dark:text-accent-400">
+                    Quiet Fans
+                  </span>
+                )}
+              </div>
+              <p className="text-meta text-ink-2 mt-0.5 leading-relaxed">
+                {homeMode
+                  ? 'Defers background AI description sweeps for existing tasks until midnight (01:30 AM – 05:30 AM) to prevent fan noise while you are home. New tasks still generate descriptions immediately.'
+                  : 'Background AI description generation runs automatically at any time.'}
+              </p>
+            </div>
+
+            <button
+              onClick={handleToggleHomeMode}
+              className={`shrink-0 h-9 px-3.5 rounded-control text-meta font-medium
+                          transition-all duration-200 ease-spring active:scale-[0.97] ${
+                            homeMode
+                              ? 'bg-sunken text-ink-2 hover:text-ink'
+                              : 'bg-accent-500 hover:bg-accent-600 text-white'
+                          }`}
+            >
+              {homeMode ? 'Turn off' : 'Turn on'}
+            </button>
+          </div>
+
+          <div className="border-t border-hairline pt-3 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-meta">
+            <div className="text-ink-2">
+              <span className="text-ink font-medium">
+                {pendingBacklog.projects + pendingBacklog.tasks === 0
+                  ? 'All tasks & projects have descriptions'
+                  : `${pendingBacklog.projects} project${pendingBacklog.projects === 1 ? '' : 's'}, ${pendingBacklog.tasks} task${pendingBacklog.tasks === 1 ? '' : 's'} pending`}
+              </span>
+              <span className="text-ink-3 block text-caption mt-0.5">
+                {isQuietHoursNow
+                  ? '🌙 Quiet hours active now (01:30 – 05:30 AM)'
+                  : homeMode
+                  ? '⏰ Scheduled for quiet hours (01:30 – 05:30 AM)'
+                  : '⚡ Runs anytime on background schedule'}
+              </span>
+            </div>
+
+            <button
+              onClick={handleRunBacklogNow}
+              disabled={isProcessingBacklog || (pendingBacklog.projects === 0 && pendingBacklog.tasks === 0)}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-control text-meta font-medium
+                         bg-surface-sunken hover:bg-hairline/60 text-ink-2 hover:text-ink transition-colors
+                         disabled:opacity-40 disabled:pointer-events-none self-start sm:self-auto shrink-0"
+            >
+              <RotateCw className={`w-3.5 h-3.5 ${isProcessingBacklog ? 'animate-spin text-accent-500' : ''}`} />
+              {isProcessingBacklog ? 'Processing...' : 'Process backlog now'}
+            </button>
+          </div>
+
+          {backlogFeedback && (
+            <p className="text-caption text-accent-600 dark:text-accent-400 bg-accent-500/10 px-3 py-1.5 rounded-control">
+              {backlogFeedback}
+            </p>
+          )}
+        </div>
+      </section>
 
       {/* ---------------------------- Reminders ---------------------------- */}
       <section className="mt-7">

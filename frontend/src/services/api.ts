@@ -307,6 +307,48 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ name }),
     }),
+  getHomeMode: () =>
+    fetchJson<{
+      success: boolean;
+      data: {
+        home_mode: boolean;
+        quiet_hours_schedule: string;
+        is_quiet_hours_now: boolean;
+        pending_projects: number;
+        pending_tasks: number;
+        can_run_now: boolean;
+      };
+    }>('/api/v1/ai/home-mode'),
+  setHomeMode: (home_mode: boolean) =>
+    fetchJson<{
+      success: boolean;
+      data: {
+        home_mode: boolean;
+        quiet_hours_schedule: string;
+        is_quiet_hours_now: boolean;
+        pending_projects: number;
+        pending_tasks: number;
+        can_run_now: boolean;
+      };
+    }>('/api/v1/ai/home-mode', {
+      method: 'POST',
+      body: JSON.stringify({ home_mode }),
+    }),
+  processBacklog: (force = false, max_items = 50) =>
+    fetchJson<{
+      success: boolean;
+      data: {
+        processed_projects: number;
+        processed_tasks: number;
+        deferred: boolean;
+        reason: string;
+        pending_projects: number;
+        pending_tasks: number;
+      };
+    }>('/api/v1/ai/process-backlog', {
+      method: 'POST',
+      body: JSON.stringify({ force, max_items }),
+    }),
   organizeBoard: (tasks?: any[]) =>
     fetchJson<{
       success: boolean;

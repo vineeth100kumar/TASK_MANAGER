@@ -200,6 +200,13 @@ CREATE TABLE IF NOT EXISTS capture_requests (
     created_at TEXT NOT NULL,
     response TEXT
 );
+
+-- System Settings & Operational Modes (Home Mode, Quiet Hours, etc.)
+CREATE TABLE IF NOT EXISTS system_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
 """
 
 SCHEMA_INDEXES_SQL = """
@@ -376,6 +383,11 @@ async def init_database():
                 "INSERT INTO finance_categories (id, name, icon, monthly_budget) VALUES (?, ?, ?, ?)",
                 categories,
             )
+
+        # Seed default system settings if not already present
+        await db.execute(
+            "INSERT OR IGNORE INTO system_settings (key, value) VALUES ('home_mode', 'true')"
+        )
 
         await db.commit()
 

@@ -12,6 +12,10 @@ from ..services.capture_service import (
     claim_capture, commit_capture, read_capture, release_capture, remember_capture,
 )
 from ..services.weather_service import get_current_weather
+from ..services.ws_manager import ws_manager
+from ..services.backlog_service import (
+    get_backlog_stats, set_home_mode, process_backlog_items
+)
 from ..config import DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME
 from ..database import get_db
 import aiosqlite
@@ -36,6 +40,13 @@ class ProjectDescriptionRequest(BaseModel):
     name: str
     project_id: Optional[str] = None
     context: Optional[str] = None
+
+class HomeModeRequest(BaseModel):
+    home_mode: bool
+
+class ProcessBacklogRequest(BaseModel):
+    max_items: Optional[int] = 50
+    force: Optional[bool] = False
 
 class OrganizeBoardRequest(BaseModel):
     tasks: Optional[List[Dict[str, Any]]] = None
@@ -232,7 +243,7 @@ async def generate_proj_desc(
             existing_tasks = [r["title"] for r in t_rows]
             
     desc = await generate_project_description(req.name, existing_tasks, req.context)
-    return {"success": True, "description": desc}
+    return {"success": True, "description": desc, "data": {"description": desc}}
 
 @router.post("/organize-board")
 async def organize_board(
@@ -248,3 +259,32 @@ async def organize_board(
     
     result = await organize_board_data(tasks)
     return {"success": True, "data": result}
+
+@router.get("/home-mode")
+async def get_home_mode_status(db: aiosqlite.Connection = Depends(get_db)):
+    """Returns Home Mode quiet hours status, quiet hours schedule, and pending backlog counts."""
+    stats = await get_backlog_stats(db)
+    return {"success": True, "data": stats}
+
+@router.post("/home-mode")
+async def update_home_mode_setting(
+    req: HomeModeRequest,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    """Enables or disables Home Mode (fan noise quiet hours protection)."""
+    await set_home_mode(db, req.home_mode)
+    stats = await get_backlog_stats(db)
+    return {"success": True, "data": stats}
+
+@router.post("/process-backlog")
+async def process_backlog(
+    req: Optional[ProcessBacklogRequest] = None,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    """Processes existing tasks and projects lacking descriptions in created_at DESC order.
+    Defers if Home Mode is active and outside quiet hours (01:30 AM), unless force=True."""
+    max_items = req.max_items if req and req.max_items else 50
+    force = req.force if req and req.force is not None else False
+    result = await process_backlog_items(db, max_items=max_items, force=force, ws_broadcast=ws_manager.broadcast)
+    return {"success": True, "data": result}
+

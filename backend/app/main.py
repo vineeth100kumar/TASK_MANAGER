@@ -15,9 +15,19 @@ from .database import init_database, DB_PATH, db_pool
 from .routers import items, finance, dashboard, ai, shortcuts, push, weather, planner, whiteboards
 from .services.ws_manager import ws_manager
 from .services.push_service import check_due_reminders
+from .services.backlog_service import process_backlog_items
 from .version import VERSION, BUILD_NAME
 
 scheduler = AsyncIOScheduler()
+
+async def run_backlog_worker(db_path: str, ws_mgr):
+    """Periodic job to process backlog items. Deferral check for fan noise happens inside process_backlog_items."""
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+            await process_backlog_items(db, max_items=20, force=False, ws_broadcast=ws_mgr.broadcast)
+    except Exception as e:
+        print(f"Error in backlog worker: {e}")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -35,6 +45,14 @@ async def lifespan(app: FastAPI):
         seconds=60,
         args=[DB_PATH, ws_manager],
         id="reminder_worker"
+    )
+    # Start periodic backlog description worker (runs every 15 minutes, active 01:30 AM or when Home Mode is off)
+    scheduler.add_job(
+        run_backlog_worker,
+        "interval",
+        minutes=15,
+        args=[DB_PATH, ws_manager],
+        id="backlog_description_worker"
     )
     scheduler.start()
     print("Database connection pool initialized and background scheduler started.")

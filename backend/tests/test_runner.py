@@ -396,6 +396,109 @@ class TestSageBackend(unittest.TestCase):
             config.API_SECRET = original_secret
             auth.API_SECRET = original_secret
 
+    def test_home_mode_and_backlog_processor(self):
+        from fastapi.testclient import TestClient
+        import app.config as config
+        import app.auth as auth
+        from app.services.backlog_service import is_quiet_hours_window
+
+        # 1. Test quiet hours logic (01:30 AM to 05:30 AM)
+        t_early = datetime.datetime(2026, 9, 18, 1, 15, 0)
+        self.assertFalse(is_quiet_hours_window(t_early))
+
+        t_start = datetime.datetime(2026, 9, 18, 1, 30, 0)
+        self.assertTrue(is_quiet_hours_window(t_start))
+
+        t_mid = datetime.datetime(2026, 9, 18, 3, 45, 0)
+        self.assertTrue(is_quiet_hours_window(t_mid))
+
+        t_end = datetime.datetime(2026, 9, 18, 5, 30, 0)
+        self.assertTrue(is_quiet_hours_window(t_end))
+
+        t_day = datetime.datetime(2026, 9, 18, 14, 0, 0)
+        self.assertFalse(is_quiet_hours_window(t_day))
+
+        original_secret = config.API_SECRET
+        config.API_SECRET = "test_api_secret_backlog"
+        auth.API_SECRET = "test_api_secret_backlog"
+
+        try:
+            from app.main import app
+            with TestClient(app) as client:
+                headers = {"Authorization": "Bearer test_api_secret_backlog"}
+
+                # 2. Test GET /home-mode status
+                hm_res = client.get("/api/v1/ai/home-mode", headers=headers)
+                self.assertEqual(hm_res.status_code, 200)
+                hm_data = hm_res.json()
+                self.assertTrue(hm_data["success"])
+                self.assertIn("home_mode", hm_data["data"])
+                self.assertIn("quiet_hours_schedule", hm_data["data"])
+
+                # 3. Test toggling Home Mode
+                toggle_res = client.post("/api/v1/ai/home-mode", json={"home_mode": True}, headers=headers)
+                self.assertEqual(toggle_res.status_code, 200)
+                self.assertTrue(toggle_res.json()["data"]["home_mode"])
+
+                # 4. Insert older and newer tasks directly without description
+                import sqlite3
+                from app.database import DB_PATH
+                conn = sqlite3.connect(DB_PATH)
+                older_t_id = "test_t_older_01"
+                newer_t_id = "test_t_newer_02"
+                older_time = "2026-09-10T10:00:00"
+                newer_time = "2026-09-18T12:00:00"
+
+                conn.execute(
+                    "INSERT INTO work_items (id, title, description, entity_type, status, priority, is_completed, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, 'task', 'todo', 'medium', 0, ?, ?)",
+                    (older_t_id, "Old Backlog Archival Task", older_time, older_time)
+                )
+                conn.execute(
+                    "INSERT INTO work_items (id, title, description, entity_type, status, priority, is_completed, created_at, updated_at) "
+                    "VALUES (?, ?, NULL, 'task', 'todo', 'high', 0, ?, ?)",
+                    (newer_t_id, "New Priority Feature Delivery", newer_time, newer_time)
+                )
+                conn.commit()
+                conn.close()
+
+                # 5. Outside quiet hours with home_mode=True: calling process-backlog without force should defer
+                now_mock = datetime.datetime(2026, 9, 18, 14, 0, 0)
+                # If currently outside 01:30 - 05:30 AM, standard call defers
+                if not is_quiet_hours_window(datetime.datetime.now()):
+                    defer_res = client.post("/api/v1/ai/process-backlog", json={"force": False}, headers=headers)
+                    self.assertEqual(defer_res.status_code, 200)
+                    self.assertTrue(defer_res.json()["data"]["deferred"])
+                    self.assertIn("Home mode active", defer_res.json()["data"]["reason"])
+
+                # 6. Forcing processing or turning home_mode=False processes backlog in created_at DESC order
+                proc_res = client.post("/api/v1/ai/process-backlog", json={"force": True}, headers=headers)
+                self.assertEqual(proc_res.status_code, 200)
+                self.assertFalse(proc_res.json()["data"]["deferred"])
+                self.assertGreaterEqual(proc_res.json()["data"]["processed_tasks"], 2)
+
+                # Verify both tasks now have valid, non-empty, 1-paragraph descriptions without # or *
+                t_check1 = client.get("/api/v1/items", headers=headers).json()
+                older_item = next((i for i in t_check1 if i["id"] == older_t_id), None)
+                newer_item = next((i for i in t_check1 if i["id"] == newer_t_id), None)
+
+                self.assertIsNotNone(older_item)
+                self.assertIsNotNone(newer_item)
+                self.assertTrue(older_item["description"])
+                self.assertTrue(newer_item["description"])
+                self.assertNotIn("#", older_item["description"])
+                self.assertNotIn("*", older_item["description"])
+                self.assertNotIn("#", newer_item["description"])
+                self.assertNotIn("*", newer_item["description"])
+
+                # Cleanup test items
+                client.delete(f"/api/v1/items/{older_t_id}", headers=headers)
+                client.delete(f"/api/v1/items/{newer_t_id}", headers=headers)
+
+        finally:
+            config.API_SECRET = original_secret
+            auth.API_SECRET = original_secret
+
 if __name__ == "__main__":
     unittest.main()
 
