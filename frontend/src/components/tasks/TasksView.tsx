@@ -64,6 +64,8 @@ interface TasksViewProps {
   onDeleteItem?: (id: string) => void;
   onUpdateItem?: (id: string, updates: WorkItemUpdatePayload) => void;
   onToggleSubtask?: (itemId: string, subtaskId: string) => void;
+  onAddSubtask?: (itemId: string, title: string) => void;
+  onDeleteSubtask?: (itemId: string, subtaskId: string) => void;
   onOpenBrainDump?: () => void;
   onCelebrationTrigger?: () => void;
 }
@@ -79,6 +81,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onDeleteItem,
   onUpdateItem,
   onToggleSubtask,
+  onAddSubtask,
+  onDeleteSubtask,
   onOpenBrainDump,
   onCelebrationTrigger
 }) => {
@@ -97,6 +101,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [deletingItemId, setDeletingItemId] = useState<string | null>(null);
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({});
+  const [newDetailSubtaskTitle, setNewDetailSubtaskTitle] = useState('');
 
   // Multi-select state
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -431,6 +436,39 @@ export const TasksView: React.FC<TasksViewProps> = ({
       } else {
         api.toggleSubtask(subtaskId).then(() => onRefresh());
       }
+    }
+  };
+
+  const handleAddDetailSubtask = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    if (!newDetailSubtaskTitle.trim() || !selectedItem) return;
+    const title = newDetailSubtaskTitle.trim();
+    setNewDetailSubtaskTitle('');
+    if (onAddSubtask) {
+      onAddSubtask(selectedItem.id, title);
+    } else {
+      const created = await api.addSubtask(selectedItem.id, title);
+      if (created) {
+        setSelectedItem({
+          ...selectedItem,
+          subtasks: [...(selectedItem.subtasks || []), created]
+        });
+        onRefresh();
+      }
+    }
+  };
+
+  const handleDeleteDetailSubtask = async (subtaskId: string) => {
+    if (!selectedItem) return;
+    if (onDeleteSubtask) {
+      onDeleteSubtask(selectedItem.id, subtaskId);
+    } else {
+      await api.deleteSubtask(subtaskId);
+      setSelectedItem({
+        ...selectedItem,
+        subtasks: (selectedItem.subtasks || []).filter(s => s.id !== subtaskId)
+      });
+      onRefresh();
     }
   };
 
@@ -1405,28 +1443,64 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
             {/* Subtasks Checklist */}
             <div className="space-y-2">
-              <span className="text-meta font-semibold text-ink-2">Actionable Checklist</span>
+              <div className="flex items-center justify-between">
+                <span className="text-meta font-semibold text-ink-2">
+                  Actionable Checklist {selectedItem.subtasks.length > 0 && `(${selectedItem.subtasks.filter(s => s.is_completed).length}/${selectedItem.subtasks.length})`}
+                </span>
+              </div>
               {selectedItem.subtasks.length === 0 ? (
-                <p className="text-meta text-ink-2 italic">No checklist items yet.</p>
+                <p className="text-meta text-ink-3 italic">No checklist items yet.</p>
               ) : (
-                selectedItem.subtasks.map((st) => (
-                  <div
-                    key={st.id}
-                    onClick={() => handleToggleSubtask(st.id)}
-                    className="flex items-center space-x-2.5 p-2 rounded-lg bg-sunken/60 border border-hairline/60 cursor-pointer"
-                  >
-                    <input
-                      type="checkbox"
-                      checked={st.is_completed}
-                      onChange={() => handleToggleSubtask(st.id)}
-                      className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
-                    />
-                    <span className={`text-meta ${st.is_completed ? 'line-through text-ink-2' : 'text-ink'}`}>
-                      {st.title}
-                    </span>
-                  </div>
-                ))
+                <div className="space-y-1.5">
+                  {selectedItem.subtasks.map((st) => (
+                    <div
+                      key={st.id}
+                      className="group flex items-center justify-between p-2 rounded-lg bg-sunken/60 border border-hairline/60 hover:border-hairline transition-colors"
+                    >
+                      <label className="flex items-center space-x-2.5 flex-1 min-w-0 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={st.is_completed}
+                          onChange={() => handleToggleSubtask(st.id)}
+                          className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
+                        />
+                        <span className={`text-meta truncate ${st.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
+                          {st.title}
+                        </span>
+                      </label>
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteDetailSubtask(st.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 p-1 text-ink-3 hover:text-rose-500 rounded transition-opacity"
+                        title="Delete subtask"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
               )}
+
+              {/* Inline Add Subtask */}
+              <form onSubmit={handleAddDetailSubtask} className="flex items-center gap-1.5 pt-1">
+                <input
+                  type="text"
+                  placeholder="+ Add micro-step or subtask..."
+                  value={newDetailSubtaskTitle}
+                  onChange={(e) => setNewDetailSubtaskTitle(e.target.value)}
+                  className="flex-1 bg-sunken border border-hairline rounded-lg px-2.5 py-1 text-meta text-ink placeholder-ink-3 focus:outline-none focus:border-blue-500"
+                />
+                <button
+                  type="submit"
+                  disabled={!newDetailSubtaskTitle.trim()}
+                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-caption font-semibold disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                >
+                  Add
+                </button>
+              </form>
             </div>
 
             {/* GTD Context Tags Selector */}

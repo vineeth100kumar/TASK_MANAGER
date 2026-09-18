@@ -16,6 +16,11 @@ class SubtaskCreate(BaseModel):
     is_completed: bool = False
     position: int = 0
 
+class SubtaskUpdate(BaseModel):
+    title: Optional[str] = None
+    is_completed: Optional[bool] = None
+    position: Optional[int] = None
+
 class SubtaskResponse(BaseModel):
     id: str
     work_item_id: str

@@ -499,6 +499,78 @@ class TestSageBackend(unittest.TestCase):
             config.API_SECRET = original_secret
             auth.API_SECRET = original_secret
 
+    def test_subtask_crud_endpoints(self):
+        from fastapi.testclient import TestClient
+        import app.config as config
+        import app.auth as auth
+        from app.main import app
+
+        original_secret = config.API_SECRET
+        config.API_SECRET = "test_api_secret_subtask"
+        auth.API_SECRET = "test_api_secret_subtask"
+
+        try:
+            with TestClient(app) as client:
+                headers = {"Authorization": "Bearer test_api_secret_subtask"}
+
+                # 1. Create a task
+                c_res = client.post("/api/v1/items", json={
+                    "title": "Task for Subtask CRUD Testing",
+                    "entity_type": "task"
+                }, headers=headers)
+                self.assertEqual(c_res.status_code, 200)
+                item_id = c_res.json()["id"]
+
+                # 2. Add a subtask
+                sub_res = client.post(f"/api/v1/items/{item_id}/subtasks", json={
+                    "title": "Prepare test harness"
+                }, headers=headers)
+                self.assertEqual(sub_res.status_code, 200)
+                sub_data = sub_res.json()
+                self.assertEqual(sub_data["title"], "Prepare test harness")
+                self.assertFalse(sub_data["is_completed"])
+                sub_id = sub_data["id"]
+
+                # 3. Toggle subtask
+                tgl_res = client.patch(f"/api/v1/items/subtasks/{sub_id}/toggle", headers=headers)
+                self.assertEqual(tgl_res.status_code, 200)
+                self.assertTrue(tgl_res.json()["is_completed"])
+
+                # 4. Update subtask title
+                upd_res = client.patch(f"/api/v1/items/subtasks/{sub_id}", json={
+                    "title": "Prepare complete test harness"
+                }, headers=headers)
+                self.assertEqual(upd_res.status_code, 200)
+                self.assertEqual(upd_res.json()["title"], "Prepare complete test harness")
+
+                # 5. Verify in item's subtasks list
+                list_res = client.get(f"/api/v1/items", headers=headers)
+                self.assertEqual(list_res.status_code, 200)
+                item = next((i for i in list_res.json() if i["id"] == item_id), None)
+                self.assertIsNotNone(item)
+                self.assertEqual(len(item["subtasks"]), 1)
+                self.assertEqual(item["subtasks"][0]["id"], sub_id)
+                self.assertEqual(item["subtasks"][0]["title"], "Prepare complete test harness")
+                self.assertTrue(item["subtasks"][0]["is_completed"])
+
+                # 6. Delete subtask
+                del_res = client.delete(f"/api/v1/items/subtasks/{sub_id}", headers=headers)
+                self.assertEqual(del_res.status_code, 200)
+                self.assertTrue(del_res.json()["success"])
+
+                # Verify deletion
+                list_res2 = client.get(f"/api/v1/items", headers=headers)
+                item2 = next((i for i in list_res2.json() if i["id"] == item_id), None)
+                self.assertIsNotNone(item2)
+                self.assertEqual(len(item2["subtasks"]), 0)
+
+                # Cleanup task
+                client.delete(f"/api/v1/items/{item_id}", headers=headers)
+
+        finally:
+            config.API_SECRET = original_secret
+            auth.API_SECRET = original_secret
+
 if __name__ == "__main__":
     unittest.main()
 

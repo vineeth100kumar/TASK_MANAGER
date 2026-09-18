@@ -109,6 +109,8 @@ export const App: React.FC = () => {
     handleCreateItem,
     handleUpdateItem,
     handleToggleSubtask,
+    handleAddSubtask,
+    handleDeleteSubtask,
     handleCreateProject,
     handleDeleteProject,
     handleCreateMilestone,
@@ -337,6 +339,8 @@ export const App: React.FC = () => {
             onDeleteItem={handleDeleteItem}
             onUpdateItem={handleUpdateItem}
             onToggleSubtask={handleToggleSubtask}
+            onAddSubtask={handleAddSubtask}
+            onDeleteSubtask={handleDeleteSubtask}
             onOpenBrainDump={() => setIsBrainDumpOpen(true)}
             onCelebrationTrigger={() => setIsCelebrationOpen(true)}
           />
@@ -373,6 +377,9 @@ export const App: React.FC = () => {
             onSelectItem={() => setActiveTab('tasks')}
             onCreateItem={handleCreateItem}
             onToggleComplete={handleToggleComplete}
+            onToggleSubtask={handleToggleSubtask}
+            onAddSubtask={handleAddSubtask}
+            onDeleteSubtask={handleDeleteSubtask}
             onOpenWhiteboard={(projId) => {
               setActiveWhiteboardProjectId(projId);
               setActiveTab('whiteboard');

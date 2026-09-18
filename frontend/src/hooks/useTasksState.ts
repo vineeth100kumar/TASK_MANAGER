@@ -5,6 +5,7 @@ import { isDueToday } from '../utils/dateHelpers';
 import {
   WorkItem,
   WorkItemUpdatePayload,
+  Subtask,
   Milestone,
   Project,
   DailyPerformance,
@@ -312,6 +313,82 @@ export function useTasksState({
       .finally(endSync);
   }, [startSync, endSync, toast]);
 
+  // Add Subtask
+  const handleAddSubtask = useCallback(async (itemId: string, title: string) => {
+    if (!title.trim()) return;
+    const tempId = `temp_sub_${Date.now()}`;
+    const optimisticSubtask: Subtask = {
+      id: tempId,
+      work_item_id: itemId,
+      title: title.trim(),
+      is_completed: false,
+      position: 999,
+    };
+    setItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      return {
+        ...item,
+        subtasks: [...(item.subtasks || []), optimisticSubtask],
+      };
+    }));
+    startSync();
+    try {
+      const created = await api.addSubtask(itemId, title.trim());
+      if (created) {
+        setItems(prev => prev.map(item => {
+          if (item.id !== itemId) return item;
+          return {
+            ...item,
+            subtasks: (item.subtasks || []).map(s => s.id === tempId ? created : s),
+          };
+        }));
+      }
+    } catch (err) {
+      console.error('Failed to add subtask on Pi', err);
+      toast.error('Failed to add subtask on Raspberry Pi');
+      setItems(prev => prev.map(item => {
+        if (item.id !== itemId) return item;
+        return {
+          ...item,
+          subtasks: (item.subtasks || []).filter(s => s.id !== tempId),
+        };
+      }));
+    } finally {
+      endSync();
+    }
+  }, [startSync, endSync, toast]);
+
+  // Delete Subtask
+  const handleDeleteSubtask = useCallback(async (itemId: string, subtaskId: string) => {
+    let removedSubtask: Subtask | undefined;
+    setItems(prev => prev.map(item => {
+      if (item.id !== itemId) return item;
+      removedSubtask = (item.subtasks || []).find(s => s.id === subtaskId);
+      return {
+        ...item,
+        subtasks: (item.subtasks || []).filter(s => s.id !== subtaskId),
+      };
+    }));
+    startSync();
+    try {
+      await api.deleteSubtask(subtaskId);
+    } catch (err) {
+      console.error('Failed to delete subtask on Pi', err);
+      toast.error('Failed to delete subtask on Raspberry Pi');
+      if (removedSubtask) {
+        setItems(prev => prev.map(item => {
+          if (item.id !== itemId) return item;
+          return {
+            ...item,
+            subtasks: [...(item.subtasks || []), removedSubtask!],
+          };
+        }));
+      }
+    } finally {
+      endSync();
+    }
+  }, [startSync, endSync, toast]);
+
   // Projects
   const handleCreateProject = useCallback(async (proj: { name: string; color?: string; description?: string }) => {
     try {
@@ -499,6 +576,33 @@ export function useTasksState({
         }
         return true;
       }
+      case 'SUBTASK_CREATED': {
+        const sub = event.data as Subtask;
+        if (sub && sub.work_item_id) {
+          setItems(prev => prev.map(item => {
+            if (item.id !== sub.work_item_id) return item;
+            if ((item.subtasks || []).some(s => s.id === sub.id)) return item;
+            return {
+              ...item,
+              subtasks: [...(item.subtasks || []), sub]
+            };
+          }));
+        }
+        return true;
+      }
+      case 'SUBTASK_DELETED': {
+        const { id, work_item_id } = event.data || {};
+        if (id) {
+          setItems(prev => prev.map(item => {
+            if (work_item_id && item.id !== work_item_id) return item;
+            return {
+              ...item,
+              subtasks: (item.subtasks || []).filter(s => s.id !== id)
+            };
+          }));
+        }
+        return true;
+      }
       default:
         return false;
     }
@@ -518,6 +622,8 @@ export function useTasksState({
     handleCreateItem,
     handleUpdateItem,
     handleToggleSubtask,
+    handleAddSubtask,
+    handleDeleteSubtask,
     handleCreateProject,
     handleDeleteProject,
     handleCreateMilestone,

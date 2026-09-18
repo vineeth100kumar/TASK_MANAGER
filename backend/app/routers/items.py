@@ -8,7 +8,8 @@ from typing import List, Optional, Dict
 from ..database import get_db
 from ..models import (
     WorkItemCreate, WorkItemUpdate, WorkItemResponse,
-    SubtaskResponse, ProjectCreate, ProjectUpdate, ProjectResponse,
+    SubtaskCreate, SubtaskUpdate, SubtaskResponse,
+    ProjectCreate, ProjectUpdate, ProjectResponse,
     MilestoneCreate, MilestoneResponse
 )
 from ..services.item_serializer import load_item
@@ -408,6 +409,96 @@ async def delete_item(item_id: str, db: aiosqlite.Connection = Depends(get_db)):
     await db.commit()
     await ws_manager.broadcast({"type": "ITEM_DELETED", "data": {"id": item_id}})
     return {"success": True, "id": item_id}
+
+# Subtasks Management
+@router.post("/{item_id}/subtasks", response_model=SubtaskResponse)
+async def create_subtask_for_item(
+    item_id: str,
+    sub: SubtaskCreate,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    async with db.execute("SELECT id FROM work_items WHERE id = ?", (item_id,)) as cursor:
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Work item not found")
+
+    sub_id = f"sub_{uuid.uuid4().hex[:10]}"
+    now_iso = datetime.datetime.now().isoformat()
+    
+    async with db.execute("SELECT COALESCE(MAX(position), -1) FROM subtasks WHERE work_item_id = ?", (item_id,)) as max_cur:
+        max_row = await max_cur.fetchone()
+        pos = (max_row[0] if max_row else -1) + 1
+        
+    await db.execute(
+        "INSERT INTO subtasks (id, work_item_id, title, is_completed, position, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (sub_id, item_id, sub.title.strip(), 1 if sub.is_completed else 0, pos, now_iso)
+    )
+    await db.commit()
+
+    resp = SubtaskResponse(
+        id=sub_id,
+        work_item_id=item_id,
+        title=sub.title.strip(),
+        is_completed=sub.is_completed,
+        position=pos,
+        created_at=now_iso
+    )
+    await ws_manager.broadcast({"type": "SUBTASK_CREATED", "data": resp.model_dump()})
+    return resp
+
+@router.delete("/subtasks/{subtask_id}")
+async def delete_subtask(subtask_id: str, db: aiosqlite.Connection = Depends(get_db)):
+    async with db.execute("SELECT work_item_id FROM subtasks WHERE id = ?", (subtask_id,)) as cursor:
+        row = await cursor.fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Subtask not found")
+        item_id = row["work_item_id"]
+
+    await db.execute("DELETE FROM subtasks WHERE id = ?", (subtask_id,))
+    await db.commit()
+    await ws_manager.broadcast({"type": "SUBTASK_DELETED", "data": {"id": subtask_id, "work_item_id": item_id}})
+    return {"success": True, "id": subtask_id, "work_item_id": item_id}
+
+@router.patch("/subtasks/{subtask_id}", response_model=SubtaskResponse)
+async def update_subtask(
+    subtask_id: str,
+    updates: SubtaskUpdate,
+    db: aiosqlite.Connection = Depends(get_db)
+):
+    async with db.execute("SELECT * FROM subtasks WHERE id = ?", (subtask_id,)) as cursor:
+        existing = await cursor.fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Subtask not found")
+
+    fields = []
+    values = []
+    if updates.title is not None:
+        fields.append("title = ?")
+        values.append(updates.title.strip())
+    if updates.is_completed is not None:
+        fields.append("is_completed = ?")
+        values.append(1 if updates.is_completed else 0)
+    if updates.position is not None:
+        fields.append("position = ?")
+        values.append(updates.position)
+
+    if fields:
+        values.append(subtask_id)
+        await db.execute(f"UPDATE subtasks SET {', '.join(fields)} WHERE id = ?", values)
+        await db.commit()
+
+    async with db.execute("SELECT * FROM subtasks WHERE id = ?", (subtask_id,)) as cursor:
+        row = await cursor.fetchone()
+
+    resp = SubtaskResponse(
+        id=row["id"],
+        work_item_id=row["work_item_id"],
+        title=row["title"],
+        is_completed=bool(row["is_completed"]),
+        position=row["position"],
+        created_at=row["created_at"]
+    )
+    await ws_manager.broadcast({"type": "SUBTASK_UPDATED", "data": resp.model_dump()})
+    return resp
 
 # Subtask toggle
 @router.patch("/subtasks/{subtask_id}/toggle")

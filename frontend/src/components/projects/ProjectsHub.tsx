@@ -1,14 +1,16 @@
 import React, { useState } from 'react';
 import { 
   Folder, Plus, CheckCircle2, Circle, Clock, Flag, 
-  Trash2, ChevronDown, ChevronRight, Calendar, Tag, AlertCircle, PenTool
+  Trash2, ChevronDown, ChevronRight, Calendar, Tag, AlertCircle, PenTool,
+  Network, CheckSquare
 } from 'lucide-react';
-import { Project, Milestone, WorkItem } from '../../types';
+import { Project, Milestone, WorkItem, Subtask } from '../../types';
 import { formatRelativeDate } from '../../utils/dateHelpers';
 import { ConfirmDialog } from '../common/ConfirmDialog';
 import { Modal } from '../common/Modal';
 import { Button } from '../common/Button';
 import { Skeleton } from '../common/Skeleton';
+import { ProjectMap } from './ProjectMap';
 
 interface ProjectsHubProps {
   isLoading?: boolean;
@@ -22,6 +24,9 @@ interface ProjectsHubProps {
   onSelectItem: (item: WorkItem) => void;
   onCreateItem?: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
   onToggleComplete?: (item: WorkItem) => void;
+  onToggleSubtask?: (itemId: string, subtaskId: string) => void;
+  onAddSubtask?: (itemId: string, title: string) => void;
+  onDeleteSubtask?: (itemId: string, subtaskId: string) => void;
   onOpenWhiteboard?: (projectId: string) => void;
 }
 
@@ -48,8 +53,17 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   onSelectItem,
   onCreateItem,
   onToggleComplete,
+  onToggleSubtask,
+  onAddSubtask,
+  onDeleteSubtask,
   onOpenWhiteboard,
 }) => {
+  // View mode: 'list' (dossiers) or 'map' (interactive project map)
+  const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
+  const [mappedProjectId, setMappedProjectId] = useState<string | null>(
+    projects.length > 0 ? projects[0].id : null
+  );
+
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingProjectId, setDeletingProjectId] = useState<string | null>(null);
   const [deletingMilestoneId, setDeletingMilestoneId] = useState<string | null>(null);
@@ -70,6 +84,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   const [quickTaskMilestone, setQuickTaskMilestone] = useState<{ [projectId: string]: string }>({});
   const [quickTaskPriority, setQuickTaskPriority] = useState<{ [projectId: string]: string }>({});
   const [hideCompletedTasks, setHideCompletedTasks] = useState<{ [projectId: string]: boolean }>({});
+
+  // Subtask accordion & input state in task cards
+  const [expandedTaskSubtasks, setExpandedTaskSubtasks] = useState<{ [taskId: string]: boolean }>({});
+  const [taskSubtaskInput, setTaskSubtaskInput] = useState<{ [taskId: string]: string }>({});
 
   const handleQuickAddTask = (projectId: string, milestoneId?: string) => {
     const title = (quickTaskTitle[projectId] || '').trim();
@@ -117,6 +135,8 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
     setAddingMilestoneForProject(null);
   };
 
+  const activeMapProject = projects.find(p => p.id === mappedProjectId) || (projects.length > 0 ? projects[0] : null);
+
   return (
     <div className="space-y-6 animate-in fade-in">
       {/* Header */}
@@ -129,16 +149,65 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
           </p>
         </div>
 
-        <button
-          onClick={() => setShowCreateModal(true)}
-          className="flex items-center gap-1.5 h-9 px-3.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white font-medium text-meta transition-all duration-150 ease-settle active:scale-[0.98] self-start sm:self-auto"
-        >
-          <Plus className="w-4 h-4" /> New project
-        </button>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          {projects.length > 0 && (
+            <div className="flex items-center bg-sunken rounded-control p-0.5 border border-hairline text-meta">
+              <button
+                type="button"
+                onClick={() => setViewMode('list')}
+                className={`px-3 py-1 rounded-control font-medium transition-colors ${
+                  viewMode === 'list'
+                    ? 'bg-surface text-ink shadow-xs'
+                    : 'text-ink-3 hover:text-ink'
+                }`}
+              >
+                List
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!mappedProjectId && projects.length > 0) {
+                    setMappedProjectId(projects[0].id);
+                  }
+                  setViewMode('map');
+                }}
+                className={`px-3 py-1 rounded-control font-medium flex items-center gap-1.5 transition-colors ${
+                  viewMode === 'map'
+                    ? 'bg-surface text-ink shadow-xs'
+                    : 'text-ink-3 hover:text-ink'
+                }`}
+              >
+                <Network className="w-3.5 h-3.5 text-blue-500" />
+                Project Map
+              </button>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowCreateModal(true)}
+            className="flex items-center gap-1.5 h-9 px-3.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white font-medium text-meta transition-all duration-150 ease-settle active:scale-[0.98] self-start sm:self-auto"
+          >
+            <Plus className="w-4 h-4" /> New project
+          </button>
+        </div>
       </div>
 
-      {/* Projects Grid / List */}
-      {projects.length === 0 ? (
+      {viewMode === 'map' && activeMapProject ? (
+        <ProjectMap
+          project={activeMapProject}
+          allProjects={projects}
+          milestones={milestones}
+          items={items}
+          onSelectProject={(id) => setMappedProjectId(id)}
+          onToggleComplete={onToggleComplete}
+          onToggleSubtask={onToggleSubtask}
+          onAddSubtask={onAddSubtask}
+          onDeleteSubtask={onDeleteSubtask}
+          onCreateItem={onCreateItem}
+          onCreateMilestone={onCreateMilestone}
+          onClose={() => setViewMode('list')}
+        />
+      ) : projects.length === 0 ? (
         isLoading ? (
           <div className="space-y-4">
             <Skeleton variant="card" count={3} />
@@ -226,6 +295,19 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                         <PenTool className="w-4 h-4" />
                       </button>
                     )}
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setMappedProjectId(proj.id);
+                        setViewMode('map');
+                      }}
+                      aria-label={`Open Project Map for ${proj.name}`}
+                      className="p-1.5 rounded-control text-ink-3 dark:text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 border border-stone-300 dark:border-stone-700 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+                      title="Open project map"
+                    >
+                      <Network className="w-4 h-4" />
+                    </button>
 
                     <button
                       onClick={(e) => {
@@ -412,53 +494,153 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                             .filter(task => !hideCompletedTasks[proj.id] || !task.is_completed)
                             .map(task => {
                               const taskMilestone = projectMilestones.find(m => m.id === task.milestone_id);
+                              const isSubtasksExpanded = !!expandedTaskSubtasks[task.id];
+                              const taskSubtasks = task.subtasks || [];
+                              const completedSubCount = taskSubtasks.filter(s => s.is_completed).length;
+
                               return (
-                                <div
-                                  key={task.id}
-                                  onClick={() => onSelectItem(task)}
-                                  className="flex items-center justify-between p-2.5 rounded-control bg-surface border border-stone-200 dark:border-stone-800/80 hover:border-stone-400 cursor-pointer text-meta transition-colors shadow-sm"
-                                >
-                                  <div className="flex items-center gap-2.5 truncate pr-2">
-                                    <button
-                                      type="button"
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        onToggleComplete?.(task);
-                                      }}
-                                      className="p-0.5 rounded-control text-ink-2 hover:text-stone-900 dark:hover:text-white transition-colors"
-                                      title={task.is_completed ? "Mark incomplete" : "Mark complete"}
+                                  <div
+                                    key={task.id}
+                                    className="rounded-control bg-surface border border-stone-200 dark:border-stone-800/80 hover:border-stone-400 transition-colors shadow-sm overflow-hidden"
+                                  >
+                                    <div
+                                      onClick={() => onSelectItem(task)}
+                                      className="flex items-center justify-between p-2.5 cursor-pointer text-meta hover:bg-black/5 dark:hover:bg-stone-800/20 transition-colors"
                                     >
-                                      {task.is_completed ? (
-                                        <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
-                                      ) : (
-                                        <Circle className="w-4 h-4 text-ink-2 hover:text-ink-3 flex-shrink-0" />
-                                      )}
-                                    </button>
-                                    <span className={` font-semibold truncate ${task.is_completed ? 'line-through text-ink-2 dark:text-zinc-500 italic' : 'text-stone-900 dark:text-zinc-100'}`}>
-                                      {task.title}
-                                    </span>
-                                  </div>
-                                  <div className="flex items-center gap-2 flex-shrink-0">
-                                    {taskMilestone && (
-                                      <span className="text-caption px-1.5 py-0.5 rounded-control bg-amber-100 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                                        🏁 {taskMilestone.title}
-                                      </span>
+                                      <div className="flex items-center gap-2.5 truncate pr-2">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onToggleComplete?.(task);
+                                          }}
+                                          className="p-0.5 rounded-control text-ink-2 hover:text-stone-900 dark:hover:text-white transition-colors"
+                                          title={task.is_completed ? "Mark incomplete" : "Mark complete"}
+                                        >
+                                          {task.is_completed ? (
+                                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                                          ) : (
+                                            <Circle className="w-4 h-4 text-ink-2 hover:text-ink-3 flex-shrink-0" />
+                                          )}
+                                        </button>
+                                        <span className={`font-semibold truncate ${task.is_completed ? 'line-through text-ink-2 dark:text-zinc-500 italic' : 'text-stone-900 dark:text-zinc-100'}`}>
+                                          {task.title}
+                                        </span>
+                                      </div>
+
+                                      <div className="flex items-center gap-2 flex-shrink-0">
+                                        {taskMilestone && (
+                                          <span className="text-caption px-1.5 py-0.5 rounded-control bg-amber-100 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center gap-1">
+                                            🏁 {taskMilestone.title}
+                                          </span>
+                                        )}
+                                        {task.due_date && (
+                                          <span className="text-caption text-ink-3 dark:text-zinc-400">
+                                            {formatRelativeDate(task.due_date)}
+                                          </span>
+                                        )}
+                                        <span className={`text-caption px-1.5 py-0.5 rounded-control font-bold border ${
+                                          task.priority === 'urgent' ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-700' :
+                                          task.priority === 'high' ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-700' :
+                                          'bg-paper-aged dark:bg-zinc-800 text-stone-700 dark:text-zinc-400 border-stone-300 dark:border-stone-700'
+                                        }`}>
+                                          {task.priority}
+                                        </span>
+
+                                        {/* Subtasks Accordion Button */}
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            setExpandedTaskSubtasks(prev => ({ ...prev, [task.id]: !prev[task.id] }));
+                                          }}
+                                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-caption font-medium transition-colors ${
+                                            taskSubtasks.length > 0
+                                              ? 'bg-sunken text-ink hover:bg-hairline'
+                                              : 'text-ink-3 hover:text-ink'
+                                          }`}
+                                          title="Toggle subtasks"
+                                        >
+                                          <CheckSquare className="w-3 h-3" />
+                                          <span>
+                                            {taskSubtasks.length > 0 ? `${completedSubCount}/${taskSubtasks.length}` : '+ Subtasks'}
+                                          </span>
+                                          {isSubtasksExpanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {/* Expanded Subtasks List */}
+                                    {isSubtasksExpanded && (
+                                      <div className="border-t border-hairline p-2.5 bg-sunken/40 space-y-2 animate-in fade-in">
+                                        {taskSubtasks.length > 0 && (
+                                          <div className="space-y-1">
+                                            {taskSubtasks.map(st => (
+                                              <div
+                                                key={st.id}
+                                                className="group flex items-center justify-between p-1.5 rounded-lg bg-surface border border-hairline/60 hover:border-hairline transition-colors"
+                                              >
+                                                <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
+                                                  <input
+                                                    type="checkbox"
+                                                    checked={st.is_completed}
+                                                    onChange={() => onToggleSubtask?.(task.id, st.id)}
+                                                    className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
+                                                  />
+                                                  <span className={`text-meta truncate ${st.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
+                                                    {st.title}
+                                                  </span>
+                                                </label>
+                                                <button
+                                                  type="button"
+                                                  onClick={() => onDeleteSubtask?.(task.id, st.id)}
+                                                  className="opacity-0 group-hover:opacity-100 p-0.5 text-ink-3 hover:text-rose-500 transition-opacity"
+                                                  title="Delete subtask"
+                                                >
+                                                  <Trash2 className="w-3 h-3" />
+                                                </button>
+                                              </div>
+                                            ))}
+                                          </div>
+                                        )}
+
+                                        {/* Inline Add Subtask Input */}
+                                        <div className="flex items-center gap-1.5 pt-0.5">
+                                          <input
+                                            type="text"
+                                            placeholder="+ Add micro-step / subtask..."
+                                            value={taskSubtaskInput[task.id] || ''}
+                                            onChange={e => setTaskSubtaskInput(prev => ({ ...prev, [task.id]: e.target.value }))}
+                                            onKeyDown={e => {
+                                              if (e.key === 'Enter') {
+                                                const val = (taskSubtaskInput[task.id] || '').trim();
+                                                if (val) {
+                                                  onAddSubtask?.(task.id, val);
+                                                  setTaskSubtaskInput(prev => ({ ...prev, [task.id]: '' }));
+                                                }
+                                              }
+                                            }}
+                                            className="flex-1 bg-surface border border-hairline rounded px-2.5 py-1 text-meta text-ink placeholder-ink-3 focus:outline-none focus:border-amber-600"
+                                          />
+                                          <button
+                                            type="button"
+                                            disabled={!(taskSubtaskInput[task.id] || '').trim()}
+                                            onClick={() => {
+                                              const val = (taskSubtaskInput[task.id] || '').trim();
+                                              if (val) {
+                                                onAddSubtask?.(task.id, val);
+                                                setTaskSubtaskInput(prev => ({ ...prev, [task.id]: '' }));
+                                              }
+                                            }}
+                                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-caption disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                          >
+                                            Add
+                                          </button>
+                                        </div>
+                                      </div>
                                     )}
-                                    {task.due_date && (
-                                      <span className="text-caption text-ink-3 dark:text-zinc-400">
-                                        {formatRelativeDate(task.due_date)}
-                                      </span>
-                                    )}
-                                    <span className={`text-caption px-1.5 py-0.5 rounded-control font-bold border ${
-                                      task.priority === 'urgent' ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-700' :
-                                      task.priority === 'high' ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-700' :
-                                      'bg-paper-aged dark:bg-zinc-800 text-stone-700 dark:text-zinc-400 border-stone-300 dark:border-stone-700'
-                                    }`}>
-                                      {task.priority}
-                                    </span>
                                   </div>
-                                </div>
-                              );
+                                );
                             })}
                         </div>
                       )}

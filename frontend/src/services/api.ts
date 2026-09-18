@@ -1,5 +1,5 @@
 import {
-  WorkItem, WorkItemUpdatePayload, Milestone, Project, DailyPerformance,
+  WorkItem, WorkItemUpdatePayload, Subtask, Milestone, Project, DailyPerformance,
   FinanceSummary, Transaction, AiGreetingResponse,
   FinanceAccount, WeatherData, DailyReflection, KickoffData, DebriefResult,
   RecurringBill, BudgetGuardrail, Whiteboard, WhiteboardListItem, WhiteboardElement, ViewState,
@@ -84,6 +84,21 @@ export const api = {
   deleteItem: (id: string) =>
     fetchJson<{ success: boolean; id: string }>(`/api/v1/items/${id}`, {
       method: 'DELETE',
+    }),
+  addSubtask: (itemId: string, title: string) =>
+    fetchJson<Subtask>(`/api/v1/items/${itemId}/subtasks`, {
+      method: 'POST',
+      body: JSON.stringify({ title }),
+    }),
+  deleteSubtask: (subtaskId: string) =>
+    fetchJson<{ success: boolean; id: string; work_item_id?: string }>(
+      `/api/v1/items/subtasks/${subtaskId}`,
+      { method: 'DELETE' }
+    ),
+  updateSubtask: (subtaskId: string, updates: { title?: string; is_completed?: boolean; position?: number }) =>
+    fetchJson<Subtask>(`/api/v1/items/subtasks/${subtaskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(updates),
     }),
   toggleSubtask: (subtaskId: string) =>
     fetchJson<{ success: boolean; id: string; is_completed: boolean }>(
