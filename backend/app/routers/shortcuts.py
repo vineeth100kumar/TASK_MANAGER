@@ -6,7 +6,7 @@ from typing import Optional, Dict, Any
 
 from ..database import get_db
 from ..models import SiriQuickTask, SiriQuickExpense
-from ..services.ai_engine import parse_brain_dump
+from ..services.capture_service import commit_capture
 from ..services.ws_manager import ws_manager
 
 router = APIRouter(prefix="/api/v1/shortcuts", tags=["iOS Shortcuts & Siri Voice Integration"])
@@ -15,48 +15,39 @@ router = APIRouter(prefix="/api/v1/shortcuts", tags=["iOS Shortcuts & Siri Voice
 async def siri_quick_task(payload: SiriQuickTask, db: aiosqlite.Connection = Depends(get_db)):
     """
     Siri Voice Endpoint: 'Hey Siri, Add Task'
-    Receives dictated text, parses with AI engine, and saves to database.
+
+    Dictated speech goes through the same capture engine as the app's capture
+    bar, so "going out with cousins at 7.30pm so leave office by 6.30pm" spoken
+    at the phone creates the same two items it would if typed.
     """
-    parsed_items = await parse_brain_dump(payload.input_text)
-    if not parsed_items:
+    result = await commit_capture(db, payload.input_text)
+    created = result["created"]
+    if not created:
         raise HTTPException(status_code=400, detail="Could not parse task")
 
-    item = parsed_items[0]
-    item_id = f"item_{uuid.uuid4().hex[:12]}"
-    now_iso = datetime.datetime.now().isoformat()
+    first = created[0]
+    if len(created) == 1:
+        spoken = f"Added {first['entity_type']}: {first['title']}."
+        if first.get("start_at"):
+            spoken += f" Scheduled for {_spoken_time(first['start_at'])}."
+    else:
+        spoken = f"Added {len(created)} items, starting with {first['title']}."
 
-    await db.execute("""
-        INSERT INTO work_items (
-            id, title, description, entity_type, status, priority, energy,
-            due_date, remind_at, estimated_minutes, is_completed, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'todo', ?, 'medium', ?, ?, ?, 0, ?, ?)
-    """, (
-        item_id,
-        item["title"],
-        item.get("description", "Added via Siri"),
-        item.get("entity_type", "task"),
-        item.get("priority", "medium"),
-        item.get("due_date"),
-        item.get("due_date"), # Default reminder
-        item.get("estimated_minutes", 30),
-        now_iso,
-        now_iso
-    ))
-    await db.commit()
-
-    # Broadcast to live UI
-    await ws_manager.broadcast({
-        "type": "ITEM_CREATED",
-        "data": {"id": item_id, "title": item["title"], "source": "Siri"}
-    })
-
-    # Return speech response for Siri
     return {
         "success": True,
-        "spoken_response": f"Added task: {item['title']}. Priority is {item.get('priority', 'medium')}.",
-        "task_id": item_id,
-        "title": item["title"]
+        "spoken_response": spoken,
+        "task_id": first["id"],
+        "title": first["title"],
+        "items": created,
     }
+
+def _spoken_time(iso_value: str) -> str:
+    """A time Siri can read out, rather than an ISO timestamp."""
+    try:
+        moment = datetime.datetime.fromisoformat(iso_value)
+    except ValueError:
+        return iso_value
+    return moment.strftime("%-I:%M %p on %A").replace(" 00", "")
 
 @router.post("/log-expense")
 async def siri_log_expense(payload: SiriQuickExpense, db: aiosqlite.Connection = Depends(get_db)):
