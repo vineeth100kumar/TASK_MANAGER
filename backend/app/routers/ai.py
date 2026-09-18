@@ -5,7 +5,9 @@ from typing import Optional, List, Dict, Any
 
 from ..services.ai_engine import generate_greeting, parse_brain_dump, auto_fill_task_details, improve_task_data, organize_board_data
 from ..services.ai_runtime import status as ai_runtime_status
-from ..services.capture_service import commit_capture, read_capture
+from ..services.capture_service import (
+    claim_capture, commit_capture, read_capture, release_capture, remember_capture,
+)
 from ..services.weather_service import get_current_weather
 from ..config import DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME
 from ..database import get_db
@@ -39,6 +41,10 @@ class CaptureRequest(BaseModel):
     # millisecond.
     use_ai: bool = True
     log_expenses: bool = True
+    # The client's id for this capture, the same across every retry of it. A
+    # capture that arrives twice under one id is answered with what the first
+    # one created rather than creating it again.
+    request_id: Optional[str] = None
 
 @router.get("/greeting")
 async def get_greeting(
@@ -112,17 +118,44 @@ async def capture(req: CaptureRequest, db: aiosqlite.Connection = Depends(get_db
     if not text:
         return {"success": False, "committed": False, "items": [], "detail": "Nothing to capture"}
 
-    items = await read_capture(db, text, use_ai=req.use_ai)
     if not req.commit:
+        items = await read_capture(db, text, use_ai=req.use_ai)
         return {"success": True, "committed": False, "items": [i.to_dict() for i in items]}
 
-    result = await commit_capture(db, text, log_expenses=req.log_expenses, items=items)
-    return {
+    # Everything below writes rows, so it happens at most once per request_id.
+    request_id = (req.request_id or "").strip()[:64]
+    if request_id:
+        mine, previous = await claim_capture(db, request_id)
+        if not mine:
+            if previous is not None:
+                return {**previous, "duplicate": True}
+            return {
+                "success": True,
+                "committed": False,
+                "duplicate": True,
+                "items": [],
+                "detail": "That capture is already being handled",
+            }
+
+    try:
+        items = await read_capture(db, text, use_ai=req.use_ai)
+        result = await commit_capture(db, text, log_expenses=req.log_expenses, items=items)
+    except Exception:
+        # The claim must not outlive a failed attempt, or the retry that would
+        # have worked is told the capture is already handled.
+        if request_id:
+            await release_capture(db, request_id)
+        raise
+
+    response = {
         "success": bool(result["created"]),
         "committed": True,
         "items": result["created"],
         "transactions": result["transactions"],
     }
+    if request_id:
+        await remember_capture(db, request_id, response)
+    return response
 
 @router.post("/parse-brain-dump")
 async def parse_dump(req: BrainDumpRequest, db: aiosqlite.Connection = Depends(get_db)):

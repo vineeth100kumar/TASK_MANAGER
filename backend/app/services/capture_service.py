@@ -9,8 +9,9 @@ appeared.
 """
 
 import datetime
+import json
 import uuid
-from typing import Any, Dict, List, Optional, Sequence
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import aiosqlite
 
@@ -18,6 +19,65 @@ from .capture_ai import DEFAULT_TIMEOUT_SECONDS, understand
 from .capture_engine import CapturedItem
 from .item_serializer import load_item
 from .ws_manager import ws_manager
+
+# How long a capture's request_id is remembered. Long enough to cover a phone
+# that went to sleep mid-request and retried on waking, short enough that the
+# table stays small on a Pi.
+CAPTURE_REPLAY_WINDOW = datetime.timedelta(hours=6)
+
+
+async def claim_capture(
+    db: aiosqlite.Connection,
+    request_id: str,
+    now: Optional[datetime.datetime] = None,
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """
+    Take ownership of a capture, or report that it has already been handled.
+
+    Returns (this_attempt_owns_it, what_the_first_attempt_created). The claim
+    is an INSERT on a primary key, so two attempts arriving at once cannot both
+    win it: one creates the items, the other is answered with the result.
+    """
+    now = now or datetime.datetime.now()
+    await db.execute(
+        "DELETE FROM capture_requests WHERE created_at < ?",
+        ((now - CAPTURE_REPLAY_WINDOW).isoformat(),),
+    )
+    cursor = await db.execute(
+        "INSERT OR IGNORE INTO capture_requests (request_id, created_at, response) VALUES (?, ?, NULL)",
+        (request_id, now.isoformat()),
+    )
+    await db.commit()
+    if cursor.rowcount == 1:
+        return True, None
+
+    async with db.execute(
+        "SELECT response FROM capture_requests WHERE request_id = ?", (request_id,)
+    ) as existing:
+        row = await existing.fetchone()
+    if row is None or row["response"] is None:
+        # Claimed, but the first attempt has not finished yet.
+        return False, None
+    try:
+        return False, json.loads(row["response"])
+    except (TypeError, ValueError):
+        return False, None
+
+
+async def remember_capture(db: aiosqlite.Connection, request_id: str, response: Dict[str, Any]) -> None:
+    """Record what a capture created, so a repeat of it is answered not repeated."""
+    await db.execute(
+        "UPDATE capture_requests SET response = ? WHERE request_id = ?",
+        (json.dumps(response), request_id),
+    )
+    await db.commit()
+
+
+async def release_capture(db: aiosqlite.Connection, request_id: str) -> None:
+    """Give up a claim whose attempt failed, so the retry can do the work."""
+    await db.execute("DELETE FROM capture_requests WHERE request_id = ?", (request_id,))
+    await db.commit()
+
 
 async def load_projects(db: aiosqlite.Connection) -> List[Dict[str, Any]]:
     """Project names the parser can match `#tags` and plain mentions against."""

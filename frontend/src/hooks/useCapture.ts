@@ -10,8 +10,12 @@ import { AiBusyEvent, AiStatus, CapturedItem } from '../types';
  * deliberate rather than broken: the caller always knows whether the Pi is
  * thinking, and roughly how long it expects to take.
  *
- * Three things keep the client in step with the backend:
+ * Four things keep the client in step with the backend:
  *
+ *  - Every attempt at one capture carries the same `request_id`. Creating
+ *    items is not something to do twice, and the retry below, a double tap, or
+ *    a phone that resends after waking all arrive under the id of the first
+ *    attempt and are answered with what it created.
  *  - The wait is sized from the backend's own budget (`next_timeout_seconds`),
  *    not a number picked here. A cold model can legitimately take half a
  *    minute, and a client that gives up at fifteen seconds would report a
@@ -22,6 +26,13 @@ import { AiBusyEvent, AiStatus, CapturedItem } from '../types';
  *    The deterministic parser answers in well under a millisecond, so a slow
  *    or stopped Ollama costs a pause, never the capture itself.
  */
+
+function newRequestId(): string {
+  const globalCrypto = typeof crypto !== 'undefined' ? crypto : undefined;
+  if (globalCrypto?.randomUUID) return globalCrypto.randomUUID();
+  return `cap_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function useCapture(onItemsCreated?: (items: CapturedItem[]) => void) {
   const [isCapturing, setIsCapturing] = useState(false);
   const [expectedSeconds, setExpectedSeconds] = useState<number | null>(null);
@@ -29,6 +40,9 @@ export function useCapture(onItemsCreated?: (items: CapturedItem[]) => void) {
   const [usedFallback, setUsedFallback] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  // A capture writes to the database, so a second one must not start while the
+  // first is still in flight -- not on a double tap, not on a stray re-render.
+  const inFlightRef = useRef(false);
 
   // Tick a visible timer while the Pi is busy, so the wait has a pulse.
   useEffect(() => {
@@ -49,10 +63,15 @@ export function useCapture(onItemsCreated?: (items: CapturedItem[]) => void) {
     async (text: string): Promise<CapturedItem[]> => {
       const trimmed = text.trim();
       if (!trimmed) return [];
+      if (inFlightRef.current) return [];
 
+      inFlightRef.current = true;
       setIsCapturing(true);
       setUsedFallback(false);
       setError(null);
+
+      // One id for this capture, whatever it takes to land it.
+      const requestId = newRequestId();
 
       // Ask the Pi what to expect before committing to a wait. If it cannot
       // answer, fall back to a generous ceiling rather than a tight one.
@@ -70,21 +89,32 @@ export function useCapture(onItemsCreated?: (items: CapturedItem[]) => void) {
 
       try {
         const result = await api.capture(trimmed, {
+          requestId,
           timeoutMs: budgetMs,
           signal: controller.signal,
         });
         return result.items ?? [];
-      } catch (aiError) {
+      } catch (aiError: any) {
+        // Cancelled on purpose: the user closed the box. Nothing to retry.
+        if (aiError?.cancelled) return [];
+
         // The model was too slow, or is not running. The parser still is.
+        // Same request_id, so if the first attempt did land after all, the Pi
+        // hands back what it created instead of creating it twice.
         try {
-          const result = await api.capture(trimmed, { useAi: false, timeoutMs: 15000 });
-          setUsedFallback(true);
+          const result = await api.capture(trimmed, {
+            requestId,
+            useAi: false,
+            timeoutMs: 15000,
+          });
+          setUsedFallback(!result.duplicate);
           return result.items ?? [];
         } catch (fallbackError: any) {
           setError(fallbackError?.message || 'Could not reach the Pi');
           throw fallbackError;
         }
       } finally {
+        inFlightRef.current = false;
         abortRef.current = null;
         setIsCapturing(false);
         setExpectedSeconds(null);
