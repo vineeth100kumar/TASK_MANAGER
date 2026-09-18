@@ -44,7 +44,11 @@ import {
   getTodayDateString, 
   getTomorrowDateString, 
   isOverdue, 
-  isDueToday 
+  isDueToday,
+  itemMoment,
+  formatWhen,
+  timeInputValue,
+  withTimeOfDay
 } from '../../utils/dateHelpers';
 import { haptics } from '../../utils/haptics';
 
@@ -1068,9 +1072,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
                               </div>
                             );
                           })()}
-                          {item.due_date && (
+                          {(item.due_date || itemMoment(item)) && (
                             <span className="text-caption text-ink-3 dark:text-zinc-400">
-                              📅 {item.due_date}
+                              📅 {formatWhen(item)}
                             </span>
                           )}
                           {item.context_tags && (
@@ -1621,10 +1625,48 @@ export const TasksView: React.FC<TasksViewProps> = ({
               </div>
             </div>
 
-            {/* Recurrence & Due Date info */}
-            <div className="flex items-center justify-between text-meta text-ink-2 border-t border-hairline pt-3">
-              <span>Due: {selectedItem.due_date || 'None'}</span>
-              <span>{selectedItem.repeat_rule ? `🔄 Recurrence: ${selectedItem.repeat_rule}` : 'One-time item'}</span>
+            {/* When it happens. The time is the whole point of a reminder, so
+                it is shown and editable rather than hidden behind the date. */}
+            <div className="space-y-2 border-t border-hairline pt-3">
+              <div className="flex items-center justify-between text-meta text-ink-2">
+                <span>{formatWhen(selectedItem)}</span>
+                <span>{selectedItem.repeat_rule ? `🔄 Recurrence: ${selectedItem.repeat_rule}` : 'One-time item'}</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="date"
+                  value={selectedItem.due_date || ''}
+                  onChange={e => {
+                    const next = withTimeOfDay(
+                      selectedItem.entity_type,
+                      e.target.value || null,
+                      timeInputValue(itemMoment(selectedItem)) || null
+                    );
+                    setSelectedItem({ ...selectedItem, ...next });
+                    onUpdateItem?.(selectedItem.id, next);
+                  }}
+                  className="flex-1 bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
+                />
+                <input
+                  type="time"
+                  value={timeInputValue(itemMoment(selectedItem))}
+                  onChange={e => {
+                    const next = withTimeOfDay(
+                      selectedItem.entity_type,
+                      selectedItem.due_date || getTodayDateString(),
+                      e.target.value || null
+                    );
+                    setSelectedItem({ ...selectedItem, ...next });
+                    onUpdateItem?.(selectedItem.id, next);
+                  }}
+                  className="w-28 bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
+                />
+              </div>
+              <p className="text-caption text-ink-3">
+                {itemMoment(selectedItem)
+                  ? 'You will be reminded at this time.'
+                  : 'Add a time and this will remind you.'}
+              </p>
             </div>
           </div>
         </div>
