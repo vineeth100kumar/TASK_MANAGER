@@ -2,7 +2,7 @@ import secrets
 from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from .config import API_SECRET, LEGACY_SHORTCUTS_SECRET
+from .config import API_SECRET
 
 security_scheme = HTTPBearer(auto_error=False)
 
@@ -16,7 +16,15 @@ def assert_api_secret_configured():
 async def verify_auth_token(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_scheme)
 ) -> str:
-    """Validate bearer token against configured API_SECRET or legacy secret."""
+    """
+    Validate the bearer token against the configured API_SECRET.
+
+    There used to be a second accepted value, a constant named
+    LEGACY_SHORTCUTS_SECRET, kept so older Siri Shortcuts would keep working.
+    It was committed to a public repository and shipped inside the frontend
+    bundle, which made every route here readable and writable by anyone who
+    knew the address. Shortcuts carry the real secret now.
+    """
     if not API_SECRET:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -31,10 +39,7 @@ async def verify_auth_token(
         )
         
     token = credentials.credentials
-    matches_primary = secrets.compare_digest(token, API_SECRET)
-    matches_legacy = secrets.compare_digest(token, LEGACY_SHORTCUTS_SECRET) if LEGACY_SHORTCUTS_SECRET else False
-
-    if not matches_primary and not matches_legacy:
+    if not secrets.compare_digest(token, API_SECRET):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid authentication token",

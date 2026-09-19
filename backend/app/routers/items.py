@@ -5,7 +5,7 @@ import aiosqlite
 from fastapi import APIRouter, Depends, HTTPException, Query
 from typing import List, Optional, Dict
 
-from ..database import get_db
+from ..database import get_db, DB_PATH
 from ..models import (
     WorkItemCreate, WorkItemUpdate, WorkItemResponse,
     SubtaskCreate, SubtaskUpdate, SubtaskResponse,
@@ -15,9 +15,18 @@ from ..models import (
 from ..services.item_serializer import load_item
 from ..services.recurrence import calculate_next_occurrence
 from ..services.ws_manager import ws_manager
-from ..services.ai_engine import auto_fill_task_details, generate_project_description
+from ..services.backlog_service import (
+    schedule_description_fill,
+    schedule_project_description_fill,
+)
 
 router = APIRouter(prefix="/api/v1/items", tags=["Items & Milestones"])
+
+# A personal task manager should never be paging, so the ceiling is set where
+# a real backlog stops and runaway accumulation starts. Completed items older
+# than the window are excluded by default rather than counted against it.
+MAX_ITEMS_PER_REQUEST = 1000
+DEFAULT_COMPLETED_WINDOW_DAYS = 60
 
 @router.get("", response_model=List[WorkItemResponse])
 async def list_items(
@@ -25,12 +34,35 @@ async def list_items(
     status: Optional[str] = None,
     priority: Optional[str] = None,
     project_id: Optional[str] = None,
+    completed_within_days: Optional[int] = Query(
+        DEFAULT_COMPLETED_WINDOW_DAYS,
+        ge=0,
+        description="Only return items finished within this many days. 0 means no limit.",
+    ),
+    limit: int = Query(MAX_ITEMS_PER_REQUEST, ge=1, le=MAX_ITEMS_PER_REQUEST),
+    offset: int = Query(0, ge=0),
     db: aiosqlite.Connection = Depends(get_db)
 ):
-    """Lists work items with optional filtering and pre-batched subtasks for maximum speed."""
+    """
+    Lists work items with optional filtering and pre-batched subtasks.
+
+    Unbounded, this returned every row the database had ever held on every
+    load. Nothing open is ever hidden: the bound falls only on items already
+    finished, which are the ones that accumulate without being looked at.
+    Pass `completed_within_days=0` to get the lot.
+    """
     query = "SELECT * FROM work_items WHERE 1=1"
     params = []
-    
+
+    if completed_within_days:
+        cutoff = (
+            datetime.datetime.now() - datetime.timedelta(days=completed_within_days)
+        ).isoformat()
+        query += (
+            " AND (is_completed = 0 OR completed_at IS NULL OR completed_at >= ?)"
+        )
+        params.append(cutoff)
+
     if entity_type:
         query += " AND entity_type = ?"
         params.append(entity_type)
@@ -44,8 +76,9 @@ async def list_items(
         query += " AND project_id = ?"
         params.append(project_id)
         
-    query += " ORDER BY is_completed ASC, due_date ASC, created_at DESC"
-    
+    query += " ORDER BY is_completed ASC, due_date ASC, created_at DESC LIMIT ? OFFSET ?"
+    params.extend([limit, offset])
+
     async with db.execute(query, params) as cursor:
         rows = await cursor.fetchall()
 
@@ -121,34 +154,15 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
         if calc:
             next_occurrence = calc.isoformat()
 
-    # Automate description generation if not provided, incorporating project and previous tasks context
-    if not item.description or not item.description.strip():
-        project_name = None
-        previous_tasks = []
-        if item.project_id:
-            async with db.execute("SELECT name FROM projects WHERE id = ?", (item.project_id,)) as p_cur:
-                p_row = await p_cur.fetchone()
-                if p_row:
-                    project_name = p_row["name"]
-            async with db.execute(
-                "SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 5",
-                (item.project_id,)
-            ) as t_cur:
-                t_rows = await t_cur.fetchall()
-                previous_tasks = [r["title"] for r in t_rows if r["title"]]
+    # A missing description is filled in afterwards, not now. Generating one
+    # here meant every quick-capture waited on the local model before the task
+    # existed, which on a Pi 5 is seconds of nothing happening. The item is
+    # saved and returned straight away; the description arrives over the
+    # websocket when the model gets to it. Subtasks the model would invent are
+    # offered through /api/v1/ai/auto-fill for the user to accept, rather than
+    # written silently under a task they just typed one line of.
+    needs_description = not item.description or not item.description.strip()
 
-        generated = await auto_fill_task_details(
-            title=item.title,
-            context=item.context_tags,
-            project_name=project_name,
-            previous_tasks=previous_tasks,
-            entity_type=item.entity_type
-        )
-        if generated.get("description"):
-            item.description = generated["description"]
-        if not item.subtasks and generated.get("subtasks"):
-            item.subtasks = generated["subtasks"]
-            
     query = """
         INSERT INTO work_items (
             id, title, description, entity_type, status, priority, energy,
@@ -207,6 +221,10 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
     
     # Broadcast to all connected clients
     await ws_manager.broadcast({"type": "ITEM_CREATED", "data": res.model_dump()})
+
+    if needs_description:
+        schedule_description_fill(DB_PATH, item_id, ws_manager.broadcast)
+
     return res
 
 @router.patch("/{item_id}", response_model=WorkItemResponse)
@@ -554,14 +572,19 @@ async def list_projects(db: aiosqlite.Connection = Depends(get_db)):
 async def create_project(proj: ProjectCreate, db: aiosqlite.Connection = Depends(get_db)):
     p_id = f"proj_{uuid.uuid4().hex[:8]}"
     now_iso = datetime.datetime.now().isoformat()
+    # As with tasks: the project is created now, and a missing description is
+    # generated afterwards rather than holding the request open on the model.
     desc = proj.description
-    if not desc or not desc.strip():
-        desc = await generate_project_description(proj.name)
+    needs_description = not desc or not desc.strip()
     await db.execute(
         "INSERT INTO projects (id, name, color, description, created_at) VALUES (?, ?, ?, ?, ?)",
         (p_id, proj.name, proj.color, desc, now_iso)
     )
     await db.commit()
+
+    if needs_description:
+        schedule_project_description_fill(DB_PATH, p_id, ws_manager.broadcast)
+
     return ProjectResponse(
         id=p_id, name=proj.name, color=proj.color, description=desc,
         created_at=now_iso, total_task_count=0, completed_task_count=0, progress_percentage=0

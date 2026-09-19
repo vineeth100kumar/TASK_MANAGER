@@ -4,14 +4,20 @@ import aiosqlite
 from fastapi import APIRouter, Depends
 from ..database import get_db
 from ..models import PushSubscriptionCreate
-from ..services.push_service import VAPID_PUBLIC_KEY, send_web_push
+from ..services.push_service import VAPID_PUBLIC_KEY, push_is_configured, send_web_push
 
 router = APIRouter(prefix="/api/v1/push", tags=["Push Notifications"])
 
 @router.get("/vapid-public-key")
 async def get_vapid_public_key():
-    """Returns the VAPID public key so client service workers can subscribe to Web Push."""
-    return {"public_key": VAPID_PUBLIC_KEY}
+    """
+    The VAPID public key a service worker subscribes with.
+
+    `configured` is false when the Pi has no keys yet, which lets the app say
+    reminders need setting up instead of subscribing against a placeholder and
+    appearing to succeed.
+    """
+    return {"public_key": VAPID_PUBLIC_KEY, "configured": push_is_configured()}
 
 @router.post("/subscribe")
 async def subscribe(sub: PushSubscriptionCreate, db: aiosqlite.Connection = Depends(get_db)):

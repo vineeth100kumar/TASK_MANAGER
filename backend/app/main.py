@@ -1,14 +1,17 @@
 import os
+import json
 import asyncio
 import secrets
-from typing import Optional
+
+import aiosqlite
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, Query, status
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, status
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.middleware.gzip import GZipMiddleware
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 
-from .config import API_SECRET, ENV, ALLOWED_ORIGINS, LEGACY_SHORTCUTS_SECRET
+from . import config
+from .config import ENV, ALLOWED_ORIGINS
 from .auth import verify_auth_token, assert_api_secret_configured
 
 from .database import init_database, DB_PATH, db_pool
@@ -92,18 +95,59 @@ app.include_router(push.router, dependencies=auth_dep)
 app.include_router(planner.router, dependencies=auth_dep)
 app.include_router(whiteboards.router, dependencies=auth_dep)
 
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket, token: Optional[str] = Query(None)):
-    if API_SECRET:
-        matches_primary = bool(token and secrets.compare_digest(token, API_SECRET))
-        matches_legacy = bool(token and LEGACY_SHORTCUTS_SECRET and secrets.compare_digest(token, LEGACY_SHORTCUTS_SECRET))
-        if not matches_primary and not matches_legacy:
-            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
-            return
+# How long a freshly opened socket has to prove itself before it is dropped.
+WS_AUTH_TIMEOUT_SECONDS = 10.0
 
-    await ws_manager.connect(websocket)
+
+@app.websocket("/ws")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    Live sync, authenticated by a first message rather than a query parameter.
+
+    The token used to travel as `/ws?token=...`. A query string is written to
+    nginx's access log and to every proxy along the way, so the one secret that
+    guards this data ended up in plain text in places nobody thinks to scrub.
+    The socket is accepted first now, and the client's first frame must be
+    {"type": "auth", "token": "..."}; anything else, or nothing at all within
+    a few seconds, and the connection closes without ever joining the pool.
+    """
+    await websocket.accept()
 
     try:
+        raw = await asyncio.wait_for(
+            websocket.receive_text(), timeout=WS_AUTH_TIMEOUT_SECONDS
+        )
+    except Exception:
+        # Timed out, disconnected, or never said anything intelligible.
+        try:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except Exception:
+            pass
+        return
+
+    token = ""
+    try:
+        message = json.loads(raw)
+        if isinstance(message, dict) and message.get("type") == "auth":
+            token = str(message.get("token") or "")
+    except (ValueError, TypeError):
+        token = ""
+
+    # Read through the module rather than a copy bound at import time, so the
+    # socket always checks against the secret in force now.
+    expected = config.API_SECRET
+    if not (expected and token and secrets.compare_digest(token, expected)):
+        try:
+            await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        except Exception:
+            pass
+        return
+
+    # Authenticated: only now does it start receiving broadcasts.
+    ws_manager.register(websocket)
+    try:
+        await websocket.send_text(json.dumps({"type": "AUTH_OK"}))
+
         while True:
             # Keep-alive ping/pong
             data = await websocket.receive_text()
