@@ -1,7 +1,6 @@
 import asyncio
 import datetime
 import aiosqlite
-import uuid
 from typing import Optional, List, Dict, Any
 
 from .ai_engine import auto_fill_task_details, generate_project_description
@@ -174,7 +173,6 @@ async def process_backlog_items(
             )
 
             new_desc = generated.get("description", "")
-            new_subtasks = generated.get("subtasks", [])
 
             now_iso = datetime.datetime.now().isoformat()
             await db.execute(
@@ -182,18 +180,10 @@ async def process_backlog_items(
                 (new_desc, now_iso, t_id)
             )
 
-            # Backfill subtasks only if task had zero subtasks
-            async with db.execute("SELECT COUNT(*) FROM subtasks WHERE work_item_id = ?", (t_id,)) as sub_cnt_cur:
-                sub_cnt_row = await sub_cnt_cur.fetchone()
-                sub_cnt = sub_cnt_row[0] if sub_cnt_row else 0
-
-            if sub_cnt == 0 and new_subtasks:
-                for idx, s_title in enumerate(new_subtasks):
-                    sub_id = f"sub_{uuid.uuid4().hex[:10]}"
-                    await db.execute(
-                        "INSERT INTO subtasks (id, work_item_id, title, is_completed, position, created_at) VALUES (?, ?, ?, 0, ?, ?)",
-                        (sub_id, t_id, s_title, idx, now_iso)
-                    )
+            # Descriptions only. Subtasks the model invented are a suggestion
+            # the user accepts from the task itself, never rows written behind
+            # their back -- waking up to five checklist items under every task
+            # you captured yesterday is not a feature.
 
             await db.commit()
             processed_tasks += 1
@@ -216,3 +206,137 @@ async def process_backlog_items(
         "pending_projects": updated_stats["pending_projects"],
         "pending_tasks": updated_stats["pending_tasks"]
     }
+
+
+# Background description fills, kept alive while they run.
+#
+# asyncio only holds a weak reference to a bare task, so one created and
+# forgotten can be collected mid-flight and simply never finish. Holding them
+# here until they are done is what makes "fire and forget" actually fire.
+_pending_fills: set = set()
+
+
+async def _fill_description(db_path: str, item_id: str, ws_broadcast=None) -> None:
+    """Generate one item's description after the fact and tell the clients."""
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                "SELECT id, title, project_id, entity_type, context_tags, description "
+                "FROM work_items WHERE id = ?",
+                (item_id,)
+            ) as cur:
+                row = await cur.fetchone()
+
+            # Gone, or described in the meantime -- either way there is nothing
+            # to do, and overwriting what the user typed would be worse.
+            if not row or (row["description"] or "").strip():
+                return
+
+            project_name = None
+            previous_tasks: List[str] = []
+            if row["project_id"]:
+                async with db.execute(
+                    "SELECT name FROM projects WHERE id = ?", (row["project_id"],)
+                ) as p_cur:
+                    p_row = await p_cur.fetchone()
+                    if p_row:
+                        project_name = p_row["name"]
+                async with db.execute(
+                    "SELECT title FROM work_items WHERE project_id = ? AND id != ? "
+                    "ORDER BY created_at DESC LIMIT 5",
+                    (row["project_id"], item_id)
+                ) as prev_cur:
+                    previous_tasks = [r["title"] for r in await prev_cur.fetchall() if r["title"]]
+
+            generated = await auto_fill_task_details(
+                title=row["title"],
+                context=row["context_tags"] or "",
+                project_name=project_name,
+                previous_tasks=previous_tasks,
+                entity_type=row["entity_type"] or "task",
+            )
+            description = (generated.get("description") or "").strip()
+            if not description:
+                return
+
+            now_iso = datetime.datetime.now().isoformat()
+            await db.execute(
+                "UPDATE work_items SET description = ?, updated_at = ? "
+                "WHERE id = ? AND (description IS NULL OR trim(description) = '')",
+                (description, now_iso, item_id)
+            )
+            await db.commit()
+
+        if ws_broadcast:
+            await ws_broadcast({
+                "type": "ITEM_UPDATED",
+                "data": {"id": item_id, "description": description, "updated_at": now_iso},
+            })
+    except Exception as e:
+        # A description is a nicety. Never let failing to write one surface as
+        # an error on a task that was created perfectly well.
+        print(f"Background description fill failed for {item_id}: {e}")
+
+
+def schedule_description_fill(db_path: str, item_id: str, ws_broadcast=None) -> None:
+    """
+    Queue a description for an item that was just created without one.
+
+    Creating a task used to wait on the model before it returned, which on this
+    hardware meant the request could sit there for the better part of a minute
+    while the Pi thought. The item is saved and returned immediately now, and
+    its description arrives over the websocket whenever the model is free.
+    """
+    task = asyncio.create_task(_fill_description(db_path, item_id, ws_broadcast))
+    _pending_fills.add(task)
+    task.add_done_callback(_pending_fills.discard)
+
+
+async def _fill_project_description(db_path: str, project_id: str, ws_broadcast=None) -> None:
+    """Generate one project's description after the fact and tell the clients."""
+    try:
+        async with aiosqlite.connect(db_path) as db:
+            db.row_factory = aiosqlite.Row
+
+            async with db.execute(
+                "SELECT id, name, description FROM projects WHERE id = ?", (project_id,)
+            ) as cur:
+                row = await cur.fetchone()
+            if not row or (row["description"] or "").strip():
+                return
+
+            async with db.execute(
+                "SELECT title FROM work_items WHERE project_id = ? ORDER BY created_at DESC LIMIT 5",
+                (project_id,)
+            ) as t_cur:
+                existing_titles = [r["title"] for r in await t_cur.fetchall() if r["title"]]
+
+            description = (await generate_project_description(
+                row["name"], existing_tasks=existing_titles
+            ) or "").strip()
+            if not description:
+                return
+
+            await db.execute(
+                "UPDATE projects SET description = ? "
+                "WHERE id = ? AND (description IS NULL OR trim(description) = '')",
+                (description, project_id)
+            )
+            await db.commit()
+
+        if ws_broadcast:
+            await ws_broadcast({
+                "type": "PROJECT_UPDATED",
+                "data": {"id": project_id, "description": description},
+            })
+    except Exception as e:
+        print(f"Background description fill failed for project {project_id}: {e}")
+
+
+def schedule_project_description_fill(db_path: str, project_id: str, ws_broadcast=None) -> None:
+    """Queue a description for a project that was just created without one."""
+    task = asyncio.create_task(_fill_project_description(db_path, project_id, ws_broadcast))
+    _pending_fills.add(task)
+    task.add_done_callback(_pending_fills.discard)

@@ -172,7 +172,7 @@ async def test_committing_twice_under_one_id_writes_one_set_of_rows(db):
 async def test_posting_the_same_capture_twice_creates_one_set(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app import main
+    from app import config, main
     from app.database import db_pool
 
     db_path = str(tmp_path / "e2e.db")
@@ -181,7 +181,7 @@ async def test_posting_the_same_capture_twice_creates_one_set(tmp_path, monkeypa
     monkeypatch.setattr(db_pool, "db_path", db_path)
 
     app = main.app
-    headers = {"Authorization": f"Bearer {main.API_SECRET}"}
+    headers = {"Authorization": f"Bearer {config.API_SECRET}"}
     body = {
         "text": "dinner with sam tomorrow at 8pm so leave by 7.15pm",
         "use_ai": False,

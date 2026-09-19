@@ -76,8 +76,14 @@ async def test_ai_task_improvisation():
     run_res = await improve_task_data("Go for a Run")
     assert "efficiently with high quality" not in run_res["description"]
     assert "associated checklist items" not in run_res["description"]
-    assert "Pacing" in run_res["description"]
+    # The assertions here used to look for "Pacing", a markdown heading that
+    # was deliberately removed when descriptions became one plain paragraph.
+    # What actually matters is that the text is about running rather than
+    # generic filler, so check for that instead of a formatting artefact.
+    assert "pacing" in run_res["description"].lower()
     assert "cadence" in run_res["description"]
+    assert "#" not in run_res["description"]
+    assert "*" not in run_res["description"]
     assert len(run_res["subtasks"]) >= 3
     assert run_res["category"] == "Health"
     

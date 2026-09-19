@@ -75,6 +75,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
           </div>
           <button
             onClick={onClose}
+            aria-label="Close"
             className="p-1 rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-stone-100"
           >
             <X className="w-4 h-4" />
