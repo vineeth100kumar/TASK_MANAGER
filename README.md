@@ -89,3 +89,47 @@ Frontend runs at `http://localhost:3000`.
    ./deploy/setup_pi.sh
    ```
 3. Follow `CLOUDFLARE_TUNNEL_GUIDE.md` to connect your free Cloudflare tunnel and access your system from anywhere on your iPhone or PC!
+
+---
+
+## 🔑 The access key
+
+Sage is reachable from the public internet through the tunnel, and one shared
+token is what stands between that and your data. There is no default: the app
+asks for the key once per browser and keeps it there.
+
+Set one on the Pi, in a file the repository never sees:
+
+```bash
+sudo install -d -m 700 /etc/sage
+printf 'API_SECRET=%s\n' "$(python3 -c 'import secrets; print(secrets.token_hex(24))')" \
+  | sudo tee /etc/sage/sage.env > /dev/null
+sudo chmod 600 /etc/sage/sage.env
+sudo systemctl restart sage-backend
+```
+
+Then open Sage, paste the key into the screen it shows you, and that device is
+connected. To change it later, or to sign a device out, use **Settings →
+Connection → Forget key**.
+
+If you skip this, the backend generates a random key on first boot and prints
+where it saved it (`data/api_secret.txt`); the app will not talk to the Pi
+until you paste that in.
+
+**Siri Shortcuts** send the same key as a `Bearer` token in the `Authorization`
+header. Any shortcut built before this change needs its header updated, since
+the old shared constant is no longer accepted.
+
+---
+
+## Running the checks
+
+```bash
+cd backend && python -m pytest tests -q     # backend
+cd frontend && npx tsc --noEmit && npm test  # frontend
+cd frontend && npm run build                 # rebuild the committed bundle
+```
+
+`frontend/dist` is committed and nginx serves it straight from the checkout, so
+any change to `frontend/src` needs `npm run build` committed alongside it. CI
+rebuilds and fails if the two disagree.

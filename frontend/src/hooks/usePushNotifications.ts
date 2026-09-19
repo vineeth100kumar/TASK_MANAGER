@@ -93,14 +93,14 @@ export const usePushNotifications = () => {
     setDetail(null);
 
     try {
-      const { public_key: publicKey } = await api.getVapidPublicKey();
+      const { public_key: publicKey, configured } = await api.getVapidPublicKey();
 
       /*
-       * A Pi that has never had keys generated returns the placeholder from
-       * push_service.py. Subscribing with it fails deep inside the browser with
-       * an opaque error, so say the useful thing instead.
+       * A Pi that has never had keys generated now says so outright. The old
+       * placeholder key is gone, but the prefix check stays for a backend that
+       * has not been restarted since this change.
        */
-      if (!publicKey || publicKey.startsWith('BN_DEMO')) {
+      if (configured === false || !publicKey || publicKey.startsWith('BN_DEMO')) {
         setState('unconfigured');
         return;
       }

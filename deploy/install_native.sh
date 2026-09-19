@@ -69,11 +69,36 @@ server {
     gzip on;
     gzip_types text/plain text/css application/json application/javascript text/xml application/xml application/xml+rss text/javascript;
 
+    # Security headers. This server is reachable from the public internet
+    # through the Cloudflare tunnel, so it gets the same basics any public
+    # host would have.
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header Referrer-Policy "strict-origin-when-cross-origin" always;
+    add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
+
     # Static Frontend PWA
     location / {
         root $REPO_DIR/frontend/dist;
         index index.html;
         try_files \$uri \$uri/ /index.html =404;
+    }
+
+    # Build output is content-hashed, so a given filename never changes and
+    # can be kept for good. Saves the phone revalidating every chunk on each
+    # load over the tunnel.
+    location /assets/ {
+        root $REPO_DIR/frontend/dist;
+        add_header Cache-Control "public, max-age=31536000, immutable";
+        access_log off;
+        try_files \$uri =404;
+    }
+
+    # The service worker must not be cached, or a deploy cannot replace it.
+    location = /sw.js {
+        root $REPO_DIR/frontend/dist;
+        add_header Cache-Control "no-cache, no-store, must-revalidate";
+        try_files \$uri =404;
     }
 
 
@@ -112,6 +137,32 @@ sudo tee /etc/sudoers.d/sage-os > /dev/null <<EOF
 $ACTUAL_USER ALL=(ALL) NOPASSWD: /bin/systemctl restart sage-backend, /bin/systemctl reload sage-backend, /bin/systemctl status sage-backend, /bin/systemctl start sage-backend, /bin/systemctl stop sage-backend
 EOF
 sudo chmod 0440 /etc/sudoers.d/sage-os
+
+# 6b. Access key
+#
+# This box is reachable from the public internet through the Cloudflare tunnel,
+# and one shared token is all that stands between that and the data. A fresh
+# install generates a real one rather than leaving the backend to fall back on
+# anything predictable. Existing keys are never overwritten.
+echo "--> [6b/8] Ensuring an access key exists..."
+sudo install -d -m 700 /etc/sage
+if sudo grep -qs '^API_SECRET=.\+' /etc/sage/sage.env; then
+    echo "    An API_SECRET is already set in /etc/sage/sage.env. Leaving it alone."
+else
+    GENERATED_SECRET="$(python3 -c 'import secrets; print(secrets.token_hex(24))')"
+    printf 'API_SECRET=%s\n' "$GENERATED_SECRET" | sudo tee -a /etc/sage/sage.env > /dev/null
+    sudo chmod 600 /etc/sage/sage.env
+    echo ""
+    echo "    ============================================================"
+    echo "    Your access key:"
+    echo ""
+    echo "      $GENERATED_SECRET"
+    echo ""
+    echo "    Open Sage and paste this in when it asks. It is also in"
+    echo "    /etc/sage/sage.env if you need it again."
+    echo "    ============================================================"
+    echo ""
+fi
 
 # 7. Create and Start Systemd Services
 echo "--> [7/8] Creating Systemd services for Backend and 24/7 Auto-Sync..."

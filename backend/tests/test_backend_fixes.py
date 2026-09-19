@@ -75,7 +75,7 @@ async def test_moving_a_reminder_lets_it_fire_again(tmp_path, monkeypatch):
     await check_due_reminders(db_path, ws)
     assert len(ws.messages) == 1
 
-    from app import main
+    from app import config, main
     from app.database import db_pool
 
     monkeypatch.setattr(db_pool, "db_path", db_path)
@@ -83,7 +83,7 @@ async def test_moving_a_reminder_lets_it_fire_again(tmp_path, monkeypatch):
         client.patch(
             "/api/v1/items/item_1",
             json={"remind_at": (datetime.datetime.now() - datetime.timedelta(minutes=1)).isoformat()},
-            headers={"Authorization": f"Bearer {main.API_SECRET}"},
+            headers={"Authorization": f"Bearer {config.API_SECRET}"},
         )
 
     await check_due_reminders(db_path, ws)
@@ -98,14 +98,14 @@ async def test_moving_a_reminder_lets_it_fire_again(tmp_path, monkeypatch):
 async def test_completing_a_recurring_task_creates_the_next_one(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app import main
+    from app import config, main
     from app.database import db_pool
 
     db_path = await _fresh_db(tmp_path, monkeypatch, "recurring.db")
     monkeypatch.setattr(db_pool, "db_path", db_path)
 
     with TestClient(main.app) as client:
-        headers = {"Authorization": f"Bearer {main.API_SECRET}"}
+        headers = {"Authorization": f"Bearer {config.API_SECRET}"}
         created = client.post(
             "/api/v1/items",
             json={"title": "Take medicine", "entity_type": "reminder",
@@ -150,7 +150,7 @@ def test_overdue_outranks_due_today():
 async def test_debrief_counts_only_the_tasks_it_moved(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
-    from app import main
+    from app import config, main
     from app.database import db_pool
 
     db_path = await _fresh_db(tmp_path, monkeypatch, "debrief.db")
@@ -170,6 +170,6 @@ async def test_debrief_counts_only_the_tasks_it_moved(tmp_path, monkeypatch):
 
     with TestClient(main.app) as client:
         result = client.post("/api/v1/planner/debrief", json={"date": today},
-                             headers={"Authorization": f"Bearer {main.API_SECRET}"}).json()
+                             headers={"Authorization": f"Bearer {config.API_SECRET}"}).json()
 
     assert result["migrated_to_tomorrow"] == 1

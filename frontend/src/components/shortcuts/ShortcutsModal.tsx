@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Bell, Home, RotateCw } from 'lucide-react';
+import { Copy, Check, Bell, Home, RotateCw, KeyRound } from 'lucide-react';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { api } from '../../services/api';
+import { clearApiSecret, isApiSecretFromEnv } from '../../config';
 
 /* The three things the backend will do for a shortcut, and how to reach them. */
 const ENDPOINTS = [
@@ -83,12 +84,9 @@ export const ShortcutsModal: React.FC = () => {
     setIsTesting(true);
     setTestResult(null);
     try {
-      const res = await fetch(`${currentHost}/api/v1/shortcuts/quick-task`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ input_text: testTaskText }),
-      });
-      const data = await res.json();
+      // Goes through the api client so it carries the access key. Called
+      // bare, this always came back 401 and the button never worked.
+      const data = await api.siriQuickTask(testTaskText);
       setTestResult(data.spoken_response || 'Task created.');
     } catch (e: unknown) {
       setTestResult(e instanceof Error ? `Error: ${e.message}` : 'Something went wrong.');
@@ -206,6 +204,39 @@ export const ShortcutsModal: React.FC = () => {
             <p className="text-caption text-accent-600 dark:text-accent-400 bg-accent-500/10 px-3 py-1.5 rounded-control">
               {backlogFeedback}
             </p>
+          )}
+        </div>
+      </section>
+
+      {/* --------------------------- Connection --------------------------- */}
+      <section className="mt-7">
+        <h2 className="label mb-2">Connection</h2>
+
+        <div className="surface px-4 py-3.5 flex items-start gap-3.5">
+          <KeyRound className="w-5 h-5 mt-0.5 shrink-0 text-ink-3" aria-hidden="true" />
+
+          <div className="min-w-0 flex-1">
+            <p className="text-body text-ink">
+              {isApiSecretFromEnv() ? 'Key built into this app' : 'This device is connected'}
+            </p>
+            <p className="text-meta text-ink-2 mt-0.5 leading-relaxed">
+              {isApiSecretFromEnv()
+                ? 'The key came from the build, so it cannot be changed here.'
+                : 'The access key is kept in this browser and never leaves it. Forget it to sign this device out, or to enter a new one after rotating the key on the Pi.'}
+            </p>
+          </div>
+
+          {!isApiSecretFromEnv() && (
+            <button
+              onClick={() => {
+                clearApiSecret();
+                window.location.reload();
+              }}
+              className="shrink-0 h-9 px-3.5 rounded-control bg-sunken text-ink-2 hover:text-ink
+                         text-meta font-medium transition-colors"
+            >
+              Forget key
+            </button>
           )}
         </div>
       </section>

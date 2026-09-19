@@ -47,17 +47,25 @@ if not API_SECRET:
     API_SECRET = secrets.token_hex(24)
     try:
         secret_file.write_text(API_SECRET, encoding="utf-8")
-        print(f"[SECURITY] Generated and saved new persistent API_SECRET to {secret_file}")
+        print(
+            "[SECURITY] No API_SECRET was configured, so a new random one was "
+            f"generated and saved to {secret_file}. Open Settings in the app "
+            "and paste it in to connect. Better: put it in /etc/sage/sage.env."
+        )
     except Exception as e:
         print(f"[SECURITY] Could not persist API_SECRET to file: {e}")
 
-# Legacy secret for backward compatibility with Siri iOS Shortcuts
-LEGACY_SHORTCUTS_SECRET: str = "sage_rpi5_secret_ios_key_2026"
-
 ENV: str = os.environ.get("ENV", "development")
 
-FRONTEND_ORIGIN_RAW: str = os.environ.get("FRONTEND_ORIGIN", "*")
-ALLOWED_ORIGINS: List[str] = [origin.strip() for origin in FRONTEND_ORIGIN_RAW.split(",") if origin.strip()] or ["*"]
+# The frontend is served by the same nginx that proxies this API, so the app
+# itself is same-origin and needs no CORS grant at all. The default is
+# therefore nothing: set FRONTEND_ORIGIN only to name a genuinely separate
+# origin, such as a Vite dev server. It used to default to "*", which handed
+# every site on the internet a scripted path to this data.
+FRONTEND_ORIGIN_RAW: str = os.environ.get("FRONTEND_ORIGIN", "")
+ALLOWED_ORIGINS: List[str] = [
+    origin.strip() for origin in FRONTEND_ORIGIN_RAW.split(",") if origin.strip()
+]
 
 DEFAULT_LAT: float = float(os.environ.get("DEFAULT_LAT", "28.6139"))
 DEFAULT_LON: float = float(os.environ.get("DEFAULT_LON", "77.2090"))

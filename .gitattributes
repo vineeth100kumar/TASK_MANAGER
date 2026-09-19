@@ -1,0 +1,14 @@
+# The build emits LF. dist/index.html was committed once with CRLF, so every
+# rebuild rewrote all 57 lines and the diffs were unreadable.
+* text=auto eol=lf
+
+# Build output: normalise it like everything else, but keep it out of diffs,
+# since reviewing a minified bundle tells nobody anything.
+frontend/dist/** linguist-generated=true
+frontend/dist/*.html -diff
+frontend/dist/assets/* -diff
+
+*.woff2 binary
+*.png binary
+*.jpg binary
+*.ico binary
