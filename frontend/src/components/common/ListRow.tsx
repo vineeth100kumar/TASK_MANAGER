@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { motion, PanInfo } from 'framer-motion';
 import { Check, Trash2, Sparkles, RotateCw, Folder } from 'lucide-react';
 import { WorkItem, Project } from '../../types';
@@ -15,7 +15,11 @@ export interface ListRowProps {
   isBlocked?: boolean;
   blockerTitles?: string[];
   isRefining?: boolean;
+  isRenaming?: boolean;
   onToggleSelect?: (id: string) => void;
+  onStartRename?: (item: WorkItem) => void;
+  onRename?: (item: WorkItem, title: string) => void;
+  onCancelRename?: () => void;
   onToggleComplete: (item: WorkItem) => void;
   onDelete: (id: string) => void;
   onClick: (item: WorkItem) => void;
@@ -40,7 +44,11 @@ export const ListRow: React.FC<ListRowProps> = ({
   isBlocked = false,
   blockerTitles = [],
   isRefining = false,
+  isRenaming = false,
   onToggleSelect,
+  onStartRename,
+  onRename,
+  onCancelRename,
   onToggleComplete,
   onDelete,
   onClick,
@@ -49,6 +57,61 @@ export const ListRow: React.FC<ListRowProps> = ({
 }) => {
   const [dragOffset, setDragOffset] = useState(0);
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
+  const [draftTitle, setDraftTitle] = useState(item.title);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const renameRef = useRef<HTMLInputElement>(null);
+  const openTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Keyboard navigation is only useful if the row it lands on is on screen.
+  useEffect(() => {
+    if (isHighlighted) {
+      rowRef.current?.scrollIntoView({ block: 'nearest' });
+    }
+  }, [isHighlighted]);
+
+  useEffect(() => {
+    if (isRenaming) {
+      setDraftTitle(item.title);
+      // The field mounts in the same frame the row re-renders.
+      requestAnimationFrame(() => {
+        renameRef.current?.focus();
+        renameRef.current?.select();
+      });
+    }
+  }, [isRenaming, item.title]);
+
+  useEffect(() => () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+  }, []);
+
+  /*
+   * A click on the title opens the task and a double click renames it in
+   * place, so the first click waits long enough to find out which it was.
+   */
+  const handleTitleClick = () => {
+    if (openTimerRef.current) clearTimeout(openTimerRef.current);
+    openTimerRef.current = setTimeout(() => {
+      openTimerRef.current = null;
+      onClick(item);
+    }, 220);
+  };
+
+  const handleTitleDoubleClick = () => {
+    if (openTimerRef.current) {
+      clearTimeout(openTimerRef.current);
+      openTimerRef.current = null;
+    }
+    onStartRename?.(item);
+  };
+
+  const commitRename = () => {
+    const next = draftTitle.trim();
+    if (next && next !== item.title) {
+      onRename?.(item, next);
+    } else {
+      onCancelRename?.();
+    }
+  };
 
   const matchedProject = item.project_id ? projects.find((p) => p.id === item.project_id) : undefined;
   const overdue = isOverdue(item.due_date, item.is_completed);
@@ -71,7 +134,10 @@ export const ListRow: React.FC<ListRowProps> = ({
   };
 
   return (
-    <div className="relative overflow-hidden group select-none border-b border-hairline last:border-b-0">
+    <div
+      ref={rowRef}
+      className="relative overflow-hidden group select-none border-b border-hairline last:border-b-0 scroll-mt-24"
+    >
       {/* What the swipe will do, revealed as you drag */}
       <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
         <span
@@ -94,7 +160,7 @@ export const ListRow: React.FC<ListRowProps> = ({
       </div>
 
       <motion.div
-        drag="x"
+        drag={isRenaming ? false : 'x'}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.4}
         onDrag={handleDrag}
@@ -133,13 +199,43 @@ export const ListRow: React.FC<ListRowProps> = ({
           />
         )}
 
-        <div onClick={() => onClick(item)} className="cursor-pointer min-w-0 flex-1">
-          <p className={`text-body ${item.is_completed ? 'text-ink-3 line-through' : 'text-ink'}`}>
-            {item.title}
-          </p>
+        <div className="min-w-0 flex-1">
+          {isRenaming ? (
+            <input
+              ref={renameRef}
+              type="text"
+              value={draftTitle}
+              aria-label={`Rename ${item.title}`}
+              onChange={(e) => setDraftTitle(e.target.value)}
+              onBlur={commitRename}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitRename();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  setDraftTitle(item.title);
+                  onCancelRename?.();
+                }
+              }}
+              className="w-full bg-transparent text-body text-ink border-b border-accent-500 focus:outline-none pb-0.5"
+            />
+          ) : (
+            <p
+              onClick={handleTitleClick}
+              onDoubleClick={handleTitleDoubleClick}
+              title="Click to open, double click to rename"
+              className={`text-body cursor-pointer ${item.is_completed ? 'text-ink-3 line-through' : 'text-ink'}`}
+            >
+              {item.title}
+            </p>
+          )}
 
           {/* One quiet line of metadata, not a row of boxes */}
-          <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-0.5 text-meta text-ink-3">
+          <div
+            onClick={() => onClick(item)}
+            className="flex items-center gap-x-2.5 gap-y-1 flex-wrap mt-0.5 text-meta text-ink-3 cursor-pointer"
+          >
             {isBlocked && (
               <span
                 title={`Blocked by ${blockerTitles.join(', ')}`}
@@ -202,6 +298,8 @@ export const ListRow: React.FC<ListRowProps> = ({
             {item.priority === 'urgent' && !item.is_completed && (
               <span className="text-late-500 dark:text-late-400 font-medium">Urgent</span>
             )}
+
+            {item.priority === 'high' && !item.is_completed && <span>High</span>}
           </div>
         </div>
 

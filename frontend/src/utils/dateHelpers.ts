@@ -280,3 +280,14 @@ export function compareBySchedule(
 
   return (PRIORITY_ORDER[a.priority] ?? 2) - (PRIORITY_ORDER[b.priority] ?? 2);
 }
+
+/*
+ * A duration in minutes, written the way a person would say it: 45m, 1h,
+ * 1h30m. Dividing by 60 and printing the result gave "1.5h30m".
+ */
+export function formatDuration(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const rest = minutes % 60;
+  return rest ? `${hours}h${rest}m` : `${hours}h`;
+}

@@ -1,30 +1,16 @@
-import React, { useState, useEffect, useMemo } from 'react';
-import { 
-  Plus, 
-  CheckSquare, 
-  Calendar, 
-  Bell, 
-  Flag, 
-  RotateCw, 
-  Trash2, 
-  Sparkles, 
-  Kanban, 
-  ListFilter,
-  CheckCircle2,
-  Clock,
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import {
+  Plus,
+  RotateCw,
+  Sparkles,
   Target,
-  Zap,
   Check,
   X,
-  Lock,
   Tag,
   Folder,
-  SlidersHorizontal,
+  MoreHorizontal,
   ChevronDown,
   ChevronRight,
-  Sun,
-  AlertCircle,
-  CheckCheck,
   ArrowUpDown
 } from 'lucide-react';
 import { WorkItem, WorkItemUpdatePayload, Milestone, Project, EntityType, TaskStatus, TaskPriority } from '../../types';
@@ -35,8 +21,10 @@ import { Modal } from '../common/Modal';
 import { Skeleton } from '../common/Skeleton';
 import { ListRow } from '../common/ListRow';
 import { PullToRefresh } from '../common/PullToRefresh';
-import { QuickAddBar } from './QuickAddBar';
+import { QuickAddBar, QuickAddBarHandle, CONTEXT_TAGS } from './QuickAddBar';
 import { BulkActionBar } from './BulkActionBar';
+import { TaskDetailSheet } from './TaskDetailSheet';
+import { KeyboardHelpModal } from './KeyboardHelpModal';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
 import { 
@@ -48,6 +36,7 @@ import {
   itemMoment,
   formatWhen,
   compareBySchedule,
+  formatDuration,
   timeInputValue,
   withTimeOfDay
 } from '../../utils/dateHelpers';
@@ -93,6 +82,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [selectedProjectId, setSelectedProjectId] = usePersistedState<string>('tasks_selected_project', 'all');
   const [sortBy, setSortBy] = usePersistedState<'due_date' | 'priority' | 'title' | 'created_at'>('tasks_sort_by', 'due_date');
   const [smartGrouping, setSmartGrouping] = usePersistedState<boolean>('tasks_smart_grouping', true);
+  const [sortDir, setSortDir] = usePersistedState<'asc' | 'desc'>('tasks_sort_dir', 'asc');
+  const [showCompleted, setShowCompleted] = usePersistedState<boolean>('tasks_show_completed', false);
 
   // Interaction State
   const [selectedItem, setSelectedItem] = useState<WorkItem | null>(null);
@@ -102,6 +93,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [highlightedIndex, setHighlightedIndex] = useState<number>(-1);
   const [collapsedSections, setCollapsedSections] = useState<{ [key: string]: boolean }>({});
   const [newDetailSubtaskTitle, setNewDetailSubtaskTitle] = useState('');
+  const [renamingItemId, setRenamingItemId] = useState<string | null>(null);
+  const [isHelpOpen, setIsHelpOpen] = useState(false);
+  const [dragOverColumn, setDragOverColumn] = useState<TaskStatus | null>(null);
+  const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
+  const quickAddRef = useRef<QuickAddBarHandle>(null);
 
   // Multi-select state
   const [isSelectMode, setIsSelectMode] = useState(false);
@@ -147,80 +143,140 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   }, [items]);
 
-  // Filter items
-  const filteredItems = useMemo(() => {
-    return items.filter((item) => {
-      if (filterType === 'task' && item.entity_type !== 'task') return false;
-      if (filterType === 'event' && item.entity_type !== 'event') return false;
-      if (filterType === 'reminder' && item.entity_type !== 'reminder') return false;
-      if (filterType === 'milestone') return false;
-      if (selectedTag && !item.context_tags?.toLowerCase().includes(selectedTag.toLowerCase())) {
-        return false;
-      }
-      if (selectedProjectId === 'inbox') {
-        if (item.project_id) return false;
-      } else if (selectedProjectId !== 'all' && item.project_id !== selectedProjectId) {
-        return false;
-      }
-      return true;
-    });
-  }, [items, filterType, selectedTag, selectedProjectId]);
+  /*
+   * Filtering happens once, against every rule the chips express, so the
+   * completed list and the open list can never disagree about what matches.
+   */
+  const matchesFilters = useCallback((item: WorkItem) => {
+    if (filterType === 'task' && item.entity_type !== 'task') return false;
+    if (filterType === 'event' && item.entity_type !== 'event') return false;
+    if (filterType === 'reminder' && item.entity_type !== 'reminder') return false;
+    if (filterType === 'milestone') return false;
+    if (selectedTag && !item.context_tags?.toLowerCase().includes(selectedTag.toLowerCase())) {
+      return false;
+    }
+    if (selectedProjectId === 'inbox') {
+      if (item.project_id) return false;
+    } else if (selectedProjectId !== 'all' && item.project_id !== selectedProjectId) {
+      return false;
+    }
+    return true;
+  }, [filterType, selectedTag, selectedProjectId]);
+
+  const hasActiveFilters = filterType !== 'all' || !!selectedTag || selectedProjectId !== 'all';
+
+  const clearFilters = () => {
+    setFilterType('all');
+    setSelectedTag(null);
+    setSelectedProjectId('all');
+  };
+
+  // What is still open. Finished work is kept apart rather than struck
+  // through in place, where it goes on taking up the list.
+  const filteredItems = useMemo(
+    () => items.filter((item) => matchesFilters(item) && !item.is_completed),
+    [items, matchesFilters]
+  );
+
+  const completedItems = useMemo(
+    () =>
+      items
+        .filter((item) => matchesFilters(item) && item.is_completed)
+        .sort((a, b) => (b.completed_at || b.updated_at || '').localeCompare(a.completed_at || a.updated_at || '')),
+    [items, matchesFilters]
+  );
 
   // Sort items
   const priorityWeights: { [key: string]: number } = { urgent: 4, high: 3, medium: 2, low: 1 };
 
   const sortedItems = useMemo(() => {
+    const direction = sortDir === 'asc' ? 1 : -1;
     return [...filteredItems].sort((a, b) => {
       if (sortBy === 'priority') {
-        return (priorityWeights[b.priority] || 0) - (priorityWeights[a.priority] || 0);
+        // Most urgent first is the useful direction, so ascending means that.
+        return direction * ((priorityWeights[b.priority] || 0) - (priorityWeights[a.priority] || 0));
       }
       if (sortBy === 'title') {
-        return a.title.localeCompare(b.title);
+        return direction * a.title.localeCompare(b.title);
       }
       if (sortBy === 'created_at') {
-        return new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime();
+        return direction * (new Date(b.created_at || '').getTime() - new Date(a.created_at || '').getTime());
       }
       // Default: when it happens, which includes the time of day. Sorting on
       // the date alone left everything due today in an arbitrary order.
-      return compareBySchedule(a, b);
+      return direction * compareBySchedule(a, b);
     });
-  }, [filteredItems, sortBy]);
+  }, [filteredItems, sortBy, sortDir]);
 
   // Smart Date Groups
   const smartGroups = useMemo(() => {
     return groupTasksBySmartDate(sortedItems);
   }, [sortedItems]);
 
-  // Keyboard Navigation Shortcuts (j/k, Space, e, d, t, m)
-  useKeyboardShortcuts({
-    enabled: viewMode === 'list' && !isCreating && !selectedItem && !isBoardOrganizerOpen,
-    onMoveDown: () => setHighlightedIndex(prev => Math.min(sortedItems.length - 1, prev + 1)),
-    onMoveUp: () => setHighlightedIndex(prev => Math.max(0, prev - 1)),
-    onToggleComplete: () => {
-      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
-        onToggleComplete(sortedItems[highlightedIndex]);
-      }
-    },
-    onEdit: () => {
-      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
-        setSelectedItem(sortedItems[highlightedIndex]);
-      }
-    },
-    onDelete: () => {
-      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length) {
-        setDeletingItemId(sortedItems[highlightedIndex].id);
-      }
-    },
-    onSetToday: () => {
-      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length && onUpdateItem) {
-        onUpdateItem(sortedItems[highlightedIndex].id, { due_date: getTodayDateString() });
-      }
-    },
-    onSetTomorrow: () => {
-      if (highlightedIndex >= 0 && highlightedIndex < sortedItems.length && onUpdateItem) {
-        onUpdateItem(sortedItems[highlightedIndex].id, { due_date: getTomorrowDateString() });
-      }
+  /*
+   * The sections exactly as the list draws them. Keyboard navigation walks
+   * this, so the row the arrow keys land on is the row the eye is on — which
+   * grouping and flat order had previously disagreed about.
+   */
+  const sections = useMemo(() => {
+    const open = smartGrouping
+      ? [
+          { key: 'overdue', label: 'Overdue', tone: 'late' as const, items: smartGroups.overdue },
+          { key: 'today', label: 'Today', tone: 'plain' as const, items: smartGroups.today },
+          { key: 'upcoming', label: 'Next 7 days', tone: 'plain' as const, items: smartGroups.upcoming },
+          { key: 'backlog', label: 'Someday', tone: 'plain' as const, items: smartGroups.backlog },
+        ]
+      : [{ key: 'all', label: null, tone: 'plain' as const, items: sortedItems }];
+
+    const completed = showCompleted && completedItems.length > 0
+      ? [{ key: 'completed', label: 'Completed', tone: 'plain' as const, items: completedItems }]
+      : [];
+
+    return [...open, ...completed].filter((section) => section.items.length > 0);
+  }, [smartGrouping, smartGroups, sortedItems, showCompleted, completedItems]);
+
+  const visibleItems = useMemo(
+    () => sections.filter((section) => !collapsedSections[section.key]).flatMap((section) => section.items),
+    [sections, collapsedSections]
+  );
+
+  const highlightedItem = highlightedIndex >= 0 ? visibleItems[highlightedIndex] : undefined;
+
+  // A list that shortened under the cursor should not leave it past the end.
+  useEffect(() => {
+    if (highlightedIndex >= visibleItems.length) {
+      setHighlightedIndex(visibleItems.length - 1);
     }
+  }, [visibleItems.length, highlightedIndex]);
+
+  const withHighlighted = (fn: (item: WorkItem) => void) => () => {
+    if (highlightedItem) fn(highlightedItem);
+  };
+
+  // Keyboard Navigation Shortcuts
+  useKeyboardShortcuts({
+    enabled: viewMode === 'list' && !isCreating && !selectedItem && !isBoardOrganizerOpen && !isHelpOpen && !renamingItemId,
+    onMoveDown: () => setHighlightedIndex(prev => Math.min(visibleItems.length - 1, prev + 1)),
+    onMoveUp: () => setHighlightedIndex(prev => Math.max(0, prev - 1)),
+    onToggleComplete: withHighlighted(onToggleComplete),
+    onEdit: withHighlighted(setSelectedItem),
+    onRename: withHighlighted((item) => setRenamingItemId(item.id)),
+    onDelete: withHighlighted((item) => setDeletingItemId(item.id)),
+    onSetToday: withHighlighted((item) => onUpdateItem?.(item.id, { due_date: getTodayDateString() })),
+    onSetTomorrow: withHighlighted((item) => onUpdateItem?.(item.id, { due_date: getTomorrowDateString() })),
+    onSetPriority: (priority) => {
+      if (highlightedItem) onUpdateItem?.(highlightedItem.id, { priority });
+    },
+    onToggleSelect: () => setIsSelectMode(prev => !prev),
+    onQuickAdd: () => quickAddRef.current?.focus(),
+    onShowHelp: () => setIsHelpOpen(true),
+    onEscape: () => {
+      if (selectedIds.size > 0 || isSelectMode) {
+        handleClearSelection();
+      } else {
+        setHighlightedIndex(-1);
+      }
+    },
   });
 
   // Multi-Select Handlers
@@ -272,6 +328,14 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const handleReschedule = (item: WorkItem, newDate: string | null) => {
     if (onUpdateItem) {
       onUpdateItem(item.id, { due_date: newDate });
+    }
+  };
+
+  // Rename in place, from a double click on the title or the r shortcut.
+  const handleRename = (item: WorkItem, title: string) => {
+    setRenamingItemId(null);
+    if (title !== item.title) {
+      onUpdateItem?.(item.id, { title });
     }
   };
 
@@ -439,10 +503,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
-  const handleAddDetailSubtask = async (e?: React.FormEvent) => {
+  const handleAddDetailSubtask = async (e?: React.FormEvent, explicitTitle?: string) => {
     if (e) e.preventDefault();
-    if (!newDetailSubtaskTitle.trim() || !selectedItem) return;
-    const title = newDetailSubtaskTitle.trim();
+    const title = (explicitTitle ?? newDetailSubtaskTitle).trim();
+    if (!title || !selectedItem) return;
     setNewDetailSubtaskTitle('');
     if (onAddSubtask) {
       onAddSubtask(selectedItem.id, title);
@@ -518,17 +582,20 @@ export const TasksView: React.FC<TasksViewProps> = ({
     }
   };
 
-  const kanbanColumns: { id: TaskStatus; label: string; desk: string }[] = [
-    { id: 'todo', label: 'Assignments', desk: 'DESK I' },
-    { id: 'in_progress', label: 'In Proofing', desk: 'DESK II' },
-    { id: 'blocked', label: 'Under Hold', desk: 'HOLD' },
-    { id: 'done', label: 'Published', desk: 'DESK III' },
+  // The same four names the detail sheet uses, so a status reads the same
+  // wherever it is shown.
+  const kanbanColumns: { id: TaskStatus; label: string }[] = [
+    { id: 'todo', label: 'To do' },
+    { id: 'in_progress', label: 'In progress' },
+    { id: 'blocked', label: 'On hold' },
+    { id: 'done', label: 'Done' },
   ];
 
   return (
     <PullToRefresh onRefresh={onRefresh} className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12">
       {/* Natural-language quick add */}
       <QuickAddBar
+        ref={quickAddRef}
         projects={projects}
         onQuickAdd={(itemData) => onCreateItem?.(itemData)}
         onOpenAiBrainDump={() => onOpenBrainDump?.()}
@@ -540,9 +607,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <h1 className="screen-title">Tasks</h1>
           <p className="text-meta text-ink-3 mt-0.5">
             {[
-              `${items.length} total`,
+              `${filteredItems.length} open`,
               smartGroups.overdue.length > 0 ? `${smartGroups.overdue.length} overdue` : null,
-              smartGroups.today.length > 0 ? `${smartGroups.today.length} due today` : null,
+              smartGroups.today.length > 0 ? `${smartGroups.today.length} today` : null,
             ]
               .filter(Boolean)
               .join(' · ')}
@@ -590,70 +657,102 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </button>
           </div>
 
-          {/* Smart Grouping Toggle (for List View) */}
-          {viewMode === 'list' && (
-            <button
-              onClick={() => setSmartGrouping(!smartGrouping)}
-              title={smartGrouping ? "Smart Grouping Enabled (Overdue, Today, Upcoming)" : "Flat List (Smart Grouping Off)"}
-              className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-control border text-meta transition-colors ${
-                smartGrouping
-                  ? 'bg-accent-500/15 text-accent-600 dark:text-accent-300 border-transparent'
-                  : 'bg-sunken text-ink-2 border-transparent hover:text-ink'
-              }`}
-            >
-              <SlidersHorizontal className="w-3.5 h-3.5" />
-              <span className="hidden sm:inline">{smartGrouping ? 'Grouped' : 'Flat'}</span>
-            </button>
-          )}
-
-          {/* Sort Dropdown */}
-          <div className="relative flex items-center bg-paper-aged dark:bg-stone-900 border border-stone-300 dark:border-stone-800 rounded-control px-2 py-1 text-meta">
+          {/* Sort */}
+          <div className="relative flex items-center bg-sunken rounded-control px-2 py-1 text-meta">
             <ArrowUpDown className="w-3.5 h-3.5 text-ink-3 mr-1.5" />
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="bg-transparent text-meta text-stone-800 dark:text-stone-200 focus:outline-none cursor-pointer"
+              aria-label="Sort by"
+              className="bg-transparent text-meta text-ink-2 focus:outline-none cursor-pointer"
             >
               <option value="due_date">Due date</option>
-              <option value="priority" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">Priority</option>
-              <option value="title" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">TITLE (A-Z)</option>
-              <option value="created_at" className="bg-paper-base text-stone-900 dark:bg-stone-900 dark:text-stone-200">Newest</option>
+              <option value="priority">Priority</option>
+              <option value="title">Title</option>
+              <option value="created_at">Created</option>
             </select>
+            <button
+              onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
+              aria-label={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+              title={sortDir === 'asc' ? 'Sort descending' : 'Sort ascending'}
+              className="ml-1.5 pl-1.5 border-l border-hairline text-ink-3 hover:text-ink transition-colors"
+            >
+              {sortDir === 'asc' ? '↑' : '↓'}
+            </button>
           </div>
 
-          {/* Multi-Select Mode Toggle */}
-          {viewMode === 'list' && (
+          {/*
+           * Everything else the view can do, behind one control. Five toggles
+           * across the top competed with the tasks for attention; only the
+           * thing you came to do, and the two you change often, stay out.
+           */}
+          <div className="relative">
             <button
-              onClick={() => {
-                if (isSelectMode) {
-                  handleClearSelection();
-                } else {
-                  setIsSelectMode(true);
-                }
-              }}
-              className={`px-2.5 py-1.5 rounded-control border text-meta transition-colors ${
-                isSelectMode
-                  ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                  : 'bg-paper-aged dark:bg-stone-900 text-ink-3 dark:text-stone-400 border-stone-300 dark:border-stone-800 hover:text-stone-900'
-              }`}
+              onClick={() => setIsViewMenuOpen(!isViewMenuOpen)}
+              aria-label="View options"
+              aria-expanded={isViewMenuOpen}
+              className="w-9 h-9 grid place-items-center rounded-control bg-sunken text-ink-2 hover:text-ink transition-colors"
             >
-              {isSelectMode ? 'Cancel' : 'Select'}
+              <MoreHorizontal className="w-4 h-4" />
             </button>
-          )}
 
-          {/* AI Board Organizer */}
-          <button
-            onClick={handleOpenBoardOrganizer}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-amber-800 dark:text-amber-400 border border-stone-300 dark:border-stone-700 rounded-control text-meta transition-colors"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
-            <span className="hidden sm:inline">AI Organize</span>
-          </button>
+            {isViewMenuOpen && (
+              <>
+                <div className="fixed inset-0 z-30" onClick={() => setIsViewMenuOpen(false)} />
+                <div className="absolute right-0 top-full mt-2 z-40 w-56 bg-surface border border-hairline rounded-control shadow-lg py-1">
+                  {viewMode === 'list' && (
+                    <>
+                      <button
+                        onClick={() => { setSmartGrouping(!smartGrouping); setIsViewMenuOpen(false); }}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+                      >
+                        <span>Group by date</span>
+                        {smartGrouping && <Check className="w-3.5 h-3.5 text-accent-500" />}
+                      </button>
+                      <button
+                        onClick={() => { setShowCompleted(!showCompleted); setIsViewMenuOpen(false); }}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+                      >
+                        <span>Show completed</span>
+                        {showCompleted && <Check className="w-3.5 h-3.5 text-accent-500" />}
+                      </button>
+                      <button
+                        onClick={() => {
+                          if (isSelectMode) handleClearSelection(); else setIsSelectMode(true);
+                          setIsViewMenuOpen(false);
+                        }}
+                        className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+                      >
+                        <span>{isSelectMode ? 'Stop selecting' : 'Select several'}</span>
+                        <kbd className="text-caption text-ink-3 font-mono">S</kbd>
+                      </button>
+                      <div className="h-px bg-hairline my-1" />
+                    </>
+                  )}
+
+                  <button
+                    onClick={() => { setIsViewMenuOpen(false); handleOpenBoardOrganizer(); }}
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Organize with AI</span>
+                  </button>
+                  <button
+                    onClick={() => { setIsViewMenuOpen(false); setIsHelpOpen(true); }}
+                    className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-meta text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+                  >
+                    <span>Keyboard shortcuts</span>
+                    <kbd className="text-caption text-ink-3 font-mono">?</kbd>
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
 
           {/* Manual New Item Button */}
           <button
             onClick={() => setIsCreating(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold border border-amber-600 transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-colors"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>New task</span>
@@ -690,7 +789,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <span className="text-ink-3 dark:text-stone-500 font-bold text-caption pr-1 flex items-center gap-1">
             <Tag className="w-3.5 h-3.5" /> Context
           </span>
-          {['all', '@errands', '@computer', '@phone', '@home', '@deep-work'].map((tag) => (
+          {['all', ...CONTEXT_TAGS].map((tag) => (
             <button
               key={tag}
               onClick={() => setSelectedTag(tag === 'all' ? null : tag)}
@@ -735,13 +834,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <button
                 key={p.id}
                 onClick={() => setSelectedProjectId(p.id)}
-                className={`px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
+                className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-control text-caption transition-colors whitespace-nowrap border ${
                   selectedProjectId === p.id
-                    ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-950/60 dark:text-amber-300 dark:border-amber-700 font-bold'
-                    : 'bg-paper-aged dark:bg-stone-900 text-ink-3 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-200 border-stone-300 dark:border-stone-800'
+                    ? 'bg-accent-500 text-white font-medium border-transparent'
+                    : 'bg-sunken text-ink-2 hover:text-ink border-transparent'
                 }`}
               >
-                <span className="w-1.5 h-1.5 rounded-control" style={{ backgroundColor: p.color || '#d97706' }} />
+                <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: p.color || 'currentColor' }} />
                 <span>{p.name}</span>
               </button>
             ))}
@@ -782,262 +881,140 @@ export const TasksView: React.FC<TasksViewProps> = ({
           )}
         </div>
       ) : viewMode === 'list' ? (
-        /* List View (Smart Date Grouping or Flat List with ListRow) */
+        /* List view: the sections exactly as `sections` describes them */
         <div className="space-y-4">
-          {sortedItems.length === 0 ? (
-            isLoading ? (
-              <div className="space-y-2">
-                <Skeleton variant="row" count={5} />
-              </div>
-            ) : (
-              <div className="text-center py-12 text-ink-2 text-meta">
-                No items match this filter. Use the Quick Add bar above!
-              </div>
-            )
-          ) : smartGrouping ? (
-            /* Smart Sections: Overdue, Today, Upcoming, Backlog */
-            <div className="space-y-6">
-              {/* Overdue Section */}
-              {smartGroups.overdue.length > 0 && (
-                <div className="space-y-2">
+          {isLoading && visibleItems.length === 0 ? (
+            <div className="space-y-2">
+              <Skeleton variant="row" count={5} />
+            </div>
+          ) : sections.length === 0 ? (
+            <div className="text-center py-16 space-y-3">
+              {hasActiveFilters ? (
+                <>
+                  <p className="text-body text-ink-2">Nothing matches these filters.</p>
                   <button
-                    onClick={() => toggleSectionCollapse('overdue')}
-                    className="flex items-center gap-2 text-meta font-semibold text-late-500 dark:text-late-400 px-1 cursor-pointer select-none"
+                    onClick={clearFilters}
+                    className="text-meta text-accent-600 dark:text-accent-400 hover:underline"
                   >
-                    {collapsedSections['overdue'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    <AlertCircle className="w-4 h-4" />
-                    <span>Overdue</span>
-                    <span className="text-caption px-2 py-0.5 rounded-full bg-late-500/15 tabular">
-                      {smartGroups.overdue.length}
-                    </span>
+                    Clear filters
                   </button>
-
-                  {!collapsedSections['overdue'] && (
-                    <div className="space-y-2 pl-1">
-                      {smartGroups.overdue.map((item, idx) => {
-                        const { blocked, blockerTitles } = isItemBlocked(item);
-                        return (
-                          <ListRow
-                            key={item.id}
-                            item={item}
-                            projects={projects}
-                            isSelected={selectedIds.has(item.id)}
-                            isSelectMode={isSelectMode}
-                            isHighlighted={highlightedIndex === idx}
-                            isBlocked={blocked}
-                            blockerTitles={blockerTitles}
-                            isRefining={refiningItemId === item.id}
-                            onToggleSelect={handleToggleSelect}
-                            onToggleComplete={onToggleComplete}
-                            onDelete={(id) => setDeletingItemId(id)}
-                            onClick={(item) => setSelectedItem(item)}
-                            onRefine={handleQuickRefine}
-                            onReschedule={handleReschedule}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Today Section */}
-              <div className="space-y-2">
-                <button
-                  onClick={() => toggleSectionCollapse('today')}
-                  className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
-                >
-                  {collapsedSections['today'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                  <Sun className="w-4 h-4 text-ink-3" />
-                  <span>Today</span>
-                  <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
-                    {smartGroups.today.length}
-                  </span>
-                </button>
-
-                {!collapsedSections['today'] && (
-                  <div className="space-y-2 pl-1">
-                    {smartGroups.today.length === 0 ? (
-                      <p className="text-meta text-ink-3 italic py-2 px-3">No tasks due today. You are all caught up!</p>
-                    ) : (
-                      smartGroups.today.map((item, idx) => {
-                        const { blocked, blockerTitles } = isItemBlocked(item);
-                        const globalIdx = smartGroups.overdue.length + idx;
-                        return (
-                          <ListRow
-                            key={item.id}
-                            item={item}
-                            projects={projects}
-                            isSelected={selectedIds.has(item.id)}
-                            isSelectMode={isSelectMode}
-                            isHighlighted={highlightedIndex === globalIdx}
-                            isBlocked={blocked}
-                            blockerTitles={blockerTitles}
-                            isRefining={refiningItemId === item.id}
-                            onToggleSelect={handleToggleSelect}
-                            onToggleComplete={onToggleComplete}
-                            onDelete={(id) => setDeletingItemId(id)}
-                            onClick={(item) => setSelectedItem(item)}
-                            onRefine={handleQuickRefine}
-                            onReschedule={handleReschedule}
-                          />
-                        );
-                      })
-                    )}
-                  </div>
-                )}
-              </div>
-
-              {/* Upcoming Section */}
-              {smartGroups.upcoming.length > 0 && (
-                <div className="space-y-2">
+                </>
+              ) : completedItems.length > 0 ? (
+                <>
+                  <p className="text-body text-ink-2">Everything here is done.</p>
                   <button
-                    onClick={() => toggleSectionCollapse('upcoming')}
-                    className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
+                    onClick={() => setShowCompleted(true)}
+                    className="text-meta text-accent-600 dark:text-accent-400 hover:underline"
                   >
-                    {collapsedSections['upcoming'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    <Calendar className="w-4 h-4 text-blue-400" />
-                    <span>Upcoming (Next 7 Days)</span>
-                    <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
-                      {smartGroups.upcoming.length}
-                    </span>
+                    Show the {completedItems.length} completed
                   </button>
-
-                  {!collapsedSections['upcoming'] && (
-                    <div className="space-y-2 pl-1">
-                      {smartGroups.upcoming.map((item, idx) => {
-                        const { blocked, blockerTitles } = isItemBlocked(item);
-                        const globalIdx = smartGroups.overdue.length + smartGroups.today.length + idx;
-                        return (
-                          <ListRow
-                            key={item.id}
-                            item={item}
-                            projects={projects}
-                            isSelected={selectedIds.has(item.id)}
-                            isSelectMode={isSelectMode}
-                            isHighlighted={highlightedIndex === globalIdx}
-                            isBlocked={blocked}
-                            blockerTitles={blockerTitles}
-                            isRefining={refiningItemId === item.id}
-                            onToggleSelect={handleToggleSelect}
-                            onToggleComplete={onToggleComplete}
-                            onDelete={(id) => setDeletingItemId(id)}
-                            onClick={(item) => setSelectedItem(item)}
-                            onRefine={handleQuickRefine}
-                            onReschedule={handleReschedule}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {/* Backlog / No Date Section */}
-              {smartGroups.backlog.length > 0 && (
-                <div className="space-y-2">
+                </>
+              ) : (
+                <>
+                  <p className="text-body text-ink-2">Nothing to do yet.</p>
                   <button
-                    onClick={() => toggleSectionCollapse('backlog')}
-                    className="flex items-center gap-2 text-meta font-semibold text-ink-2 px-1 cursor-pointer select-none"
+                    onClick={() => quickAddRef.current?.focus()}
+                    className="text-meta text-accent-600 dark:text-accent-400 hover:underline"
                   >
-                    {collapsedSections['backlog'] ? <ChevronRight className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
-                    <Folder className="w-4 h-4 text-ink-2" />
-                    <span>No Date / Backlog</span>
-                    <span className="text-caption px-2 py-0.5 rounded-full bg-sunken text-ink-3 tabular">
-                      {smartGroups.backlog.length}
-                    </span>
+                    Write the first one
                   </button>
-
-                  {!collapsedSections['backlog'] && (
-                    <div className="space-y-2 pl-1">
-                      {smartGroups.backlog.map((item, idx) => {
-                        const { blocked, blockerTitles } = isItemBlocked(item);
-                        const globalIdx = smartGroups.overdue.length + smartGroups.today.length + smartGroups.upcoming.length + idx;
-                        return (
-                          <ListRow
-                            key={item.id}
-                            item={item}
-                            projects={projects}
-                            isSelected={selectedIds.has(item.id)}
-                            isSelectMode={isSelectMode}
-                            isHighlighted={highlightedIndex === globalIdx}
-                            isBlocked={blocked}
-                            blockerTitles={blockerTitles}
-                            isRefining={refiningItemId === item.id}
-                            onToggleSelect={handleToggleSelect}
-                            onToggleComplete={onToggleComplete}
-                            onDelete={(id) => setDeletingItemId(id)}
-                            onClick={(item) => setSelectedItem(item)}
-                            onRefine={handleQuickRefine}
-                            onReschedule={handleReschedule}
-                          />
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
+                </>
               )}
             </div>
           ) : (
-            /* Flat Sorted List */
-            <div className="space-y-2">
-              {sortedItems.map((item, idx) => {
-                const { blocked, blockerTitles } = isItemBlocked(item);
-                return (
-                  <ListRow
-                    key={item.id}
-                    item={item}
-                    projects={projects}
-                    isSelected={selectedIds.has(item.id)}
-                    isSelectMode={isSelectMode}
-                    isHighlighted={highlightedIndex === idx}
-                    isBlocked={blocked}
-                    blockerTitles={blockerTitles}
-                    isRefining={refiningItemId === item.id}
-                    onToggleSelect={handleToggleSelect}
-                    onToggleComplete={onToggleComplete}
-                    onDelete={(id) => setDeletingItemId(id)}
-                    onClick={(item) => setSelectedItem(item)}
-                    onRefine={handleQuickRefine}
-                    onReschedule={handleReschedule}
-                  />
-                );
-              })}
+            <div className="space-y-6">
+              {sections.map((section) => (
+                <div key={section.key} className="space-y-1">
+                  {section.label && (
+                    <button
+                      onClick={() => toggleSectionCollapse(section.key)}
+                      aria-expanded={!collapsedSections[section.key]}
+                      className={`flex items-center gap-2 text-meta font-semibold px-1 py-1 select-none ${
+                        section.tone === 'late' ? 'text-late-500 dark:text-late-400' : 'text-ink-2'
+                      }`}
+                    >
+                      {collapsedSections[section.key] ? (
+                        <ChevronRight className="w-4 h-4" />
+                      ) : (
+                        <ChevronDown className="w-4 h-4" />
+                      )}
+                      <span>{section.label}</span>
+                      <span className="text-caption text-ink-3 tabular">{section.items.length}</span>
+                    </button>
+                  )}
+
+                  {!collapsedSections[section.key] && (
+                    <div>
+                      {section.items.map((item) => {
+                        const { blocked, blockerTitles } = isItemBlocked(item);
+                        return (
+                          <ListRow
+                            key={item.id}
+                            item={item}
+                            projects={projects}
+                            isSelected={selectedIds.has(item.id)}
+                            isSelectMode={isSelectMode}
+                            isHighlighted={highlightedItem?.id === item.id}
+                            isBlocked={blocked}
+                            blockerTitles={blockerTitles}
+                            isRefining={refiningItemId === item.id}
+                            isRenaming={renamingItemId === item.id}
+                            onToggleSelect={handleToggleSelect}
+                            onStartRename={(target) => setRenamingItemId(target.id)}
+                            onRename={handleRename}
+                            onCancelRename={() => setRenamingItemId(null)}
+                            onToggleComplete={onToggleComplete}
+                            onDelete={(id) => setDeletingItemId(id)}
+                            onClick={(target) => setSelectedItem(target)}
+                            onRefine={handleQuickRefine}
+                            onReschedule={handleReschedule}
+                          />
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              ))}
             </div>
           )}
         </div>
       ) : viewMode === 'kanban' ? (
-        /* Board view */
+        /* Board view: four quiet columns, dragged between */
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 overflow-x-auto pb-4">
           {kanbanColumns.map((col) => {
-            const colItems = sortedItems.filter(i => {
+            const colItems = (col.id === 'done' ? [...sortedItems, ...completedItems] : sortedItems).filter(i => {
               if (col.id === 'done') return i.is_completed || i.status === 'done';
               return !i.is_completed && i.status === col.id;
             });
 
             return (
-              <div 
-                key={col.id} 
-                onDragOver={(e) => e.preventDefault()}
+              <div
+                key={col.id}
+                onDragOver={(e) => {
+                  e.preventDefault();
+                  setDragOverColumn(col.id);
+                }}
+                onDragLeave={() => setDragOverColumn(null)}
                 onDrop={(e) => {
                   e.preventDefault();
-                  const droppedId = e.dataTransfer.getData('text/plain');
-                  handleDropOnColumn(col.id, droppedId);
+                  setDragOverColumn(null);
+                  handleDropOnColumn(col.id, e.dataTransfer.getData('text/plain'));
                 }}
-                className="bg-sunken border border-stone-300 dark:border-stone-800 rounded-control p-3.5 flex flex-col transition-colors hover:border-stone-400 dark:hover:border-stone-700 relative"
-              >                <div className="flex items-center justify-between mb-3 border-b border-stone-300 dark:border-stone-800/80 pb-2">
-                  <div>
-                    <div className="text-caption text-amber-700 dark:text-amber-500 font-bold">{col.desk}</div>
-                    <span className="text-sm font-bold text-stone-900 dark:text-stone-100 tracking-wide">{col.label}</span>
-                  </div>
-                  <span className="text-caption px-1.5 py-0.5 rounded-control bg-paper-white dark:bg-stone-900 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-800">
-                    {colItems.length}
-                  </span>
+                className={`rounded-surface p-3 flex flex-col transition-colors ${
+                  dragOverColumn === col.id ? 'bg-accent-500/10' : 'bg-sunken'
+                }`}
+              >
+                <div className="flex items-center justify-between pb-2 mb-1">
+                  <span className="text-meta font-semibold text-ink-2">{col.label}</span>
+                  <span className="text-caption text-ink-3 tabular">{colItems.length}</span>
                 </div>
 
-                <div className="space-y-2 flex-1 overflow-y-auto max-h-[600px] pr-1">
-                  {colItems.map((item) => {
+                <div className="space-y-2 flex-1 overflow-y-auto max-h-[600px]">
+                  {colItems.length === 0 ? (
+                    <p className="text-caption text-ink-3 py-6 text-center">Drop something here</p>
+                  ) : colItems.map((item) => {
                     const { blocked, blockerTitles } = isItemBlocked(item);
+                    const project = projects.find(proj => proj.id === item.project_id);
                     return (
                       <div
                         key={item.id}
@@ -1047,79 +1024,48 @@ export const TasksView: React.FC<TasksViewProps> = ({
                           e.dataTransfer.effectAllowed = 'move';
                         }}
                         onClick={() => setSelectedItem(item)}
-                        className={`bg-surface border p-2.5 rounded-control cursor-grab active:cursor-grabbing shadow-sm transition-colors space-y-2 select-none ${
-                          blocked
-                            ? 'border-amber-600/40 opacity-80 hover:opacity-100'
-                            : 'border-stone-300 dark:border-stone-800 hover:border-stone-400 dark:hover:border-stone-700'
-                        }`}
+                        className="group bg-surface rounded-control p-3 cursor-grab active:cursor-grabbing space-y-1.5 select-none shadow-sm"
                       >
                         <div className="flex items-start justify-between gap-2">
-                          <div className="flex items-center gap-1.5 min-w-0">
-                            {blocked && (
-                              <span title={`Blocked by: ${blockerTitles.join(', ')}`} className="text-amber-600 dark:text-amber-500 shrink-0 text-caption font-bold">
-                                [BLOCKED]
-                              </span>
+                          <span className={`text-meta min-w-0 ${item.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
+                            {item.title}
+                          </span>
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleQuickRefine(item);
+                            }}
+                            disabled={refiningItemId === item.id}
+                            title="Polish with AI"
+                            aria-label={`Polish ${item.title} with AI`}
+                            className="shrink-0 w-6 h-6 grid place-items-center rounded-control text-ink-3 opacity-0 group-hover:opacity-100 focus:opacity-100 hover:text-ink transition-opacity"
+                          >
+                            {refiningItemId === item.id ? (
+                              <RotateCw className="w-3.5 h-3.5 animate-spin text-accent-500" />
+                            ) : (
+                              <Sparkles className="w-3.5 h-3.5" />
                             )}
-                            <span className={` text-meta font-semibold truncate ${item.is_completed ? 'line-through text-ink-2 dark:text-stone-500 italic' : 'text-stone-900 dark:text-stone-100'}`}>
-                              {item.title}
-                            </span>
-                          </div>
-                          <div className="flex items-center space-x-1 shrink-0">
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleQuickRefine(item);
-                              }}
-                              disabled={refiningItemId === item.id}
-                              title="Polish with AI"
-                              className="text-ink-3 hover:text-amber-600 dark:hover:text-amber-400 p-0.5 rounded-control transition-colors"
-                            >
-                              {refiningItemId === item.id ? (
-                                <RotateCw className="w-3 h-3 animate-spin text-amber-500" />
-                              ) : (
-                                <Sparkles className="w-3 h-3" />
-                              )}
-                            </button>
-                            <span
-                              className={`text-caption font-bold px-1 py-0.2 rounded-control border ${
-                                item.priority === 'urgent'
-                                  ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950 dark:text-rose-300 dark:border-rose-800'
-                                  : 'bg-paper-aged dark:bg-stone-900 text-stone-700 dark:text-stone-400 border-stone-300 dark:border-stone-800'
-                              }`}
-                            >
-                              {item.priority}
-                            </span>
-                          </div>
+                          </button>
                         </div>
 
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {item.project_id && (() => {
-                            const p = projects.find(proj => proj.id === item.project_id);
-                            if (!p) return null;
-                            return (
-                              <div 
-                                className="text-caption px-1.5 py-0.5 rounded-control border border-stone-300 dark:border-stone-700 flex items-center gap-1 font-medium"
-                                style={{
-                                  backgroundColor: `${p.color || '#d97706'}20`,
-                                  color: p.color || '#d97706'
-                                }}
-                              >
-                                <span className="w-1.5 h-1.5 rounded-control" style={{ backgroundColor: p.color || '#d97706' }} />
-                                <span className="truncate max-w-[100px]">{p.name}</span>
-                              </div>
-                            );
-                          })()}
-                          {(item.due_date || itemMoment(item)) && (
-                            <span className="text-caption text-ink-3 dark:text-zinc-400">
-                              📅 {formatWhen(item)}
+                        {/* One quiet line, the same one the list rows carry */}
+                        <div className="flex items-center gap-x-2.5 gap-y-1 flex-wrap text-caption text-ink-3">
+                          {blocked && (
+                            <span title={`Blocked by ${blockerTitles.join(', ')}`} className="text-late-500 dark:text-late-400">
+                              Blocked
                             </span>
                           )}
-                          {item.context_tags && (
-                            <div className="text-caption text-ink-3 dark:text-zinc-400 flex items-center gap-0.5 bg-paper-base dark:bg-zinc-800/80 px-1.5 py-0.5 rounded-control border border-stone-200 dark:border-stone-700">
-                              <Tag className="w-2.5 h-2.5 text-ink-2" />
-                              <span>{item.context_tags}</span>
-                            </div>
+                          {item.priority === 'urgent' && !item.is_completed && (
+                            <span className="text-late-500 dark:text-late-400">Urgent</span>
                           )}
+                          {project && (
+                            <span className="flex items-center gap-1 min-w-0">
+                              <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: project.color || 'currentColor' }} />
+                              <span className="truncate max-w-[110px]">{project.name}</span>
+                            </span>
+                          )}
+                          {(item.due_date || itemMoment(item)) && <span>{formatWhen(item)}</span>}
+                          {item.context_tags && <span className="truncate">{item.context_tags}</span>}
                         </div>
                       </div>
                     );
@@ -1150,600 +1096,264 @@ export const TasksView: React.FC<TasksViewProps> = ({
         onBulkReschedule={handleBulkReschedule}
       />
 
-{/* Create Modal */}
+      {/* New task, when the quick-add line is not the right shape for it */}
       <Modal
         isOpen={isCreating}
         onClose={() => setIsCreating(false)}
-        title="Create New Item"
-        maxWidth="max-w-lg"
+        title="New task"
+        maxWidth="lg"
+        hasUnsavedChanges={!!newTitle.trim()}
       >
-        <form onSubmit={handleCreate} className="space-y-4">
-              <div>
-                <div className="flex items-center justify-between mb-1">
-                  <label className="block text-meta text-ink-2">Title</label>
-                  <button
-                    type="button"
-                    onClick={handleAiPolishNewItem}
-                    disabled={isAiPolishing || !newTitle.trim()}
-                    className="flex items-center space-x-1 text-meta text-blue-400 hover:text-blue-300 disabled:opacity-40 font-medium px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20 transition-all"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>{isAiPolishing ? 'Polishing...' : '✨ AI Polish & Auto-Complete'}</span>
-                  </button>
-                </div>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. gym, pay wifi, meet raj tomorrow..."
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
-                />
-              </div>
-
-              {/* Generated Subtasks Preview in Create Modal */}
-              {generatedSubtasks.length > 0 && (
-                <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3 rounded border border-ink-base/15 dark:border-stone-800 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-meta font-semibold text-blue-400 flex items-center space-x-1.5">
-                      <Sparkles className="w-3 h-3" />
-                      <span>AI Generated Action Checklist ({generatedSubtasks.length})</span>
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setGeneratedSubtasks([])}
-                      className="text-caption text-ink-3 hover:text-ink-2"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                  <div className="space-y-1">
-                    {generatedSubtasks.map((st, i) => (
-                      <div key={i} className="flex items-center justify-between text-meta bg-sunken/60 px-2.5 py-1.5 rounded-lg border border-hairline/60 text-ink">
-                        <span>{st}</span>
-                        <button
-                          type="button"
-                          onClick={() => setGeneratedSubtasks(generatedSubtasks.filter((_, idx) => idx !== i))}
-                          className="text-ink-3 hover:text-red-400"
-                        >
-                          <X className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Type</label>
-                  <select
-                    value={newType}
-                    onChange={(e) => setNewType(e.target.value as EntityType)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
-                  >
-                    <option value="task">Task</option>
-                    <option value="event">Event</option>
-                    <option value="reminder">Reminder</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Priority</label>
-                  <select
-                    value={newPriority}
-                    onChange={(e) => setNewPriority(e.target.value as TaskPriority)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
-                  >
-                    <option value="low">Low</option>
-                    <option value="medium">Medium</option>
-                    <option value="high">High</option>
-                    <option value="urgent">Urgent</option>
-                  </select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Due Date</label>
-                  <input
-                    type="date"
-                    value={newDueDate}
-                    onChange={(e) => setNewDueDate(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Recurrence (Optional)</label>
-                  <select
-                    value={newRepeatRule}
-                    onChange={(e) => setNewRepeatRule(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
-                  >
-                    <option value="">None (One-time)</option>
-                    <option value="daily">Daily</option>
-                    <option value="weekdays">Weekdays (Mon-Fri)</option>
-                    <option value="weekly:mon">Every Monday</option>
-                    <option value="monthly:1">Monthly (1st of month)</option>
-                  </select>
-                </div>
-              </div>
-
-              {/* Project & Milestone Assignment */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Project</label>
-                  <select
-                    value={newProjectId}
-                    onChange={(e) => {
-                      setNewProjectId(e.target.value);
-                      setNewMilestoneId('');
-                    }}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
-                  >
-                    <option value="">No Project (Inbox)</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>● {p.name}</option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Milestone (Optional)</label>
-                  <select
-                    value={newMilestoneId}
-                    onChange={(e) => setNewMilestoneId(e.target.value)}
-                    disabled={!newProjectId}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500 disabled:opacity-40"
-                  >
-                    <option value="">None</option>
-                    {milestones
-                      .filter(m => m.project_id === newProjectId)
-                      .map(m => (
-                        <option key={m.id} value={m.id}>🏁 {m.title}</option>
-                      ))}
-                  </select>
-                </div>
-              </div>
-
-              {/* Estimated Duration Quick Select */}
-              <div>
-                <label className="block text-meta text-ink-2 mb-1">Estimated Duration</label>
-                <div className="flex flex-wrap gap-1.5 items-center">
-                  {[15, 30, 45, 60, 90, 120].map(mins => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() => setNewEstimatedMinutes(mins)}
-                      className={`px-2.5 py-1 rounded-lg text-meta font-mono transition-all ${
-                        newEstimatedMinutes === mins
-                          ? 'bg-blue-600 text-white font-bold shadow-sm'
-                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
-                      }`}
-                    >
-                      {mins < 60 ? `${mins}m` : `${mins / 60}h${mins % 60 ? `${mins % 60}m` : ''}`}
-                    </button>
-                  ))}
-                  <div className="flex items-center gap-1 text-meta text-ink-2 ml-1">
-                    <input
-                      type="number"
-                      min={5}
-                      max={480}
-                      value={newEstimatedMinutes}
-                      onChange={e => setNewEstimatedMinutes(Math.max(5, parseInt(e.target.value) || 30))}
-                      className="w-16 bg-sunken border border-hairline rounded-lg px-2 py-1 text-meta text-ink text-right"
-                    />
-                    <span>min</span>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-meta text-ink-2 mb-1">Description</label>
-                <textarea
-                  rows={2}
-                  value={newDescription}
-                  onChange={(e) => setNewDescription(e.target.value)}
-                  placeholder="Optional: Leave blank to auto-generate based on project context upon saving..."
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
-                />
-              </div>
-
-              <div>
-                <label className="block text-meta text-ink-2 mb-1">GTD Context Tag (Optional)</label>
-                <div className="flex flex-wrap gap-1.5">
-                  {['@errands', '@computer', '@phone', '@home', '@deep-work'].map(tag => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => setNewContextTags(newContextTags === tag ? '' : tag)}
-                      className={`px-2 py-0.5 rounded-lg text-meta font-mono transition-all ${
-                        newContextTags === tag
-                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold'
-                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end space-x-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setIsCreating(false)}
-                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold"
-                >
-                  Save Item
-                </button>
-              </div>
-            </form>
-      </Modal>
-
-      {/* Item Detail & AI Auto-Fill Modal / Drawer */}
-      {selectedItem && (
-        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-4">
-          <div className="bg-surface border border-hairline rounded-2xl w-full max-w-lg p-6 space-y-4 shadow-lg max-h-[85vh] overflow-y-auto">
-            <div className="flex items-start justify-between">
-              <div>
-                <span className="text-caption font-mono text-blue-400">
-                  {selectedItem.entity_type} • {selectedItem.priority}
-                </span>
-                <h2 className="text-base font-bold text-ink mt-0.5">{selectedItem.title}</h2>
-              </div>
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={() => {
-                    const id = selectedItem.id;
-                    setSelectedItem(null);
-                    setDeletingItemId(id);
-                  }}
-                  aria-label={`Delete task: ${selectedItem.title}`}
-                  className="p-1.5 text-ink-2 hover:text-rose-400 hover:bg-sunken rounded-lg transition-colors"
-                  title="Delete task"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={() => setSelectedItem(null)}
-                  aria-label="Close task details"
-                  className="text-ink-2 hover:text-ink text-meta px-2 py-1 rounded-lg hover:bg-sunken transition-colors"
-                >
-                  Close
-                </button>
-              </div>
+        <form onSubmit={handleCreate} className="space-y-5">
+          <div className="space-y-1.5">
+            <div className="flex items-center justify-between">
+              <label htmlFor="new-task-title" className="label">Title</label>
+              <button
+                type="button"
+                onClick={handleAiPolishNewItem}
+                disabled={isAiPolishing || !newTitle.trim()}
+                className="flex items-center gap-1.5 text-meta text-ink-2 hover:text-ink disabled:opacity-40 transition-colors"
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                {isAiPolishing ? 'Polishing…' : 'Polish with AI'}
+              </button>
             </div>
+            <input
+              id="new-task-title"
+              type="text"
+              required
+              autoFocus
+              placeholder="What needs doing"
+              value={newTitle}
+              onChange={(e) => setNewTitle(e.target.value)}
+              className="field"
+            />
+          </div>
 
-            {/* Description */}
-            <div className="bg-paper-aged/40 dark:bg-stone-900/60 p-3.5 rounded border border-ink-base/15 dark:border-stone-800">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-meta font-semibold text-ink-2">Description & Context</span>
-                {/* AI Detail Filling Button */}
-                <button
-                  onClick={() => handleAiAutoFill(selectedItem)}
-                  disabled={isAiExpanding}
-                  className="flex items-center space-x-1 text-meta text-blue-400 hover:text-blue-300 font-medium"
-                >
-                  <Sparkles className="w-3 h-3" />
-                  <span>{isAiExpanding ? 'AI Generating...' : 'AI Auto-Fill Details'}</span>
-                </button>
-              </div>
-              <p className="text-meta text-ink-2 whitespace-pre-wrap">
-                {selectedItem.description || "No description provided. Click 'AI Auto-Fill Details' to have Raspberry Pi 5 generate one!"}
-              </p>
-            </div>
-
-            {/* Subtasks Checklist */}
+          {generatedSubtasks.length > 0 && (
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <span className="text-meta font-semibold text-ink-2">
-                  Actionable Checklist {selectedItem.subtasks.length > 0 && `(${selectedItem.subtasks.filter(s => s.is_completed).length}/${selectedItem.subtasks.length})`}
-                </span>
-              </div>
-              {selectedItem.subtasks.length === 0 ? (
-                <p className="text-meta text-ink-3 italic">No checklist items yet.</p>
-              ) : (
-                <div className="space-y-1.5">
-                  {selectedItem.subtasks.map((st) => (
-                    <div
-                      key={st.id}
-                      className="group flex items-center justify-between p-2 rounded-lg bg-sunken/60 border border-hairline/60 hover:border-hairline transition-colors"
-                    >
-                      <label className="flex items-center space-x-2.5 flex-1 min-w-0 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={st.is_completed}
-                          onChange={() => handleToggleSubtask(st.id)}
-                          className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
-                        />
-                        <span className={`text-meta truncate ${st.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
-                          {st.title}
-                        </span>
-                      </label>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDetailSubtask(st.id);
-                        }}
-                        className="opacity-0 group-hover:opacity-100 p-1 text-ink-3 hover:text-rose-500 rounded transition-opacity"
-                        title="Delete subtask"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Inline Add Subtask */}
-              <form onSubmit={handleAddDetailSubtask} className="flex items-center gap-1.5 pt-1">
-                <input
-                  type="text"
-                  placeholder="+ Add micro-step or subtask..."
-                  value={newDetailSubtaskTitle}
-                  onChange={(e) => setNewDetailSubtaskTitle(e.target.value)}
-                  className="flex-1 bg-sunken border border-hairline rounded-lg px-2.5 py-1 text-meta text-ink placeholder-ink-3 focus:outline-none focus:border-blue-500"
-                />
+                <span className="label">Suggested steps · {generatedSubtasks.length}</span>
                 <button
-                  type="submit"
-                  disabled={!newDetailSubtaskTitle.trim()}
-                  className="px-2.5 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-caption font-semibold disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                  type="button"
+                  onClick={() => setGeneratedSubtasks([])}
+                  className="text-meta text-ink-3 hover:text-ink"
                 >
-                  Add
+                  Clear
                 </button>
-              </form>
-            </div>
-
-            {/* GTD Context Tags Selector */}
-            <div className="space-y-1.5 border-t border-hairline pt-3">
-              <span className="text-meta font-semibold text-ink-2 flex items-center gap-1">
-                <Tag className="w-3 h-3 text-ink-2" /> GTD Context Tag
-              </span>
-              <div className="flex flex-wrap gap-1.5">
-                {['@errands', '@computer', '@phone', '@home', '@deep-work'].map(tag => {
-                  const isActive = selectedItem.context_tags?.includes(tag);
-                  return (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => {
-                        const current = selectedItem.context_tags ? selectedItem.context_tags.split(' ').filter(Boolean) : [];
-                        const next = isActive ? current.filter(t => t !== tag) : [...current, tag];
-                        const nextStr = next.join(' ');
-                        setSelectedItem({ ...selectedItem, context_tags: nextStr });
-                        onUpdateItem?.(selectedItem.id, { context_tags: nextStr });
-                      }}
-                      className={`px-2 py-0.5 rounded-lg text-meta font-mono transition-all ${
-                        isActive 
-                          ? 'bg-blue-500/20 text-blue-300 border border-blue-500/40 font-bold'
-                          : 'bg-sunken text-ink-2 border border-hairline hover:text-ink'
-                      }`}
-                    >
-                      {tag}
-                    </button>
-                  );
-                })}
               </div>
-            </div>
-
-            {/* Project & Milestone Reassignment Section */}
-            <div className="space-y-3 border-t border-hairline pt-3">
-              <span className="text-meta font-semibold text-ink-2 flex items-center gap-1.5">
-                <Folder className="w-3.5 h-3.5 text-blue-400" /> Project & Milestone Assignment
-              </span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Project</label>
-                  <select
-                    value={selectedItem.project_id || ''}
-                    onChange={(e) => {
-                      const val = e.target.value || null;
-                      const updated = { ...selectedItem, project_id: val, milestone_id: null };
-                      setSelectedItem(updated);
-                      onUpdateItem?.(selectedItem.id, { project_id: val as any, milestone_id: null as any });
-                    }}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink focus:outline-none focus:border-blue-500"
+              {generatedSubtasks.map((st, i) => (
+                <div key={i} className="flex items-center justify-between gap-3 py-1 text-meta text-ink">
+                  <span className="min-w-0 truncate">{st}</span>
+                  <button
+                    type="button"
+                    aria-label={`Remove ${st}`}
+                    onClick={() => setGeneratedSubtasks(generatedSubtasks.filter((_, idx) => idx !== i))}
+                    className="w-8 h-8 grid place-items-center text-ink-3 hover:text-ink rounded-control shrink-0"
                   >
-                    <option value="">No Project (Inbox)</option>
-                    {projects.map(p => (
-                      <option key={p.id} value={p.id}>● {p.name}</option>
-                    ))}
-                  </select>
+                    <X className="w-3.5 h-3.5" />
+                  </button>
                 </div>
-                <div>
-                  <label className="block text-meta text-ink-2 mb-1">Milestone</label>
-                  <select
-                    value={selectedItem.milestone_id || ''}
-                    onChange={(e) => {
-                      const val = e.target.value || null;
-                      const updated = { ...selectedItem, milestone_id: val };
-                      setSelectedItem(updated);
-                      onUpdateItem?.(selectedItem.id, { milestone_id: val as any });
-                    }}
-                    disabled={!selectedItem.project_id}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink focus:outline-none focus:border-blue-500 disabled:opacity-40"
-                  >
-                    <option value="">None</option>
-                    {milestones
-                      .filter(m => m.project_id === selectedItem.project_id)
-                      .map(m => (
-                        <option key={m.id} value={m.id}>🏁 {m.title}</option>
-                      ))}
-                  </select>
-                </div>
-              </div>
+              ))}
+            </div>
+          )}
 
-              {/* Estimated Duration Quick Editor */}
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-meta text-ink-2 flex items-center gap-1">
-                  <Clock className="w-3 h-3 text-ink-3" /> Estimated Duration:
-                </span>
-                <div className="flex items-center gap-1.5">
-                  {[15, 30, 45, 60, 120].map(mins => (
-                    <button
-                      key={mins}
-                      type="button"
-                      onClick={() => {
-                        const updated = { ...selectedItem, estimated_minutes: mins };
-                        setSelectedItem(updated);
-                        onUpdateItem?.(selectedItem.id, { estimated_minutes: mins });
-                      }}
-                      className={`px-2 py-0.5 rounded text-caption font-mono transition-all ${
-                        selectedItem.estimated_minutes === mins
-                          ? 'bg-blue-600 text-white font-bold shadow-sm'
-                          : 'bg-sunken text-ink-2 hover:text-white'
-                      }`}
-                    >
-                      {mins < 60 ? `${mins}m` : `${mins / 60}h`}
-                    </button>
-                  ))}
-                </div>
-              </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-type" className="label">Type</label>
+              <select
+                id="new-task-type"
+                value={newType}
+                onChange={(e) => setNewType(e.target.value as EntityType)}
+                className="field"
+              >
+                <option value="task">Task</option>
+                <option value="event">Event</option>
+                <option value="reminder">Reminder</option>
+              </select>
             </div>
 
-            {/* Task Dependencies & Blockers Section */}
-            <div className="space-y-2 border-t border-hairline pt-3">
-              <div className="flex items-center justify-between">
-                <span className="text-meta font-semibold text-ink-2 flex items-center gap-1.5">
-                  <Lock className="w-3 h-3 text-amber-400" /> Task Dependencies & Blockers
-                </span>
-              </div>
-
-              {/* Show blocker warning if blocked */}
-              {(() => {
-                const { blocked, blockerTitles } = isItemBlocked(selectedItem);
-                if (blocked) {
-                  return (
-                    <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-amber-300 text-meta flex items-center gap-2">
-                      <Lock className="w-4 h-4 shrink-0 text-amber-400" />
-                      <span>Blocked until: <strong>{blockerTitles.join(', ')}</strong> is completed.</span>
-                    </div>
-                  );
-                }
-                return null;
-              })()}
-
-              {/* Current dependencies list */}
-              {selectedItem.depends_on && selectedItem.depends_on.length > 0 ? (
-                <div className="space-y-1">
-                  {selectedItem.depends_on.map(depId => {
-                    const depItem = items.find(i => i.id === depId);
-                    return (
-                      <div key={depId} className="flex items-center justify-between p-2 rounded-lg bg-sunken/60 border border-hairline/60 text-meta">
-                        <div className="flex items-center gap-2 truncate">
-                          {depItem?.is_completed ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                          ) : (
-                            <Lock className="w-3.5 h-3.5 text-amber-400 shrink-0" />
-                          )}
-                          <span className={`truncate ${depItem?.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
-                            {depItem ? depItem.title : depId}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const newDeps = selectedItem.depends_on.filter(d => d !== depId);
-                            setSelectedItem({ ...selectedItem, depends_on: newDeps });
-                            onUpdateItem?.(selectedItem.id, { depends_on: newDeps });
-                          }}
-                          className="text-ink-3 hover:text-rose-400 p-0.5 rounded"
-                          title="Remove dependency"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p className="text-meta text-ink-3 italic">No prerequisites. This task can be started immediately.</p>
-              )}
-
-              {/* Add dependency dropdown */}
-              <div className="flex items-center gap-2 pt-1">
-                <select
-                  defaultValue=""
-                  onChange={e => {
-                    const addId = e.target.value;
-                    if (!addId) return;
-                    const cur = selectedItem.depends_on || [];
-                    if (!cur.includes(addId)) {
-                      const next = [...cur, addId];
-                      setSelectedItem({ ...selectedItem, depends_on: next });
-                      onUpdateItem?.(selectedItem.id, { depends_on: next });
-                    }
-                    e.target.value = '';
-                  }}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
-                >
-                  <option value="" disabled>+ Add blocker task dependency...</option>
-                  {items
-                    .filter(i => i.id !== selectedItem.id && !selectedItem.depends_on?.includes(i.id))
-                    .map(i => (
-                      <option key={i.id} value={i.id}>
-                        {i.is_completed ? '✓ ' : ''}{i.title}
-                      </option>
-                    ))}
-                </select>
-              </div>
-            </div>
-
-            {/* When it happens. The time is the whole point of a reminder, so
-                it is shown and editable rather than hidden behind the date. */}
-            <div className="space-y-2 border-t border-hairline pt-3">
-              <div className="flex items-center justify-between text-meta text-ink-2">
-                <span>{formatWhen(selectedItem)}</span>
-                <span>{selectedItem.repeat_rule ? `🔄 Recurrence: ${selectedItem.repeat_rule}` : 'One-time item'}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <input
-                  type="date"
-                  value={selectedItem.due_date || ''}
-                  onChange={e => {
-                    const next = withTimeOfDay(
-                      selectedItem.entity_type,
-                      e.target.value || null,
-                      timeInputValue(itemMoment(selectedItem)) || null
-                    );
-                    setSelectedItem({ ...selectedItem, ...next });
-                    onUpdateItem?.(selectedItem.id, next);
-                  }}
-                  className="flex-1 bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
-                />
-                <input
-                  type="time"
-                  value={timeInputValue(itemMoment(selectedItem))}
-                  onChange={e => {
-                    const next = withTimeOfDay(
-                      selectedItem.entity_type,
-                      selectedItem.due_date || getTodayDateString(),
-                      e.target.value || null
-                    );
-                    setSelectedItem({ ...selectedItem, ...next });
-                    onUpdateItem?.(selectedItem.id, next);
-                  }}
-                  className="w-28 bg-sunken border border-hairline rounded-lg px-2.5 py-1.5 text-meta text-ink-2 focus:outline-none focus:border-blue-500"
-                />
-              </div>
-              <p className="text-caption text-ink-3">
-                {itemMoment(selectedItem)
-                  ? 'You will be reminded at this time.'
-                  : 'Add a time and this will remind you.'}
-              </p>
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-priority" className="label">Priority</label>
+              <select
+                id="new-task-priority"
+                value={newPriority}
+                onChange={(e) => setNewPriority(e.target.value as TaskPriority)}
+                className="field"
+              >
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
             </div>
           </div>
-        </div>
+
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-due" className="label">Due</label>
+              <input
+                id="new-task-due"
+                type="date"
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="field"
+              />
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-repeat" className="label">Repeat</label>
+              <select
+                id="new-task-repeat"
+                value={newRepeatRule}
+                onChange={(e) => setNewRepeatRule(e.target.value)}
+                className="field"
+              >
+                <option value="">One-time</option>
+                <option value="daily">Daily</option>
+                <option value="weekdays">Weekdays</option>
+                <option value="weekly:mon">Every Monday</option>
+                <option value="monthly:1">Monthly</option>
+              </select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-project" className="label">Project</label>
+              <select
+                id="new-task-project"
+                value={newProjectId}
+                onChange={(e) => {
+                  setNewProjectId(e.target.value);
+                  setNewMilestoneId('');
+                }}
+                className="field"
+              >
+                <option value="">Inbox</option>
+                {projects.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="space-y-1.5">
+              <label htmlFor="new-task-milestone" className="label">Milestone</label>
+              <select
+                id="new-task-milestone"
+                value={newMilestoneId}
+                onChange={(e) => setNewMilestoneId(e.target.value)}
+                disabled={!newProjectId}
+                className="field disabled:opacity-40"
+              >
+                <option value="">None</option>
+                {milestones
+                  .filter(m => m.project_id === newProjectId)
+                  .map(m => (
+                    <option key={m.id} value={m.id}>{m.title}</option>
+                  ))}
+              </select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="label">Estimate</span>
+            <div className="flex flex-wrap gap-1.5">
+              {[15, 30, 45, 60, 90, 120].map(mins => (
+                <button
+                  key={mins}
+                  type="button"
+                  aria-pressed={newEstimatedMinutes === mins}
+                  onClick={() => setNewEstimatedMinutes(mins)}
+                  className={`px-2.5 py-1 rounded-control text-meta tabular transition-colors ${
+                    newEstimatedMinutes === mins
+                      ? 'bg-accent-500 text-white'
+                      : 'bg-sunken text-ink-2 hover:text-ink'
+                  }`}
+                >
+                  {formatDuration(mins)}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <label htmlFor="new-task-notes" className="label">Notes</label>
+            <textarea
+              id="new-task-notes"
+              rows={2}
+              value={newDescription}
+              onChange={(e) => setNewDescription(e.target.value)}
+              placeholder="Leave blank and one will be drafted from the project"
+              className="field resize-y"
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <span className="label">Context</span>
+            <div className="flex flex-wrap gap-1.5">
+              {CONTEXT_TAGS.map(tag => (
+                <button
+                  key={tag}
+                  type="button"
+                  aria-pressed={newContextTags === tag}
+                  onClick={() => setNewContextTags(newContextTags === tag ? '' : tag)}
+                  className={`px-2.5 py-1 rounded-control text-meta transition-colors ${
+                    newContextTags === tag
+                      ? 'bg-accent-500 text-white'
+                      : 'bg-sunken text-ink-2 hover:text-ink'
+                  }`}
+                >
+                  {tag}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setIsCreating(false)}
+              className="px-4 py-2 rounded-control text-meta text-ink-2 hover:text-ink transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!newTitle.trim()}
+              className="px-4 py-2 rounded-control bg-accent-500 hover:bg-accent-600 disabled:opacity-40 text-white text-meta font-medium transition-colors"
+            >
+              Add task
+            </button>
+          </div>
+        </form>
+      </Modal>
+
+      {/* Everything a task is, editable in one sheet */}
+      {selectedItem && (
+        <TaskDetailSheet
+          item={selectedItem}
+          items={items}
+          projects={projects}
+          milestones={milestones}
+          isAiExpanding={isAiExpanding}
+          onClose={() => setSelectedItem(null)}
+          onUpdate={(updates) => {
+            setSelectedItem((prev) => (prev ? { ...prev, ...updates } as WorkItem : prev));
+            onUpdateItem?.(selectedItem.id, updates);
+          }}
+          onDelete={() => {
+            const id = selectedItem.id;
+            setSelectedItem(null);
+            setDeletingItemId(id);
+          }}
+          onAiAutoFill={() => handleAiAutoFill(selectedItem)}
+          onToggleSubtask={handleToggleSubtask}
+          onAddSubtask={(title) => handleAddDetailSubtask(undefined, title)}
+          onDeleteSubtask={handleDeleteDetailSubtask}
+        />
       )}
+
 
       {/* AI Board Organizer Modal */}
       <Modal
@@ -1855,6 +1465,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
             ) : null}
           </div>
       </Modal>
+
+      <KeyboardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
 
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
