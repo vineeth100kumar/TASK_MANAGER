@@ -63,7 +63,7 @@ export const ReschedulePopover: React.FC<ReschedulePopoverProps> = ({
     >
       <div className="px-2 py-1 text-caption font-bold text-ink-muted dark:text-stone-400 flex items-center justify-between border-b border-ink-base/10 dark:border-stone-800 pb-1.5 mb-1">
         <span>Reschedule</span>
-        <button onClick={onClose} className="text-ink-muted hover:text-ink-base dark:text-stone-400 dark:hover:text-stone-200">
+        <button onClick={onClose} aria-label="Close" className="text-ink-muted hover:text-ink-base dark:text-stone-400 dark:hover:text-stone-200">
           <X className="w-3 h-3" />
         </button>
       </div>

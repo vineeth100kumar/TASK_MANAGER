@@ -7,6 +7,30 @@ import {
 } from '../types';
 import { getApiSecret, DEFAULT_LAT, DEFAULT_LON, DEFAULT_USER_NAME } from '../config';
 
+/*
+ * A rejected key has to reach the UI from anywhere a request is made, and
+ * threading it back through every caller would touch every hook in the app.
+ * Listeners are told once when the Pi says the key is wrong, and the app
+ * responds by asking for it again.
+ */
+type UnauthorizedListener = () => void;
+const unauthorizedListeners = new Set<UnauthorizedListener>();
+
+export function onUnauthorized(listener: UnauthorizedListener): () => void {
+  unauthorizedListeners.add(listener);
+  return () => unauthorizedListeners.delete(listener);
+}
+
+function reportUnauthorized(): void {
+  unauthorizedListeners.forEach((listener) => {
+    try {
+      listener();
+    } catch {
+      // A listener that throws must not break the request that found out.
+    }
+  });
+}
+
 const BASE_URL = '';
 
 // Most calls to the Pi are a few milliseconds, so a short ceiling catches a
@@ -43,8 +67,16 @@ async function fetchJson<T>(url: string, options?: RequestInit, timeoutMs = DEFA
       },
     });
     if (!res.ok) {
+      if (res.status === 401) {
+        // The key is missing or no longer the one the Pi expects -- after it
+        // was rotated, for instance. Ask for it rather than showing a wall of
+        // failed-to-sync toasts.
+        reportUnauthorized();
+      }
       const errText = await res.text();
-      throw new Error(errText || `HTTP error ${res.status}`);
+      const error: any = new Error(errText || `HTTP error ${res.status}`);
+      error.status = res.status;
+      throw error;
     }
     return res.json();
   } catch (err: any) {
@@ -382,7 +414,14 @@ export const api = {
 
   // Web Push
   getVapidPublicKey: () =>
-    fetchJson<{ public_key: string }>('/api/v1/push/vapid-public-key'),
+    fetchJson<{ public_key: string; configured: boolean }>('/api/v1/push/vapid-public-key'),
+
+  // The same endpoint a Siri shortcut hits, used by the test button in Settings.
+  siriQuickTask: (inputText: string) =>
+    fetchJson<{ success: boolean; spoken_response: string; task_id: string; title: string }>(
+      '/api/v1/shortcuts/quick-task',
+      { method: 'POST', body: JSON.stringify({ input_text: inputText }) }
+    ),
 
   subscribePush: (sub: { endpoint: string; p256dh: string; auth: string; device_name?: string }) =>
     fetchJson<{ success: boolean; id: string }>('/api/v1/push/subscribe', {

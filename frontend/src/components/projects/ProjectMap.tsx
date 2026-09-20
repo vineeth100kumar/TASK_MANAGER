@@ -266,6 +266,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
             <button
               onClick={handleZoomOut}
               className="p-1 text-ink-3 hover:text-ink rounded transition-colors"
+              aria-label="Zoom out"
               title="Zoom out"
             >
               <ZoomOut className="w-3.5 h-3.5" />
@@ -276,6 +277,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
             <button
               onClick={handleZoomIn}
               className="p-1 text-ink-3 hover:text-ink rounded transition-colors"
+              aria-label="Zoom in"
               title="Zoom in"
             >
               <ZoomIn className="w-3.5 h-3.5" />
@@ -283,6 +285,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
             <button
               onClick={handleResetView}
               className="p-1 text-ink-3 hover:text-ink rounded transition-colors border-l border-hairline ml-0.5"
+              aria-label="Reset view"
               title="Reset view"
             >
               <RotateCcw className="w-3.5 h-3.5" />
@@ -678,6 +681,7 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
             type="button"
             onClick={onToggleComplete}
             className="p-0.5 mt-0.5 rounded text-ink-3 hover:text-ink transition-colors flex-shrink-0"
+            aria-label={task.is_completed ? 'Mark pending' : 'Mark complete'}
             title={task.is_completed ? 'Mark pending' : 'Mark complete'}
           >
             {task.is_completed ? (

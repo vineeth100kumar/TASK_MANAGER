@@ -5,9 +5,23 @@ import datetime
 import aiosqlite
 from typing import List, Dict, Any, Optional
 
-VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "BN_DEMO_KEY_GENERATE_VIA_PYWEBPUSH")
-VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "DEMO_PRIVATE_KEY")
-VAPID_CLAIMS = {"sub": "mailto:admin@raspberrypi.local"}
+# Empty when unset, rather than a placeholder that looks like a key.
+#
+# The defaults here used to be the strings "BN_DEMO_KEY_GENERATE_VIA_PYWEBPUSH"
+# and "DEMO_PRIVATE_KEY", which the browser accepts as an applicationServerKey
+# and the push service then rejects. That failed indistinguishably from working
+# and left reminders quietly going nowhere. Empty means the app can tell it is
+# not set up and say so.
+VAPID_PUBLIC_KEY = os.environ.get("VAPID_PUBLIC_KEY", "").strip()
+VAPID_PRIVATE_KEY = os.environ.get("VAPID_PRIVATE_KEY", "").strip()
+VAPID_CLAIMS = {
+    "sub": os.environ.get("VAPID_CLAIM_EMAIL", "mailto:admin@raspberrypi.local")
+}
+
+
+def push_is_configured() -> bool:
+    """True when this Pi actually has keys to sign a push with."""
+    return bool(VAPID_PUBLIC_KEY and VAPID_PRIVATE_KEY)
 
 async def send_web_push(subscription: Dict[str, str], title: str, body: str, url: str = "/", tag: Optional[str] = None) -> bool:
     """
@@ -22,6 +36,15 @@ async def send_web_push(subscription: Dict[str, str], title: str, body: str, url
     exists, so the caller can drop it. Every other failure returns True: a
     Pi that was briefly offline should not lose its phone.
     """
+    if not push_is_configured():
+        # Nothing to sign with. Say it once, clearly, rather than letting the
+        # push service reject a placeholder key somewhere out of sight.
+        print(
+            "Web Push: no VAPID keys configured, so no notification was sent. "
+            "Run deploy/generate_vapid_keys.sh on the Pi."
+        )
+        return True
+
     try:
         from pywebpush import webpush
         payload = json.dumps({

@@ -5,8 +5,60 @@ import datetime
 import httpx
 from typing import Dict, Any, List, Optional
 
+from . import ai_runtime
+
 OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
 OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:1.5b")
+
+
+async def generate(
+    prompt: str,
+    label: str,
+    temperature: float = 0.2,
+    json_format: bool = False,
+) -> Optional[str]:
+    """
+    One model call, inside the runtime that governs them.
+
+    Every generation in this module goes through here rather than reaching for
+    httpx directly. `ai_runtime.inference` serialises calls to one at a time,
+    sizes the timeout from what this Pi has actually been doing, and tells the
+    connected clients the model is busy -- none of which happens on a bare
+    request. Two generations racing on a Pi 5 do not go twice as fast, they go
+    roughly four times as slowly and are likelier to time out, which is the
+    whole reason the runtime exists.
+
+    Returns the model's text, or None when it was unreachable, slow, or
+    answered with nothing. Every caller has a deterministic fallback for that
+    case, so None is an ordinary outcome and not an error.
+    """
+    async with ai_runtime.inference(label=label, input_chars=len(prompt)) as run:
+        payload: Dict[str, Any] = {
+            "model": OLLAMA_MODEL,
+            "prompt": prompt,
+            "stream": False,
+            "options": {"temperature": temperature},
+        }
+        if json_format:
+            payload["format"] = "json"
+
+        try:
+            async with httpx.AsyncClient(timeout=run.timeout) as client:
+                resp = await client.post(f"{OLLAMA_HOST}/api/generate", json=payload)
+            if resp.status_code != 200:
+                run.record_failure(f"http_{resp.status_code}")
+                return None
+            text = (resp.json().get("response") or "").strip()
+            if not text:
+                run.record_failure("empty_response")
+                return None
+            return text
+        except Exception as exc:
+            # A stopped Ollama returns in milliseconds. Recording that as a
+            # success would teach the runtime the model is very fast and shrink
+            # the budget until real generations start timing out.
+            run.record_failure(type(exc).__name__)
+            return None
 
 def safe_parse_json(raw_text: str):
     """Strips markdown code fences and safely extracts JSON dictionaries or arrays."""
@@ -59,23 +111,9 @@ async def generate_greeting(
     Output ONLY the 2 sentences. No quotes or preamble.
     """
     
-    try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.4}
-                }
-            )
-            if resp.status_code == 200:
-                text = resp.json().get("response", "").strip()
-                if text:
-                    return text
-    except Exception:
-        pass
+    text = await generate(prompt, label="greeting", temperature=0.4)
+    if text:
+        return text
 
     # Intelligent fallback if Ollama is not yet active on Pi
     if period == "morning":
@@ -749,27 +787,17 @@ async def improve_task_data(
     }}
     """
     
-    try:
-        async with httpx.AsyncClient(timeout=12.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "format": "json",
-                    "stream": False,
-                    "options": {"temperature": 0.2}
-                }
-            )
-            if resp.status_code == 200:
-                data = safe_parse_json(resp.json().get("response", ""))
-                if isinstance(data, dict) and data.get("improved_title"):
-                    desc = clean_plain_paragraph(data.get("description", ""))
-                    if desc and "efficiently with high quality" not in desc and "associated checklist items" not in desc:
-                        data["description"] = desc
-                        return data
-    except Exception:
-        pass
+    raw = await generate(prompt, label="improve-task", temperature=0.2, json_format=True)
+    if raw:
+        try:
+            data = safe_parse_json(raw)
+        except Exception:
+            data = None
+        if isinstance(data, dict) and data.get("improved_title"):
+            desc = clean_plain_paragraph(data.get("description", ""))
+            if desc and "efficiently with high quality" not in desc and "associated checklist items" not in desc:
+                data["description"] = desc
+                return data
 
     # Instant Domain-Aware Heuristic Synthesis Fallback (<5ms execution)
     return synthesize_domain_task(title, context, entity_type, project_name, previous_tasks)
@@ -925,23 +953,10 @@ async def generate_project_description(
     - Write in clean, plain English describing the objective, core deliverables, and definition of success.
     - Output ONLY the plain text paragraph. No preamble or conversational filler.
     """
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{OLLAMA_HOST}/api/generate",
-                json={
-                    "model": OLLAMA_MODEL,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {"temperature": 0.2}
-                }
-            )
-            if resp.status_code == 200:
-                text = resp.json().get("response", "").strip()
-                cleaned = clean_plain_paragraph(text)
-                if cleaned and len(cleaned) > 40:
-                    return cleaned
-    except Exception:
-        pass
+    text = await generate(prompt, label="project-description", temperature=0.2)
+    if text:
+        cleaned = clean_plain_paragraph(text)
+        if cleaned and len(cleaned) > 40:
+            return cleaned
 
     return synthesize_project_description(project_name, existing_tasks, context)

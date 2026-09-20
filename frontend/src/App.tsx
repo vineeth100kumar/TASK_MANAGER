@@ -14,12 +14,15 @@ const WhiteboardView = lazy(() =>
 );
 import { SearchModal } from './components/search/SearchModal';
 import { CelebrationModal } from './components/common/CelebrationModal';
+import { ErrorBoundary } from './components/common/ErrorBoundary';
+import { ConnectScreen } from './components/common/ConnectScreen';
 
-import { api } from './services/api';
+import { api, onUnauthorized } from './services/api';
 import { useLiveSync } from './services/websocket';
 import { useToast } from './context/ToastContext';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { storage } from './utils/storage';
+import { hasApiSecret } from './config';
 
 import { useUndoRedo } from './hooks/useUndoRedo';
 import { useTasksState } from './hooks/useTasksState';
@@ -40,6 +43,20 @@ export const App: React.FC = () => {
   const [isWizardOpen, setIsWizardOpen] = useState(false);
   const [wizardMode, setWizardMode] = useState<'morning' | 'evening'>('morning');
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  /*
+   * Nothing renders until this browser has a key. The app used to carry one
+   * compiled in, so it could always talk to the Pi -- and so could anyone
+   * else. `keyRejected` separates "never had a key" from "the key stopped
+   * working", so the screen can say which.
+   */
+  const [hasKey, setHasKey] = useState(() => hasApiSecret());
+  const [keyRejected, setKeyRejected] = useState(false);
+
+  useEffect(() => onUnauthorized(() => {
+    setKeyRejected(true);
+    setHasKey(false);
+  }), []);
 
   /*
    * Theme. The `dark` class on <html> is what actually drives every token, so it
@@ -217,7 +234,8 @@ export const App: React.FC = () => {
   const { isConnected } = useLiveSync(handleWsMessage);
 
   useEffect(() => {
-    loadData();
+    // No key means no request worth making: it would only 401.
+    if (hasKey) loadData();
 
     // Global keyboard shortcuts
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -274,9 +292,24 @@ export const App: React.FC = () => {
     }
 
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [loadData, handleUndo, handleRedo]);
+  }, [loadData, handleUndo, handleRedo, hasKey]);
 
   const todayTasks = items.filter(i => i.due_date === todayStr || (!i.is_completed && i.priority === 'urgent'));
+
+  // Every hook above has run by here, so this early return is safe.
+  if (!hasKey) {
+    return (
+      <ConnectScreen
+        wasRejected={keyRejected}
+        onConnected={() => {
+          // A reload rather than a state flip: the live-sync socket is opened
+          // once on mount and gives up immediately when there is no key, so
+          // without this it would stay dead until the next launch.
+          window.location.reload();
+        }}
+      />
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col bg-ground text-ink relative">
@@ -315,38 +348,43 @@ export const App: React.FC = () => {
         }`}
       >
         {activeTab === 'dashboard' && (
-          <DashboardView
-            isLoading={isInitialLoading}
-            performance={dailyPerformance}
-            greetingData={greetingData}
-            weatherData={weatherData}
-            financeSummary={financeSummary}
-            todayTasks={todayTasks}
-            onToggleTask={handleToggleComplete}
-            onNavigateToTab={setActiveTab}
-          />
+          <ErrorBoundary label="Today">
+            <DashboardView
+              isLoading={isInitialLoading}
+              performance={dailyPerformance}
+              greetingData={greetingData}
+              weatherData={weatherData}
+              financeSummary={financeSummary}
+              todayTasks={todayTasks}
+              onToggleTask={handleToggleComplete}
+              onNavigateToTab={setActiveTab}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'tasks' && (
-          <TasksView
-            isLoading={isInitialLoading}
-            items={items}
-            projects={projects}
-            milestones={milestones}
-            onRefresh={loadData}
-            onToggleComplete={handleToggleComplete}
-            onCreateItem={handleCreateItem}
-            onDeleteItem={handleDeleteItem}
-            onUpdateItem={handleUpdateItem}
-            onToggleSubtask={handleToggleSubtask}
-            onAddSubtask={handleAddSubtask}
-            onDeleteSubtask={handleDeleteSubtask}
-            onOpenBrainDump={() => setIsBrainDumpOpen(true)}
-            onCelebrationTrigger={() => setIsCelebrationOpen(true)}
-          />
+          <ErrorBoundary label="Tasks">
+            <TasksView
+              isLoading={isInitialLoading}
+              items={items}
+              projects={projects}
+              milestones={milestones}
+              onRefresh={loadData}
+              onToggleComplete={handleToggleComplete}
+              onCreateItem={handleCreateItem}
+              onDeleteItem={handleDeleteItem}
+              onUpdateItem={handleUpdateItem}
+              onToggleSubtask={handleToggleSubtask}
+              onAddSubtask={handleAddSubtask}
+              onDeleteSubtask={handleDeleteSubtask}
+              onOpenBrainDump={() => setIsBrainDumpOpen(true)}
+              onCelebrationTrigger={() => setIsCelebrationOpen(true)}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'whiteboard' && (
+          <ErrorBoundary label="The canvas">
           <Suspense
             fallback={
               <div className="flex items-center justify-center py-24 text-meta text-ink-3">
@@ -362,47 +400,54 @@ export const App: React.FC = () => {
               onTaskCreated={loadData}
             />
           </Suspense>
+          </ErrorBoundary>
         )}
 
         {activeTab === 'projects' && (
-          <ProjectsHub
-            isLoading={isInitialLoading}
-            projects={projects}
-            milestones={milestones}
-            items={items}
-            onCreateProject={handleCreateProject}
-            onDeleteProject={handleDeleteProject}
-            onCreateMilestone={handleCreateMilestone}
-            onDeleteMilestone={handleDeleteMilestone}
-            onSelectItem={() => setActiveTab('tasks')}
-            onCreateItem={handleCreateItem}
-            onToggleComplete={handleToggleComplete}
-            onToggleSubtask={handleToggleSubtask}
-            onAddSubtask={handleAddSubtask}
-            onDeleteSubtask={handleDeleteSubtask}
-            onOpenWhiteboard={(projId) => {
-              setActiveWhiteboardProjectId(projId);
-              setActiveTab('whiteboard');
-            }}
-          />
+          <ErrorBoundary label="Projects">
+            <ProjectsHub
+              isLoading={isInitialLoading}
+              projects={projects}
+              milestones={milestones}
+              items={items}
+              onCreateProject={handleCreateProject}
+              onDeleteProject={handleDeleteProject}
+              onCreateMilestone={handleCreateMilestone}
+              onDeleteMilestone={handleDeleteMilestone}
+              onSelectItem={() => setActiveTab('tasks')}
+              onCreateItem={handleCreateItem}
+              onToggleComplete={handleToggleComplete}
+              onToggleSubtask={handleToggleSubtask}
+              onAddSubtask={handleAddSubtask}
+              onDeleteSubtask={handleDeleteSubtask}
+              onOpenWhiteboard={(projId) => {
+                setActiveWhiteboardProjectId(projId);
+                setActiveTab('whiteboard');
+              }}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'finance' && (
-          <FinanceView
-            isLoading={isInitialLoading}
-            summary={financeSummary}
-            transactions={transactions}
-            onRefresh={loadData}
-            onCreateAccount={handleCreateAccount}
-            onUpdateAccount={handleUpdateAccount}
-            onDeleteAccount={handleDeleteAccount}
-            onCreateTransaction={handleCreateTransaction}
-            onDeleteTransaction={handleDeleteTransaction}
-          />
+          <ErrorBoundary label="Finance">
+            <FinanceView
+              isLoading={isInitialLoading}
+              summary={financeSummary}
+              transactions={transactions}
+              onRefresh={loadData}
+              onCreateAccount={handleCreateAccount}
+              onUpdateAccount={handleUpdateAccount}
+              onDeleteAccount={handleDeleteAccount}
+              onCreateTransaction={handleCreateTransaction}
+              onDeleteTransaction={handleDeleteTransaction}
+            />
+          </ErrorBoundary>
         )}
 
         {activeTab === 'shortcuts' && (
-          <ShortcutsModal />
+          <ErrorBoundary label="Settings">
+            <ShortcutsModal />
+          </ErrorBoundary>
         )}
       </main>
 

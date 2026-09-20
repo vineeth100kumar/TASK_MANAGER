@@ -136,6 +136,7 @@ export const BulkActionBar: React.FC<BulkActionBarProps> = ({
           {/* Cancel */}
           <button
             onClick={onClearSelection}
+            aria-label="Clear selection"
             className="p-1.5 rounded-control text-ink-3 hover:text-stone-900 dark:hover:text-stone-200 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
           >
             <X className="w-4 h-4" />

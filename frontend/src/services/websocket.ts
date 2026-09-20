@@ -24,29 +24,23 @@ export function useLiveSync(onMessage?: MessageHandler) {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       const host = window.location.host;
       const token = getApiSecret();
-      const query = token ? `?token=${encodeURIComponent(token)}` : '';
-      const wsUrl = `${protocol}//${host}/ws${query}`;
+      if (!token) return; // Nothing to authenticate with yet.
+      // The token is sent as the first frame, not in the URL: a query string
+      // ends up in nginx's access log and in any proxy along the way.
+      const wsUrl = `${protocol}//${host}/ws`;
 
       try {
         const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         ws.onopen = () => {
-          if (!unmounted) {
-            setIsConnected(true);
-            retryDelay = 1000; // Reset backoff on successful connection
-
-            // Periodic keep-alive ping every 25 seconds
-            clearInterval(pingInterval);
-            pingInterval = setInterval(() => {
-              if (ws.readyState === WebSocket.OPEN) {
-                try {
-                  ws.send('ping');
-                } catch {
-                  // ignore
-                }
-              }
-            }, 25000);
+          if (unmounted) return;
+          // Open is not yet connected: the server drops the socket unless the
+          // first frame proves who this is. `isConnected` waits for AUTH_OK.
+          try {
+            ws.send(JSON.stringify({ type: 'auth', token }));
+          } catch {
+            // The close handler will schedule the retry.
           }
         };
 
@@ -54,6 +48,25 @@ export function useLiveSync(onMessage?: MessageHandler) {
           try {
             if (event.data === 'pong') return;
             const parsed = JSON.parse(event.data);
+
+            if (parsed?.type === 'AUTH_OK') {
+              setIsConnected(true);
+              retryDelay = 1000; // Reset backoff once actually admitted.
+
+              // Periodic keep-alive ping every 25 seconds
+              clearInterval(pingInterval);
+              pingInterval = setInterval(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                  try {
+                    ws.send('ping');
+                  } catch {
+                    // ignore
+                  }
+                }
+              }, 25000);
+              return;
+            }
+
             if (onMessageRef.current) onMessageRef.current(parsed);
           } catch {
             // ping or raw string

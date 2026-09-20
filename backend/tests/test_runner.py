@@ -40,8 +40,12 @@ class TestSageBackend(unittest.TestCase):
         run_res = asyncio.run(improve_task_data("Go for a Run"))
         self.assertNotIn("efficiently with high quality", run_res["description"])
         self.assertNotIn("associated checklist items", run_res["description"])
-        self.assertIn("Pacing", run_res["description"])
+        # "Pacing" was a markdown heading, removed when descriptions became
+        # one plain paragraph. Assert the text is about running instead.
+        self.assertIn("pacing", run_res["description"].lower())
         self.assertIn("cadence", run_res["description"])
+        self.assertNotIn("#", run_res["description"])
+        self.assertNotIn("*", run_res["description"])
         self.assertGreaterEqual(len(run_res["subtasks"]), 3)
         self.assertEqual(run_res["category"], "Health")
 
@@ -320,17 +324,16 @@ class TestSageBackend(unittest.TestCase):
             with TestClient(app) as client:
                 headers = {"Authorization": "Bearer test_api_secret_789"}
 
-                # 1. Test project creation with NO description -> auto-generated (1 paragraph, zero # or *)
+                # 1. Creating a project returns at once. Generating the
+                # description used to happen inline, which held the request
+                # open on the local model; it is filled in afterwards now.
                 proj_res = client.post("/api/v1/items/projects", json={
                     "name": "Autonomous Agent Pipeline",
                     "color": "#10b981"
                 }, headers=headers)
                 self.assertEqual(proj_res.status_code, 200)
                 proj_data = proj_res.json()
-                self.assertTrue(proj_data["description"])
-                self.assertNotIn("#", proj_data["description"])
-                self.assertNotIn("*", proj_data["description"])
-                self.assertIn("Autonomous Agent Pipeline", proj_data["description"])
+                self.assertFalse(proj_data["description"])
                 project_id = proj_data["id"]
 
                 # 2. Test project update endpoint (PATCH /projects/{id})
@@ -340,30 +343,26 @@ class TestSageBackend(unittest.TestCase):
                 self.assertEqual(update_res.status_code, 200)
                 self.assertEqual(update_res.json()["description"], "Updated project description with custom roadmap.")
 
-                # 3. Create initial task in the project with NO description -> auto-generated (1 paragraph, zero # or *)
+                # 3. Same for a task: it comes back immediately, with no
+                # description and -- crucially -- no invented subtasks. Five
+                # checklist items the user never asked for is not a feature.
                 task1_res = client.post("/api/v1/items", json={
                     "title": "Design System Architecture",
                     "project_id": project_id
                 }, headers=headers)
                 self.assertEqual(task1_res.status_code, 200)
                 task1_data = task1_res.json()
-                self.assertTrue(task1_data["description"])
-                self.assertNotIn("#", task1_data["description"])
-                self.assertNotIn("*", task1_data["description"])
-                self.assertIn("Autonomous Agent Pipeline", task1_data["description"])
-                self.assertGreater(len(task1_data["subtasks"]), 0)
+                self.assertFalse(task1_data["description"])
+                self.assertEqual(task1_data["subtasks"], [])
 
-                # 4. Create second task in the project with NO description -> incorporates previous task without # or *
+                # 4. A second task, likewise.
                 task2_res = client.post("/api/v1/items", json={
                     "title": "Deploy API Microservices",
                     "project_id": project_id
                 }, headers=headers)
                 self.assertEqual(task2_res.status_code, 200)
                 task2_data = task2_res.json()
-                self.assertTrue(task2_data["description"])
-                self.assertNotIn("#", task2_data["description"])
-                self.assertNotIn("*", task2_data["description"])
-                self.assertIn("Design System Architecture", task2_data["description"]) # Preceding deliverable referenced!
+                self.assertFalse(task2_data["description"])
 
                 # 5. Test AI generate-project-description endpoint directly (1 paragraph, zero # or *)
                 ai_proj_res = client.post("/api/v1/ai/generate-project-description", json={
@@ -386,7 +385,7 @@ class TestSageBackend(unittest.TestCase):
                 af_desc = auto_fill_res.json()["data"]["description"]
                 self.assertNotIn("#", af_desc)
                 self.assertNotIn("*", af_desc)
-                self.assertIn("Deploy API Microservices", af_desc)
+                self.assertIn("Configure Fan Curves", af_desc)
 
                 # Cleanup test project & items
                 client.delete(f"/api/v1/items/{task1_data['id']}", headers=headers)

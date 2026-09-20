@@ -23,6 +23,19 @@ class _DeadSubscription(Exception):
         self.status_code = status_code
 
 
+@pytest.fixture(autouse=True)
+def _configured_vapid_keys(monkeypatch):
+    """
+    Give every test in this module keys to sign with.
+
+    `send_web_push` returns early when the Pi has no VAPID keys, which is the
+    right behaviour on a fresh install but means these tests would assert
+    against a function that never got as far as the push service.
+    """
+    monkeypatch.setattr(push_service, "VAPID_PUBLIC_KEY", "test-public-key")
+    monkeypatch.setattr(push_service, "VAPID_PRIVATE_KEY", "test-private-key")
+
+
 async def _fresh_db(tmp_path, monkeypatch, name):
     db_path = str(tmp_path / name)
     monkeypatch.setattr(database, "DB_PATH", db_path)

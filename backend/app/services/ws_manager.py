@@ -8,7 +8,18 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
-        self.active_connections.append(websocket)
+        self.register(websocket)
+
+    def register(self, websocket: WebSocket):
+        """
+        Add an already-accepted socket to the broadcast pool.
+
+        Kept separate from `connect` because the socket has to be accepted
+        before it can be asked for credentials, and it must not receive a
+        single broadcast until it has produced them.
+        """
+        if websocket not in self.active_connections:
+            self.active_connections.append(websocket)
 
     def disconnect(self, websocket: WebSocket):
         if websocket in self.active_connections:
