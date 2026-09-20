@@ -3,6 +3,7 @@ import {
   getTodayDateString,
   getTomorrowDateString,
   getYesterdayDateString,
+  formatDuration,
   getThisWeekend,
   getNextMonday,
   isOverdue,
@@ -256,5 +257,14 @@ describe('the order a day happens in', () => {
     const done = { ...at('reminder', '2026-09-18T18:30:00'), is_completed: true };
 
     expect(isPastDue(done, new Date('2026-09-18T23:00:00'))).toBe(false);
+  });
+});
+
+describe('formatDuration', () => {
+  it('writes durations the way a person says them', () => {
+    expect(formatDuration(15)).toBe('15m');
+    expect(formatDuration(60)).toBe('1h');
+    expect(formatDuration(90)).toBe('1h30m');
+    expect(formatDuration(120)).toBe('2h');
   });
 });

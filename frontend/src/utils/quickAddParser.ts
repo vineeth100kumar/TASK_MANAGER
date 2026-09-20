@@ -46,12 +46,12 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
   if (/^\b(event|meeting|call):\s*/i.test(remaining)) {
     entity_type = 'event';
     const match = remaining.match(/^\b(event|meeting|call):\s*/i)!;
-    tokens.push({ type: 'entity', text: match[0], display: '📅 Event' });
+    tokens.push({ type: 'entity', text: match[0], display: 'Event' });
     remaining = remaining.slice(match[0].length);
   } else if (/^\b(reminder|remember|remind):\s*/i.test(remaining)) {
     entity_type = 'reminder';
     const match = remaining.match(/^\b(reminder|remember|remind):\s*/i)!;
-    tokens.push({ type: 'entity', text: match[0], display: '🔔 Reminder' });
+    tokens.push({ type: 'entity', text: match[0], display: 'Reminder' });
     remaining = remaining.slice(match[0].length);
   }
 
@@ -62,16 +62,16 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
     const rawTag = priorityMatch[1].toLowerCase();
     if (rawTag === '!urgent' || rawTag === 'p1') {
       priority = 'urgent';
-      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: '🔴 Urgent' });
+      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: 'Urgent' });
     } else if (rawTag === '!high' || rawTag === 'p2') {
       priority = 'high';
-      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: '🟠 High' });
+      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: 'High' });
     } else if (rawTag === '!med' || rawTag === '!medium' || rawTag === 'p3') {
       priority = 'medium';
-      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: '🟡 Medium' });
+      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: 'Medium' });
     } else if (rawTag === '!low' || rawTag === 'p4') {
       priority = 'low';
-      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: '⚪ Low' });
+      tokens.push({ type: 'priority', text: priorityMatch[0].trim(), display: 'Low' });
     }
     remaining = remaining.replace(priorityRegex, ' ');
   }
@@ -87,7 +87,7 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
     } else {
       estimated_minutes = num;
     }
-    tokens.push({ type: 'estimate', text: estimateMatch[1], display: `⏱️ ${estimated_minutes}m` });
+    tokens.push({ type: 'estimate', text: estimateMatch[1], display: `${estimated_minutes}m` });
     remaining = remaining.replace(estimateRegex, ' ');
   }
 
@@ -118,7 +118,7 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
     if (matchedProject) {
       project_id = matchedProject.id;
       project_name = matchedProject.name;
-      tokens.push({ type: 'project', text: projectMatch[1], display: `📁 ${matchedProject.name}` });
+      tokens.push({ type: 'project', text: projectMatch[1], display: `${matchedProject.name}` });
     } else {
       tokens.push({ type: 'project', text: projectMatch[1], display: `#${projectMatch[2]}` });
     }
@@ -145,7 +145,7 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
       // 24-hour format
       due_time = `${timeMatch[4].padStart(2, '0')}:${timeMatch[5]}`;
     }
-    tokens.push({ type: 'time', text: timeMatch[0].trim(), display: `🕒 ${rawTime}` });
+    tokens.push({ type: 'time', text: timeMatch[0].trim(), display: rawTime });
     remaining = remaining.replace(timeRegex, ' ');
   }
 
@@ -156,16 +156,16 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
     const rawDate = dateMatch[1].toLowerCase();
     if (rawDate === 'today' || rawDate === 'tonight') {
       due_date = getTodayDateString();
-      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: '📅 Today' });
+      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: 'Today' });
     } else if (rawDate === 'tomorrow' || rawDate === 'tmrw') {
       due_date = getTomorrowDateString();
-      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: '📅 Tomorrow' });
+      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: 'Tomorrow' });
     } else if (rawDate === 'weekend') {
       due_date = getThisWeekend();
-      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: '📅 This Weekend' });
+      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: 'This weekend' });
     } else if (rawDate.includes('monday') || rawDate === 'mon' || rawDate.includes('next week')) {
       due_date = getNextMonday();
-      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: '📅 Next Monday' });
+      tokens.push({ type: 'date', text: dateMatch[0].trim(), display: 'Next Monday' });
     } else {
       // Weekday match
       const days = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'];
@@ -177,7 +177,7 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
         if (diff <= 0) diff += 7;
         d.setDate(d.getDate() + diff);
         due_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        tokens.push({ type: 'date', text: dateMatch[0].trim(), display: `📅 ${rawDate.charAt(0).toUpperCase() + rawDate.slice(1)}` });
+        tokens.push({ type: 'date', text: dateMatch[0].trim(), display: `${rawDate.charAt(0).toUpperCase() + rawDate.slice(1)}` });
       }
     }
     remaining = remaining.replace(dateKeywordRegex, ' ');
@@ -196,7 +196,7 @@ export function parseQuickAdd(input: string, availableProjects: Project[] = []):
       d.setDate(d.getDate() + count);
     }
     due_date = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-    tokens.push({ type: 'date', text: relativeMatch[0].trim(), display: `📅 In ${count} ${unit}` });
+    tokens.push({ type: 'date', text: relativeMatch[0].trim(), display: `In ${count} ${unit}` });
     remaining = remaining.replace(relativeRegex, ' ');
   }
 
