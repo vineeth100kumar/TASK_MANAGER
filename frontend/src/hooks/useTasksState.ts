@@ -12,6 +12,7 @@ import {
   TaskStatus
 } from '../types';
 import { HistoryAction } from './useUndoRedo';
+import { useSaveState } from '../context/SaveStateContext';
 
 interface UseTasksStateProps {
   todayStr: string;
@@ -29,6 +30,7 @@ export function useTasksState({
   onAllTodayCompleted,
 }: UseTasksStateProps) {
   const toast = useToast();
+  const { recordFailure } = useSaveState();
 
   const [items, setItems] = useState<WorkItem[]>([]);
   const [milestones, setMilestones] = useState<Milestone[]>([]);
@@ -58,14 +60,21 @@ export function useTasksState({
       };
     });
 
-    startSync();
-    return api.updateItem(itemId, { is_completed: newCompleted })
-      .catch(err => {
-        console.error('Failed to sync item toggle to Pi', err);
-        toast.error('Failed to sync task status to Pi');
-      })
-      .finally(endSync);
-  }, [startSync, endSync, toast]);
+    const attempt = (): Promise<unknown> => {
+      startSync();
+      return api.updateItem(itemId, { is_completed: newCompleted })
+        .catch(err => {
+          console.error('Failed to sync item toggle to Pi', err);
+          recordFailure({
+            description: newCompleted ? 'Ticking a task off' : 'Putting a task back',
+            retry: attempt,
+          });
+        })
+        .finally(endSync);
+    };
+
+    return attempt();
+  }, [startSync, endSync, recordFailure]);
 
   const handleToggleComplete = useCallback((item: WorkItem) => {
     const newCompleted = !item.is_completed;
@@ -222,11 +231,18 @@ export function useTasksState({
       })
       .catch(err => {
         console.error('Failed to create item on Pi', err);
-        toast.error('Failed to save task to Raspberry Pi');
+        // The optimistic row goes, because it does not exist. What was typed
+        // is kept in the retry, so nothing has to be typed twice.
         setItems(prev => prev.filter(i => i.id !== tempId));
+        recordFailure({
+          description: `Creating "${itemData.title}"`,
+          retry: () => api.createItem(itemData).then(realItem => {
+            setItems(prev => [realItem, ...prev]);
+          }),
+        });
       })
       .finally(endSync);
-  }, [todayStr, startSync, endSync, pushHistoryAction, executeDeleteItem, executeRestoreItem, toast]);
+  }, [todayStr, startSync, endSync, pushHistoryAction, executeDeleteItem, executeRestoreItem, toast, recordFailure]);
 
   // Update Item details
   const handleUpdateItem = useCallback((id: string, updates: WorkItemUpdatePayload) => {
@@ -283,17 +299,32 @@ export function useTasksState({
       });
     }
 
-    startSync();
-    api.updateItem(id, updates)
-      .then(realItem => {
-        setItems(prev => prev.map(i => i.id === id ? realItem : i));
-      })
-      .catch(err => {
-        console.error('Failed to update item on Pi', err);
-        toast.error('Failed to update task on Raspberry Pi');
-      })
-      .finally(endSync);
-  }, [items, pushHistoryAction, startSync, endSync, toast]);
+    /*
+     * The write, and what happens when it does not land.
+     *
+     * A failure used to be a toast, which took the only record of it away
+     * after four seconds and left the screen showing an edit the Pi had
+     * never accepted. It is kept now, named, with the same request ready to
+     * run again.
+     */
+    const attempt = (): Promise<unknown> => {
+      startSync();
+      return api.updateItem(id, updates)
+        .then(realItem => {
+          setItems(prev => prev.map(i => i.id === id ? realItem : i));
+        })
+        .catch(err => {
+          console.error('Failed to update item on Pi', err);
+          recordFailure({
+            description: existing ? `Changes to "${existing.title}"` : 'A change to a task',
+            retry: attempt,
+          });
+        })
+        .finally(endSync);
+    };
+
+    attempt();
+  }, [items, pushHistoryAction, startSync, endSync, recordFailure]);
 
   /*
    * Move an item to a new place in the hand-sorted order.
@@ -325,22 +356,29 @@ export function useTasksState({
       setItems(prev => prev.map(i => (i.id === id ? { ...i, position: optimistic } : i)));
     }
 
-    startSync();
-    api.reorderItem(id, move)
-      .then(realItem => {
-        setItems(prev => prev.map(i => (i.id === id ? realItem : i)));
-      })
-      .catch(err => {
-        console.error('Failed to reorder item on Pi', err);
-        // Put it back where it was, so the list never shows an order the Pi
-        // does not have.
-        if (previous) {
-          setItems(prev => prev.map(i => (i.id === id ? { ...i, position: previous.position } : i)));
-        }
-        toast.error('Could not save the new order');
-      })
-      .finally(endSync);
-  }, [items, startSync, endSync, toast]);
+    const attempt = (): Promise<unknown> => {
+      startSync();
+      return api.reorderItem(id, move)
+        .then(realItem => {
+          setItems(prev => prev.map(i => (i.id === id ? realItem : i)));
+        })
+        .catch(err => {
+          console.error('Failed to reorder item on Pi', err);
+          // Put it back where it was, so the list never shows an order the Pi
+          // does not have.
+          if (previous) {
+            setItems(prev => prev.map(i => (i.id === id ? { ...i, position: previous.position } : i)));
+          }
+          recordFailure({
+            description: previous ? `Moving "${previous.title}"` : 'A change to the order',
+            retry: attempt,
+          });
+        })
+        .finally(endSync);
+    };
+
+    attempt();
+  }, [items, startSync, endSync, recordFailure]);
 
   // Toggle Subtask
   const handleToggleSubtask = useCallback((itemId: string, subtaskId: string) => {
@@ -351,14 +389,18 @@ export function useTasksState({
         subtasks: item.subtasks.map(s => s.id === subtaskId ? { ...s, is_completed: !s.is_completed } : s)
       };
     }));
-    startSync();
-    api.toggleSubtask(subtaskId)
-      .catch(err => {
-        console.error('Failed to toggle subtask on Pi', err);
-        toast.error('Failed to toggle checklist item');
-      })
-      .finally(endSync);
-  }, [startSync, endSync, toast]);
+    const attempt = (): Promise<unknown> => {
+      startSync();
+      return api.toggleSubtask(subtaskId)
+        .catch(err => {
+          console.error('Failed to toggle subtask on Pi', err);
+          recordFailure({ description: 'Ticking off a checklist item', retry: attempt });
+        })
+        .finally(endSync);
+    };
+
+    attempt();
+  }, [startSync, endSync, recordFailure]);
 
   // Add Subtask
   const handleAddSubtask = useCallback(async (itemId: string, title: string) => {
@@ -392,7 +434,19 @@ export function useTasksState({
       }
     } catch (err) {
       console.error('Failed to add subtask on Pi', err);
-      toast.error('Failed to add subtask on Raspberry Pi');
+      recordFailure({
+        description: `Adding "${title.trim()}" to a checklist`,
+        // The retry is the request alone: the optimistic row has already been
+        // taken back below, so a successful retry appends the real one.
+        retry: () => api.addSubtask(itemId, title.trim()).then(created => {
+          if (!created) return;
+          setItems(prev => prev.map(item => (
+            item.id === itemId
+              ? { ...item, subtasks: [...(item.subtasks || []), created] }
+              : item
+          )));
+        }),
+      });
       setItems(prev => prev.map(item => {
         if (item.id !== itemId) return item;
         return {

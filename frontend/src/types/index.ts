@@ -1,3 +1,5 @@
+export type ThemePreference = 'light' | 'dark' | 'system';
+
 export type EntityType = 'task' | 'event' | 'reminder';
 export type TaskStatus = 'inbox' | 'todo' | 'in_progress' | 'done' | 'blocked' | 'archived';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';

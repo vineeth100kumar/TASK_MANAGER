@@ -15,6 +15,7 @@ import {
   RotateCw,
   CloudOff,
   RefreshCw,
+  Check,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -44,6 +45,8 @@ interface NavbarProps {
   setActiveTab: (tab: NavTabId) => void;
   isLiveConnected: boolean;
   isSyncing?: boolean;
+  /** True for a moment after a write lands, so a save is visibly a save. */
+  justSaved?: boolean;
   onOpenQuickCapture: () => void;
   onOpenSearch?: () => void;
   onOpenWizard?: (mode?: 'morning' | 'evening') => void;
@@ -77,6 +80,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   redoTooltip = '',
   theme = 'light',
   onToggleTheme,
+  justSaved = false,
 }) => {
   const isEvening = new Date().getHours() >= 17 || new Date().getHours() < 5;
 
@@ -89,6 +93,11 @@ export const Navbar: React.FC<NavbarProps> = ({
       <span className="flex items-center gap-1.5 text-caption text-ink-3" title="Saving to the Pi">
         <RefreshCw className="w-3.5 h-3.5 animate-spin" />
         <span className="hidden sm:inline">Saving</span>
+      </span>
+    ) : justSaved ? (
+      <span className="flex items-center gap-1.5 text-caption text-ink-3" title="Saved to the Pi">
+        <Check className="w-3.5 h-3.5 text-done-500 dark:text-done-400" />
+        <span className="hidden sm:inline">Saved</span>
       </span>
     ) : !isLiveConnected ? (
       <span className="flex items-center gap-1.5 text-caption text-late-500 dark:text-late-400" title="Reconnecting to the Pi">

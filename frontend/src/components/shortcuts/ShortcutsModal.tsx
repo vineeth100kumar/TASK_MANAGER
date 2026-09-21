@@ -1,8 +1,10 @@
 import React, { useState, useEffect } from 'react';
-import { Copy, Check, Bell, Home, RotateCw, KeyRound } from 'lucide-react';
+import { Copy, Check, Bell, Home, RotateCw, KeyRound, Monitor, Moon, Sun } from 'lucide-react';
 import { usePushNotifications } from '../../hooks/usePushNotifications';
 import { api } from '../../services/api';
 import { clearApiSecret, isApiSecretFromEnv } from '../../config';
+import { ThemePreference } from '../../types';
+import { APP_VERSION } from '../../version';
 
 /* The three things the backend will do for a shortcut, and how to reach them. */
 const ENDPOINTS = [
@@ -11,7 +13,21 @@ const ENDPOINTS = [
   { name: 'Read the day back', method: 'GET', path: '/api/v1/shortcuts/status' },
 ];
 
-export const ShortcutsModal: React.FC = () => {
+const THEME_OPTIONS: { value: ThemePreference; label: string; icon: React.ReactNode }[] = [
+  { value: 'light', label: 'Light', icon: <Sun className="w-4 h-4" /> },
+  { value: 'dark', label: 'Dark', icon: <Moon className="w-4 h-4" /> },
+  { value: 'system', label: 'System', icon: <Monitor className="w-4 h-4" /> },
+];
+
+interface SettingsProps {
+  themePreference?: ThemePreference;
+  onThemePreferenceChange?: (next: ThemePreference) => void;
+}
+
+export const ShortcutsModal: React.FC<SettingsProps> = ({
+  themePreference = 'system',
+  onThemePreferenceChange,
+}) => {
   const [copiedField, setCopiedField] = useState<string | null>(null);
   const [testTaskText, setTestTaskText] = useState('Buy coffee beans tomorrow 10am');
   const [testResult, setTestResult] = useState<string | null>(null);
@@ -129,6 +145,44 @@ export const ShortcutsModal: React.FC = () => {
         <h1 className="screen-title">Settings</h1>
         <p className="text-meta text-ink-3 mt-0.5">Notifications, device settings, and talking to Sage from Siri.</p>
       </header>
+
+      {/* --------------------------- Appearance --------------------------- */}
+      <section className="mt-7">
+        <h2 className="label mb-2">Appearance</h2>
+
+        <div className="surface px-4 py-3.5 space-y-3">
+          <div
+            className="bg-sunken rounded-control p-0.5 flex items-center"
+            role="radiogroup"
+            aria-label="Theme"
+          >
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                role="radio"
+                aria-checked={themePreference === option.value}
+                onClick={() => onThemePreferenceChange?.(option.value)}
+                className={`flex-1 flex items-center justify-center gap-1.5 px-2 py-2 rounded-control
+                            text-meta transition-colors ${
+                              themePreference === option.value
+                                ? 'bg-surface text-ink font-medium shadow-sm'
+                                : 'text-ink-2 hover:text-ink'
+                            }`}
+              >
+                {option.icon}
+                {option.label}
+              </button>
+            ))}
+          </div>
+
+          <p className="text-meta text-ink-2 leading-relaxed">
+            {themePreference === 'system'
+              ? 'Follows your phone or computer, and changes with it.'
+              : `Always ${themePreference}, whatever your device is set to.`}
+          </p>
+        </div>
+      </section>
 
       {/* ------------------- Home Mode & Fan Quiet Hours ------------------- */}
       <section className="mt-7">
@@ -377,6 +431,14 @@ export const ShortcutsModal: React.FC = () => {
             <p className="text-body text-ink mt-1">{testResult}</p>
           </div>
         )}
+      </section>
+
+      {/* ------------------------------ About ------------------------------ */}
+      <section className="mt-9">
+        <h2 className="label mb-2">About</h2>
+        <p className="text-meta text-ink-2">
+          Sage {APP_VERSION}, running on your Raspberry Pi.
+        </p>
       </section>
     </div>
   );

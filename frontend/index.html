@@ -58,11 +58,11 @@
       (function () {
         try {
           var saved = localStorage.getItem('sage_theme');
-          if (saved !== 'light' && saved !== 'dark') {
-            saved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.classList.toggle('dark', saved === 'dark');
-          document.documentElement.style.backgroundColor = saved === 'dark' ? '#0e0f12' : '#f6f6f8';
+          var resolved = saved === 'light' || saved === 'dark'
+            ? saved
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.classList.toggle('dark', resolved === 'dark');
+          document.documentElement.style.backgroundColor = resolved === 'dark' ? '#0e0f12' : '#f6f6f8';
         } catch (e) {
           /* private mode or blocked storage — fall through to the light default */
         }
