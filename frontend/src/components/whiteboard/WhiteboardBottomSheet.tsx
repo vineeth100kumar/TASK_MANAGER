@@ -25,7 +25,6 @@ export interface WhiteboardBottomSheetProps {
   canRedo: boolean;
   onClear: () => void;
   onTriggerImageUpload?: () => void;
-  edition?: 'day' | 'night';
 }
 
 export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
@@ -39,7 +38,6 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
   canRedo,
   onClear,
   onTriggerImageUpload,
-  edition = 'day',
 }) => {
   if (!isOpen) return null;
 
@@ -59,24 +57,17 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
       {/* Slide-up sheet */}
       <div
         style={{ paddingBottom: 'max(1.5rem, calc(env(safe-area-inset-bottom) + 1rem))' }}
-        className="relative z-50 bg-surface rounded-t-3xl border-t border-ink-base/20 dark:border-paper-light/20 p-5 space-y-4 shadow-lg animate-in slide-in-from-bottom duration-200"
+        className="relative z-50 bg-surface rounded-t-surface border-t border-hairline p-5 space-y-4 shadow-lift-3 animate-in slide-in-from-bottom duration-200 ease-settle"
       >
         {/* Drag Handle */}
-        <div className="w-12 h-1 bg-ink-base/20 dark:bg-paper-light/20 rounded-full mx-auto" />
+        <div className="w-12 h-1 bg-hairline rounded-full mx-auto" />
 
-        <div className="flex items-center justify-between border-b border-ink-base/10 dark:border-paper-light/10 pb-2">
-          <div>
-            <span className="text-caption text-ink-muted dark:text-stone-400">
-              DRAFTING STUDIO • EXPANDED TOOLS
-            </span>
-            <h3 className="text-sm font-bold text-ink-base dark:text-paper-light">
-              Studio Instrument Palette
-            </h3>
-          </div>
+        <div className="flex items-center justify-between border-b border-hairline pb-2">
+          <h3 className="text-lead font-semibold text-ink">Tools</h3>
           <button
             onClick={onClose}
             aria-label="Close"
-            className="p-1 rounded text-ink-muted dark:text-stone-400 hover:text-ink-base dark:hover:text-stone-100"
+            className="w-9 h-9 grid place-items-center rounded-control text-ink-3 hover:text-ink hover:bg-sunken transition-colors"
           >
             <X className="w-4 h-4" />
           </button>
@@ -86,10 +77,10 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
         <div className="grid grid-cols-4 gap-2.5">
           <button
             onClick={() => selectAndClose('highlighter')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'highlighter'
-                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-accent-500/12 border-accent-500/40 text-accent-600 dark:text-accent-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
             <Highlighter className="w-5 h-5" />
@@ -98,10 +89,10 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
 
           <button
             onClick={() => selectAndClose('shape')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'shape'
-                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-accent-500/12 border-accent-500/40 text-accent-600 dark:text-accent-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
             <Square className="w-5 h-5" />
@@ -110,10 +101,10 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
 
           <button
             onClick={() => selectAndClose('text')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'text'
-                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-accent-500/12 border-accent-500/40 text-accent-600 dark:text-accent-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
             <Type className="w-5 h-5" />
@@ -122,38 +113,38 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
 
           <button
             onClick={() => selectAndClose('sticky')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'sticky'
-                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-accent-500/12 border-accent-500/40 text-accent-600 dark:text-accent-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
-            <StickyNote className="w-5 h-5 text-amber-600 dark:text-amber-400" />
+            <StickyNote className="w-5 h-5" />
             <span className="text-caption">Note</span>
           </button>
 
           <button
             onClick={() => selectAndClose('laser')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'laser'
-                ? 'bg-rose-500/15 border-rose-600/40 text-rose-700 dark:text-rose-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-danger-500/12 border-danger-500/40 text-danger-600 dark:text-danger-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
-            <Zap className="w-5 h-5 text-rose-500" />
+            <Zap className="w-5 h-5" />
             <span className="text-caption">Laser</span>
           </button>
 
           <button
             onClick={() => selectAndClose('hand')}
-            className={`p-3 rounded flex flex-col items-center gap-1.5 border transition-all ${
+            className={`p-3 rounded-control flex flex-col items-center gap-1.5 border transition-all ${
               activeTool === 'hand'
-                ? 'bg-amber-500/15 border-amber-600/40 text-amber-700 dark:text-amber-300 font-bold'
-                : 'bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300'
+                ? 'bg-accent-500/12 border-accent-500/40 text-accent-600 dark:text-accent-400 font-medium'
+                : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
             }`}
           >
             <Hand className="w-5 h-5" />
-            <span className="text-caption">Pan Hand</span>
+            <span className="text-caption">Pan</span>
           </button>
 
           {onTriggerImageUpload && (
@@ -162,10 +153,10 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
                 onTriggerImageUpload();
                 onClose();
               }}
-              className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 hover:bg-paper-aged"
+              className="p-3 rounded-control flex flex-col items-center gap-1.5 border bg-sunken border-hairline text-ink-2 hover:text-ink hover:bg-sunken"
             >
-              <ImageIcon className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              <span className="text-caption">Add Image</span>
+              <ImageIcon className="w-5 h-5" />
+              <span className="text-caption">Image</span>
             </button>
           )}
 
@@ -174,7 +165,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
               if (canUndo) onUndo();
             }}
             disabled={!canUndo}
-            className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 disabled:opacity-40"
+            className="p-3 rounded-control flex flex-col items-center gap-1.5 border bg-sunken border-hairline text-ink-2 hover:text-ink disabled:opacity-40 disabled:pointer-events-none"
           >
             <Undo2 className="w-5 h-5" />
             <span className="text-caption">Undo</span>
@@ -185,7 +176,7 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
               if (canRedo) onRedo();
             }}
             disabled={!canRedo}
-            className="p-3 rounded flex flex-col items-center gap-1.5 border bg-paper-aged/50 dark:bg-stone-800/60 border-ink-base/15 dark:border-stone-700 text-ink-base dark:text-stone-300 disabled:opacity-40"
+            className="p-3 rounded-control flex flex-col items-center gap-1.5 border bg-sunken border-hairline text-ink-2 hover:text-ink disabled:opacity-40 disabled:pointer-events-none"
           >
             <Redo2 className="w-5 h-5" />
             <span className="text-caption">Redo</span>
@@ -193,16 +184,16 @@ export const WhiteboardBottomSheet: React.FC<WhiteboardBottomSheetProps> = ({
         </div>
 
         {/* Clear Action */}
-        <div className="pt-2 border-t border-ink-base/10 dark:border-paper-light/10">
+        <div className="pt-2 border-t border-hairline">
           <button
             onClick={() => {
               onClear();
               onClose();
             }}
-            className="w-full py-2.5 rounded border border-rose-600/30 bg-rose-500/10 text-rose-700 dark:text-rose-400 text-meta font-bold flex items-center justify-center gap-2 hover:bg-rose-500/20"
+            className="w-full h-11 rounded-control border border-danger-500/30 bg-danger-500/10 text-danger-600 dark:text-danger-400 text-meta font-medium flex items-center justify-center gap-2 hover:bg-danger-500/20 transition-colors"
           >
             <Trash2 className="w-4 h-4" />
-            <span>Clear Board Canvas</span>
+            <span>Clear the board</span>
           </button>
         </div>
       </div>

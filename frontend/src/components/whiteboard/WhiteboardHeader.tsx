@@ -39,15 +39,37 @@ interface WhiteboardHeaderProps {
   onSelectGrid?: (grid: WhiteboardGridType) => void;
   stylusOnly?: boolean;
   onToggleStylusOnly?: () => void;
-  edition?: 'day' | 'night';
 }
 
+/*
+ * The paper under the drawing, named for what it looks like.
+ *
+ * These read "Architect Dots", "Blueprint Graph" and "Pure unlined
+ * parchment". The board is a place to think, not a period drama, so each one
+ * now says what it is.
+ */
 const GRID_OPTIONS: { type: WhiteboardGridType; label: string; desc: string }[] = [
-  { type: 'dots', label: 'Architect Dots', desc: 'Neat 28px alignment dots' },
-  { type: 'graph', label: 'Blueprint Graph', desc: 'Millimeter technical grid' },
-  { type: 'ruled', label: 'Ruled Paper', desc: 'Lined tracing paper' },
-  { type: 'blank', label: 'Blank Slate', desc: 'Pure unlined parchment' },
+  { type: 'dots', label: 'Dots', desc: 'Alignment dots every 28px' },
+  { type: 'graph', label: 'Graph', desc: 'A fine square grid' },
+  { type: 'ruled', label: 'Ruled', desc: 'Horizontal lines, like paper' },
+  { type: 'blank', label: 'Blank', desc: 'Nothing at all' },
 ];
+
+/* One control, one height, so the row lines up and every target is tappable. */
+const CONTROL =
+  'h-9 inline-flex items-center gap-1.5 px-2.5 rounded-control border border-hairline ' +
+  'bg-surface text-ink-2 hover:text-ink hover:bg-sunken transition-colors';
+const ICON_CONTROL =
+  'w-9 h-9 grid place-items-center rounded-control border border-hairline ' +
+  'bg-surface text-ink-2 hover:text-ink hover:bg-sunken transition-colors';
+const MENU =
+  'absolute top-full mt-2 p-1.5 bg-surface border border-hairline rounded-surface shadow-lift-2 ' +
+  'z-50 animate-in fade-in slide-in-from-top-1 duration-150';
+const MENU_HEADING = 'px-2 py-1 text-caption text-ink-3';
+const MENU_ITEM =
+  'w-full flex items-center justify-between gap-2 px-2 py-1.5 rounded-control text-meta ' +
+  'text-left text-ink-2 hover:text-ink hover:bg-sunken transition-colors';
+const MENU_ITEM_ON = 'bg-sunken text-ink font-medium';
 
 export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   board,
@@ -71,7 +93,6 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   onSelectGrid,
   stylusOnly = false,
   onToggleStylusOnly,
-  edition = 'day',
 }) => {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [titleInput, setTitleInput] = useState(board.title);
@@ -117,6 +138,22 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
     return () => window.removeEventListener('mousedown', handleDown);
   }, []);
 
+  // Escape closes whichever menu is open, before the canvas hears the key.
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      if (showBoardsDropdown || showProjectsDropdown || showExportDropdown || showGridDropdown) {
+        e.stopPropagation();
+        setShowBoardsDropdown(false);
+        setShowProjectsDropdown(false);
+        setShowExportDropdown(false);
+        setShowGridDropdown(false);
+      }
+    };
+    window.addEventListener('keydown', handleKey, true);
+    return () => window.removeEventListener('keydown', handleKey, true);
+  }, [showBoardsDropdown, showProjectsDropdown, showExportDropdown, showGridDropdown]);
+
   const handleTitleSubmit = () => {
     const trimmed = titleInput.trim();
     if (trimmed && trimmed !== board.title) {
@@ -128,177 +165,160 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
   };
 
   const currentProject = projects.find((p) => p.id === board.project_id);
-  const isNight = edition === 'night';
-
-  const headerBg = isNight
-    ? 'bg-[#0c0c0e]/95 border-b border-hairline text-[#edece8]'
-    : 'bg-paper-aged/95 border-b border-ink-primary text-ink-primary';
-
-  const dropdownBg = isNight
-    ? 'bg-[#141418] border border-hairline text-ink'
-    : 'bg-paper-white border border-ink-primary text-ink-primary';
-
-  const btnBg = isNight
-    ? 'bg-surface hover:bg-sunken border-hairline text-ink-2'
-    : 'bg-paper-white hover:bg-paper-cream border-ink-rule text-ink-primary';
 
   return (
-    <header className={`absolute top-0 left-0 right-0 z-30 h-14 px-3 sm:px-4 backdrop-blur-md flex items-center justify-between select-none ${headerBg}`}>
-      {/* LEFT SECTION: Back button + Board Switcher & Title */}
-      <div className="flex items-center gap-2 sm:gap-3">
+    /*
+     * The bar sits on the app's own surface rather than on a hand-mixed
+     * near-black, so it follows Light, Dark and System like every other
+     * screen instead of being dark in a light app.
+     */
+    <header className="absolute top-0 left-0 right-0 z-30 h-14 px-3 sm:px-4 flex items-center justify-between select-none bg-surface/90 backdrop-blur-xl border-b border-hairline text-ink">
+      {/* LEFT: back, which board, what it is called, what it belongs to */}
+      <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
         {onBack && (
-          <button
-            type="button"
-            onClick={onBack}
-            className={`p-1.5 border rounded-control transition-colors ${btnBg}`}
-            title="Back to Projects"
-          >
+          <button type="button" onClick={onBack} className={ICON_CONTROL} title="Back to projects" aria-label="Back to projects">
             <ArrowLeft size={16} />
           </button>
         )}
 
-        {/* Section Roman Numeral Eyebrow */}
-        <div className="hidden lg:flex items-center gap-1.5 text-caption font-bold text-ink-muted border-r border-ink-rule pr-2.5">
-          <span className="text-amber-600 font-bold">III.</span>
-          <span>DRAFTING ROOM</span>
-        </div>
-
-        {/* Board Switcher Dropdown */}
+        {/* Board switcher */}
         <div ref={boardsDropdownRef} className="relative">
           <button
             type="button"
             onClick={() => setShowBoardsDropdown((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-2.5 py-1.5 border rounded-control text-meta font-bold transition-colors ${btnBg}`}
+            className={CONTROL}
+            aria-haspopup="menu"
+            aria-expanded={showBoardsDropdown}
           >
-            <span className="max-w-[120px] sm:max-w-[180px] truncate">{board.title || 'Drafting Canvas'}</span>
-            <ChevronDown size={13} className="opacity-60" />
+            <span className="max-w-[120px] sm:max-w-[180px] truncate text-meta font-medium text-ink">
+              {board.title || 'Untitled board'}
+            </span>
+            <ChevronDown size={13} className="text-ink-3" />
           </button>
 
           {showBoardsDropdown && (
-            <div className={`absolute top-full left-0 mt-2 w-64 p-2 border shadow-lg rounded-control z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
-              <div className="px-2 py-1 text-caption font-bold text-ink-muted border-b border-ink-rule/30 mb-1">
-                Drafting Canvases
-              </div>
+            <div className={`${MENU} left-0 w-64`} role="menu">
+              <div className={MENU_HEADING}>Boards</div>
               <div className="max-h-60 overflow-y-auto space-y-0.5">
                 {boardsList.map((b) => (
                   <button
                     key={b.id}
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       onSelectBoard(b.id);
                       setShowBoardsDropdown(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2 py-1.5 rounded-control text-meta text-left transition-colors ${
-                      b.id === board.id
-                        ? isNight ? 'bg-amber-600/30 text-amber-300 font-bold' : 'bg-ink-primary text-paper-white font-bold'
-                        : isNight ? 'text-ink-2 hover:bg-sunken' : 'text-ink-primary hover:bg-paper-aged'
-                    }`}
+                    className={`${MENU_ITEM} ${b.id === board.id ? MENU_ITEM_ON : ''}`}
                   >
                     <span className="truncate">{b.title}</span>
-                    {b.id === board.id && <Check size={13} className="shrink-0 ml-1" />}
+                    {b.id === board.id && <Check size={13} className="shrink-0 text-accent-500" />}
                   </button>
                 ))}
               </div>
-              <div className="border-t border-ink-rule/40 my-1" />
+              <div className="border-t border-hairline my-1" />
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   onCreateNewBoard();
                   setShowBoardsDropdown(false);
                 }}
-                className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-control text-meta font-bold text-amber-600 hover:bg-amber-600/10 transition-colors"
+                className="w-full flex items-center gap-1.5 px-2 py-1.5 rounded-control text-meta font-medium text-accent-600 dark:text-accent-400 hover:bg-sunken transition-colors"
               >
                 <Plus size={14} />
-                <span>New Drawing Canvas</span>
+                <span>New board</span>
               </button>
             </div>
           )}
         </div>
 
-        {/* Title Edit Quick Trigger */}
+        {/* Rename */}
         {isEditingTitle ? (
           <input
             ref={titleInputRef}
             type="text"
+            aria-label="Board name"
             value={titleInput}
             onChange={(e) => setTitleInput(e.target.value)}
             onBlur={handleTitleSubmit}
             onKeyDown={(e) => {
               if (e.key === 'Enter') handleTitleSubmit();
               if (e.key === 'Escape') {
+                e.stopPropagation();
                 setTitleInput(board.title);
                 setIsEditingTitle(false);
               }
             }}
-            className="px-2 py-0.5 text-meta font-bold bg-paper-white border border-amber-500 rounded-control text-ink-primary outline-none"
+            className="h-9 px-2.5 text-meta bg-surface border border-accent-500 rounded-control text-ink outline-none"
           />
         ) : (
           <button
             type="button"
             onClick={() => setIsEditingTitle(true)}
-            className="p-1 text-ink-muted hover:text-ink-primary transition-colors"
-            title="Rename Canvas"
+            className={`${ICON_CONTROL} border-transparent bg-transparent`}
+            title="Rename this board"
+            aria-label="Rename this board"
           >
-            <Edit2 size={13} />
+            <Edit2 size={14} />
           </button>
         )}
 
-        {/* Project Link Dropdown */}
+        {/* Project link */}
         <div ref={projectsDropdownRef} className="relative hidden md:block">
           <button
             type="button"
             onClick={() => setShowProjectsDropdown((prev) => !prev)}
-            className={`flex items-center gap-1.5 px-2 py-1 rounded-control text-meta border transition-colors ${btnBg}`}
+            className={CONTROL}
+            aria-haspopup="menu"
+            aria-expanded={showProjectsDropdown}
           >
             <Folder
               size={13}
-              style={{ color: currentProject ? currentProject.color || '#3b82f6' : 'currentColor' }}
+              style={{ color: currentProject?.color || undefined }}
+              className={currentProject?.color ? undefined : 'text-ink-3'}
             />
-            <span className="max-w-[120px] truncate">
-              {currentProject ? currentProject.name : 'Link Project'}
+            <span className="max-w-[120px] truncate text-meta">
+              {currentProject ? currentProject.name : 'No project'}
             </span>
-            <ChevronDown size={11} className="opacity-60" />
+            <ChevronDown size={11} className="text-ink-3" />
           </button>
 
           {showProjectsDropdown && (
-            <div className={`absolute top-full left-0 mt-2 w-56 p-1.5 border shadow-lg rounded-control z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
-              <div className="px-2 py-1 text-caption font-bold text-ink-muted border-b border-ink-rule/30 mb-1">
-                Assign Project Dossier
-              </div>
+            <div className={`${MENU} left-0 w-56`} role="menu">
+              <div className={MENU_HEADING}>Project</div>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   onUpdateProject(null);
                   setShowProjectsDropdown(false);
                 }}
-                className={`w-full flex items-center justify-between px-2 py-1 rounded-control text-meta transition-colors ${
-                  !board.project_id ? 'font-bold text-amber-600' : 'text-ink-muted hover:text-ink-primary'
-                }`}
+                className={`${MENU_ITEM} ${!board.project_id ? MENU_ITEM_ON : ''}`}
               >
-                <span>Standalone (No Project)</span>
-                {!board.project_id && <Check size={13} />}
+                <span>No project</span>
+                {!board.project_id && <Check size={13} className="text-accent-500" />}
               </button>
               <div className="max-h-48 overflow-y-auto space-y-0.5 mt-1">
                 {projects.map((p) => (
                   <button
                     key={p.id}
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       onUpdateProject(p.id);
                       setShowProjectsDropdown(false);
                     }}
-                    className={`w-full flex items-center justify-between px-2 py-1 rounded-control text-meta text-left transition-colors ${
-                      board.project_id === p.id ? 'font-bold text-amber-600' : 'hover:bg-paper-aged'
-                    }`}
+                    className={`${MENU_ITEM} ${board.project_id === p.id ? MENU_ITEM_ON : ''}`}
                   >
-                    <div className="flex items-center gap-1.5 truncate">
+                    <span className="flex items-center gap-2 truncate">
                       <span
-                        className="w-2 h-2 rounded-control shrink-0"
-                        style={{ backgroundColor: p.color || '#3b82f6' }}
+                        className="w-2 h-2 rounded-full shrink-0"
+                        style={{ backgroundColor: p.color || 'currentColor' }}
                       />
                       <span className="truncate">{p.name}</span>
-                    </div>
-                    {board.project_id === p.id && <Check size={13} className="shrink-0 ml-1" />}
+                    </span>
+                    {board.project_id === p.id && <Check size={13} className="shrink-0 text-accent-500" />}
                   </button>
                 ))}
               </div>
@@ -306,62 +326,58 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
           )}
         </div>
 
-        {/* Auto-save Status */}
-        <div className="text-caption text-ink-muted flex items-center gap-1.5 ml-1 hidden lg:flex">
-          {isSaving ? (
-            <>
-              <div className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse" />
-              <span>SAVING...</span>
-            </>
-          ) : (
-            <>
-              <div className="w-1.5 h-1.5 rounded-full bg-emerald-600" />
-              <span>DRAFT SAVED</span>
-            </>
-          )}
+        {/*
+         * Saved state. It used to shout SAVING... and DRAFT SAVED in caps at
+         * all times; the steady state of a board is saved, so the quiet word
+         * is enough and the dot carries the change.
+         */}
+        <div className="hidden lg:flex items-center gap-1.5 ml-1 text-caption text-ink-3" aria-live="polite">
+          <span
+            className={`w-1.5 h-1.5 rounded-full ${isSaving ? 'bg-late-500 animate-pulse' : 'bg-done-500'}`}
+            aria-hidden="true"
+          />
+          <span>{isSaving ? 'Saving' : 'Saved'}</span>
         </div>
       </div>
 
-      {/* RIGHT SECTION: Grid selector + Stylus Palm Rejection + Zoom Controls + Export + Delete */}
+      {/* RIGHT: the paper, the pen, the zoom, and what leaves the app */}
       <div className="flex items-center gap-1.5 sm:gap-2">
-        {/* Grid Selector Dropdown */}
         {onSelectGrid && (
           <div ref={gridDropdownRef} className="relative hidden sm:block">
             <button
               type="button"
               onClick={() => setShowGridDropdown((prev) => !prev)}
-              className={`flex items-center gap-1.5 px-2 py-1 border rounded-control text-meta transition-colors ${btnBg}`}
-              title="Change Canvas Grid Surface"
+              className={CONTROL}
+              title="Change the grid"
+              aria-haspopup="menu"
+              aria-expanded={showGridDropdown}
             >
               <Grid size={13} />
-              <span className="capitalize">{gridType}</span>
-              <ChevronDown size={11} className="opacity-60" />
+              <span className="text-meta capitalize">{gridType}</span>
+              <ChevronDown size={11} className="text-ink-3" />
             </button>
 
             {showGridDropdown && (
-              <div className={`absolute top-full right-0 mt-2 w-52 p-1.5 border shadow-lg rounded-control z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
-                <div className="px-2 py-1 text-caption font-bold text-ink-muted border-b border-ink-rule/30 mb-1">
-                  Drafting Surface
-                </div>
+              <div className={`${MENU} right-0 w-52`} role="menu">
+                <div className={MENU_HEADING}>Grid</div>
                 {GRID_OPTIONS.map((g) => (
                   <button
                     key={g.type}
                     type="button"
+                    role="menuitem"
                     onClick={() => {
                       onSelectGrid(g.type);
                       setShowGridDropdown(false);
                     }}
-                    className={`w-full flex flex-col px-2 py-1.5 rounded-control text-left transition-colors ${
-                      gridType === g.type
-                        ? isNight ? 'bg-amber-600/30 text-amber-300' : 'bg-ink-primary text-paper-white font-bold'
-                        : isNight ? 'text-ink-2 hover:bg-sunken' : 'text-ink-primary hover:bg-paper-aged'
+                    className={`w-full flex flex-col px-2 py-1.5 rounded-control text-left transition-colors text-ink-2 hover:text-ink hover:bg-sunken ${
+                      gridType === g.type ? MENU_ITEM_ON : ''
                     }`}
                   >
-                    <div className="flex items-center justify-between text-meta">
+                    <span className="flex items-center justify-between w-full text-meta">
                       <span>{g.label}</span>
-                      {gridType === g.type && <Check size={12} />}
-                    </div>
-                    <span className="text-caption opacity-70 font-sans">{g.desc}</span>
+                      {gridType === g.type && <Check size={12} className="text-accent-500" />}
+                    </span>
+                    <span className="text-caption text-ink-3">{g.desc}</span>
                   </button>
                 ))}
               </div>
@@ -369,111 +385,110 @@ export const WhiteboardHeader: React.FC<WhiteboardHeaderProps> = ({
           </div>
         )}
 
-        {/* Stylus / Palm Rejection Mode Toggle */}
+        {/*
+         * Palm rejection. The label says what the board will do with a
+         * finger, which is the thing being chosen.
+         */}
         {onToggleStylusOnly && (
           <button
             type="button"
             onClick={onToggleStylusOnly}
-            className={`flex items-center gap-1 px-2 py-1 border rounded-control text-meta transition-colors ${
+            aria-pressed={stylusOnly}
+            className={
               stylusOnly
-                ? 'bg-amber-600 text-stone-950 border-amber-500 font-bold'
-                : btnBg
-            }`}
-            title={stylusOnly ? 'Stylus Mode Active: Touches only pan/zoom' : 'All Input: Touch draws and pans'}
+                ? 'h-9 inline-flex items-center gap-1.5 px-2.5 rounded-control border border-accent-500 bg-accent-500 text-white transition-colors'
+                : CONTROL
+            }
+            title={stylusOnly ? 'Pen draws; a finger pans and zooms' : 'A finger draws as well as the pen'}
           >
             <PenTool size={13} />
-            <span className="hidden md:inline">{stylusOnly ? 'Stylus Only' : 'Touch+Pen'}</span>
+            <span className="hidden md:inline text-meta">{stylusOnly ? 'Pen only' : 'Pen and touch'}</span>
           </button>
         )}
 
-        {/* Zoom Controls */}
-        <div className={`flex items-center border rounded-control px-1 py-0.5 ${btnBg}`}>
-          <button
-            type="button"
-            onClick={onZoomOut}
-            className="p-1 hover:opacity-100 opacity-60 transition-opacity"
-            title="Zoom Out"
-          >
+        {/* Zoom */}
+        <div className="h-9 flex items-center rounded-control border border-hairline bg-surface text-ink-2">
+          <button type="button" onClick={onZoomOut} className="w-8 h-full grid place-items-center hover:text-ink transition-colors" title="Zoom out" aria-label="Zoom out">
             <ZoomOut size={14} />
           </button>
           <button
             type="button"
             onClick={onResetZoom}
-            className="px-1.5 py-0.5 text-meta font-bold tabular-nums"
-            title="Reset to 100%"
+            className="px-1.5 text-meta tabular-nums hover:text-ink transition-colors"
+            title="Back to 100%"
           >
             {Math.round(zoom * 100)}%
           </button>
-          <button
-            type="button"
-            onClick={onZoomIn}
-            className="p-1 hover:opacity-100 opacity-60 transition-opacity"
-            title="Zoom In"
-          >
+          <button type="button" onClick={onZoomIn} className="w-8 h-full grid place-items-center hover:text-ink transition-colors" title="Zoom in" aria-label="Zoom in">
             <ZoomIn size={14} />
           </button>
           <button
             type="button"
             onClick={onFitToContent}
-            className="p-1 border-l border-ink-rule/40 ml-0.5 pl-1 hover:opacity-100 opacity-60 transition-opacity"
-            title="Fit to Content"
+            className="w-8 h-full grid place-items-center border-l border-hairline hover:text-ink transition-colors"
+            title="Fit everything on screen"
+            aria-label="Fit everything on screen"
           >
             <Maximize2 size={12} />
           </button>
         </div>
 
-        {/* Export Dropdown */}
+        {/* Export */}
         <div ref={exportDropdownRef} className="relative">
           <button
             type="button"
             onClick={() => setShowExportDropdown((prev) => !prev)}
-            className={`flex items-center gap-1 px-2.5 py-1.5 border rounded-control text-meta font-bold transition-colors ${btnBg}`}
-            title="Export whiteboard"
+            className={CONTROL}
+            title="Export this board"
+            aria-haspopup="menu"
+            aria-expanded={showExportDropdown}
           >
             <Download size={13} />
-            <span className="hidden sm:inline">Export</span>
+            <span className="hidden sm:inline text-meta">Export</span>
           </button>
 
           {showExportDropdown && (
-            <div className={`absolute top-full right-0 mt-2 w-48 p-1.5 border shadow-lg rounded-control z-50 animate-in fade-in slide-in-from-top-1 duration-150 ${dropdownBg}`}>
+            <div className={`${MENU} right-0 w-52`} role="menu">
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   onExportPNG();
                   setShowExportDropdown(false);
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-meta text-left hover:bg-paper-aged transition-colors"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-control text-left text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
               >
-                <Download size={13} className="text-amber-600" />
-                <div>
-                  <div className="font-bold">Export PNG Image</div>
-                  <div className="text-caption text-ink-muted">High-res broadsheet raster</div>
-                </div>
+                <Download size={13} className="shrink-0" />
+                <span>
+                  <span className="block text-meta">PNG</span>
+                  <span className="block text-caption text-ink-3">A picture of the board</span>
+                </span>
               </button>
               <button
                 type="button"
+                role="menuitem"
                 onClick={() => {
                   onExportSVG();
                   setShowExportDropdown(false);
                 }}
-                className="w-full flex items-center gap-2 px-2 py-1.5 rounded-control text-meta text-left hover:bg-paper-aged transition-colors"
+                className="w-full flex items-center gap-2.5 px-2 py-1.5 rounded-control text-left text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
               >
-                <Share2 size={13} className="text-emerald-600" />
-                <div>
-                  <div className="font-bold">Export SVG Vector</div>
-                  <div className="text-caption text-ink-muted">Scalable vector blueprint</div>
-                </div>
+                <Share2 size={13} className="shrink-0" />
+                <span>
+                  <span className="block text-meta">SVG</span>
+                  <span className="block text-caption text-ink-3">Stays sharp at any size</span>
+                </span>
               </button>
             </div>
           )}
         </div>
 
-        {/* Delete Board Button */}
         <button
           type="button"
           onClick={onDeleteCurrentBoard}
-          className="p-1.5 border border-transparent hover:border-ink-danger text-ink-muted hover:text-ink-danger hover:bg-rose-950/20 rounded-control transition-colors"
-          title="Delete current canvas"
+          className="w-9 h-9 grid place-items-center rounded-control border border-transparent text-ink-3 hover:text-danger-600 hover:bg-danger-500/10 transition-colors"
+          title="Delete this board"
+          aria-label="Delete this board"
         >
           <Trash2 size={15} />
         </button>

@@ -401,7 +401,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
   const handleCreateNewBoard = async () => {
     try {
       const created = await api.createWhiteboard({
-        title: `Drafting Board ${boardsList.length + 1}`,
+        title: `Board ${boardsList.length + 1}`,
         project_id: initialProjectId || null,
         elements: [],
         view_state: { panX: 0, panY: 0, zoom: 1 },
@@ -444,7 +444,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       if (remaining.length > 0) {
         handleSelectBoard(remaining[0].id);
       }
-      toast.success('Drafting board deleted');
+      toast.success('Board deleted');
     } catch (err) {
       console.error('Failed to delete board:', err);
       toast.error('Could not delete board');
@@ -500,10 +500,10 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         return;
       }
       const link = document.createElement('a');
-      link.download = `${board.title.replace(/\s+/g, '_')}_blueprint.png`;
+      link.download = `${board.title.replace(/\s+/g, '_')}.png`;
       link.href = dataUrl;
       link.click();
-      toast.success('Exported PNG Blueprint snapshot');
+      toast.success('Exported a PNG');
     } catch (err) {
       console.error('Export PNG failed:', err);
       toast.error('Failed to export PNG');
@@ -521,7 +521,7 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
       link.href = url;
       link.click();
       URL.revokeObjectURL(url);
-      toast.success('Exported SVG Vector Blueprint');
+      toast.success('Exported an SVG');
     } catch (err) {
       console.error('Export SVG failed:', err);
       toast.error('Failed to export SVG');
@@ -731,10 +731,10 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
     return (
       <div
         className={`w-full h-[calc(100dvh-4rem)] md:h-[calc(100dvh-3.5rem)] flex flex-col items-center justify-center ${
-          edition === 'night' ? 'bg-[#141311] text-ink-2' : 'bg-[#F5F1E8] text-ink-primary'
+          edition === 'night' ? 'bg-[#141311] text-ink-2' : 'bg-[#F5F1E8] text-[#1A1814]'
         }`}
       >
-        <div className="w-8 h-8 border border-amber-600 border-t-transparent rounded-full animate-spin mb-3" />
+        <div className="w-8 h-8 border-2 border-accent-500 border-t-transparent rounded-full animate-spin mb-3" />
         <p className="text-meta font-bold">
           Loading the whiteboard…
         </p>
@@ -800,7 +800,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         onSelectGrid={setGridType}
         stylusOnly={stylusOnly}
         onToggleStylusOnly={() => setStylusOnly((prev) => !prev)}
-        edition={edition}
       />
 
       {/* 2. INFINITE VECTOR CANVAS */}
@@ -842,7 +841,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           onSendToBack={handleSendToBack}
           onEditText={handleEditText}
           onEditShapeText={handleEditShapeText}
-          edition={edition}
         />
       )}
 
@@ -921,7 +919,6 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
         }}
         onTriggerImageUpload={() => fileInputRef.current?.click()}
         onOpenMoreSheet={() => setIsMoreSheetOpen(true)}
-        edition={edition}
       />
 
       {/* 6. MOBILE EXPANDED BOTTOM SHEET */}
@@ -939,15 +936,14 @@ export const WhiteboardView: React.FC<WhiteboardViewProps> = ({
           setShowClearConfirm(true);
         }}
         onTriggerImageUpload={() => fileInputRef.current?.click()}
-        edition={edition}
       />
 
       {/* Clear Board Cautionary Notice */}
       <ConfirmDialog
         isOpen={showClearConfirm}
-        title="Clear Drawing Canvas?"
-        message="All inking strokes, geometry shapes, images, and sticky clippings on this drafting board will be cleared. This action can be undone with Ctrl+Z."
-        confirmText="Clear Canvas"
+        title="Clear this board?"
+        message="Everything on the board goes: strokes, shapes, images and sticky notes. Ctrl+Z brings it all back."
+        confirmText="Clear"
         cancelText="Cancel"
         isDestructive={true}
         onConfirm={() => {
