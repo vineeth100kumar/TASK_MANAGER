@@ -17,6 +17,7 @@ import { CelebrationModal } from './components/common/CelebrationModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { ConnectScreen } from './components/common/ConnectScreen';
 import { UnsavedBanner } from './components/common/UnsavedBanner';
+import { OfflineNotice } from './components/common/OfflineNotice';
 
 import { api, onUnauthorized } from './services/api';
 import { useLiveSync } from './services/websocket';
@@ -24,6 +25,7 @@ import { useToast } from './context/ToastContext';
 import { useSaveState } from './context/SaveStateContext';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { storage } from './utils/storage';
+import { saveSnapshot, readSnapshot } from './services/snapshot';
 import { hasApiSecret } from './config';
 
 import { useUndoRedo } from './hooks/useUndoRedo';
@@ -196,7 +198,17 @@ export const App: React.FC = () => {
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
 
   // Load all data with per-resource error handling (Promise.allSettled)
+  /*
+   * What the screen is showing, when it is not live.
+   *
+   * Null means everything on screen came from the Pi just now. An ISO time
+   * means the Pi could not be reached and this is the last thing it said.
+   */
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
+
   const loadData = useCallback(async () => {
+    setIsReloading(true);
     const results = await Promise.allSettled([
       api.getItems(),
       api.getMilestones(),
@@ -232,17 +244,51 @@ export const App: React.FC = () => {
     if (greetRes.status === 'fulfilled') setGreetingData(greetRes.value);
     if (weatherRes.status === 'fulfilled') setWeatherData(weatherRes.value);
 
-    if (failedResources.length > 0) {
-      toast.action(
-        `Failed to sync ${failedResources.join(', ')} from Raspberry Pi`,
-        'Retry',
-        () => { loadData(); },
-        8000
-      );
+    const core = [itemsRes, milestonesRes, projectsRes, perfRes, finRes, txRes];
+    const everythingCoreLanded = core.every(r => r.status === 'fulfilled');
+
+    if (everythingCoreLanded) {
+      // Keep this answer, so the next time the Pi is out of reach the app
+      // opens to the work rather than to nothing.
+      saveSnapshot({
+        items: itemsRes.status === 'fulfilled' ? itemsRes.value : [],
+        milestones: milestonesRes.status === 'fulfilled' ? milestonesRes.value : [],
+        projects: projectsRes.status === 'fulfilled' ? projectsRes.value : [],
+        dailyPerformance: perfRes.status === 'fulfilled' ? perfRes.value : null,
+        financeSummary: finRes.status === 'fulfilled' ? finRes.value : null,
+        transactions: txRes.status === 'fulfilled' ? txRes.value : [],
+      });
+      setDataAsOf(null);
+    } else {
+      /*
+       * The Pi did not answer. If this is the first load of the session there
+       * is nothing on screen to keep, so fall back to the snapshot and say
+       * plainly that it is one. A later failure leaves what is already there
+       * alone: it came from the Pi this session and is fresher than any
+       * snapshot.
+       */
+      const snapshot = isInitialLoading ? readSnapshot() : null;
+      if (snapshot) {
+        if (itemsRes.status === 'rejected') setItems(snapshot.data.items);
+        if (milestonesRes.status === 'rejected') setMilestones(snapshot.data.milestones);
+        if (projectsRes.status === 'rejected') setProjects(snapshot.data.projects);
+        if (perfRes.status === 'rejected') setDailyPerformance(snapshot.data.dailyPerformance);
+        if (finRes.status === 'rejected') setFinanceSummary(snapshot.data.financeSummary);
+        if (txRes.status === 'rejected') setTransactions(snapshot.data.transactions);
+        setDataAsOf(snapshot.savedAt);
+      } else {
+        toast.action(
+          `Failed to sync ${failedResources.join(', ')} from Raspberry Pi`,
+          'Retry',
+          () => { loadData(); },
+          8000
+        );
+      }
     }
 
+    setIsReloading(false);
     setIsInitialLoading(false);
-  }, [setItems, setMilestones, setProjects, setDailyPerformance, setFinanceSummary, setTransactions, toast]);
+  }, [setItems, setMilestones, setProjects, setDailyPerformance, setFinanceSummary, setTransactions, toast, isInitialLoading]);
 
   // Debounced live sync fallback for unhandled events
   const syncDebounceRef = useRef<any>(null);
@@ -366,6 +412,9 @@ export const App: React.FC = () => {
         undoTooltip={undoTooltip}
         redoTooltip={redoTooltip}
       />
+
+      {/* Said once, above everything, when the screen is a memory */}
+      <OfflineNotice asOf={dataAsOf} onRetry={loadData} isRetrying={isReloading} />
 
       {/* Main Content Area */}
       {/*
