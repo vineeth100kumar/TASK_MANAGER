@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Sparkles, Trash2, Lock, CheckCircle2, X, Clock, Folder, Tag, RotateCw } from 'lucide-react';
+import { Sparkles, Trash2, Lock, CheckCircle2, X, Clock, Folder, Tag, MapPin } from 'lucide-react';
 import {
   WorkItem,
   WorkItemUpdatePayload,
@@ -10,6 +10,7 @@ import {
 } from '../../types';
 import { Modal } from '../common/Modal';
 import { CONTEXT_TAGS } from './QuickAddBar';
+import { RepeatEditor } from './RepeatEditor';
 import {
   formatDuration,
   formatWhen,
@@ -31,14 +32,6 @@ const STATUSES: { value: TaskStatus; label: string }[] = [
   { value: 'in_progress', label: 'In progress' },
   { value: 'blocked', label: 'On hold' },
   { value: 'done', label: 'Done' },
-];
-
-const REPEAT_RULES: { value: string; label: string }[] = [
-  { value: '', label: 'One-time' },
-  { value: 'daily', label: 'Daily' },
-  { value: 'weekdays', label: 'Weekdays' },
-  { value: 'weekly:mon', label: 'Every Monday' },
-  { value: 'monthly:1', label: 'Monthly' },
 ];
 
 const ESTIMATES = [15, 30, 45, 60, 90, 120];
@@ -95,11 +88,13 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
   const [title, setTitle] = useState(item.title);
   const [description, setDescription] = useState(item.description || '');
   const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
+  const [location, setLocation] = useState(item.location || '');
   const titleRef = useRef<HTMLTextAreaElement>(null);
 
   // The sheet stays open while background refreshes land, so track the item.
   useEffect(() => setTitle(item.title), [item.id, item.title]);
   useEffect(() => setDescription(item.description || ''), [item.id, item.description]);
+  useEffect(() => setLocation(item.location || ''), [item.id, item.location]);
 
   // A title that wraps should grow rather than scroll.
   useEffect(() => {
@@ -121,6 +116,11 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
   const commitDescription = () => {
     const next = description.trim();
     if (next !== (item.description || '')) onUpdate({ description: next });
+  };
+
+  const commitLocation = () => {
+    const next = location.trim();
+    if (next !== (item.location || '')) onUpdate({ location: next || null });
   };
 
   const blockers = (item.depends_on || [])
@@ -260,21 +260,42 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
               }}
               className="field flex-1"
             />
-            <input
-              type="time"
-              aria-label="Time"
-              value={timeInputValue(itemMoment(item))}
-              onChange={(e) => {
-                const next = withTimeOfDay(
-                  item.entity_type,
-                  item.due_date || getTodayDateString(),
-                  e.target.value || null
-                );
-                onUpdate(next);
-              }}
-              className="field w-32"
-            />
+            {!item.is_all_day && (
+              <input
+                type="time"
+                aria-label="Time"
+                value={timeInputValue(itemMoment(item))}
+                onChange={(e) => {
+                  const next = withTimeOfDay(
+                    item.entity_type,
+                    item.due_date || getTodayDateString(),
+                    e.target.value || null
+                  );
+                  onUpdate(next);
+                }}
+                className="field w-32"
+              />
+            )}
           </div>
+
+          {/* All day. Clearing the clock is the point of it, so the times go
+              rather than sitting there greyed out and lying about the item. */}
+          <label className="flex items-center gap-2.5 text-meta text-ink-2 cursor-pointer pt-1">
+            <input
+              type="checkbox"
+              checked={!!item.is_all_day}
+              onChange={(e) => {
+                const allDay = e.target.checked;
+                onUpdate(
+                  allDay
+                    ? { is_all_day: true, start_at: null, end_at: null, remind_at: null }
+                    : { is_all_day: false }
+                );
+              }}
+              className="rounded border-hairline text-accent-500 focus:ring-accent-500"
+            />
+            All day
+          </label>
           {/* An event runs between two times. Until now the sheet only ever
               showed the one it starts at, so a meeting's length was something
               you could set when capturing it and never see again. */}
@@ -300,20 +321,50 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
             </div>
           )}
 
-          <div className="flex items-center gap-2 pt-1">
-            <RotateCw className="w-3.5 h-3.5 text-ink-3 shrink-0" />
-            <select
-              value={item.repeat_rule || ''}
-              aria-label="Repeat"
-              onChange={(e) => onUpdate({ repeat_rule: e.target.value || null })}
-              className="field"
-            >
-              {REPEAT_RULES.map((r) => (
-                <option key={r.value} value={r.value}>{r.label}</option>
-              ))}
-            </select>
-          </div>
         </div>
+
+        {/* Where it happens. An event without this is a time with no place,
+            which is the one thing you look for on the way out of the door. */}
+        {item.entity_type === 'event' && (
+          <div className="space-y-1.5">
+            <label htmlFor="detail-location" className="label flex items-center gap-1.5">
+              <MapPin className="w-3.5 h-3.5" /> Location
+            </label>
+            <input
+              id="detail-location"
+              type="text"
+              value={location}
+              placeholder="Where is it"
+              onChange={(e) => setLocation(e.target.value)}
+              onBlur={commitLocation}
+              className="field"
+            />
+          </div>
+        )}
+
+        <RepeatEditor
+          idPrefix="detail-repeat"
+          anchorDate={item.due_date}
+          value={{
+            rule: item.repeat_rule || '',
+            until: item.repeat_until || null,
+            count: item.repeat_count || null,
+          }}
+          onChange={(next) =>
+            onUpdate({
+              repeat_rule: next.rule || null,
+              repeat_until: next.until,
+              repeat_count: next.count,
+            })
+          }
+        />
+
+        {/* Where a repeat has got to, when it has somewhere to get to. */}
+        {item.repeat_count && item.repeat_count > 0 && (
+          <p className="text-caption text-ink-3 -mt-3">
+            {item.repeat_done || 0} of {item.repeat_count} done
+          </p>
+        )}
 
         {/* Type. Things get captured as the wrong kind all the time — a note
             about a meeting arrives as a task — and until now the only way to
@@ -491,7 +542,7 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
                 key={mins}
                 type="button"
                 aria-pressed={item.estimated_minutes === mins}
-                onClick={() => onUpdate({ estimated_minutes: item.estimated_minutes === mins ? 0 : mins })}
+                onClick={() => onUpdate({ estimated_minutes: item.estimated_minutes === mins ? null : mins })}
                 className={`px-2.5 py-1 rounded-control text-meta tabular transition-colors ${
                   item.estimated_minutes === mins
                     ? 'bg-accent-500 text-white'

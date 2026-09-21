@@ -125,6 +125,7 @@ export const App: React.FC = () => {
     handleDeleteItem,
     handleCreateItem,
     handleUpdateItem,
+    handleReorderItem,
     handleToggleSubtask,
     handleAddSubtask,
     handleDeleteSubtask,
@@ -374,6 +375,7 @@ export const App: React.FC = () => {
               onCreateItem={handleCreateItem}
               onDeleteItem={handleDeleteItem}
               onUpdateItem={handleUpdateItem}
+              onReorderItem={handleReorderItem}
               onToggleSubtask={handleToggleSubtask}
               onAddSubtask={handleAddSubtask}
               onDeleteSubtask={handleDeleteSubtask}

@@ -24,8 +24,10 @@ import { QuickAddBar, QuickAddBarHandle, CONTEXT_TAGS } from './QuickAddBar';
 import { BulkActionBar } from './BulkActionBar';
 import { TaskDetailSheet } from './TaskDetailSheet';
 import { KeyboardHelpModal } from './KeyboardHelpModal';
+import { RepeatEditor } from './RepeatEditor';
 import { usePersistedState } from '../../hooks/usePersistedState';
 import { useKeyboardShortcuts } from '../../hooks/useKeyboardShortcuts';
+import { useListReorder } from '../../hooks/useListReorder';
 import { 
   groupTasksBySmartDate, 
   getTodayDateString, 
@@ -51,6 +53,7 @@ interface TasksViewProps {
   onCreateItem?: (item: Omit<Partial<WorkItem>, 'subtasks'> & { subtasks?: string[] }) => void;
   onDeleteItem?: (id: string) => void;
   onUpdateItem?: (id: string, updates: WorkItemUpdatePayload) => void;
+  onReorderItem?: (id: string, move: { before_id: string | null; after_id: string | null }) => void;
   onToggleSubtask?: (itemId: string, subtaskId: string) => void;
   onAddSubtask?: (itemId: string, title: string) => void;
   onDeleteSubtask?: (itemId: string, subtaskId: string) => void;
@@ -81,6 +84,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   onCreateItem,
   onDeleteItem,
   onUpdateItem,
+  onReorderItem,
   onToggleSubtask,
   onAddSubtask,
   onDeleteSubtask,
@@ -92,7 +96,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [viewMode, setViewMode] = usePersistedState<'list' | 'kanban' | 'timeline'>('tasks_view_mode', 'list');
   const [selectedTag, setSelectedTag] = usePersistedState<string | null>('tasks_selected_tag', null);
   const [selectedProjectId, setSelectedProjectId] = usePersistedState<string>('tasks_selected_project', 'all');
-  const [sortBy, setSortBy] = usePersistedState<'due_date' | 'priority' | 'title' | 'created_at'>('tasks_sort_by', 'due_date');
+  const [sortBy, setSortBy] = usePersistedState<'due_date' | 'priority' | 'title' | 'created_at' | 'manual'>('tasks_sort_by', 'due_date');
   const [smartGrouping, setSmartGrouping] = usePersistedState<boolean>('tasks_smart_grouping', true);
   const [sortDir, setSortDir] = usePersistedState<'asc' | 'desc'>('tasks_sort_dir', 'asc');
   const [showCompleted, setShowCompleted] = usePersistedState<boolean>('tasks_show_completed', false);
@@ -139,6 +143,10 @@ export const TasksView: React.FC<TasksViewProps> = ({
   // day with no time and no end, and the calendar had nowhere to draw it.
   const [newTime, setNewTime] = useState('');
   const [newEndTime, setNewEndTime] = useState('');
+  const [newLocation, setNewLocation] = useState('');
+  const [newAllDay, setNewAllDay] = useState(false);
+  const [newRepeatUntil, setNewRepeatUntil] = useState<string | null>(null);
+  const [newRepeatCount, setNewRepeatCount] = useState<number | null>(null);
 
   // Check if an item is blocked by uncompleted dependencies
   const isItemBlocked = (item: WorkItem): { blocked: boolean; blockerTitles: string[] } => {
@@ -209,6 +217,19 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const sortedItems = useMemo(() => {
     const direction = sortDir === 'asc' ? 1 : -1;
     return [...filteredItems].sort((a, b) => {
+      if (sortBy === 'manual') {
+        // Hand-chosen order. Anything without a position yet — created
+        // before the column existed, or while offline — sits at the end in
+        // creation order rather than jumping to the top.
+        const left = a.position;
+        const right = b.position;
+        if (left == null && right == null) {
+          return new Date(a.created_at || '').getTime() - new Date(b.created_at || '').getTime();
+        }
+        if (left == null) return 1;
+        if (right == null) return -1;
+        return direction * (left - right);
+      }
       if (sortBy === 'priority') {
         // Most urgent first is the useful direction, so ascending means that.
         return direction * ((priorityWeights[b.priority] || 0) - (priorityWeights[a.priority] || 0));
@@ -235,8 +256,12 @@ export const TasksView: React.FC<TasksViewProps> = ({
    * this, so the row the arrow keys land on is the row the eye is on — which
    * grouping and flat order had previously disagreed about.
    */
+  // Manual order and smart grouping cannot both be true: one says the order
+  // is yours, the other says it is the calendar's.
+  const isManualOrder = sortBy === 'manual';
+
   const sections = useMemo(() => {
-    const open = smartGrouping
+    const open = smartGrouping && !isManualOrder
       ? [
           { key: 'overdue', label: 'Overdue', tone: 'late' as const, items: smartGroups.overdue },
           { key: 'today', label: 'Today', tone: 'plain' as const, items: smartGroups.today },
@@ -250,7 +275,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
       : [];
 
     return [...open, ...completed].filter((section) => section.items.length > 0);
-  }, [smartGrouping, smartGroups, sortedItems, showCompleted, completedItems]);
+  }, [smartGrouping, isManualOrder, smartGroups, sortedItems, showCompleted, completedItems]);
 
   const visibleItems = useMemo(
     () => sections.filter((section) => !collapsedSections[section.key]).flatMap((section) => section.items),
@@ -258,6 +283,22 @@ export const TasksView: React.FC<TasksViewProps> = ({
   );
 
   const highlightedItem = highlightedIndex >= 0 ? visibleItems[highlightedIndex] : undefined;
+
+  const reorderOrder = useMemo(() => visibleItems.map((i) => i.id), [visibleItems]);
+
+  const handleReorderDrop = useCallback(
+    ({ id, beforeId, afterId }: { id: string; beforeId: string | null; afterId: string | null }) => {
+      haptics.light();
+      if (onReorderItem) {
+        onReorderItem(id, { before_id: beforeId, after_id: afterId });
+      } else {
+        api.reorderItem(id, { before_id: beforeId, after_id: afterId }).then(() => onRefresh());
+      }
+    },
+    [onReorderItem, onRefresh]
+  );
+
+  const reorder = useListReorder({ order: reorderOrder, onDrop: handleReorderDrop });
 
   // A list that shortened under the cursor should not leave it past the end.
   useEffect(() => {
@@ -559,9 +600,13 @@ export const TasksView: React.FC<TasksViewProps> = ({
 
     // The same helper the detail sheet uses, so a task created here and one
     // edited later end up with identical fields on the row.
-    const moment = withTimeOfDay(newType, newDueDate || null, newTime || null);
+    // An all-day item has a date and no clock, so the times are dropped
+    // rather than saved alongside a flag that contradicts them.
+    const moment = newAllDay
+      ? { due_date: newDueDate || null, start_at: null, remind_at: null }
+      : withTimeOfDay(newType, newDueDate || null, newTime || null);
     const endAt =
-      newType === 'event' && newDueDate && newEndTime
+      !newAllDay && newType === 'event' && newDueDate && newEndTime
         ? `${newDueDate}T${newEndTime}:00`
         : null;
 
@@ -573,7 +618,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
       start_at: moment.start_at || undefined,
       end_at: endAt || undefined,
       remind_at: moment.remind_at || undefined,
+      is_all_day: newAllDay,
+      location: newType === 'event' && newLocation.trim() ? newLocation.trim() : undefined,
       repeat_rule: newRepeatRule || undefined,
+      repeat_until: newRepeatUntil || undefined,
+      repeat_count: newRepeatCount || undefined,
       description: newDescription || undefined,
       context_tags: newContextTags || undefined,
       project_id: newProjectId || undefined,
@@ -594,7 +643,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
     setNewDueDate('');
     setNewTime('');
     setNewEndTime('');
+    setNewLocation('');
+    setNewAllDay(false);
     setNewRepeatRule('');
+    setNewRepeatUntil(null);
+    setNewRepeatCount(null);
     setNewContextTags('');
     setNewProjectId('');
     setNewMilestoneId('');
@@ -700,6 +753,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <option value="priority">Priority</option>
               <option value="title">Title</option>
               <option value="created_at">Created</option>
+              <option value="manual">Manual order</option>
             </select>
             <button
               onClick={() => setSortDir(sortDir === 'asc' ? 'desc' : 'asc')}
@@ -998,6 +1052,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
                             onClick={(target) => setSelectedItem(target)}
                             onRefine={handleQuickRefine}
                             onReschedule={handleReschedule}
+                            isReorderable={isManualOrder}
+                            isDragging={reorder.draggingId === item.id}
+                            dropEdge={reorder.target?.overId === item.id ? reorder.target.edge : null}
+                            onReorderStart={(target, event) => reorder.start(target.id, event)}
+                            onReorderNudge={(target, delta) => reorder.moveBy(target.id, delta)}
                           />
                         );
                       })}
@@ -1224,17 +1283,35 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 onChange={(e) => setNewDueDate(e.target.value)}
                 className="field flex-1"
               />
-              <input
-                type="time"
-                aria-label={newType === 'event' ? 'Starts at' : 'Time'}
-                value={newTime}
-                disabled={!newDueDate}
-                onChange={(e) => setNewTime(e.target.value)}
-                className="field w-32 disabled:opacity-40"
-              />
+              {!newAllDay && (
+                <input
+                  type="time"
+                  aria-label={newType === 'event' ? 'Starts at' : 'Time'}
+                  value={newTime}
+                  disabled={!newDueDate}
+                  onChange={(e) => setNewTime(e.target.value)}
+                  className="field w-32 disabled:opacity-40"
+                />
+              )}
             </div>
 
-            {newType === 'event' && (
+            <label className="flex items-center gap-2.5 text-meta text-ink-2 cursor-pointer pt-1">
+              <input
+                type="checkbox"
+                checked={newAllDay}
+                onChange={(e) => {
+                  setNewAllDay(e.target.checked);
+                  if (e.target.checked) {
+                    setNewTime('');
+                    setNewEndTime('');
+                  }
+                }}
+                className="rounded border-hairline text-accent-500 focus:ring-accent-500"
+              />
+              All day
+            </label>
+
+            {newType === 'event' && !newAllDay && (
               <div className="flex items-center gap-2 pt-1">
                 <span className="text-meta text-ink-2 shrink-0">Ends</span>
                 <input
@@ -1260,9 +1337,22 @@ export const TasksView: React.FC<TasksViewProps> = ({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          {newType === 'event' && (
             <div className="space-y-1.5">
-              <label htmlFor="new-task-priority" className="label">Priority</label>
+              <label htmlFor="new-task-location" className="label">Location</label>
+              <input
+                id="new-task-location"
+                type="text"
+                placeholder="Where is it"
+                value={newLocation}
+                onChange={(e) => setNewLocation(e.target.value)}
+                className="field"
+              />
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <label htmlFor="new-task-priority" className="label">Priority</label>
               <select
                 id="new-task-priority"
                 value={newPriority}
@@ -1273,25 +1363,19 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
-              </select>
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="new-task-repeat" className="label">Repeat</label>
-              <select
-                id="new-task-repeat"
-                value={newRepeatRule}
-                onChange={(e) => setNewRepeatRule(e.target.value)}
-                className="field"
-              >
-                <option value="">One-time</option>
-                <option value="daily">Daily</option>
-                <option value="weekdays">Weekdays</option>
-                <option value="weekly:mon">Every Monday</option>
-                <option value="monthly:1">Monthly</option>
-              </select>
-            </div>
+            </select>
           </div>
+
+          <RepeatEditor
+            idPrefix="new-task-repeat"
+            anchorDate={newDueDate || null}
+            value={{ rule: newRepeatRule, until: newRepeatUntil, count: newRepeatCount }}
+            onChange={(next) => {
+              setNewRepeatRule(next.rule);
+              setNewRepeatUntil(next.until);
+              setNewRepeatCount(next.count);
+            }}
+          />
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             <div className="space-y-1.5">

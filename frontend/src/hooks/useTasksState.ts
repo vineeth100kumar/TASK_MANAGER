@@ -295,6 +295,53 @@ export function useTasksState({
       .finally(endSync);
   }, [items, pushHistoryAction, startSync, endSync, toast]);
 
+  /*
+   * Move an item to a new place in the hand-sorted order.
+   *
+   * The new position is worked out on the client first, so the row settles
+   * where it was dropped straight away rather than snapping back while the
+   * Pi answers. The server does the same arithmetic and its answer replaces
+   * this one; they agree unless another device moved something in between,
+   * in which case the server is right.
+   */
+  const handleReorderItem = useCallback((
+    id: string,
+    move: { before_id: string | null; after_id: string | null },
+  ) => {
+    const previous = items.find(i => i.id === id);
+    const above = move.before_id ? items.find(i => i.id === move.before_id) : undefined;
+    const below = move.after_id ? items.find(i => i.id === move.after_id) : undefined;
+
+    let optimistic: number | null = null;
+    if (above?.position != null && below?.position != null) {
+      optimistic = (above.position + below.position) / 2;
+    } else if (above?.position != null) {
+      optimistic = above.position + 1024;
+    } else if (below?.position != null) {
+      optimistic = below.position - 1024;
+    }
+
+    if (optimistic !== null) {
+      setItems(prev => prev.map(i => (i.id === id ? { ...i, position: optimistic } : i)));
+    }
+
+    startSync();
+    api.reorderItem(id, move)
+      .then(realItem => {
+        setItems(prev => prev.map(i => (i.id === id ? realItem : i)));
+      })
+      .catch(err => {
+        console.error('Failed to reorder item on Pi', err);
+        // Put it back where it was, so the list never shows an order the Pi
+        // does not have.
+        if (previous) {
+          setItems(prev => prev.map(i => (i.id === id ? { ...i, position: previous.position } : i)));
+        }
+        toast.error('Could not save the new order');
+      })
+      .finally(endSync);
+  }, [items, startSync, endSync, toast]);
+
   // Toggle Subtask
   const handleToggleSubtask = useCallback((itemId: string, subtaskId: string) => {
     setItems(prev => prev.map(item => {
@@ -621,6 +668,7 @@ export function useTasksState({
     handleDeleteItem,
     handleCreateItem,
     handleUpdateItem,
+    handleReorderItem,
     handleToggleSubtask,
     handleAddSubtask,
     handleDeleteSubtask,

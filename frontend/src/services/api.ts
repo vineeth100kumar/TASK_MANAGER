@@ -117,6 +117,17 @@ export const api = {
     fetchJson<{ success: boolean; id: string }>(`/api/v1/items/${id}`, {
       method: 'DELETE',
     }),
+  /*
+   * A drop is described by the rows it landed between, not by an index.
+   * Between the drag starting and the request landing, a websocket update
+   * from another device may have re-sorted the list; neighbours still mean
+   * the same thing afterwards, an index does not.
+   */
+  reorderItem: (id: string, move: { before_id?: string | null; after_id?: string | null }) =>
+    fetchJson<WorkItem>(`/api/v1/items/${id}/reorder`, {
+      method: 'POST',
+      body: JSON.stringify(move),
+    }),
   addSubtask: (itemId: string, title: string) =>
     fetchJson<Subtask>(`/api/v1/items/${itemId}/subtasks`, {
       method: 'POST',
