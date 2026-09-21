@@ -37,7 +37,7 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({
           animate={{ scale: 1, opacity: 1, y: 0 }}
           exit={{ scale: 0.8, opacity: 0 }}
           onClick={e => e.stopPropagation()}
-          className="relative max-w-sm w-full bg-surface border border-ink-base/30 dark:border-paper-light/25 rounded-control p-6 text-center shadow-lg space-y-4 overflow-hidden"
+          className="relative max-w-sm w-full bg-surface border border-hairline dark:border-paper-light/25 rounded-control p-6 text-center shadow-lg space-y-4 overflow-hidden"
         >
           {/* Stamp checkmark */}
           <motion.div
@@ -50,26 +50,26 @@ export const CelebrationModal: React.FC<CelebrationModalProps> = ({
           </motion.div>
 
           <div className="space-y-1.5">
-            <span className="text-caption font-bold text-amber-700 dark:text-amber-400">
+            <span className="text-caption font-semibold text-amber-700 dark:text-amber-400">
               SPECIAL BULLETIN • EXTRA! EXTRA!
             </span>
-            <h3 className="text-2xl font-bold text-ink-base dark:text-paper-light flex items-center justify-center gap-1.5">
+            <h3 className="text-title font-semibold text-ink flex items-center justify-center gap-1.5">
               <span>All Clear for Today!</span>
-              <Sparkles className="w-5 h-5 text-amber-600 dark:text-amber-400 animate-pulse" />
+              <Sparkles className="w-5 h-5 text-accent-500 animate-pulse" />
             </h3>
-            <p className="text-meta italic text-ink-muted dark:text-stone-400 leading-relaxed">
+            <p className="text-meta italic text-ink-2 leading-relaxed">
               You completed all scheduled docket items. Take a breath and enjoy your evening.
             </p>
           </div>
 
-          <div className="flex items-center justify-center space-x-2 px-4 py-2 rounded border border-amber-600/30 bg-paper-aged dark:bg-stone-800 max-w-[220px] mx-auto text-meta font-bold text-amber-800 dark:text-amber-300">
-            <Flame className="w-4 h-4 text-amber-600 dark:text-amber-400 animate-bounce" />
+          <div className="flex items-center justify-center space-x-2 px-4 py-2 rounded border border-amber-600/30 bg-sunken max-w-[220px] mx-auto text-meta font-semibold text-amber-800 dark:text-amber-300">
+            <Flame className="w-4 h-4 text-accent-500 animate-bounce" />
             <span>{streakDays} DAY STREAK ACTIVE</span>
           </div>
 
           <button
             onClick={onClose}
-            className="w-full py-2.5 rounded bg-ink-base hover:bg-sunken text-paper-white dark:bg-paper-light dark:hover:bg-paper-aged dark:text-ink-base text-meta font-bold shadow transition-all active:scale-95"
+            className="w-full py-2.5 rounded bg-ink-base hover:bg-sunken text-paper-white dark:bg-surface dark:hover:bg-sunken dark:text-ink-base text-meta font-semibold shadow transition-all active:scale-95"
           >
             Acknowledge & Continue
           </button>

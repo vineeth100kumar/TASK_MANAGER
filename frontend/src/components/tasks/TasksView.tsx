@@ -3,7 +3,6 @@ import {
   Plus,
   RotateCw,
   Sparkles,
-  Target,
   Check,
   X,
   Tag,
@@ -58,6 +57,19 @@ interface TasksViewProps {
   onOpenBrainDump?: () => void;
   onCelebrationTrigger?: () => void;
 }
+
+const ENTITY_TYPES: { value: EntityType; label: string }[] = [
+  { value: 'task', label: 'Task' },
+  { value: 'event', label: 'Event' },
+  { value: 'reminder', label: 'Reminder' },
+];
+
+/* What each type actually does, said once, where the choice is made. */
+const ENTITY_HINTS: Record<EntityType, string> = {
+  task: 'Something to get done. Sits in your list until you tick it off.',
+  event: 'Something that happens at a time. Gets a slot on the calendar.',
+  reminder: 'A nudge at a moment. Notifies you and then gets out of the way.',
+};
 
 export const TasksView: React.FC<TasksViewProps> = ({
   isLoading = false,
@@ -122,6 +134,11 @@ export const TasksView: React.FC<TasksViewProps> = ({
   const [newProjectId, setNewProjectId] = useState<string>('');
   const [newMilestoneId, setNewMilestoneId] = useState<string>('');
   const [newEstimatedMinutes, setNewEstimatedMinutes] = useState<number>(30);
+  // An event with no clock on it is not an event. The form used to collect a
+  // date and nothing else, so anything made here as an "Event" landed in the
+  // day with no time and no end, and the calendar had nowhere to draw it.
+  const [newTime, setNewTime] = useState('');
+  const [newEndTime, setNewEndTime] = useState('');
 
   // Check if an item is blocked by uncompleted dependencies
   const isItemBlocked = (item: WorkItem): { blocked: boolean; blockerTitles: string[] } => {
@@ -540,11 +557,22 @@ export const TasksView: React.FC<TasksViewProps> = ({
     e.preventDefault();
     if (!newTitle.trim()) return;
 
+    // The same helper the detail sheet uses, so a task created here and one
+    // edited later end up with identical fields on the row.
+    const moment = withTimeOfDay(newType, newDueDate || null, newTime || null);
+    const endAt =
+      newType === 'event' && newDueDate && newEndTime
+        ? `${newDueDate}T${newEndTime}:00`
+        : null;
+
     const itemData = {
       title: newTitle.trim(),
       entity_type: newType,
       priority: newPriority,
-      due_date: newDueDate || undefined,
+      due_date: moment.due_date || undefined,
+      start_at: moment.start_at || undefined,
+      end_at: endAt || undefined,
+      remind_at: moment.remind_at || undefined,
       repeat_rule: newRepeatRule || undefined,
       description: newDescription || undefined,
       context_tags: newContextTags || undefined,
@@ -564,6 +592,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
     setNewTitle('');
     setNewDescription('');
     setNewDueDate('');
+    setNewTime('');
+    setNewEndTime('');
     setNewRepeatRule('');
     setNewContextTags('');
     setNewProjectId('');
@@ -860,8 +890,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
               <div key={m.id} className="bg-surface border border-hairline p-5 rounded-2xl space-y-3">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-ink">{m.title}</h3>
-                    <p className="text-meta text-ink-2 mt-0.5">Target Due Date: {m.due_date}</p>
+                    <h3 className="text-body font-medium text-ink">{m.title}</h3>
+                    <p className="text-meta text-ink-3 mt-0.5">Due {m.due_date}</p>
                   </div>
                   <span className="text-caption font-bold px-2 py-0.5 rounded bg-blue-500/20 text-blue-400">
                     {m.status}
@@ -1100,9 +1130,9 @@ export const TasksView: React.FC<TasksViewProps> = ({
       <Modal
         isOpen={isCreating}
         onClose={() => setIsCreating(false)}
-        title="New task"
+        title={newType === 'event' ? 'New event' : newType === 'reminder' ? 'New reminder' : 'New task'}
         maxWidth="lg"
-        hasUnsavedChanges={!!newTitle.trim()}
+        hasUnsavedChanges={!!newTitle.trim() || !!newDescription.trim()}
       >
         <form onSubmit={handleCreate} className="space-y-5">
           <div className="space-y-1.5">
@@ -1158,21 +1188,79 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
           )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label htmlFor="new-task-type" className="label">Type</label>
-              <select
-                id="new-task-type"
-                value={newType}
-                onChange={(e) => setNewType(e.target.value as EntityType)}
-                className="field"
-              >
-                <option value="task">Task</option>
-                <option value="event">Event</option>
-                <option value="reminder">Reminder</option>
-              </select>
+          {/* Type decides the shape of the rest of the form, so it comes first
+              and reads as a choice rather than a dropdown to go hunting in. */}
+          <div className="space-y-1.5">
+            <span className="label">Type</span>
+            <div className="bg-sunken rounded-control p-0.5 flex items-center" role="group" aria-label="Type">
+              {ENTITY_TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  aria-pressed={newType === t.value}
+                  onClick={() => setNewType(t.value)}
+                  className={`flex-1 px-2 py-1.5 rounded-control text-meta transition-colors ${
+                    newType === t.value
+                      ? 'bg-surface text-ink font-medium shadow-sm'
+                      : 'text-ink-2 hover:text-ink'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+            <p className="text-caption text-ink-3">{ENTITY_HINTS[newType]}</p>
+          </div>
+
+          {/* When */}
+          <div className="space-y-1.5">
+            <span className="label">{newType === 'event' ? 'When' : 'Due'}</span>
+            <div className="flex items-center gap-2">
+              <input
+                id="new-task-due"
+                type="date"
+                aria-label={newType === 'event' ? 'Date' : 'Due date'}
+                value={newDueDate}
+                onChange={(e) => setNewDueDate(e.target.value)}
+                className="field flex-1"
+              />
+              <input
+                type="time"
+                aria-label={newType === 'event' ? 'Starts at' : 'Time'}
+                value={newTime}
+                disabled={!newDueDate}
+                onChange={(e) => setNewTime(e.target.value)}
+                className="field w-32 disabled:opacity-40"
+              />
             </div>
 
+            {newType === 'event' && (
+              <div className="flex items-center gap-2 pt-1">
+                <span className="text-meta text-ink-2 shrink-0">Ends</span>
+                <input
+                  type="time"
+                  aria-label="Ends at"
+                  value={newEndTime}
+                  disabled={!newTime}
+                  onChange={(e) => setNewEndTime(e.target.value)}
+                  className="field w-32 disabled:opacity-40"
+                />
+                {newEndTime && newTime && newEndTime <= newTime && (
+                  <span className="text-caption text-late-500 dark:text-late-400">
+                    Ends before it starts
+                  </span>
+                )}
+              </div>
+            )}
+
+            {!newDueDate && (
+              <p className="text-caption text-ink-3">
+                Leave the date empty and this waits in Someday.
+              </p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1.5">
               <label htmlFor="new-task-priority" className="label">Priority</label>
               <select
@@ -1186,19 +1274,6 @@ export const TasksView: React.FC<TasksViewProps> = ({
                 <option value="high">High</option>
                 <option value="urgent">Urgent</option>
               </select>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <label htmlFor="new-task-due" className="label">Due</label>
-              <input
-                id="new-task-due"
-                type="date"
-                value={newDueDate}
-                onChange={(e) => setNewDueDate(e.target.value)}
-                className="field"
-              />
             </div>
 
             <div className="space-y-1.5">
@@ -1256,6 +1331,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
             </div>
           </div>
 
+          {newType !== 'event' && (
           <div className="space-y-1.5">
             <span className="label">Estimate</span>
             <div className="flex flex-wrap gap-1.5">
@@ -1264,7 +1340,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
                   key={mins}
                   type="button"
                   aria-pressed={newEstimatedMinutes === mins}
-                  onClick={() => setNewEstimatedMinutes(mins)}
+                  onClick={() => setNewEstimatedMinutes(newEstimatedMinutes === mins ? 0 : mins)}
                   className={`px-2.5 py-1 rounded-control text-meta tabular transition-colors ${
                     newEstimatedMinutes === mins
                       ? 'bg-accent-500 text-white'
@@ -1276,6 +1352,7 @@ export const TasksView: React.FC<TasksViewProps> = ({
               ))}
             </div>
           </div>
+          )}
 
           <div className="space-y-1.5">
             <label htmlFor="new-task-notes" className="label">Notes</label>
@@ -1292,21 +1369,32 @@ export const TasksView: React.FC<TasksViewProps> = ({
           <div className="space-y-1.5">
             <span className="label">Context</span>
             <div className="flex flex-wrap gap-1.5">
-              {CONTEXT_TAGS.map(tag => (
-                <button
-                  key={tag}
-                  type="button"
-                  aria-pressed={newContextTags === tag}
-                  onClick={() => setNewContextTags(newContextTags === tag ? '' : tag)}
-                  className={`px-2.5 py-1 rounded-control text-meta transition-colors ${
-                    newContextTags === tag
-                      ? 'bg-accent-500 text-white'
-                      : 'bg-sunken text-ink-2 hover:text-ink'
-                  }`}
-                >
-                  {tag}
-                </button>
-              ))}
+              {CONTEXT_TAGS.map(tag => {
+                // Multi-select, the same as the detail sheet. Creating a task
+                // used to allow exactly one context and editing it allowed
+                // several, so a second tag could only be added after saving.
+                const selected = newContextTags.split(' ').filter(Boolean);
+                const isActive = selected.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    aria-pressed={isActive}
+                    onClick={() =>
+                      setNewContextTags(
+                        (isActive ? selected.filter(t => t !== tag) : [...selected, tag]).join(' ')
+                      )
+                    }
+                    className={`px-2.5 py-1 rounded-control text-meta transition-colors ${
+                      isActive
+                        ? 'bg-accent-500 text-white'
+                        : 'bg-sunken text-ink-2 hover:text-ink'
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -1314,16 +1402,16 @@ export const TasksView: React.FC<TasksViewProps> = ({
             <button
               type="button"
               onClick={() => setIsCreating(false)}
-              className="px-4 py-2 rounded-control text-meta text-ink-2 hover:text-ink transition-colors"
+              className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={!newTitle.trim()}
-              className="px-4 py-2 rounded-control bg-accent-500 hover:bg-accent-600 disabled:opacity-40 text-white text-meta font-medium transition-colors"
+              className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 disabled:opacity-40 disabled:pointer-events-none text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97]"
             >
-              Add task
+              Add {newType}
             </button>
           </div>
         </form>
@@ -1355,115 +1443,94 @@ export const TasksView: React.FC<TasksViewProps> = ({
       )}
 
 
-      {/* AI Board Organizer Modal */}
+      {/* What to do first, when the list is too long to read */}
       <Modal
         isOpen={isBoardOrganizerOpen}
         onClose={() => setIsBoardOrganizerOpen(false)}
-        title="Executive Board Organizer"
-        icon={<Sparkles className="w-4 h-4 text-blue-400" />}
-        maxWidth="max-w-xl"
+        title="What matters today"
+        maxWidth="xl"
       >
-        <div className="space-y-5">
+        {isOrganizingBoard ? (
+          <div className="py-14 flex flex-col items-center justify-center gap-3">
+            <RotateCw className="w-5 h-5 animate-spin text-ink-3" aria-hidden="true" />
+            <p className="text-meta text-ink-2">Reading your list on the Pi…</p>
+          </div>
+        ) : boardOrgData ? (
+          <div className="space-y-6">
+            <p className="text-body text-ink leading-relaxed">
+              {boardOrgData.executive_summary}
+            </p>
 
-            {isOrganizingBoard ? (
-              <div className="py-12 flex flex-col items-center justify-center space-y-3">
-                <RotateCw className="w-6 h-6 animate-spin text-blue-400" />
-                <p className="text-meta text-ink-2">Analyzing tasks and strategic priorities...</p>
-              </div>
-            ) : boardOrgData ? (
-              <div className="space-y-4">
-                {/* Executive Summary Card */}
-                <div className="bg-gradient-to-br from-blue-950/40 via-zinc-900 to-zinc-900 border border-blue-500/20 rounded-xl p-3.5 space-y-1.5">
-                  <span className="text-caption font-mono text-blue-400 font-semibold">
-                    Workload Synthesis
-                  </span>
-                  <p className="text-meta text-ink leading-relaxed">
-                    {boardOrgData.executive_summary}
-                  </p>
-                </div>
-
-                {/* Top 3 Big Rocks */}
-                <div className="space-y-2">
-                  <div className="flex items-center space-x-1.5 text-meta font-semibold text-ink-2">
-                    <Target className="w-4 h-4 text-red-400" />
-                    <span>Today's Strategic Big 3 (High Leverage)</span>
-                  </div>
-                  <div className="space-y-1.5">
-                    {boardOrgData.big_rocks.length === 0 ? (
-                      <p className="text-meta text-ink-2 italic">No pending tasks on the board.</p>
-                    ) : (
-                      boardOrgData.big_rocks.map((task: any, idx: number) => (
-                        <div
-                          key={task.id || idx}
-                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-meta"
-                        >
-                          <div className="flex items-center space-x-2 min-w-0 flex-1">
-                            <span className="w-5 h-5 rounded-full bg-blue-500/10 text-blue-400 flex items-center justify-center font-bold text-caption">
-                              {idx + 1}
-                            </span>
-                            <span className="font-medium text-ink truncate">{task.title}</span>
-                          </div>
-                          <span className={`text-caption font-bold px-2 py-0.5 rounded ml-2 ${
-                            task.priority === 'urgent' ? 'bg-red-500/20 text-red-400' : 'bg-amber-500/20 text-amber-400'
-                          }`}>
-                            {task.priority || 'medium'}
-                          </span>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-
-                {/* Proposed Title Polish */}
-                {boardOrgData.title_improvements && boardOrgData.title_improvements.length > 0 && (
-                  <div className="space-y-2 pt-2 border-t border-hairline/80">
-                    <div className="flex items-center justify-between">
-                      <span className="text-meta font-semibold text-ink-2 flex items-center space-x-1.5">
-                        <Sparkles className="w-3.5 h-3.5 text-blue-400" />
-                        <span>Recommended Title Improvements ({boardOrgData.title_improvements.length})</span>
+            <div className="space-y-2">
+              <span className="label">The three worth doing first</span>
+              {boardOrgData.big_rocks.length === 0 ? (
+                <p className="text-meta text-ink-3">Nothing open on the board.</p>
+              ) : (
+                <div className="divide-y divide-hairline">
+                  {boardOrgData.big_rocks.map((task: any, idx: number) => (
+                    <div key={task.id || idx} className="flex items-center gap-3 py-2.5">
+                      <span className="w-6 h-6 rounded-full bg-sunken text-ink-2 grid place-items-center text-caption font-medium shrink-0 tabular">
+                        {idx + 1}
                       </span>
-                      <button
-                        onClick={handleApplyAllTitleImprovements}
-                        className="text-meta text-blue-400 hover:text-blue-300 font-semibold px-2 py-0.5 rounded bg-blue-500/10 border border-blue-500/20"
-                      >
-                        Polish All
-                      </button>
+                      <span className="flex-1 min-w-0 text-meta text-ink truncate">{task.title}</span>
+                      <span className="text-caption text-ink-3 shrink-0 capitalize">
+                        {task.priority || 'medium'}
+                      </span>
                     </div>
+                  ))}
+                </div>
+              )}
+            </div>
 
-                    <div className="space-y-2">
-                      {boardOrgData.title_improvements.map((ti: any) => (
-                        <div
-                          key={ti.id}
-                          className="flex items-center justify-between p-2.5 rounded border border-ink-base/15 dark:border-stone-800 bg-paper-aged/50 dark:bg-stone-900 text-meta gap-3"
-                        >
-                          <div className="min-w-0 flex-1">
-                            <div className="text-meta text-ink-2 line-through truncate">{ti.current_title}</div>
-                            <div className="font-semibold text-emerald-400 truncate mt-0.5">{ti.improved_title}</div>
-                          </div>
-                          <button
-                            onClick={() => handleApplyTitleImprovement(ti.id, ti.improved_title)}
-                            className="px-2.5 py-1 rounded bg-sunken hover:bg-hairline text-ink text-meta font-medium shrink-0 flex items-center space-x-1"
-                          >
-                            <Check className="w-3 h-3 text-emerald-400" />
-                            <span>Apply</span>
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-end pt-2">
+            {boardOrgData.title_improvements && boardOrgData.title_improvements.length > 0 && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="label">
+                    Clearer wording · {boardOrgData.title_improvements.length}
+                  </span>
                   <button
-                    onClick={() => setIsBoardOrganizerOpen(false)}
-                    className="px-4 py-2 bg-sunken hover:bg-hairline text-ink text-meta font-semibold rounded-lg"
+                    type="button"
+                    onClick={handleApplyAllTitleImprovements}
+                    className="text-meta text-ink-2 hover:text-ink transition-colors"
                   >
-                    Done
+                    Apply all
                   </button>
                 </div>
+
+                <div className="divide-y divide-hairline">
+                  {boardOrgData.title_improvements.map((ti: any) => (
+                    <div key={ti.id} className="flex items-center gap-3 py-2.5">
+                      <div className="min-w-0 flex-1">
+                        <div className="text-caption text-ink-3 line-through truncate">
+                          {ti.current_title}
+                        </div>
+                        <div className="text-meta text-ink truncate mt-0.5">{ti.improved_title}</div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handleApplyTitleImprovement(ti.id, ti.improved_title)}
+                        aria-label={`Rename to ${ti.improved_title}`}
+                        className="h-9 px-3 rounded-control bg-sunken hover:bg-hairline text-ink text-meta font-medium shrink-0 transition-colors"
+                      >
+                        Use
+                      </button>
+                    </div>
+                  ))}
+                </div>
               </div>
-            ) : null}
+            )}
+
+            <div className="flex justify-end pt-1">
+              <button
+                type="button"
+                onClick={() => setIsBoardOrganizerOpen(false)}
+                className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97]"
+              >
+                Done
+              </button>
+            </div>
           </div>
+        ) : null}
       </Modal>
 
       <KeyboardHelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
@@ -1471,8 +1538,8 @@ export const TasksView: React.FC<TasksViewProps> = ({
       {/* Delete Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deletingItemId}
-        title="Delete Task"
-        message={`Are you sure you want to delete "${items.find(i => i.id === deletingItemId)?.title || 'this task'}"? This can be undone from the undo notification or with Ctrl+Z.`}
+        title="Delete this task?"
+        message={`"${items.find(i => i.id === deletingItemId)?.title || 'This task'}" will go. Ctrl+Z brings it back.`}
         confirmLabel="Delete"
         confirmVariant="danger"
         onConfirm={() => {

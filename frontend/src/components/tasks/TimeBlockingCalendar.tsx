@@ -114,18 +114,18 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
   return (
     <div className="flex flex-col lg:flex-row gap-6 w-full">
       {/* Main Calendar Timeline */}
-      <div className="flex-1 flex flex-col bg-surface border border-stone-300 dark:border-stone-800 rounded-control overflow-hidden min-h-[600px] relative">        {/* Calendar Header */}
-        <div className="p-4 bg-paper-aged dark:bg-sunken border-b border-stone-300 dark:border-stone-800 flex items-center justify-between flex-wrap gap-3">
+      <div className="flex-1 flex flex-col bg-surface border border-hairline rounded-control overflow-hidden min-h-[600px] relative">        {/* Calendar Header */}
+        <div className="p-4 bg-sunken dark:bg-sunken border-b border-hairline flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
-            <div className="p-2 rounded-control bg-paper-base dark:bg-stone-900 text-amber-700 dark:text-amber-400 border border-stone-300 dark:border-stone-700">
+            <div className="p-2 rounded-control bg-sunken text-amber-700 dark:text-amber-400 border border-hairline">
               <Clock className="w-5 h-5" />
             </div>
             <div>
-              <div className="text-caption text-amber-700 dark:text-amber-500 font-bold">
+              <div className="text-caption text-amber-700 dark:text-amber-500 font-semibold">
                 SECTION II &bull; TIMELINE REGISTER
               </div>
-              <h2 className="text-lg font-bold text-stone-900 dark:text-stone-100 tracking-tight">Daily Time-Blocking</h2>
-              <p className="text-meta text-ink-3 dark:text-stone-400">
+              <h2 className="text-lead font-semibold text-ink tracking-tight">Daily Time-Blocking</h2>
+              <p className="text-meta text-ink-2">
                 {new Date(selectedDate + 'T00:00:00').toLocaleDateString(undefined, { 
                   weekday: 'long', month: 'short', day: 'numeric', year: 'numeric' 
                 })}
@@ -136,26 +136,26 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
           <div className="flex items-center gap-2">
             <button
               onClick={handleToday}
-              className={`px-3 py-1.5 rounded-control text-meta font-bold transition-colors border ${
-                isToday 
-                  ? 'bg-surface text-ink dark:bg-stone-100 dark:text-stone-950 border-hairline dark:border-stone-100' 
-                  : 'bg-paper-base dark:bg-stone-800 text-stone-700 dark:text-stone-300 border-stone-300 dark:border-stone-700 hover:bg-stone-200 dark:hover:bg-stone-700'
-              }`}
+              className={`px-3 py-1.5 rounded-control text-meta font-semibold transition-colors border ${
+ isToday 
+ ? 'bg-accent-500 text-white border-accent-500' 
+ : 'bg-sunken text-ink-2 border-hairline hover:bg-hairline'
+ }`}
             >
               Today
             </button>
-            <div className="flex items-center rounded-control bg-paper-base dark:bg-stone-800 border border-stone-300 dark:border-stone-700 p-0.5">
+            <div className="flex items-center rounded-control bg-sunken border border-hairline p-0.5">
               <button
                 onClick={handlePrevDay}
                 aria-label="Previous Day"
-                className="p-1 text-ink-3 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-control hover:bg-black/5 dark:hover:bg-stone-700 transition-colors"
+                className="p-1 text-ink-2 hover:text-ink rounded-control hover:bg-ink/5 transition-colors"
               >
                 <ChevronLeft className="w-4 h-4" />
               </button>
               <button
                 onClick={handleNextDay}
                 aria-label="Next Day"
-                className="p-1 text-ink-3 dark:text-stone-400 hover:text-stone-900 dark:hover:text-white rounded-control hover:bg-black/5 dark:hover:bg-stone-700 transition-colors"
+                className="p-1 text-ink-2 hover:text-ink rounded-control hover:bg-ink/5 transition-colors"
               >
                 <ChevronRight className="w-4 h-4" />
               </button>
@@ -173,17 +173,17 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
             return (
               <div 
                 key={hour} 
-                className="flex group relative min-h-[64px] border-b border-stone-200 dark:border-stone-800/60 transition-colors hover:bg-black/5 dark:hover:bg-stone-800/20 rounded-control"
+                className="flex group relative min-h-[64px] border-b border-hairline transition-colors hover:bg-ink/5 rounded-control"
               >
                 {/* Time Label */}
                 <div className="w-20 py-2 pr-3 text-right flex-shrink-0">
-                  <span className={`text-meta font-medium ${isNowHour ? 'text-rose-600 dark:text-rose-400 font-bold' : 'text-ink-3'}`}>
+                  <span className={`text-meta font-medium ${isNowHour ? 'text-rose-600 dark:text-rose-400 font-semibold' : 'text-ink-3'}`}>
                     {hourLabel}
                   </span>
                 </div>
 
                 {/* Slot Lane */}
-                <div className="flex-1 pl-3 py-1.5 relative border-l border-stone-300 dark:border-zinc-800 flex flex-wrap gap-2 items-start">
+                <div className="flex-1 pl-3 py-1.5 relative border-l border-hairline flex flex-wrap gap-2 items-start">
                   {/* Current Time Line */}
                   {isNowHour && (
                     <div 
@@ -203,18 +203,18 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                         key={item.id}
                         onClick={() => onSelectItem(item)}
                         className={`flex items-center justify-between px-3 py-2 rounded-control text-meta cursor-pointer transition-all flex-1 min-w-[200px] border shadow-sm bg-surface ${
-                          item.is_completed
-                            ? ' border-stone-300 dark:border-zinc-700/40 text-ink-2 line-through'
-                            : isUrgent
-                            ? ' border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-200'
-                            : isHigh
-                            ? ' border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-200'
-                            : ' border-stone-300 dark:border-stone-700 text-stone-900 dark:text-stone-100'
-                        }`}
+ item.is_completed
+ ? ' border-hairline text-ink-2 line-through'
+ : isUrgent
+ ? ' border-rose-300 dark:border-rose-500/40 text-rose-800 dark:text-rose-200'
+ : isHigh
+ ? ' border-amber-300 dark:border-amber-500/40 text-amber-800 dark:text-amber-200'
+ : ' border-hairline text-ink'
+ }`}
                       >
                         <div className="flex items-center gap-2 truncate pr-2">
                           {item.is_completed ? (
-                            <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                            <CheckCircle2 className="w-3.5 h-3.5 text-done-500 dark:text-done-400 flex-shrink-0" />
                           ) : (
                             <Circle className="w-3.5 h-3.5 text-ink-2 flex-shrink-0" />
                           )}
@@ -224,7 +224,7 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                             if (!p) return null;
                             return (
                               <span 
-                                className="text-caption px-1.5 py-0.5 rounded-control font-medium flex items-center gap-1 shrink-0 border border-stone-300 dark:border-stone-700"
+                                className="text-caption px-1.5 py-0.5 rounded-control font-medium flex items-center gap-1 shrink-0 border border-hairline"
                                 style={{
                                   backgroundColor: `${p.color || '#d97706'}20`,
                                   color: p.color || '#d97706'
@@ -255,17 +255,17 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                           if (e.key === 'Escape') setQuickHour(null);
                         }}
                         placeholder="Draft title & hit Enter..."
-                        className="bg-paper-base dark:bg-stone-800 border border-stone-300 dark:border-stone-700 rounded-control text-meta px-2.5 py-1 text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none flex-1"
+                        className="bg-sunken border border-hairline rounded-control text-meta px-2.5 py-1 text-ink placeholder:text-ink-3 focus:outline-none flex-1"
                       />
                       <button
                         onClick={() => handleQuickAdd(hour)}
-                        className="px-2.5 py-1 bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold rounded-control text-meta"
+                        className="px-2.5 py-1 bg-accent-500 hover:bg-accent-600 text-white font-semibold rounded-control text-meta"
                       >
                         Add
                       </button>
                       <button
                         onClick={() => setQuickHour(null)}
-                        className="px-2 py-1 text-meta text-ink-3 hover:text-stone-800 dark:hover:text-stone-300"
+                        className="px-2 py-1 text-meta text-ink-3 hover:text-ink"
                       >
                         ✕
                       </button>
@@ -292,15 +292,15 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
       </div>
 
       {/* Unscheduled / Floating Column (Sidebar) */}
-      <div className="w-full lg:w-80 bg-sunken border border-stone-300 dark:border-stone-800 rounded-control flex flex-col overflow-hidden relative">        <div className="p-4 border-b border-stone-300 dark:border-stone-800 bg-paper-base dark:bg-stone-900/40">
-          <div className="text-caption text-amber-700 dark:text-amber-500 font-bold mb-0.5">
+      <div className="w-full lg:w-80 bg-sunken border border-hairline rounded-control flex flex-col overflow-hidden relative">        <div className="p-4 border-b border-hairline bg-sunken">
+          <div className="text-caption text-amber-700 dark:text-amber-500 font-semibold mb-0.5">
             Unscheduled
           </div>
-          <h3 className="text-sm font-bold text-stone-900 dark:text-white flex items-center gap-2">
-            <CalendarIcon className="w-4 h-4 text-amber-600 dark:text-amber-400" />
+          <h3 className="text-meta font-semibold text-ink flex items-center gap-2">
+            <CalendarIcon className="w-4 h-4 text-accent-500" />
             Floating Tasks Due Today ({unscheduledItems.length})
           </h3>
-          <p className="text-meta text-ink-3 dark:text-stone-400 mt-0.5">
+          <p className="text-meta text-ink-2 mt-0.5">
             Click "Block at..." to assign to an open time slot.
           </p>
         </div>
@@ -314,13 +314,13 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
             unscheduledItems.map(item => (
               <div
                 key={item.id}
-                className="p-3 rounded-control bg-surface border border-stone-300 dark:border-stone-700/50 hover:border-stone-400 transition-all flex flex-col gap-2 shadow-sm"
+                className="p-3 rounded-control bg-surface border border-hairline hover:border-hairline transition-all flex flex-col gap-2 shadow-sm"
               >
                 <div 
                   onClick={() => onSelectItem(item)}
                   className="cursor-pointer"
                 >
-                  <span className="text-meta font-semibold text-stone-900 dark:text-stone-100 line-clamp-2">
+                  <span className="text-meta font-semibold text-ink line-clamp-2">
                     {item.title}
                   </span>
                   <div className="flex items-center gap-1.5 mt-1 flex-wrap">
@@ -329,7 +329,7 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                       if (!p) return null;
                       return (
                         <span 
-                          className="text-caption px-1.5 py-0.5 rounded-control font-medium flex items-center gap-1 shrink-0 border border-stone-300 dark:border-stone-700"
+                          className="text-caption px-1.5 py-0.5 rounded-control font-medium flex items-center gap-1 shrink-0 border border-hairline"
                           style={{
                             backgroundColor: `${p.color || '#d97706'}20`,
                             color: p.color || '#d97706'
@@ -349,7 +349,7 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                 </div>
 
                 {/* Quick Schedule Dropdown / Action */}
-                <div className="flex items-center justify-between pt-1 border-t border-stone-200 dark:border-zinc-700/30">
+                <div className="flex items-center justify-between pt-1 border-t border-hairline">
                   <span className="text-caption text-ink-3">
                     {item.estimated_minutes || 30}m
                   </span>
@@ -359,7 +359,7 @@ export const TimeBlockingCalendar: React.FC<TimeBlockingCalendarProps> = ({
                       if (!isNaN(h)) handleDropToHour(item, h);
                     }}
                     defaultValue=""
-                    className="bg-paper-base dark:bg-stone-700/80 border border-stone-300 dark:border-stone-600 rounded-control text-meta text-stone-800 dark:text-stone-200 px-2 py-0.5 focus:outline-none"
+                    className="bg-sunken border border-hairline rounded-control text-meta text-ink px-2 py-0.5 focus:outline-none"
                   >
                     <option value="" disabled>Block at...</option>
                     {HOURS.map(h => (

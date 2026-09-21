@@ -56,12 +56,12 @@ const TransactionRow: React.FC<{
   const [dragOffset, setDragOffset] = useState(0);
 
   return (
-    <div className="relative overflow-hidden rounded-control bg-surface border border-stone-300 dark:border-stone-800/80 mb-1.5 shadow-sm">
+    <div className="relative overflow-hidden rounded-control bg-surface border border-hairline mb-1.5 shadow-sm">
       {/* Background Swipe Action: Delete */}
       <div
         className={`absolute inset-0 flex items-center justify-end px-4 transition-colors rounded-control ${
-          dragOffset <= -60 ? 'bg-rose-700 text-white' : 'bg-rose-950/60 text-rose-400'
-        }`}
+ dragOffset <= -60 ? 'bg-rose-700 text-white' : 'bg-rose-950/60 text-rose-400'
+ }`}
       >
         <Trash2 className="w-4 h-4" />
       </div>
@@ -81,17 +81,17 @@ const TransactionRow: React.FC<{
         }}
         animate={{ x: 0 }}
         transition={{ type: 'spring', stiffness: 400, damping: 30 }}
-        className="relative flex items-center justify-between p-3 bg-paper-white dark:bg-surface text-meta select-none rounded-control border-b border-stone-200 dark:border-stone-800"
+        className="relative flex items-center justify-between p-3 bg-surface dark:bg-surface text-meta select-none rounded-control border-b border-hairline"
       >
         <div className="flex items-center space-x-3 truncate pr-2">
           <div
             className={`w-7 h-7 rounded-control border flex items-center justify-center shrink-0 ${
-              tx.type === 'expense'
-                ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
-                : tx.type === 'income'
-                ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
-                : 'bg-paper-aged text-amber-700 border-stone-300 dark:bg-stone-900 dark:text-amber-400 dark:border-stone-700'
-            }`}
+ tx.type === 'expense'
+ ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800'
+ : tx.type === 'income'
+ ? 'bg-emerald-100 text-emerald-800 border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-800'
+ : 'bg-sunken text-amber-700 border-hairline dark:text-amber-400 '
+ }`}
           >
             {tx.type === 'expense' ? (
               <ArrowDownLeft className="w-4 h-4" />
@@ -103,17 +103,17 @@ const TransactionRow: React.FC<{
           </div>
 
           <div className="truncate">
-            <p className="text-sm font-semibold text-stone-900 dark:text-stone-100 truncate">
+            <p className="text-meta font-semibold text-ink truncate">
               {tx.description || (tx.type === 'transfer' ? 'Internal Transfer' : 'No description')}
             </p>
-            <div className="flex items-center space-x-2 text-caption text-ink-3 dark:text-stone-400 mt-0.5">
+            <div className="flex items-center space-x-2 text-caption text-ink-2 mt-0.5">
               <span>{tx.date}</span>
               <span>&bull;</span>
-              <span className="text-stone-700 dark:text-stone-300 font-bold">{tx.payment_mode}</span>
+              <span className="text-ink-2 font-semibold">{tx.payment_mode}</span>
               {tx.account_name && (
                 <>
                   <span>&bull;</span>
-                  <span className="text-ink-3 dark:text-stone-400">{tx.account_name}</span>
+                  <span className="text-ink-2">{tx.account_name}</span>
                 </>
               )}
             </div>
@@ -122,20 +122,20 @@ const TransactionRow: React.FC<{
 
         <div className="flex items-center space-x-2 shrink-0">
           <span
-            className={` text-sm font-bold tracking-tight ${
-              tx.type === 'expense'
-                ? 'text-rose-700 dark:text-rose-400'
-                : tx.type === 'income'
-                ? 'text-emerald-700 dark:text-emerald-400'
-                : 'text-amber-700 dark:text-stone-300'
-            }`}
+            className={` text-meta font-semibold tracking-tight ${
+ tx.type === 'expense'
+ ? 'text-rose-700 dark:text-rose-400'
+ : tx.type === 'income'
+ ? 'text-emerald-700 dark:text-emerald-400'
+ : 'text-amber-700 dark:text-stone-300'
+ }`}
           >
             {tx.type === 'expense' ? '-' : tx.type === 'income' ? '+' : ''}₹{tx.amount.toLocaleString('en-IN')}
           </span>
 
           <button
             onClick={() => onDelete(tx.id)}
-            className="hidden sm:flex text-ink-2 hover:text-rose-600 dark:hover:text-rose-400 p-1 rounded-control border border-transparent hover:border-stone-300 dark:hover:border-stone-800 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+            className="hidden sm:flex text-ink-2 hover:text-danger-600 dark:hover:text-danger-400 p-1 rounded-control border border-transparent hover:border-hairline dark:hover:border-hairline hover:bg-ink/5 transition-colors"
             title="Delete entry"
           >
             <Trash2 className="w-3.5 h-3.5" />
@@ -383,7 +383,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
   if (!summary && isLoading) {
     return (
       <div className="space-y-6 max-w-6xl mx-auto pb-24 md:pb-12 animate-in fade-in">
-        <div className="p-6 bg-surface border border-hairline rounded-2xl space-y-3">
+        <div className="p-6 bg-surface border border-hairline rounded-surface space-y-3">
           <Skeleton variant="text" className="w-48 h-6" />
           <Skeleton variant="text" className="w-96 h-4" />
         </div>
@@ -412,7 +412,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         <div className="flex items-center space-x-2 self-start sm:self-auto">
           <button
             onClick={() => setIsCreatingAccount(true)}
-            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-control bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-800 dark:text-stone-300 text-meta border border-stone-300 dark:border-stone-700 transition-colors"
+            className="flex items-center space-x-1.5 px-3 py-1.5 rounded-control bg-sunken hover:bg-hairline text-ink text-meta border border-hairline transition-colors"
           >
             <Plus className="w-3.5 h-3.5 text-amber-700 dark:text-amber-500" />
             <span>New account</span>
@@ -422,7 +422,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               setIsAdding(true);
               selectPaymentMode(paymentMode || 'upi');
             }}
-            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold border border-amber-600 transition-colors shadow-sm"
+            className="flex items-center space-x-1.5 px-3.5 py-1.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-semibold border border-amber-600 transition-colors shadow-sm"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Log transaction</span>
@@ -432,15 +432,15 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
       {/* Smart Unification Banner if separate wallet exists */}
       {accounts.some(a => a.account_type === 'wallet') && accounts.some(a => a.account_type === 'bank') && !dismissedUpiBanner && (
-        <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900 to-blue-950/40 border border-purple-800/40 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
+        <div className="bg-gradient-to-r from-purple-950/40 via-zinc-900 to-blue-950/40 border border-purple-800/40 rounded-surface p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-lg">
           <div className="flex items-start gap-3">
-            <div className="p-2 rounded-xl bg-purple-500/20 text-purple-400 border border-purple-500/30 mt-0.5">
+            <div className="p-2 rounded-control bg-accent-500/10 text-accent-500 mt-0.5">
               <Zap className="w-5 h-5" />
             </div>
             <div>
-              <h3 className="text-meta font-bold text-ink flex items-center gap-1.5">
+              <h3 className="text-meta font-semibold text-ink flex items-center gap-1.5">
                 Keep UPI & Bank Account as the same?
-                <span className="text-caption px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 font-medium">Unified Balance</span>
+                <span className="text-caption px-1.5 py-0.5 rounded-control bg-accent-500/10 text-accent-600 dark:text-accent-400 font-medium">Unified Balance</span>
               </h3>
               <p className="text-meta text-ink-2 mt-0.5">
                 In India, UPI payments come directly from your bank. Consolidate your separate{' '}
@@ -456,7 +456,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             <button
               onClick={handleUnifyUPI}
               disabled={unifyingUpi}
-              className="px-3 py-1.5 rounded-lg bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 text-white text-meta font-semibold shadow-md shadow-purple-600/20 flex items-center gap-1.5 transition-all"
+              className="h-9 px-3 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium flex items-center gap-1.5 transition-colors"
             >
               <Zap className="w-3.5 h-3.5" />
               <span>{unifyingUpi ? 'Unifying...' : `Merge into ${accounts.find(a => a.account_type === 'bank')?.name}`}</span>
@@ -473,11 +473,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
       {/* 1. Account Cards (Bank, Cash, Wallet) with Real Balance Edit */}
       {accounts.length === 0 ? (
-        <div className="bg-surface/60 border border-hairline rounded-2xl p-6 text-center">
+        <div className="bg-surface/60 border border-hairline rounded-surface p-6 text-center">
           <p className="text-meta text-ink-2 mb-3">No accounts yet. Add a bank account or a cash wallet to start tracking.</p>
           <button
             onClick={() => setIsCreatingAccount(true)}
-            className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold inline-flex items-center space-x-1.5"
+            className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium inline-flex items-center gap-1.5 transition-colors"
           >
             <Plus className="w-4 h-4" />
             <span>Add your first account</span>
@@ -486,12 +486,12 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           {accounts.map((acc) => (
-            <div key={acc.id} className="bg-sunken border border-stone-300 dark:border-stone-800 p-5 rounded-control relative overflow-hidden group shadow-sm">              <div className="flex items-center justify-between text-meta text-ink-3 dark:text-zinc-400">
+            <div key={acc.id} className="bg-sunken border border-hairline p-5 rounded-control relative overflow-hidden group shadow-sm">              <div className="flex items-center justify-between text-meta text-ink-2">
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="font-bold text-stone-900 dark:text-zinc-200">{acc.name}</span>
+                  <span className="font-semibold text-ink">{acc.name}</span>
                   {acc.is_upi_default && (
-                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-control text-caption font-bold bg-amber-100 text-amber-800 dark:bg-purple-500/20 dark:text-purple-300 border border-amber-300 dark:border-purple-500/30">
-                      <Zap className="w-2.5 h-2.5 text-amber-700 dark:text-purple-400" />
+                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-control text-caption font-semibold bg-amber-100 text-amber-800 dark:bg-purple-500/20 dark:text-purple-300 border border-amber-300 dark:border-purple-500/30">
+                      <Zap className="w-2.5 h-2.5" />
                       UPI Linked
                     </span>
                   )}
@@ -499,7 +499,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <div className="flex items-center space-x-2">
                   <button
                     onClick={() => handleOpenEdit(acc)}
-                    className="p-1 rounded-control bg-paper-white dark:bg-zinc-800 border border-stone-300 dark:border-stone-700 text-stone-700 dark:text-zinc-300 hover:text-stone-900 dark:hover:text-white transition-colors"
+                    className="p-1 rounded-control bg-sunken border border-hairline text-ink-2 hover:text-ink transition-colors"
                     title="Edit Balance"
                   >
                     <Pencil className="w-3.5 h-3.5" />
@@ -514,16 +514,16 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
               </div>
               <div className="mt-3">
-                <p className="text-3xl font-bold text-stone-900 dark:text-zinc-100">
+                <p className="text-3xl font-semibold text-ink">
                   ₹{acc.balance.toLocaleString('en-IN')}
                 </p>
                 <div className="flex items-center justify-between mt-1">
-                  <p className="text-meta text-ink-3 dark:text-zinc-400">
+                  <p className="text-meta text-ink-2">
                     {acc.is_upi_default ? 'Bank & UPI Balance' : `${acc.account_type} Balance`}
                   </p>
                   <button
                     onClick={() => handleOpenEdit(acc)}
-                    className="text-meta text-amber-800 dark:text-blue-400 hover:underline font-bold"
+                    className="text-meta text-amber-800 dark:text-blue-400 hover:underline font-semibold"
                   >
                     Set Balance
                   </button>
@@ -535,48 +535,48 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       )}
 
       {/* 2. Today's Breakdown by Payment Mode (UPI vs Debit vs Cash) */}
-      <div className="bg-surface border border-stone-300 dark:border-stone-800/80 rounded-control p-5 shadow-sm">
+      <div className="bg-surface border border-hairline rounded-control p-5 shadow-sm">
         <h2 className="text-lead font-semibold text-ink mb-3">Spent today</h2>
         <div className="grid grid-cols-3 gap-3 text-center">
-          <div className="p-3 rounded-control bg-surface border border-stone-300 dark:border-zinc-800">
+          <div className="p-3 rounded-control bg-surface border border-hairline">
             <span className="text-meta text-ink-3">UPI</span>
-            <p className="text-lg font-bold text-stone-900 dark:text-zinc-100 mt-1">₹{summary?.today_breakdown?.upi ?? 0}</p>
+            <p className="text-lead font-semibold text-ink mt-1">₹{summary?.today_breakdown?.upi ?? 0}</p>
           </div>
-          <div className="p-3 rounded-control bg-surface border border-stone-300 dark:border-zinc-800">
+          <div className="p-3 rounded-control bg-surface border border-hairline">
             <span className="text-meta text-ink-3">Debit Card</span>
-            <p className="text-lg font-bold text-stone-900 dark:text-zinc-100 mt-1">₹{summary?.today_breakdown?.debit_card ?? 0}</p>
+            <p className="text-lead font-semibold text-ink mt-1">₹{summary?.today_breakdown?.debit_card ?? 0}</p>
           </div>
-          <div className="p-3 rounded-control bg-surface border border-stone-300 dark:border-zinc-800">
+          <div className="p-3 rounded-control bg-surface border border-hairline">
             <span className="text-meta text-ink-3">Cash</span>
-            <p className="text-lg font-bold text-stone-900 dark:text-zinc-100 mt-1">₹{summary?.today_breakdown?.cash ?? 0}</p>
+            <p className="text-lead font-semibold text-ink mt-1">₹{summary?.today_breakdown?.cash ?? 0}</p>
           </div>
         </div>
       </div>
 
       {/* 3. Recurring bills */}
-      <div className="bg-surface border border-stone-300 dark:border-stone-800/80 rounded-control p-5 space-y-4 shadow-sm">
+      <div className="bg-surface border border-hairline rounded-control p-5 space-y-4 shadow-sm">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
           <div className="flex items-center gap-2.5">
-            <div className="p-2 rounded-control bg-paper-base dark:bg-stone-900 text-amber-700 dark:text-amber-400 border border-stone-300 dark:border-stone-700">
+            <div className="p-2 rounded-control bg-sunken text-amber-700 dark:text-amber-400 border border-hairline">
               <Receipt className="w-5 h-5" />
             </div>
             <div>
-              <h2 className="text-base font-bold text-stone-900 dark:text-zinc-100 tracking-tight">Recurring bills</h2>
-              <p className="text-meta text-ink-3 dark:text-zinc-400">
+              <h2 className="text-body font-semibold text-ink tracking-tight">Recurring bills</h2>
+              <p className="text-meta text-ink-2">
                 Monthly commitment: ₹{recurringBills.reduce((acc, b) => acc + b.amount, 0).toLocaleString('en-IN')} &bull; {recurringBills.length} active bills
               </p>
             </div>
           </div>
           <button
             onClick={() => setIsAddingBill(true)}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-control bg-paper-aged dark:bg-stone-900 hover:bg-stone-200 dark:hover:bg-stone-800 text-stone-800 dark:text-indigo-300 border border-stone-300 dark:border-stone-700 text-meta font-bold self-start sm:self-auto transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-control bg-sunken hover:bg-hairline text-stone-800 dark:text-indigo-300 border border-hairline text-meta font-semibold self-start sm:self-auto transition-all"
           >
             <Plus className="w-3.5 h-3.5 text-amber-700" /> Add bill
           </button>
         </div>
 
         {recurringBills.length === 0 ? (
-          <div className="text-center py-6 text-ink-3 text-meta bg-surface/40 border border-hairline/60 rounded-xl">
+          <div className="text-center py-6 text-ink-3 text-meta bg-surface/40 border border-hairline/60 rounded-surface">
             No recurring bills yet. Add rent, utilities or subscriptions.
           </div>
         ) : (
@@ -597,24 +597,24 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               const badgeText = isOverdue
                 ? '🚨 Overdue'
                 : days === 0
-                ? '⏰ Due Today'
+                ? 'Due today'
                 : days === 1
-                ? '⚡ Due Tomorrow'
+                ? 'Due tomorrow'
                 : `Due in ${days} days`;
 
               return (
                 <div 
                   key={bill.id}
-                  className="p-3.5 rounded-xl bg-surface border border-hairline flex flex-col justify-between gap-3 hover:border-hairline transition-all shadow-sm"
+                  className="p-3.5 rounded-surface bg-surface border border-hairline flex flex-col justify-between gap-3 hover:border-hairline transition-all shadow-sm"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div>
-                      <h4 className="text-meta font-bold text-white">{bill.name}</h4>
+                      <h4 className="text-meta font-semibold text-ink">{bill.name}</h4>
                       <p className="text-meta text-ink-2 mt-0.5 font-mono">
                         Due on {bill.due_day_of_month}{bill.due_day_of_month === 1 ? 'st' : bill.due_day_of_month === 2 ? 'nd' : bill.due_day_of_month === 3 ? 'rd' : 'th'} of month
                       </p>
                     </div>
-                    <span className="text-sm font-bold text-ink font-mono">
+                    <span className="text-meta font-semibold text-ink font-mono">
                       ₹{bill.amount.toLocaleString('en-IN')}
                     </span>
                   </div>
@@ -640,7 +640,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       </div>
 
       {/* 4. Monthly Category Budgets & Visual Guardrails */}
-      <div className="bg-surface/60 border border-hairline/80 rounded-2xl p-5 space-y-4">
+      <div className="bg-surface/60 border border-hairline/80 rounded-surface p-5 space-y-4">
         <div className="flex items-center justify-between">
           <div>
             <div className="flex items-center gap-2">
@@ -650,11 +650,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               Total Budget: ₹{(summary?.monthly_budget ?? 0).toLocaleString('en-IN')} • Spent: ₹{(summary?.monthly_spend ?? 0).toLocaleString('en-IN')}
             </p>
           </div>
-          <span className={`text-meta font-bold font-mono px-2.5 py-1 rounded-lg border ${
-            (summary?.monthly_spend || 0) > (summary?.monthly_budget || 0)
-              ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
-              : 'bg-sunken text-ink-2 border-hairline'
-          }`}>
+          <span className={`text-meta font-semibold font-mono px-2.5 py-1 rounded-control border ${
+ (summary?.monthly_spend || 0) > (summary?.monthly_budget || 0)
+ ? 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+ : 'bg-sunken text-ink-2 border-hairline'
+ }`}>
             {summary?.monthly_budget ? Math.round(((summary?.monthly_spend || 0) / summary.monthly_budget) * 100) : 0}% used
           </span>
         </div>
@@ -675,9 +675,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               : 'bg-gradient-to-r from-emerald-400 to-teal-500';
 
             return (
-              <div key={cat.id} className={`p-3.5 rounded-xl bg-surface border transition-all space-y-2.5 ${
-                isDanger ? 'border-rose-500/40 shadow-sm' : isWarning ? 'border-amber-500/30' : 'border-hairline/80'
-              }`}>
+              <div key={cat.id} className={`p-3.5 rounded-surface bg-surface border transition-all space-y-2.5 ${
+ isDanger ? 'border-rose-500/40 shadow-sm' : isWarning ? 'border-amber-500/30' : 'border-hairline/80'
+ }`}>
                 <div className="flex items-center justify-between text-meta">
                   <div className="flex items-center gap-2">
                     <span className="font-semibold text-ink">{cat.name}</span>
@@ -707,7 +707,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
                 <div className="flex items-center justify-between text-caption">
                   {isDanger ? (
-                    <span className="flex items-center gap-1 text-rose-400 font-bold">
+                    <span className="flex items-center gap-1 text-rose-400 font-semibold">
                       <ShieldAlert className="w-3 h-3" />
                       {pct >= 100 ? 'Budget Exceeded!' : 'Critical Guardrail (>90%)'}
                     </span>
@@ -721,7 +721,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       ✓ Safe Guardrail (&lt;70%)
                     </span>
                   )}
-                  <span className="font-mono text-ink-2 font-bold">{pct}%</span>
+                  <span className="font-mono text-ink-2 font-semibold">{pct}%</span>
                 </div>
               </div>
             );
@@ -730,7 +730,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       </div>
 
       {/* 4. Transaction History */}
-      <div className="bg-sunken border border-stone-300 dark:border-stone-800/80 rounded-control p-5 shadow-sm">
+      <div className="bg-sunken border border-hairline rounded-control p-5 shadow-sm">
         <h2 className="text-lead font-semibold text-ink mb-4">Recent transactions</h2>
 
         <div className="space-y-2">
@@ -754,21 +754,21 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       <Modal
         isOpen={isAdding}
         onClose={() => setIsAdding(false)}
-        title="Log transaction"
-        icon={<Receipt className="w-4 h-4 text-blue-400" />}
+        title="Log a transaction"
+        icon={<Receipt className="w-4 h-4" />}
         maxWidth="max-w-lg"
       >
         <form onSubmit={handleCreateTx} className="space-y-4">
               {/* Type Toggle */}
-              <div className="grid grid-cols-3 gap-2 bg-sunken p-1 rounded-xl">
+              <div className="grid grid-cols-3 gap-2 bg-sunken p-1 rounded-surface">
                 {(['expense', 'income', 'transfer'] as TransactionType[]).map((t) => (
                   <button
                     key={t}
                     type="button"
                     onClick={() => setType(t)}
-                    className={`py-1.5 text-meta font-semibold rounded-lg capitalize transition-colors ${
-                      type === t ? 'bg-surface text-white shadow-sm' : 'text-ink-2 hover:text-ink'
-                    }`}
+                    className={`py-1.5 text-meta font-medium rounded-control capitalize transition-colors ${
+ type === t ? 'bg-surface text-ink shadow-sm' : 'text-ink-2 hover:text-ink'
+ }`}
                   >
                     {t}
                   </button>
@@ -777,21 +777,23 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               {/* Amount */}
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Amount (₹)</label>
+                <label className="label block mb-1.5">Amount</label>
                 <input
                   type="number"
                   step="any"
+                  min="0"
+                  inputMode="decimal"
                   required
                   placeholder="0.00"
                   value={amount}
                   onChange={(e) => setAmount(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-sm text-ink font-bold focus:outline-none focus:border-blue-500"
+                  className="field"
                 />
               </div>
 
               {/* Payment Mode Selector */}
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Payment Mode</label>
+                <label className="label block mb-1.5">Paid with</label>
                 <div className="grid grid-cols-3 gap-2">
                   {[
                     { id: 'upi', label: 'UPI' },
@@ -802,21 +804,19 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       key={m.id}
                       type="button"
                       onClick={() => selectPaymentMode(m.id as PaymentMode)}
-                      className={`py-2 px-3 rounded-lg text-meta font-semibold border transition-all ${
-                        paymentMode === m.id
-                          ? m.id === 'upi'
-                            ? 'bg-purple-600/20 border-purple-500 text-purple-400'
-                            : 'bg-blue-600/20 border-blue-500 text-blue-400'
-                          : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
-                      }`}
+                      className={`h-11 px-3 rounded-control text-meta font-medium border transition-colors ${
+ paymentMode === m.id
+ ? 'bg-accent-500 border-accent-500 text-white'
+ : 'bg-sunken border-hairline text-ink-2 hover:text-ink'
+ }`}
                     >
                       {m.label}
                     </button>
                   ))}
                 </div>
                 {paymentMode === 'upi' && (
-                  <div className="mt-2 flex items-center gap-1.5 text-meta text-purple-300 bg-purple-950/40 border border-purple-800/40 px-2.5 py-1.5 rounded-lg">
-                    <Zap className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                  <div className="mt-2 flex items-center gap-1.5 text-meta text-ink-2 bg-sunken px-2.5 py-1.5 rounded-control">
+                    <Zap className="w-3.5 h-3.5 text-accent-500 shrink-0" />
                     <span>
                       UPI Linked: Auto-deducts from <strong>{accounts.find(a => a.id === accountId)?.name || 'Primary Bank Account'}</strong>
                     </span>
@@ -827,15 +827,15 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               {/* Account Selector */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-meta text-ink-2 mb-1">Account</label>
+                  <label className="label block mb-1.5">Account</label>
                   <select
                     value={accountId}
                     onChange={(e) => setAccountId(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
+                    className="field"
                   >
                     {accounts.map((a) => (
                       <option key={a.id} value={a.id}>
-                        {a.name} (₹{a.balance}){a.is_upi_default ? ' • ⚡ UPI Linked' : ''}
+                        {a.name} · ₹{a.balance.toLocaleString('en-IN')}{a.is_upi_default ? ' · UPI' : ''}
                       </option>
                     ))}
                   </select>
@@ -843,11 +843,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
                 {type === 'transfer' ? (
                   <div>
-                    <label className="block text-meta text-ink-2 mb-1">Transfer To</label>
+                    <label className="label block mb-1.5">Into</label>
                     <select
                       value={transferToAccountId}
                       onChange={(e) => setTransferToAccountId(e.target.value)}
-                      className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
+                      className="field"
                     >
                       <option value="">Select Account</option>
                       {accounts.map((a) => (
@@ -857,11 +857,11 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                 ) : (
                   <div>
-                    <label className="block text-meta text-ink-2 mb-1">Category</label>
+                    <label className="label block mb-1.5">Category</label>
                     <select
                       value={categoryId}
                       onChange={(e) => setCategoryId(e.target.value)}
-                      className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
+                      className="field"
                     >
                       <option value="">Select Category</option>
                       {categories.map((c) => (
@@ -874,13 +874,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               {/* Description */}
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Description</label>
+                <label className="label block mb-1.5">Description</label>
                 <input
                   type="text"
                   placeholder="e.g. Swiggy order, Metro recharge, Grocery store..."
                   value={description}
                   onChange={(e) => setDescription(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink"
+                  className="field"
                 />
               </div>
 
@@ -888,13 +888,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsAdding(false)}
-                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
+                  className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold"
+                  className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
                 >
                   Confirm & Save
                 </button>
@@ -906,47 +906,49 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       <Modal
         isOpen={!!editingAccount}
         onClose={() => setEditingAccount(null)}
-        title="Edit Account & Balance"
-        icon={<Pencil className="w-4 h-4 text-blue-400" />}
+        title="Edit account"
+        icon={<Pencil className="w-4 h-4" />}
         maxWidth="max-w-md"
       >
         {editingAccount && (
           <form onSubmit={handleSaveAccount} className="space-y-4">
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Account Name</label>
+                <label className="label block mb-1.5">Name</label>
                 <input
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
+                  className="field"
                   required
                 />
               </div>
 
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Current Balance (₹)</label>
+                <label className="label block mb-1.5">Balance</label>
                 <input
                   type="number"
                   step="0.01"
+                  min="0"
+                  inputMode="decimal"
                   value={editBalance}
                   onChange={(e) => setEditBalance(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
+                  className="field"
                   placeholder="0.00"
                   required
                 />
               </div>
 
               {editingAccount.account_type === 'bank' && (
-                <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-purple-950/20 border border-purple-800/30 cursor-pointer text-meta text-ink-2">
+                <label className="flex items-center gap-2.5 p-2.5 rounded-control bg-sunken cursor-pointer text-meta text-ink-2">
                   <input
                     type="checkbox"
                     checked={editIsUpiDefault}
                     onChange={(e) => setEditIsUpiDefault(e.target.checked)}
-                    className="rounded bg-sunken border-hairline text-purple-600 focus:ring-purple-500"
+                    className="rounded border-hairline text-accent-500 focus:ring-accent-500"
                   />
                   <div className="flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Keep UPI & this Bank Account as the same (Primary UPI)</span>
+                    <Zap className="w-3.5 h-3.5 text-accent-500" />
+                    <span>Use this account for UPI payments</span>
                   </div>
                 </label>
               )}
@@ -960,22 +962,22 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                       setDeletingAccountId(id);
                     }}
                     aria-label={`Delete account: ${editingAccount.name}`}
-                    className="flex items-center space-x-1 text-meta text-red-400 hover:text-red-300 font-medium px-2 py-1 rounded hover:bg-red-500/10"
+                    className="flex items-center gap-1.5 text-meta font-medium text-ink-2 hover:text-danger-600 dark:hover:text-danger-400 px-2 py-1 rounded-control transition-colors"
                   >
                     <Trash2 className="w-3.5 h-3.5" />
-                    <span>Delete Account</span>
+                    <span>Delete account</span>
                   </button>
                   <div className="flex space-x-2">
                     <button
                       type="button"
                       onClick={() => setEditingAccount(null)}
-                      className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
+                      className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
                     >
                       Cancel
                     </button>
                     <button
                       type="submit"
-                      className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold"
+                      className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
                     >
                       Update Account
                     </button>
@@ -989,30 +991,30 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       <Modal
         isOpen={isCreatingAccount}
         onClose={() => setIsCreatingAccount(false)}
-        title="Add New Account"
-        icon={<Wallet className="w-4 h-4 text-blue-400" />}
+        title="New account"
+        icon={<Wallet className="w-4 h-4" />}
         maxWidth="max-w-md"
       >
         <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Account Name</label>
+                <label className="label block mb-1.5">Name</label>
                 <input
                   type="text"
                   placeholder="e.g. HDFC Salary, SBI Savings, Cash in Wallet..."
                   value={newAccName}
                   onChange={(e) => setNewAccName(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
+                  className="field"
                   required
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-meta text-ink-2 mb-1">Type</label>
+                  <label className="label block mb-1.5">Type</label>
                   <select
                     value={newAccType}
                     onChange={(e) => setNewAccType(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
+                    className="field"
                   >
                     <option value="bank">Bank Account</option>
                     <option value="cash">Cash in Hand</option>
@@ -1021,30 +1023,32 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-meta text-ink-2 mb-1">Initial Balance (₹)</label>
+                  <label className="label block mb-1.5">Opening balance</label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
+                    inputMode="decimal"
                     placeholder="0.00"
                     value={newAccBalance}
                     onChange={(e) => setNewAccBalance(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500"
+                    className="field"
                     required
                   />
                 </div>
               </div>
 
               {newAccType === 'bank' && (
-                <label className="flex items-center gap-2.5 p-2.5 rounded-xl bg-purple-950/20 border border-purple-800/30 cursor-pointer text-meta text-ink-2">
+                <label className="flex items-center gap-2.5 p-2.5 rounded-control bg-sunken cursor-pointer text-meta text-ink-2">
                   <input
                     type="checkbox"
                     checked={newAccIsUpiDefault}
                     onChange={(e) => setNewAccIsUpiDefault(e.target.checked)}
-                    className="rounded bg-sunken border-hairline text-purple-600 focus:ring-purple-500"
+                    className="rounded border-hairline text-accent-500 focus:ring-accent-500"
                   />
                   <div className="flex items-center gap-1.5">
-                    <Zap className="w-3.5 h-3.5 text-purple-400" />
-                    <span>Set as Primary UPI Account (Keep UPI & Bank Same)</span>
+                    <Zap className="w-3.5 h-3.5 text-accent-500" />
+                    <span>Use this account for UPI payments</span>
                   </div>
                 </label>
               )}
@@ -1053,13 +1057,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsCreatingAccount(false)}
-                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
+                  className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold"
+                  className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
                 >
                   Create Account
                 </button>
@@ -1071,43 +1075,45 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       <Modal
         isOpen={isAddingBill}
         onClose={() => setIsAddingBill(false)}
-        title="Add Recurring Bill or Subscription"
-        icon={<Receipt className="w-4 h-4 text-indigo-400" />}
+        title="New recurring bill"
+        icon={<Receipt className="w-4 h-4" />}
         maxWidth="max-w-md"
       >
         <form onSubmit={handleAddBill} className="space-y-4">
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Bill Name</label>
+                <label className="label block mb-1.5">Name</label>
                 <input
                   type="text"
                   required
                   placeholder="e.g. Netflix, Airtel Broadband, Gym Membership"
                   value={newBillName}
                   onChange={(e) => setNewBillName(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-indigo-500"
+                  className="field"
                 />
               </div>
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="block text-meta text-ink-2 mb-1">Amount (₹)</label>
+                  <label className="label block mb-1.5">Amount</label>
                   <input
                     type="number"
                     step="0.01"
+                    min="0"
+                    inputMode="decimal"
                     required
                     placeholder="e.g. 999"
                     value={newBillAmount}
                     onChange={(e) => setNewBillAmount(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-indigo-500"
+                    className="field"
                   />
                 </div>
 
                 <div>
-                  <label className="block text-meta text-ink-2 mb-1">Due Day of Month</label>
+                  <label className="label block mb-1.5">Due on</label>
                   <select
                     value={newBillDueDay}
                     onChange={(e) => setNewBillDueDay(e.target.value)}
-                    className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-indigo-500"
+                    className="field"
                   >
                     {Array.from({ length: 31 }, (_, i) => i + 1).map((d) => (
                       <option key={d} value={d}>
@@ -1119,13 +1125,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               </div>
 
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Category</label>
+                <label className="label block mb-1.5">Category</label>
                 <input
                   type="text"
                   placeholder="Utilities & Bills, Entertainment, Housing..."
                   value={newBillCategory}
                   onChange={(e) => setNewBillCategory(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-indigo-500"
+                  className="field"
                 />
               </div>
 
@@ -1133,13 +1139,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setIsAddingBill(false)}
-                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
+                  className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-meta font-semibold shadow-lg shadow-indigo-600/20"
+                  className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
                 >
                   Track Bill
                 </button>
@@ -1151,30 +1157,32 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       <Modal
         isOpen={!!editingBudgetCat}
         onClose={() => setEditingBudgetCat(null)}
-        title="Adjust Budget Guardrail"
-        icon={<SlidersHorizontal className="w-4 h-4 text-blue-400" />}
+        title="Monthly budget"
+        icon={<SlidersHorizontal className="w-4 h-4" />}
         maxWidth="max-w-sm"
       >
         {editingBudgetCat && (
           <form onSubmit={handleSaveBudget} className="space-y-4">
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Category</label>
-                <p className="text-sm font-bold text-white">{editingBudgetCat.name}</p>
+                <label className="label block mb-1.5">Category</label>
+                <p className="text-body font-medium text-ink">{editingBudgetCat.name}</p>
                 <p className="text-meta text-ink-2 mt-1">
-                  Spent this month: ₹{editingBudgetCat.spent_this_month.toLocaleString('en-IN')}
+                  Spent this month ₹{editingBudgetCat.spent_this_month.toLocaleString('en-IN')}
                 </p>
               </div>
 
               <div>
-                <label className="block text-meta text-ink-2 mb-1">Monthly Limit (₹)</label>
+                <label className="label block mb-1.5">Monthly limit</label>
                 <input
                   type="number"
                   step="100"
+                  min="0"
+                  inputMode="decimal"
                   required
                   placeholder="e.g. 8000"
                   value={newBudgetLimit}
                   onChange={(e) => setNewBudgetLimit(e.target.value)}
-                  className="w-full bg-sunken border border-hairline rounded-lg px-3 py-2 text-meta text-ink focus:outline-none focus:border-blue-500 font-mono text-base"
+                  className="field tabular"
                 />
               </div>
 
@@ -1182,13 +1190,13 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 <button
                   type="button"
                   onClick={() => setEditingBudgetCat(null)}
-                  className="px-4 py-2 rounded-lg text-meta text-ink-2 hover:text-ink"
+                  className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
                 >
                   Cancel
                 </button>
                 <button
                   type="submit"
-                  className="px-4 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-meta font-semibold shadow-lg shadow-blue-600/20"
+                  className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
                 >
                   Save Guardrail
                 </button>

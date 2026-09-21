@@ -147,7 +147,7 @@ export const ShortcutsModal: React.FC = () => {
                   {homeMode ? 'Home Mode is active' : 'Home Mode is off'}
                 </p>
                 {homeMode && (
-                  <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-600 dark:text-accent-400">
+                  <span className="text-caption font-medium px-2 py-0.5 rounded-full bg-accent-500/10 text-accent-600 dark:text-accent-400">
                     Quiet Fans
                   </span>
                 )}
@@ -181,10 +181,10 @@ export const ShortcutsModal: React.FC = () => {
               </span>
               <span className="text-ink-3 block text-caption mt-0.5">
                 {isQuietHoursNow
-                  ? '🌙 Quiet hours active now (01:30 – 05:30 AM)'
+                  ? 'Quiet hours now, until 05:30'
                   : homeMode
-                  ? '⏰ Scheduled for quiet hours (01:30 – 05:30 AM)'
-                  : '⚡ Runs anytime on background schedule'}
+                  ? 'Waiting for quiet hours, 01:30 to 05:30'
+                  : 'Runs in the background at any hour'}
               </span>
             </div>
 
@@ -196,7 +196,7 @@ export const ShortcutsModal: React.FC = () => {
                          disabled:opacity-40 disabled:pointer-events-none self-start sm:self-auto shrink-0"
             >
               <RotateCw className={`w-3.5 h-3.5 ${isProcessingBacklog ? 'animate-spin text-accent-500' : ''}`} />
-              {isProcessingBacklog ? 'Processing...' : 'Process backlog now'}
+              {isProcessingBacklog ? 'Working…' : 'Run it now'}
             </button>
           </div>
 

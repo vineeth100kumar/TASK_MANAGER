@@ -93,7 +93,7 @@ export const ConnectScreen: React.FC<ConnectScreenProps> = ({ wasRejected, onCon
         />
 
         {error ? (
-          <p id="sage-key-error" role="alert" className="mt-2 text-meta text-red-500">
+          <p id="sage-key-error" role="alert" className="mt-2 text-meta text-danger-600 dark:text-danger-400">
             {error}
           </p>
         ) : (
