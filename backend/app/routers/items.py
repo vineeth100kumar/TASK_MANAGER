@@ -10,10 +10,10 @@ from ..models import (
     WorkItemCreate, WorkItemUpdate, WorkItemResponse,
     SubtaskCreate, SubtaskUpdate, SubtaskResponse,
     ProjectCreate, ProjectUpdate, ProjectResponse,
-    MilestoneCreate, MilestoneResponse
+    MilestoneCreate, MilestoneResponse, WorkItemReorder
 )
-from ..services.item_serializer import load_item
-from ..services.recurrence import calculate_next_occurrence
+from ..services.item_serializer import load_item, serialize_item
+from ..services.recurrence import calculate_next_occurrence, recurrence_has_ended
 from ..services.ws_manager import ws_manager
 from ..services.backlog_service import (
     schedule_description_fill,
@@ -104,43 +104,15 @@ async def list_items(
                     created_at=s["created_at"]
                 ))
 
+    # Built through the one serializer rather than by hand here, so a column
+    # added to the table cannot arrive on the websocket and go missing from
+    # the list, or the other way round.
     items = []
     for row in rows:
-        item_id = row["id"]
-        depends_on = []
-        if row["depends_on"]:
-            try:
-                depends_on = json.loads(row["depends_on"])
-            except Exception:
-                depends_on = []
-                
-        items.append(WorkItemResponse(
-            id=row["id"],
-            title=row["title"],
-            description=row["description"],
-            entity_type=row["entity_type"],
-            status=row["status"],
-            priority=row["priority"],
-            energy=row["energy"],
-            due_date=row["due_date"],
-            start_at=row["start_at"],
-            end_at=row["end_at"],
-            remind_at=row["remind_at"],
-            repeat_rule=row["repeat_rule"],
-            next_occurrence=row["next_occurrence"],
-            project_id=row["project_id"],
-            milestone_id=row["milestone_id"],
-            estimated_minutes=row["estimated_minutes"],
-            actual_minutes=row["actual_minutes"],
-            depends_on=depends_on,
-            context_tags=row["context_tags"] or "" if "context_tags" in row.keys() else "",
-            is_completed=bool(row["is_completed"]),
-            completed_at=row["completed_at"],
-            created_at=row["created_at"],
-            updated_at=row["updated_at"],
-            subtasks=subtasks_by_item.get(item_id, [])
-        ))
-            
+        payload = serialize_item(row)
+        payload["subtasks"] = subtasks_by_item.get(row["id"], [])
+        items.append(WorkItemResponse(**payload))
+
     return items
 
 @router.post("", response_model=WorkItemResponse)
@@ -163,18 +135,29 @@ async def create_item(item: WorkItemCreate, db: aiosqlite.Connection = Depends(g
     # written silently under a task they just typed one line of.
     needs_description = not item.description or not item.description.strip()
 
+    # A new item goes to the end of the hand-sorted order. One step of 1024
+    # leaves room for roughly ten drops between any two neighbours before the
+    # gap needs renumbering.
+    async with db.execute("SELECT COALESCE(MAX(position), 0) AS top FROM work_items") as pos_cursor:
+        pos_row = await pos_cursor.fetchone()
+    position = (pos_row["top"] or 0) + 1024.0
+
     query = """
         INSERT INTO work_items (
             id, title, description, entity_type, status, priority, energy,
-            due_date, start_at, end_at, remind_at, repeat_rule, next_occurrence,
-            project_id, milestone_id, estimated_minutes, actual_minutes,
+            due_date, start_at, end_at, remind_at, repeat_rule, repeat_until,
+            repeat_count, repeat_done, next_occurrence,
+            project_id, milestone_id, location, is_all_day, position,
+            estimated_minutes, actual_minutes,
             depends_on, context_tags, is_completed, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?)
     """
     await db.execute(query, (
         item_id, item.title, item.description, item.entity_type, item.status, item.priority, item.energy,
-        item.due_date, item.start_at, item.end_at, item.remind_at, item.repeat_rule, next_occurrence,
-        item.project_id, item.milestone_id, item.estimated_minutes, item.actual_minutes,
+        item.due_date, item.start_at, item.end_at, item.remind_at, item.repeat_rule,
+        item.repeat_until, item.repeat_count, next_occurrence,
+        item.project_id, item.milestone_id, item.location, 1 if item.is_all_day else 0, position,
+        item.estimated_minutes, item.actual_minutes,
         json.dumps(item.depends_on), item.context_tags or "", now_iso, now_iso
     ))
     
@@ -266,10 +249,27 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
             repeat_rule = existing["repeat_rule"]
             if repeat_rule:
                 next_date = calculate_next_occurrence(repeat_rule)
-                if next_date:
+                # A rule can now carry an end: a last date, or a number of
+                # times. Without one every repeat ran forever, so "take the
+                # tablets for ten days" had to be deleted by hand to stop it.
+                done_so_far = (_row_value(existing, "repeat_done") or 0) + 1
+                ended = recurrence_has_ended(
+                    _row_value(existing, "repeat_until"),
+                    _row_value(existing, "repeat_count"),
+                    done_so_far,
+                    next_date,
+                )
+                if next_date and not ended:
                     fields.append("next_occurrence = ?")
                     values.append(next_date.isoformat())
-                    spawned_next = await _spawn_next_occurrence(db, existing, next_date, now_iso)
+                    spawned_next = await _spawn_next_occurrence(
+                        db, existing, next_date, now_iso, done_so_far
+                    )
+                else:
+                    # The last one. Keep the rule on the finished item as a
+                    # record of what it was, but stop it producing more.
+                    fields.append("next_occurrence = ?")
+                    values.append(None)
         else:
             fields.append("completed_at = ?")
             values.append(None)
@@ -361,11 +361,17 @@ async def update_item(item_id: str, updates: WorkItemUpdate, db: aiosqlite.Conne
     return res
 
 
+def _row_value(row: aiosqlite.Row, name: str, default=None):
+    """A column that may not exist yet on a database mid-migration."""
+    return row[name] if name in row.keys() else default
+
+
 async def _spawn_next_occurrence(
     db: aiosqlite.Connection,
     completed_row: aiosqlite.Row,
     next_date: datetime.datetime,
     now_iso: str,
+    done_so_far: int = 0,
 ) -> str:
     """Create the next cycle of a recurring item, with its subtasks unticked."""
     new_id = f"item_{uuid.uuid4().hex[:12]}"
@@ -376,6 +382,17 @@ async def _spawn_next_occurrence(
             day_shift = datetime.datetime.combine(next_date.date(), previous_start.time())
         except ValueError:
             day_shift = None
+
+    # A recurring meeting keeps its length: the end moves with the start by
+    # the same span, rather than being dropped as it was before.
+    end_at = None
+    if completed_row["end_at"] and completed_row["start_at"] and day_shift:
+        try:
+            previous_start = datetime.datetime.fromisoformat(completed_row["start_at"])
+            previous_end = datetime.datetime.fromisoformat(completed_row["end_at"])
+            end_at = (day_shift + (previous_end - previous_start)).isoformat()
+        except ValueError:
+            end_at = None
 
     remind_at = None
     if completed_row["remind_at"] and day_shift:
@@ -391,17 +408,23 @@ async def _spawn_next_occurrence(
         INSERT INTO work_items (
             id, title, description, entity_type, status, priority, energy,
             due_date, start_at, end_at, remind_at, repeat_rule,
-            project_id, milestone_id, estimated_minutes, actual_minutes,
+            repeat_until, repeat_count, repeat_done,
+            project_id, milestone_id, location, is_all_day, position,
+            estimated_minutes, actual_minutes,
             depends_on, context_tags, is_completed, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)
+        ) VALUES (?, ?, ?, ?, 'todo', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, 0, ?, ?)
         """,
         (
             new_id, completed_row["title"], completed_row["description"],
             completed_row["entity_type"], completed_row["priority"], completed_row["energy"],
             next_date.strftime("%Y-%m-%d"),
             day_shift.isoformat() if day_shift else None,
-            None, remind_at, completed_row["repeat_rule"],
+            end_at, remind_at, completed_row["repeat_rule"],
+            _row_value(completed_row, "repeat_until"), _row_value(completed_row, "repeat_count"),
+            done_so_far,
             completed_row["project_id"], completed_row["milestone_id"],
+            _row_value(completed_row, "location"), _row_value(completed_row, "is_all_day", 0) or 0,
+            _row_value(completed_row, "position"),
             completed_row["estimated_minutes"], completed_row["depends_on"] or "[]",
             completed_row["context_tags"] or "", now_iso, now_iso,
         ),
@@ -418,6 +441,78 @@ async def _spawn_next_occurrence(
                 (f"sub_{uuid.uuid4().hex[:10]}", new_id, sub_row["title"], sub_row["position"], now_iso),
             )
     return new_id
+
+@router.post("/{item_id}/reorder", response_model=WorkItemResponse)
+async def reorder_item(
+    item_id: str,
+    move: WorkItemReorder,
+    db: aiosqlite.Connection = Depends(get_db),
+):
+    """
+    Put an item where it was dropped, named by the two it landed between.
+
+    The client sends neighbours rather than an index, because between the drag
+    starting and the request landing the list may have been re-sorted by a
+    websocket update from another device. Neighbours still mean the same thing
+    then; an index does not.
+
+    Only the dragged row is written. Its new position is the midpoint of the
+    two it sits between, so a drop costs one UPDATE rather than one per task.
+    """
+    async with db.execute("SELECT * FROM work_items WHERE id = ?", (item_id,)) as cursor:
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Work item not found")
+
+    async def position_of(other_id: Optional[str]) -> Optional[float]:
+        if not other_id:
+            return None
+        async with db.execute(
+            "SELECT position FROM work_items WHERE id = ?", (other_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+        return row["position"] if row and row["position"] is not None else None
+
+    above = await position_of(move.before_id)
+    below = await position_of(move.after_id)
+
+    if above is not None and below is not None:
+        new_position = (above + below) / 2
+    elif above is not None:
+        new_position = above + 1024.0
+    elif below is not None:
+        new_position = below - 1024.0
+    else:
+        # Dropped into a list with no positions yet — seed one and let the
+        # neighbours settle as they are dragged.
+        new_position = 1024.0
+
+    # Two neighbours whose positions have converged past what a float can
+    # split leave nowhere to land. Spread the whole list out again; this is
+    # rare enough to be worth the one expensive write when it happens.
+    if above is not None and below is not None and abs(above - below) < 0.0001:
+        async with db.execute(
+            "SELECT id FROM work_items ORDER BY position IS NULL, position ASC, created_at ASC"
+        ) as cursor:
+            ordered = [row["id"] for row in await cursor.fetchall()]
+        for index, other_id in enumerate(ordered):
+            await db.execute(
+                "UPDATE work_items SET position = ? WHERE id = ?", ((index + 1) * 1024.0, other_id)
+            )
+        above = await position_of(move.before_id)
+        below = await position_of(move.after_id)
+        if above is not None and below is not None:
+            new_position = (above + below) / 2
+
+    await db.execute(
+        "UPDATE work_items SET position = ?, updated_at = ? WHERE id = ?",
+        (new_position, datetime.datetime.now().isoformat(), item_id),
+    )
+    await db.commit()
+
+    payload = await load_item(db, item_id)
+    await ws_manager.broadcast({"type": "ITEM_UPDATED", "data": payload})
+    return WorkItemResponse(**payload)
+
 
 @router.delete("/{item_id}")
 async def delete_item(item_id: str, db: aiosqlite.Connection = Depends(get_db)):

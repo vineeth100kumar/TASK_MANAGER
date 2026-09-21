@@ -40,10 +40,17 @@ class WorkItemBase(BaseModel):
     start_at: Optional[str] = None # ISO datetime
     end_at: Optional[str] = None   # ISO datetime
     remind_at: Optional[str] = None # ISO datetime
-    repeat_rule: Optional[str] = None # daily, weekly:mon,tue, monthly:1, custom:7d
+    repeat_rule: Optional[str] = None # daily, weekly:2:mon,tue, monthly:1, monthly:3rd-tue, custom:7d
+    repeat_until: Optional[str] = None # YYYY-MM-DD, the last day it may recur
+    repeat_count: Optional[int] = Field(default=None, gt=0) # or stop after N
     project_id: Optional[str] = None
     milestone_id: Optional[str] = None
-    estimated_minutes: int = Field(default=30, gt=0)
+    location: Optional[str] = None
+    is_all_day: bool = False
+    position: Optional[float] = None
+    # Nullable: an estimate can be taken back off, which the column's CHECK
+    # allows as NULL but not as 0.
+    estimated_minutes: Optional[int] = Field(default=30, gt=0)
     actual_minutes: int = 0
     depends_on: List[str] = Field(default_factory=list)
     context_tags: str = ""
@@ -63,8 +70,13 @@ class WorkItemUpdate(BaseModel):
     end_at: Optional[str] = None
     remind_at: Optional[str] = None
     repeat_rule: Optional[str] = None
+    repeat_until: Optional[str] = None
+    repeat_count: Optional[int] = Field(default=None, gt=0)
     project_id: Optional[str] = None
     milestone_id: Optional[str] = None
+    location: Optional[str] = None
+    is_all_day: Optional[bool] = None
+    position: Optional[float] = None
     estimated_minutes: Optional[int] = Field(default=None, gt=0)
     actual_minutes: Optional[int] = None
     depends_on: Optional[List[str]] = None
@@ -74,12 +86,19 @@ class WorkItemUpdate(BaseModel):
 
 class WorkItemResponse(WorkItemBase):
     id: str
+    repeat_done: int = 0
     is_completed: bool
     completed_at: Optional[str] = None
     next_occurrence: Optional[str] = None
     created_at: str
     updated_at: str
     subtasks: List[SubtaskResponse] = Field(default_factory=list)
+
+class WorkItemReorder(BaseModel):
+    """Where an item was dropped, named by what it landed between."""
+    before_id: Optional[str] = None  # the item now above it, if any
+    after_id: Optional[str] = None   # the item now below it, if any
+
 
 class ProjectCreate(BaseModel):
     name: str
