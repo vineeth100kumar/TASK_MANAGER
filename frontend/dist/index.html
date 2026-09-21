@@ -58,20 +58,20 @@
       (function () {
         try {
           var saved = localStorage.getItem('sage_theme');
-          if (saved !== 'light' && saved !== 'dark') {
-            saved = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-          }
-          document.documentElement.classList.toggle('dark', saved === 'dark');
-          document.documentElement.style.backgroundColor = saved === 'dark' ? '#0e0f12' : '#f6f6f8';
+          var resolved = saved === 'light' || saved === 'dark'
+            ? saved
+            : (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+          document.documentElement.classList.toggle('dark', resolved === 'dark');
+          document.documentElement.style.backgroundColor = resolved === 'dark' ? '#0e0f12' : '#f6f6f8';
         } catch (e) {
           /* private mode or blocked storage — fall through to the light default */
         }
       })();
     </script>
-    <script type="module" crossorigin src="/assets/index-Dq9Fia4-.js"></script>
+    <script type="module" crossorigin src="/assets/index-DzhZiLTV.js"></script>
     <link rel="modulepreload" crossorigin href="/assets/motion-BwLpCJQ6.js">
     <link rel="modulepreload" crossorigin href="/assets/react-BsOvDYUW.js">
-    <link rel="stylesheet" crossorigin href="/assets/index-Dga_8iJC.css">
+    <link rel="stylesheet" crossorigin href="/assets/index-CyQs3QGj.css">
   </head>
   <body class="antialiased">
     <div id="root"></div>
