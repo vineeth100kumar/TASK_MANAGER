@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { api } from '../services/api';
 import { useToast } from '../context/ToastContext';
+import { useSaveState } from '../context/SaveStateContext';
 import {
   FinanceSummary,
   Transaction,
@@ -22,6 +23,7 @@ export function useFinanceState({
   pushHistoryAction,
 }: UseFinanceStateProps) {
   const toast = useToast();
+  const { recordFailure } = useSaveState();
 
   const [financeSummary, setFinanceSummary] = useState<FinanceSummary | null>(null);
   const [transactions, setTransactions] = useState<Transaction[]>([]);
@@ -78,14 +80,22 @@ export function useFinanceState({
       })
       .catch(err => {
         console.error('Failed to create account on Pi', err);
-        toast.error('Failed to create account on Raspberry Pi');
         setFinanceSummary(prev => prev ? {
           ...prev,
           accounts: prev.accounts.filter(a => a.id !== tempId)
         } : prev);
+        recordFailure({
+          description: `Creating the account "${accData.name}"`,
+          retry: () => api.createAccount(accData).then(realAcc => {
+            setFinanceSummary(prev => prev ? {
+              ...prev,
+              accounts: [...prev.accounts, realAcc],
+            } : prev);
+          }),
+        });
       })
       .finally(endSync);
-  }, [startSync, endSync, pushHistoryAction, toast]);
+  }, [startSync, endSync, pushHistoryAction, toast, recordFailure]);
 
   // Update Account
   const handleUpdateAccount = useCallback((id: string, updates: { name?: string; balance?: number; is_upi_default?: boolean }) => {
@@ -108,15 +118,18 @@ export function useFinanceState({
       };
     });
 
-    startSync();
-    api.updateAccount(id, updates as any)
-      .then(() => toast.info('Account updated'))
-      .catch(err => {
-        console.error('Failed to update account on Pi', err);
-        toast.error('Failed to update account');
-      })
-      .finally(endSync);
-  }, [startSync, endSync, toast]);
+    const attempt = (): Promise<unknown> => {
+      startSync();
+      return api.updateAccount(id, updates as any)
+        .catch(err => {
+          console.error('Failed to update account on Pi', err);
+          recordFailure({ description: 'Changes to an account', retry: attempt });
+        })
+        .finally(endSync);
+    };
+
+    attempt();
+  }, [startSync, endSync, recordFailure]);
 
   // Delete Account
   const handleDeleteAccount = useCallback((id: string, recordHistory = true) => {
@@ -247,11 +260,16 @@ export function useFinanceState({
       })
       .catch(err => {
         console.error('Failed to create transaction on Pi', err);
-        toast.error('Failed to save transaction to Raspberry Pi');
         setTransactions(prev => prev.filter(t => t.id !== tempId));
+        recordFailure({
+          description: `Logging ₹${txData.amount} ${txData.type}`,
+          retry: () => api.createTransaction(txData).then(realTx => {
+            setTransactions(prev => [realTx, ...prev]);
+          }),
+        });
       })
       .finally(endSync);
-  }, [financeSummary, todayStr, startSync, endSync, pushHistoryAction, toast]);
+  }, [financeSummary, todayStr, startSync, endSync, pushHistoryAction, toast, recordFailure]);
 
   // Delete Transaction
   const handleDeleteTransaction = useCallback((id: string, recordHistory = true) => {

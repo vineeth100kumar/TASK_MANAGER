@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { App } from './App';
 import { ToastProvider } from './context/ToastContext';
+import { SaveStateProvider } from './context/SaveStateContext';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import './index.css';
 
@@ -23,7 +24,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     */}
     <ErrorBoundary>
       <ToastProvider>
-        <App />
+        <SaveStateProvider>
+          <App />
+        </SaveStateProvider>
       </ToastProvider>
     </ErrorBoundary>
   </React.StrictMode>,

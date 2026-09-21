@@ -60,7 +60,7 @@ const COLOR_MAP: Record<StickyColor, { bg: string; border: string; text: string;
 
 const STICKY_COLORS: { color: StickyColor; hex: string; name: string }[] = [
   { color: 'yellow', hex: '#fef08a', name: 'Canary Yellow' },
-  { color: 'blue', hex: '#bae6fd', name: 'Blueprint Cyan' },
+  { color: 'blue', hex: '#bae6fd', name: 'Blue' },
   { color: 'green', hex: '#bbf7d0', name: 'Mint Green' },
   { color: 'pink', hex: '#fbcfe8', name: 'Rose Coral' },
   { color: 'purple', hex: '#e9d5ff', name: 'Lilac' },
@@ -280,7 +280,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
             style={{ color: palette.text }}
             title="Convert this note into a docket task"
           >
-            <Zap size={10} className="fill-current text-amber-700" />
+            <Zap size={10} className="fill-current opacity-70" />
             <span>Make a task</span>
           </button>
         )}
@@ -293,7 +293,7 @@ export const StickyNoteOverlay: React.FC<StickyNoteOverlayProps> = ({
               e.stopPropagation();
               onDelete();
             }}
-            className="p-1 rounded-control text-black/40 hover:text-rose-700 hover:bg-black/10 transition-colors"
+            className="p-1 rounded-control text-black/40 hover:text-danger-600 hover:bg-black/10 transition-colors"
             title="Delete Sticky Note"
           >
             <Trash2 size={12} />

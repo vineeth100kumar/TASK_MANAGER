@@ -46,7 +46,6 @@ interface WhiteboardToolbarProps {
   onClear: () => void;
   onTriggerImageUpload?: () => void;
   onOpenMoreSheet?: () => void;
-  edition?: 'day' | 'night';
 }
 
 const PEN_COLORS = [
@@ -84,7 +83,7 @@ const HIGHLIGHTER_SIZES = [
 
 const STICKY_COLORS: { color: StickyColor; hex: string; name: string }[] = [
   { color: 'yellow', hex: '#fef08a', name: 'Canary Yellow' },
-  { color: 'blue', hex: '#bae6fd', name: 'Blueprint Cyan' },
+  { color: 'blue', hex: '#bae6fd', name: 'Blue' },
   { color: 'green', hex: '#bbf7d0', name: 'Mint Green' },
   { color: 'pink', hex: '#fbcfe8', name: 'Rose Coral' },
   { color: 'purple', hex: '#e9d5ff', name: 'Lilac' },
@@ -124,7 +123,6 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
   onClear,
   onTriggerImageUpload,
   onOpenMoreSheet,
-  edition = 'day',
 }) => {
   const [showPenFlyout, setShowPenFlyout] = useState(false);
   const [showHighlighterFlyout, setShowHighlighterFlyout] = useState(false);
@@ -205,18 +203,18 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
     setShowShapeFlyout(false);
   };
 
-  const isNight = edition === 'night';
-  const containerClass = isNight
-    ? 'bg-[#141418] border-hairline text-ink'
-    : 'bg-paper-white border-ink-primary text-ink-primary';
-
-  const btnHoverClass = isNight
-    ? 'hover:bg-sunken text-ink-2'
-    : 'hover:bg-paper-aged text-ink-primary';
-
-  const btnActiveClass = isNight
-    ? 'bg-amber-600/30 text-amber-400 border-amber-600/60 font-bold'
-    : 'bg-ink-primary text-paper-white border-ink-primary font-bold';
+  /*
+   * One set of classes for both editions.
+   *
+   * The toolbar used to carry two hand-mixed themes -- a near-black for night
+   * and a cream for day -- which meant every state had to be written twice and
+   * the selected tool was a different idea in each: an accent wash at night, a
+   * full inverted block by day. It is the app's surface now, and the selected
+   * tool is the accent, once.
+   */
+  const containerClass = 'bg-surface/95 backdrop-blur-xl border border-hairline text-ink';
+  const btnHoverClass = 'text-ink-2 hover:text-ink hover:bg-sunken';
+  const btnActiveClass = 'bg-accent-500 text-white border-accent-500';
 
   const bottomStyle = {
     bottom: 'max(1.25rem, calc(env(safe-area-inset-bottom) + 0.75rem))'
@@ -228,11 +226,11 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <button
           type="button"
           onClick={() => setIsCollapsed(false)}
-          className={`flex items-center gap-2 px-3 py-1.5 border shadow-xl rounded-control text-meta font-bold ${containerClass}`}
-          title="Expand Drafting Rack"
+          className={`h-10 flex items-center gap-2 px-3.5 shadow-lift-2 rounded-control text-meta font-medium ${containerClass}`}
+          title="Show the tools"
         >
-          <Pen size={14} className="text-amber-500" />
-          <span>Drafting Rack</span>
+          <Pen size={14} className="text-accent-500" />
+          <span>Tools</span>
           <ChevronUp size={14} />
         </button>
       </div>
@@ -287,7 +285,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
               className={`absolute bottom-12 left-0 p-3 border shadow-lg rounded-control w-52 space-y-3 z-40 ${containerClass}`}
             >
               <div>
-                <div className="text-caption font-bold mb-1.5 text-ink-muted">
+                <div className="text-caption mb-1.5 text-ink-3">
                   Ink Color
                 </div>
                 <div className="grid grid-cols-4 gap-1.5">
@@ -300,7 +298,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                         setShowPenFlyout(false);
                       }}
                       className={`h-6 rounded-control border border-black/20 flex items-center justify-center transition-transform ${
-                        activeColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                        activeColor === hex ? 'scale-110 ring-2 ring-accent-500' : 'hover:scale-105'
                       }`}
                       style={{ backgroundColor: hex }}
                     />
@@ -309,7 +307,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
               </div>
 
               <div>
-                <div className="text-caption font-bold mb-1.5 text-ink-muted">
+                <div className="text-caption mb-1.5 text-ink-3">
                   Line Width
                 </div>
                 <div className="grid grid-cols-2 gap-1 text-caption">
@@ -370,7 +368,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             <div
               className={`absolute bottom-12 left-0 p-2.5 border shadow-lg rounded-control w-48 space-y-2 z-40 ${containerClass}`}
             >
-              <div className="text-caption font-bold text-ink-muted">
+              <div className="text-caption text-ink-3">
                 Select Note Color
               </div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -394,14 +392,14 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
           )}
         </div>
 
-        <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-hairline' : 'bg-ink-rule'}`} />
+        <div className={`w-[1px] h-6 mx-0.5 bg-hairline`} />
 
-        {/* More Instruments (...) */}
+        {/* More tools */}
         <button
           type="button"
           onClick={onOpenMoreSheet}
           className={`p-2 rounded-control border border-transparent transition-colors ${btnHoverClass}`}
-          title="More Instruments"
+          title="More tools"
         >
           <MoreHorizontal size={18} />
         </button>
@@ -454,7 +452,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <Hand size={16} />
       </button>
 
-      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-hairline' : 'bg-ink-rule'}`} />
+      <div className={`w-[1px] h-6 mx-0.5 bg-hairline`} />
 
       {/* 3. PEN TOOL */}
       <div className="relative">
@@ -464,7 +462,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
           className={`p-2 rounded-control border flex items-center gap-1 transition-colors ${
             activeTool === 'pen' ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Drafting Pen (P)"
+          title="Pen (P)"
         >
           <Pen size={16} />
           <div
@@ -479,7 +477,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             className={`absolute bottom-12 left-0 p-3 border shadow-lg rounded-control w-56 space-y-3 z-40 ${containerClass}`}
           >
             <div>
-              <div className="text-caption font-bold mb-1.5 text-ink-muted">
+              <div className="text-caption mb-1.5 text-ink-3">
                 Ink Color
               </div>
               <div className="grid grid-cols-4 gap-1.5">
@@ -492,7 +490,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                       setShowPenFlyout(false);
                     }}
                     className={`h-6 rounded-control border border-black/20 flex items-center justify-center transition-transform ${
-                      activeColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                      activeColor === hex ? 'scale-110 ring-2 ring-accent-500' : 'hover:scale-105'
                     }`}
                     style={{ backgroundColor: hex }}
                   />
@@ -501,7 +499,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             </div>
 
             <div>
-              <div className="text-caption font-bold mb-1.5 text-ink-muted">
+              <div className="text-caption mb-1.5 text-ink-3">
                 Line Width
               </div>
               <div className="grid grid-cols-2 gap-1 text-caption">
@@ -538,10 +536,10 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         }}
         className={`p-2 rounded-control border transition-colors ${
           activeTool === 'laser'
-            ? 'bg-rose-600 text-white border-rose-600 font-bold shadow-sm animate-pulse'
+            ? 'bg-danger-600 text-white border-danger-600 shadow-sm'
             : `border-transparent ${btnHoverClass}`
         }`}
-        title="Laser Pointer (L) - Temporary Fading Trace"
+        title="Laser pointer (L). The trace fades on its own."
       >
         <Zap size={16} />
       </button>
@@ -569,7 +567,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             className={`absolute bottom-12 left-0 p-3 border shadow-lg rounded-control w-52 space-y-3 z-40 ${containerClass}`}
           >
             <div>
-              <div className="text-caption font-bold mb-1.5 text-ink-muted">
+              <div className="text-caption mb-1.5 text-ink-3">
                 Marker Ink
               </div>
               <div className="grid grid-cols-3 gap-1.5">
@@ -582,7 +580,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                       setShowHighlighterFlyout(false);
                     }}
                     className={`h-6 rounded-control border border-black/20 flex items-center justify-center transition-transform ${
-                      highlighterColor === hex ? 'scale-110 ring-2 ring-amber-500' : 'hover:scale-105'
+                      highlighterColor === hex ? 'scale-110 ring-2 ring-accent-500' : 'hover:scale-105'
                     }`}
                     style={{ backgroundColor: hex }}
                   />
@@ -591,7 +589,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             </div>
 
             <div>
-              <div className="text-caption font-bold mb-1.5 text-ink-muted">
+              <div className="text-caption mb-1.5 text-ink-3">
                 Tip Width
               </div>
               <div className="grid grid-cols-3 gap-1 text-caption">
@@ -634,7 +632,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         <Eraser size={16} />
       </button>
 
-      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-hairline' : 'bg-ink-rule'}`} />
+      <div className={`w-[1px] h-6 mx-0.5 bg-hairline`} />
 
       {/* 7. SHAPES TOOL */}
       <div className="relative">
@@ -644,7 +642,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
           className={`p-2 rounded-control border flex items-center gap-1 transition-colors ${
             activeTool === 'shape' ? btnActiveClass : `border-transparent ${btnHoverClass}`
           }`}
-          title="Geometric Drafting Shapes (U)"
+          title="Shapes (U)"
         >
           {activeShape === 'rectangle' && <Square size={16} />}
           {activeShape === 'circle' && <Circle size={16} />}
@@ -659,7 +657,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
             className={`absolute bottom-12 left-0 p-3 border shadow-lg rounded-control space-y-3 z-40 w-56 ${containerClass}`}
           >
             <div>
-              <div className="text-caption font-bold mb-1.5 text-ink-muted">
+              <div className="text-caption mb-1.5 text-ink-3">
                 Shape Type
               </div>
               <div className="flex gap-1">
@@ -733,13 +731,13 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
 
             {/* Shape Fill Color Selection */}
             {setActiveFillColor && (
-              <div className="pt-2 border-t border-ink-base/15 dark:border-stone-700">
-                <div className="flex items-center justify-between text-caption font-bold mb-1 text-ink-muted">
+              <div className="pt-2 border-t border-hairline">
+                <div className="flex items-center justify-between text-caption mb-1 text-ink-3">
                   <span>Fill Tone</span>
                   <button
                     type="button"
                     onClick={() => setActiveFillColor(null)}
-                    className={activeFillColor === null ? "text-amber-600 dark:text-amber-400 font-bold text-caption" : "text-ink-muted text-caption"}
+                    className={activeFillColor === null ? "text-accent-600 dark:text-accent-400 font-medium text-caption" : "text-ink-3 text-caption"}
                   >
                     None
                   </button>
@@ -751,7 +749,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
                       type="button"
                       onClick={() => setActiveFillColor(c)}
                       className={`w-5 h-5 rounded-control border transition-transform ${
-                        activeFillColor === c ? 'ring-2 ring-amber-500 border-black/40 scale-110' : 'border-black/20 hover:scale-105'
+                        activeFillColor === c ? 'ring-2 ring-accent-500 border-hairline scale-110' : 'border-black/20 hover:scale-105'
                       }`}
                       style={{ backgroundColor: c }}
                       title={c}
@@ -782,7 +780,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
           <div
             className={`absolute bottom-12 left-0 p-2.5 border shadow-lg rounded-control w-48 space-y-2 z-40 ${containerClass}`}
           >
-            <div className="text-caption font-bold text-ink-muted">
+            <div className="text-caption text-ink-3">
               Select Note Color
             </div>
             <div className="grid grid-cols-3 gap-1.5">
@@ -837,7 +835,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
         </button>
       )}
 
-      <div className={`w-[1px] h-6 mx-0.5 ${isNight ? 'bg-hairline' : 'bg-ink-rule'}`} />
+      <div className={`w-[1px] h-6 mx-0.5 bg-hairline`} />
 
       {/* 11. UNDO / REDO */}
       <button
@@ -867,7 +865,7 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
       <button
         type="button"
         onClick={onClear}
-        className={`p-2 rounded-control border border-transparent transition-colors text-rose-600 hover:bg-rose-950/20`}
+        className="p-2 rounded-control border border-transparent transition-colors text-danger-600 dark:text-danger-400 hover:bg-danger-500/10"
         title="Clear Drawing Board"
       >
         <Trash2 size={16} />
@@ -877,8 +875,8 @@ export const WhiteboardToolbar: React.FC<WhiteboardToolbarProps> = ({
       <button
         type="button"
         onClick={() => setIsCollapsed(true)}
-        className={`p-2 rounded-control border border-transparent text-ink-muted hover:text-ink-primary`}
-        title="Minimize Drafting Rack"
+        className={"p-2 rounded-control border border-transparent text-ink-3 hover:text-ink hover:bg-sunken transition-colors"}
+        title="Hide the tools"
       >
         <ChevronDown size={16} />
       </button>

@@ -16,12 +16,16 @@ import { SearchModal } from './components/search/SearchModal';
 import { CelebrationModal } from './components/common/CelebrationModal';
 import { ErrorBoundary } from './components/common/ErrorBoundary';
 import { ConnectScreen } from './components/common/ConnectScreen';
+import { UnsavedBanner } from './components/common/UnsavedBanner';
+import { OfflineNotice } from './components/common/OfflineNotice';
 
 import { api, onUnauthorized } from './services/api';
 import { useLiveSync } from './services/websocket';
 import { useToast } from './context/ToastContext';
+import { useSaveState } from './context/SaveStateContext';
 import { useVisualViewport } from './hooks/useVisualViewport';
 import { storage } from './utils/storage';
+import { saveSnapshot, readSnapshot } from './services/snapshot';
 import { hasApiSecret } from './config';
 
 import { useUndoRedo } from './hooks/useUndoRedo';
@@ -30,6 +34,7 @@ import { useFinanceState } from './hooks/useFinanceState';
 
 import {
   AiGreetingResponse,
+  ThemePreference,
   WeatherData
 } from './types';
 
@@ -59,42 +64,69 @@ export const App: React.FC = () => {
   }), []);
 
   /*
-   * Theme. The `dark` class on <html> is what actually drives every token, so it
-   * is the single source of truth. It used to be hardcoded in index.html and
-   * never toggled, which meant every `dark:` variant was permanently on and the
-   * light theme never actually rendered. index.html now resolves it before
-   * first paint; this keeps it in sync.
+   * Theme. The `dark` class on <html> is what actually drives every token, so
+   * it is the single source of truth. index.html resolves it before first
+   * paint; this keeps it in sync.
+   *
+   * Three states, not two. "System" is the default and stays the default:
+   * pressing the toggle used to pin the theme forever with no way back to
+   * following the phone, so a single press in the wrong light meant the app
+   * never went dark again at night.
    */
-  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+  const [themePreference, setThemePreference] = useState<ThemePreference>(() => {
     const saved = storage.get('sage_theme');
-    if (saved === 'light' || saved === 'dark') return saved;
-    return typeof window !== 'undefined' &&
-      window.matchMedia?.('(prefers-color-scheme: dark)').matches
-      ? 'dark'
-      : 'light';
+    return saved === 'light' || saved === 'dark' || saved === 'system' ? saved : 'system';
   });
+
+  const [systemTheme, setSystemTheme] = useState<'light' | 'dark'>(() =>
+    typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches
+      ? 'dark'
+      : 'light'
+  );
+
+  // Follow the system while the preference says to. Without this listener,
+  // "System" was only read once at boot and never again.
+  useEffect(() => {
+    const query = window.matchMedia?.('(prefers-color-scheme: dark)');
+    if (!query) return;
+    const onChange = (e: MediaQueryListEvent) => setSystemTheme(e.matches ? 'dark' : 'light');
+    query.addEventListener('change', onChange);
+    return () => query.removeEventListener('change', onChange);
+  }, []);
+
+  const theme: 'light' | 'dark' = themePreference === 'system' ? systemTheme : themePreference;
 
   useEffect(() => {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.style.backgroundColor = theme === 'dark' ? '#0e0f12' : '#f6f6f8';
   }, [theme]);
 
-  const handleToggleTheme = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'light' ? 'dark' : 'light';
-      storage.set('sage_theme', next);
-      return next;
-    });
+  const handleSetThemePreference = useCallback((next: ThemePreference) => {
+    setThemePreference(next);
+    storage.set('sage_theme', next);
   }, []);
+
+  /*
+   * The bar's one-press toggle. It moves to the theme you are not looking at
+   * and, when that happens to be what the system already says, hands control
+   * back to the system rather than pinning the same value by hand.
+   */
+  const handleToggleTheme = useCallback(() => {
+    const next = theme === 'light' ? 'dark' : 'light';
+    handleSetThemePreference(next === systemTheme ? 'system' : next);
+  }, [theme, systemTheme, handleSetThemePreference]);
 
   // Track iOS Visual Viewport & Keyboard offset dynamically
   useVisualViewport();
 
-  // Background sync tracking
-  const [syncingCount, setSyncingCount] = useState(0);
-  const isSyncing = syncingCount > 0;
-  const startSync = useCallback(() => setSyncingCount(c => c + 1), []);
-  const endSync = useCallback(() => setSyncingCount(c => Math.max(0, c - 1)), []);
+  /*
+   * Background sync tracking.
+   *
+   * The counting lives in SaveStateContext now, because the same two facts —
+   * a write is in flight, a write did not land — are needed both up here for
+   * the status pill and down in the hooks that do the writing.
+   */
+  const { isSaving: isSyncing, justSaved, beginSave: startSync, endSave: endSync } = useSaveState();
 
   const todayStr = new Date().toISOString().split('T')[0];
 
@@ -125,6 +157,7 @@ export const App: React.FC = () => {
     handleDeleteItem,
     handleCreateItem,
     handleUpdateItem,
+    handleReorderItem,
     handleToggleSubtask,
     handleAddSubtask,
     handleDeleteSubtask,
@@ -165,7 +198,17 @@ export const App: React.FC = () => {
   const [weatherData, setWeatherData] = useState<WeatherData | null>(null);
 
   // Load all data with per-resource error handling (Promise.allSettled)
+  /*
+   * What the screen is showing, when it is not live.
+   *
+   * Null means everything on screen came from the Pi just now. An ISO time
+   * means the Pi could not be reached and this is the last thing it said.
+   */
+  const [dataAsOf, setDataAsOf] = useState<string | null>(null);
+  const [isReloading, setIsReloading] = useState(false);
+
   const loadData = useCallback(async () => {
+    setIsReloading(true);
     const results = await Promise.allSettled([
       api.getItems(),
       api.getMilestones(),
@@ -201,17 +244,51 @@ export const App: React.FC = () => {
     if (greetRes.status === 'fulfilled') setGreetingData(greetRes.value);
     if (weatherRes.status === 'fulfilled') setWeatherData(weatherRes.value);
 
-    if (failedResources.length > 0) {
-      toast.action(
-        `Failed to sync ${failedResources.join(', ')} from Raspberry Pi`,
-        'Retry',
-        () => { loadData(); },
-        8000
-      );
+    const core = [itemsRes, milestonesRes, projectsRes, perfRes, finRes, txRes];
+    const everythingCoreLanded = core.every(r => r.status === 'fulfilled');
+
+    if (everythingCoreLanded) {
+      // Keep this answer, so the next time the Pi is out of reach the app
+      // opens to the work rather than to nothing.
+      saveSnapshot({
+        items: itemsRes.status === 'fulfilled' ? itemsRes.value : [],
+        milestones: milestonesRes.status === 'fulfilled' ? milestonesRes.value : [],
+        projects: projectsRes.status === 'fulfilled' ? projectsRes.value : [],
+        dailyPerformance: perfRes.status === 'fulfilled' ? perfRes.value : null,
+        financeSummary: finRes.status === 'fulfilled' ? finRes.value : null,
+        transactions: txRes.status === 'fulfilled' ? txRes.value : [],
+      });
+      setDataAsOf(null);
+    } else {
+      /*
+       * The Pi did not answer. If this is the first load of the session there
+       * is nothing on screen to keep, so fall back to the snapshot and say
+       * plainly that it is one. A later failure leaves what is already there
+       * alone: it came from the Pi this session and is fresher than any
+       * snapshot.
+       */
+      const snapshot = isInitialLoading ? readSnapshot() : null;
+      if (snapshot) {
+        if (itemsRes.status === 'rejected') setItems(snapshot.data.items);
+        if (milestonesRes.status === 'rejected') setMilestones(snapshot.data.milestones);
+        if (projectsRes.status === 'rejected') setProjects(snapshot.data.projects);
+        if (perfRes.status === 'rejected') setDailyPerformance(snapshot.data.dailyPerformance);
+        if (finRes.status === 'rejected') setFinanceSummary(snapshot.data.financeSummary);
+        if (txRes.status === 'rejected') setTransactions(snapshot.data.transactions);
+        setDataAsOf(snapshot.savedAt);
+      } else {
+        toast.action(
+          `Failed to sync ${failedResources.join(', ')} from Raspberry Pi`,
+          'Retry',
+          () => { loadData(); },
+          8000
+        );
+      }
     }
 
+    setIsReloading(false);
     setIsInitialLoading(false);
-  }, [setItems, setMilestones, setProjects, setDailyPerformance, setFinanceSummary, setTransactions, toast]);
+  }, [setItems, setMilestones, setProjects, setDailyPerformance, setFinanceSummary, setTransactions, toast, isInitialLoading]);
 
   // Debounced live sync fallback for unhandled events
   const syncDebounceRef = useRef<any>(null);
@@ -319,6 +396,7 @@ export const App: React.FC = () => {
         setActiveTab={setActiveTab}
         isLiveConnected={isConnected}
         isSyncing={isSyncing}
+        justSaved={justSaved}
         theme={theme}
         onToggleTheme={handleToggleTheme}
         onOpenQuickCapture={() => setIsBrainDumpOpen(true)}
@@ -334,6 +412,9 @@ export const App: React.FC = () => {
         undoTooltip={undoTooltip}
         redoTooltip={redoTooltip}
       />
+
+      {/* Said once, above everything, when the screen is a memory */}
+      <OfflineNotice asOf={dataAsOf} onRetry={loadData} isRetrying={isReloading} />
 
       {/* Main Content Area */}
       {/*
@@ -374,6 +455,7 @@ export const App: React.FC = () => {
               onCreateItem={handleCreateItem}
               onDeleteItem={handleDeleteItem}
               onUpdateItem={handleUpdateItem}
+              onReorderItem={handleReorderItem}
               onToggleSubtask={handleToggleSubtask}
               onAddSubtask={handleAddSubtask}
               onDeleteSubtask={handleDeleteSubtask}
@@ -446,7 +528,10 @@ export const App: React.FC = () => {
 
         {activeTab === 'shortcuts' && (
           <ErrorBoundary label="Settings">
-            <ShortcutsModal />
+            <ShortcutsModal
+              themePreference={themePreference}
+              onThemePreferenceChange={handleSetThemePreference}
+            />
           </ErrorBoundary>
         )}
       </main>
@@ -484,6 +569,9 @@ export const App: React.FC = () => {
         }}
         onOpenBrainDump={() => setIsBrainDumpOpen(true)}
       />
+
+      {/* What did not reach the Pi, kept until it does or is dismissed */}
+      <UnsavedBanner />
 
       {/* All Clear Daily Celebration Micro-Interaction */}
       <CelebrationModal

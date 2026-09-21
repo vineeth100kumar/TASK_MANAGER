@@ -204,8 +204,8 @@ export const WhiteboardMinimap: React.FC<WhiteboardMinimapProps> = ({
   };
 
   return (
-    <div className="bg-surface rounded-control border border-ink-base/20 dark:border-paper-light/20 shadow-lg p-1.5 space-y-1 select-none backdrop-blur-sm">
-      <div className="flex items-center justify-between px-1 text-caption text-ink-muted dark:text-stone-400">
+    <div className="bg-surface rounded-control border border-hairline shadow-lg p-1.5 space-y-1 select-none backdrop-blur-sm">
+      <div className="flex items-center justify-between px-1 text-caption text-ink-3">
         <span>OVERVIEW MINIMAP</span>
         <span>{Math.round(viewState.zoom * 100)}%</span>
       </div>
@@ -213,7 +213,7 @@ export const WhiteboardMinimap: React.FC<WhiteboardMinimapProps> = ({
         ref={minimapCanvasRef}
         onClick={handleClick}
         style={{ width: `${W}px`, height: `${H}px` }}
-        className="cursor-crosshair block border border-ink-base/10 dark:border-paper-light/10"
+        className="cursor-crosshair block border border-hairline"
       />
     </div>
   );

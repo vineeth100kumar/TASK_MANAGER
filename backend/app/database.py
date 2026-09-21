@@ -60,7 +60,14 @@ CREATE TABLE IF NOT EXISTS work_items (
     remind_at TEXT,
     
     repeat_rule TEXT,
+    repeat_until TEXT,
+    repeat_count INTEGER,
+    repeat_done INTEGER DEFAULT 0,
     next_occurrence TEXT,
+
+    location TEXT,
+    is_all_day INTEGER DEFAULT 0,
+    position REAL,
     
     project_id TEXT REFERENCES projects(id) ON DELETE SET NULL,
     milestone_id TEXT REFERENCES milestones(id) ON DELETE SET NULL,
@@ -316,6 +323,47 @@ async def _run_migrations(db: aiosqlite.Connection):
             (datetime.datetime.now().isoformat(), datetime.datetime.now().isoformat())
         )
         print("Migration: added reminder_sent_at column to work_items")
+
+    # v2.5.0: Where an event happens, and whether it takes the whole day.
+    if "location" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN location TEXT")
+        print("Migration: added location column to work_items")
+    if "is_all_day" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN is_all_day INTEGER DEFAULT 0")
+        print("Migration: added is_all_day column to work_items")
+
+    # v2.5.0: Hand-chosen order within a list.
+    #
+    # A float rather than an integer, so an item dropped between two others
+    # takes the midpoint of their positions and only that one row is written.
+    # Renumbering the whole list on every drag would be a write per task, on a
+    # Pi, over a tunnel.
+    if "position" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN position REAL")
+        # Seed from the order the list already draws in, so the first drag has
+        # something to move relative to rather than starting from nothing.
+        await db.execute(
+            """
+            UPDATE work_items
+               SET position = (
+                   SELECT COUNT(*) * 1024.0
+                     FROM work_items AS earlier
+                    WHERE earlier.created_at < work_items.created_at
+               )
+            """
+        )
+        print("Migration: added position column to work_items")
+
+    # v2.5.0: When a repeat stops. Until now every rule ran forever.
+    if "repeat_until" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN repeat_until TEXT")
+        print("Migration: added repeat_until column to work_items")
+    if "repeat_count" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN repeat_count INTEGER")
+        print("Migration: added repeat_count column to work_items")
+    if "repeat_done" not in columns:
+        await db.execute("ALTER TABLE work_items ADD COLUMN repeat_done INTEGER DEFAULT 0")
+        print("Migration: added repeat_done column to work_items")
 
     # v2.3.1: Add is_upi_default column to finance_accounts if it doesn't exist
     async with db.execute("PRAGMA table_info(finance_accounts)") as fa_cursor:

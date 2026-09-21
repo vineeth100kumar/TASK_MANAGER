@@ -20,24 +20,33 @@ import {
   Plus,
 } from 'lucide-react';
 
+/*
+ * Ink and fill, named for the colour rather than for a mood.
+ *
+ * These were "Blueprint", "Sage", "Blush" and "Graphite" -- a vocabulary you
+ * had to learn before you could pick a pen. The swatch shows the colour; the
+ * name only has to say which one it is. Each swatch is painted from its own
+ * value, so what the button shows is exactly what the stroke will be, which
+ * a Tailwind class name could not promise once the palette was repointed.
+ */
 const PRESET_COLORS = [
-  { label: 'Ink Black', value: '#1c1917', bg: 'bg-[#1c1917]' },
-  { label: 'Amber', value: '#b45309', bg: 'bg-amber-700' },
-  { label: 'Crimson', value: '#dc2626', bg: 'bg-red-600' },
-  { label: 'Blueprint', value: '#2563eb', bg: 'bg-blue-600' },
-  { label: 'Sage', value: '#15803d', bg: 'bg-emerald-700' },
-  { label: 'Violet', value: '#7c3aed', bg: 'bg-purple-600' },
-  { label: 'Graphite', value: '#4b5563', bg: 'bg-stone-600' },
+  { label: 'Black', value: '#1c1917' },
+  { label: 'Amber', value: '#b45309' },
+  { label: 'Red', value: '#dc2626' },
+  { label: 'Blue', value: '#2563eb' },
+  { label: 'Green', value: '#15803d' },
+  { label: 'Violet', value: '#7c3aed' },
+  { label: 'Grey', value: '#4b5563' },
 ];
 
-const PRESET_FILLS = [
-  { label: 'None', value: null, bg: 'bg-transparent border border-dashed border-stone-400' },
-  { label: 'Sand', value: 'rgba(254, 243, 199, 0.65)', bg: 'bg-amber-100' },
-  { label: 'Amber', value: 'rgba(253, 230, 138, 0.65)', bg: 'bg-amber-200' },
-  { label: 'Blush', value: 'rgba(254, 202, 202, 0.65)', bg: 'bg-red-100' },
-  { label: 'Sage', value: 'rgba(209, 250, 229, 0.65)', bg: 'bg-emerald-100' },
-  { label: 'Blueprint', value: 'rgba(219, 234, 254, 0.65)', bg: 'bg-blue-100' },
-  { label: 'Slate', value: 'rgba(226, 232, 240, 0.65)', bg: 'bg-stone-200' },
+const PRESET_FILLS: { label: string; value: string | null }[] = [
+  { label: 'No fill', value: null },
+  { label: 'Sand', value: 'rgba(254, 243, 199, 0.65)' },
+  { label: 'Amber', value: 'rgba(253, 230, 138, 0.65)' },
+  { label: 'Pink', value: 'rgba(254, 202, 202, 0.65)' },
+  { label: 'Green', value: 'rgba(209, 250, 229, 0.65)' },
+  { label: 'Blue', value: 'rgba(219, 234, 254, 0.65)' },
+  { label: 'Grey', value: 'rgba(226, 232, 240, 0.65)' },
 ];
 
 function getElementBBox(el: WhiteboardElement): { x: number; y: number; w: number; h: number } | null {
@@ -76,7 +85,6 @@ export interface WhiteboardFloatingBarProps {
   onSendToBack: () => void;
   onEditText?: (textEl: TextElement) => void;
   onEditShapeText?: (shapeEl: ShapeElement) => void;
-  edition?: 'day' | 'night';
 }
 
 export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
@@ -89,7 +97,6 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
   onSendToBack,
   onEditText,
   onEditShapeText,
-  edition = 'day',
 }) => {
   const [showColorPicker, setShowColorPicker] = useState(false);
   const [showFillPicker, setShowFillPicker] = useState(false);
@@ -166,10 +173,12 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
     onUpdateElements(updated);
   };
 
-  const isNight = edition === 'night';
-  const barBg = isNight
-    ? 'bg-[#1C1B18]/95 border-amber-900/40 text-ink'
-    : 'bg-[#FBF8F1]/95 border-amber-900/20 text-ink-primary';
+  /*
+   * The bar sits on the app's own surface, not on a hand-mixed cream that
+   * only looked right on one of the two editions.
+   */
+  const barBg = 'bg-surface/95 border border-hairline text-ink rounded-surface shadow-lift-2';
+  const barBtn = 'w-8 h-8 grid place-items-center rounded-control text-ink-2 hover:text-ink hover:bg-sunken transition-colors';
 
   return (
     <div
@@ -179,17 +188,17 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
         top: `${topPos}px`,
         zIndex: 60,
       }}
-      className={`flex items-center gap-1 px-2 py-1 border shadow-lg backdrop-blur-md transition-all animate-in fade-in zoom-in-95 duration-100 ${barBg}`}
+      className={`flex items-center gap-0.5 px-1.5 py-1 backdrop-blur-xl transition-all animate-in fade-in zoom-in-95 duration-100 ease-settle ${barBg}`}
     >
       {/* 1. In-Place Text Editing (if text element selected) */}
       {hasText && firstText && onEditText && (
         <button
           type="button"
           onClick={() => onEditText(firstText)}
-          className="flex items-center gap-1 px-2 py-1 text-meta font-bold hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
-          title="Edit Text"
+          className="h-8 flex items-center gap-1.5 px-2 text-meta text-ink hover:bg-sunken rounded-control transition-colors border-r border-hairline pr-2 mr-1"
+          title="Edit this text"
         >
-          <Edit3 size={13} className="text-amber-600" />
+          <Edit3 size={13} className="text-ink-2" />
           <span>Edit</span>
         </button>
       )}
@@ -199,11 +208,11 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
         <button
           type="button"
           onClick={() => onEditShapeText(firstShape)}
-          className="flex items-center gap-1 px-2 py-1 text-meta font-bold hover:bg-amber-600/20 transition-colors border-r border-amber-900/10 pr-2 mr-1"
-          title={firstShape.text ? 'Edit Shape Text' : 'Add Text to Shape'}
+          className="h-8 flex items-center gap-1.5 px-2 text-meta text-ink hover:bg-sunken rounded-control transition-colors border-r border-hairline pr-2 mr-1"
+          title={firstShape.text ? 'Edit the text in this shape' : 'Put text in this shape'}
         >
-          <Type size={13} className="text-amber-600" />
-          <span>{firstShape.text ? 'Edit Text' : 'Add Text'}</span>
+          <Type size={13} className="text-ink-2" />
+          <span>{firstShape.text ? 'Edit text' : 'Add text'}</span>
         </button>
       )}
 
@@ -215,23 +224,25 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
             setShowColorPicker((prev) => !prev);
             setShowFillPicker(false);
           }}
-          className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-control ${showColorPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
-          title="Change Color"
+          className={`${barBtn} ${showColorPicker ? 'bg-sunken text-ink' : ''}`}
+          title="Pen colour"
         >
           <Palette size={14} />
         </button>
 
         {showColorPicker && (
           <div
-            className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-lg flex items-center gap-1.5 z-70 ${barBg}`}
+            className={`absolute left-0 bottom-full mb-2 p-1.5 flex items-center gap-1.5 z-[70] ${barBg}`}
           >
             {PRESET_COLORS.map((c) => (
               <button
                 key={c.value}
                 type="button"
                 onClick={() => handleChangeColor(c.value)}
-                className={`w-5 h-5 rounded-full ${c.bg} border border-stone-300 hover:scale-110 transition-transform`}
+                style={{ backgroundColor: c.value }}
+                className="w-6 h-6 rounded-full border border-hairline hover:scale-110 transition-transform duration-200 ease-spring"
                 title={c.label}
+                aria-label={c.label}
               />
             ))}
           </div>
@@ -247,23 +258,27 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
               setShowFillPicker((prev) => !prev);
               setShowColorPicker(false);
             }}
-            className={`p-1.5 hover:bg-amber-600/20 transition-colors rounded-control ${showFillPicker ? 'bg-amber-600/20 text-amber-600' : ''}`}
-            title="Change Fill Tone"
+            className={`${barBtn} ${showFillPicker ? 'bg-sunken text-ink' : ''}`}
+            title="Fill colour"
           >
             <Droplet size={14} />
           </button>
 
           {showFillPicker && (
             <div
-              className={`absolute left-0 bottom-full mb-2 p-1.5 border shadow-lg flex items-center gap-1.5 z-70 ${barBg}`}
+              className={`absolute left-0 bottom-full mb-2 p-1.5 flex items-center gap-1.5 z-[70] ${barBg}`}
             >
               {PRESET_FILLS.map((f, idx) => (
                 <button
                   key={idx}
                   type="button"
                   onClick={() => handleChangeFill(f.value)}
-                  className={`w-5 h-5 rounded-[2px] ${f.bg} hover:scale-110 transition-transform`}
+                  style={f.value ? { backgroundColor: f.value } : undefined}
+                  className={`w-6 h-6 rounded-control hover:scale-110 transition-transform duration-200 ease-spring ${
+                    f.value ? 'border border-hairline' : 'border border-dashed border-ink-3'
+                  }`}
                   title={f.label}
+                  aria-label={f.label}
                 />
               ))}
             </div>
@@ -275,36 +290,36 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={() => handleAdjustSize(-1)}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
-        title="Decrease Size"
+        className={barBtn}
+        title="Smaller"
       >
         <Minus size={13} />
       </button>
       <button
         type="button"
         onClick={() => handleAdjustSize(1)}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
-        title="Increase Size"
+        className={barBtn}
+        title="Bigger"
       >
         <Plus size={13} />
       </button>
 
-      <div className="w-[1px] h-4 bg-amber-900/20 dark:bg-amber-500/20 mx-0.5" />
+      <div className="w-px h-4 bg-hairline mx-0.5" />
 
       {/* 5. Layer Controls */}
       <button
         type="button"
         onClick={onBringToFront}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
-        title="Bring to Front"
+        className={barBtn}
+        title="Bring to the front"
       >
         <ArrowUp size={13} />
       </button>
       <button
         type="button"
         onClick={onSendToBack}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
-        title="Send to Back"
+        className={barBtn}
+        title="Send to the back"
       >
         <ArrowDown size={13} />
       </button>
@@ -313,20 +328,20 @@ export const WhiteboardFloatingBar: React.FC<WhiteboardFloatingBarProps> = ({
       <button
         type="button"
         onClick={onDuplicateElements}
-        className="p-1.5 hover:bg-amber-600/20 transition-colors rounded-control"
-        title="Duplicate (Ctrl+D)"
+        className={barBtn}
+        title="Duplicate"
       >
         <Copy size={13} />
       </button>
 
-      <div className="w-[1px] h-4 bg-amber-900/20 dark:bg-amber-500/20 mx-0.5" />
+      <div className="w-px h-4 bg-hairline mx-0.5" />
 
       {/* 7. Delete */}
       <button
         type="button"
         onClick={onDeleteElements}
-        className="p-1.5 hover:bg-red-500/20 text-red-600 dark:text-red-400 transition-colors rounded-control"
-        title="Delete (Backspace / Del)"
+        className="w-8 h-8 grid place-items-center rounded-control text-danger-600 dark:text-danger-400 hover:bg-danger-500/10 transition-colors"
+        title="Delete"
       >
         <Trash2 size={13} />
       </button>

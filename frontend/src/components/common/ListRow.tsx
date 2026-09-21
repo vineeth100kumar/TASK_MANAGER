@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { motion, PanInfo } from 'framer-motion';
-import { Check, Trash2, Sparkles, RotateCw, Folder } from 'lucide-react';
+import { Check, Trash2, Sparkles, RotateCw, Folder, GripVertical } from 'lucide-react';
 import { WorkItem, Project } from '../../types';
 import { haptics } from '../../utils/haptics';
 import { formatRelativeDate, isOverdue, isDueToday } from '../../utils/dateHelpers';
@@ -25,6 +25,13 @@ export interface ListRowProps {
   onClick: (item: WorkItem) => void;
   onRefine?: (item: WorkItem) => void;
   onReschedule?: (item: WorkItem, newDate: string | null) => void;
+  /** Set in manual order, where a row can be dragged to a new place. */
+  isReorderable?: boolean;
+  isDragging?: boolean;
+  /** Which edge of this row the dragged one would land on, if either. */
+  dropEdge?: 'above' | 'below' | null;
+  onReorderStart?: (item: WorkItem, event: React.PointerEvent) => void;
+  onReorderNudge?: (item: WorkItem, delta: -1 | 1) => void;
 }
 
 /*
@@ -54,6 +61,11 @@ export const ListRow: React.FC<ListRowProps> = ({
   onClick,
   onRefine,
   onReschedule,
+  isReorderable = false,
+  isDragging = false,
+  dropEdge = null,
+  onReorderStart,
+  onReorderNudge,
 }) => {
   const [dragOffset, setDragOffset] = useState(0);
   const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
@@ -136,8 +148,21 @@ export const ListRow: React.FC<ListRowProps> = ({
   return (
     <div
       ref={rowRef}
-      className="relative overflow-hidden group select-none border-b border-hairline last:border-b-0 scroll-mt-24"
+      data-reorder-id={isReorderable ? item.id : undefined}
+      className={`relative overflow-hidden group select-none border-b border-hairline last:border-b-0 scroll-mt-24 transition-opacity ${
+        isDragging ? 'opacity-40' : ''
+      }`}
     >
+      {/* Where the dragged row would land. A line, not a gap: the list does
+          not reflow under the finger, so nothing jumps while aiming. */}
+      {dropEdge && (
+        <div
+          aria-hidden="true"
+          className={`absolute left-0 right-0 h-0.5 bg-accent-500 z-20 ${
+            dropEdge === 'above' ? 'top-0' : 'bottom-0'
+          }`}
+        />
+      )}
       {/* What the swipe will do, revealed as you drag */}
       <div className="absolute inset-0 flex items-center justify-between px-4 pointer-events-none">
         <span
@@ -160,7 +185,7 @@ export const ListRow: React.FC<ListRowProps> = ({
       </div>
 
       <motion.div
-        drag={isRenaming ? false : 'x'}
+        drag={isRenaming || isReorderable ? false : 'x'}
         dragConstraints={{ left: 0, right: 0 }}
         dragElastic={0.4}
         onDrag={handleDrag}
@@ -170,6 +195,29 @@ export const ListRow: React.FC<ListRowProps> = ({
         }`}
         style={{ minHeight: 44 }}
       >
+        {isReorderable && (
+          <button
+            type="button"
+            aria-label={`Move ${item.title}`}
+            title="Drag to reorder, or use Alt with the arrow keys"
+            onPointerDown={(e) => onReorderStart?.(item, e)}
+            onKeyDown={(e) => {
+              if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                onReorderNudge?.(item, -1);
+              } else if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                onReorderNudge?.(item, 1);
+              }
+            }}
+            className="mt-0.5 -ml-0.5 w-6 h-6 grid place-items-center shrink-0 text-ink-3
+                       hover:text-ink cursor-grab active:cursor-grabbing touch-none
+                       opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+          >
+            <GripVertical className="w-4 h-4" />
+          </button>
+        )}
+
         {/* Complete, or select when in multi-select mode */}
         {isSelectMode ? (
           <button

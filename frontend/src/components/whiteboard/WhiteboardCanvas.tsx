@@ -2263,7 +2263,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
                 resize: 'none',
                 overflow: 'hidden',
               }}
-              className="bg-paper-light dark:bg-stone-900 border border-amber-600 dark:border-amber-400 rounded-control px-2.5 py-1.5 outline-none font-bold shadow-lg"
+              className="bg-surface border border-accent-500 rounded-control px-2.5 py-1.5 outline-none shadow-lift-2"
             />
           </div>
         )}
@@ -2311,7 +2311,7 @@ export const WhiteboardCanvas = forwardRef<WhiteboardCanvasRef, WhiteboardCanvas
                 overflow: 'hidden',
                 lineHeight: 1.32,
               }}
-              className="bg-transparent border border-dashed border-amber-600/70 rounded-control p-1 outline-none font-bold select-text flex items-center justify-center placeholder:opacity-40"
+              className="bg-transparent border border-dashed border-accent-500/70 rounded-control p-1 outline-none select-text flex items-center justify-center placeholder:opacity-40"
             />
           </div>
         )}

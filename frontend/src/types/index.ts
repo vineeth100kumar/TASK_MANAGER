@@ -1,3 +1,5 @@
+export type ThemePreference = 'light' | 'dark' | 'system';
+
 export type EntityType = 'task' | 'event' | 'reminder';
 export type TaskStatus = 'inbox' | 'todo' | 'in_progress' | 'done' | 'blocked' | 'archived';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -24,10 +26,22 @@ export interface WorkItem {
   end_at?: string | null;
   remind_at?: string | null;
   repeat_rule?: string | null;
+  /** The last day a repeat may fire, or null for no end. */
+  repeat_until?: string | null;
+  /** Stop after this many occurrences, or null for no limit. */
+  repeat_count?: number | null;
+  /** How many have already run. */
+  repeat_done?: number;
   next_occurrence?: string | null;
   project_id?: string | null;
   milestone_id?: string | null;
-  estimated_minutes: number;
+  /** Where an event happens. Free text — it is read, not resolved. */
+  location?: string | null;
+  is_all_day?: boolean;
+  /** Hand-chosen order. A float, so a drop between two rows writes one row. */
+  position?: number | null;
+  /** Null when no estimate is set; the column rejects 0. */
+  estimated_minutes: number | null;
   actual_minutes: number;
   depends_on: string[];
   context_tags?: string;

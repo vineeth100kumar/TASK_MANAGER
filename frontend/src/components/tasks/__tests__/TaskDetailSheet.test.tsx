@@ -105,9 +105,58 @@ describe('TaskDetailSheet', () => {
   it('changes the repeat rule', () => {
     const { onUpdate } = renderSheet();
 
-    fireEvent.change(screen.getByLabelText('Repeat'), { target: { value: 'weekly:mon' } });
+    // The item is due on Wednesday 30 September 2026, so choosing Weekly
+    // should mean that Wednesday rather than a hardcoded Monday.
+    fireEvent.change(screen.getByLabelText('Repeat'), { target: { value: 'weekly' } });
 
-    expect(onUpdate).toHaveBeenCalledWith({ repeat_rule: 'weekly:mon' });
+    expect(onUpdate).toHaveBeenCalledWith({
+      repeat_rule: 'weekly:wed',
+      repeat_until: null,
+      repeat_count: null,
+    });
+  });
+
+  it('can say the repeat stops after a number of times', () => {
+    const repeating: WorkItem = { ...item, repeat_rule: 'daily' };
+    const { onUpdate } = renderSheet({ item: repeating, items: [repeating] });
+
+    fireEvent.change(screen.getByLabelText('Ends'), { target: { value: 'after' } });
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      repeat_rule: 'daily',
+      repeat_until: null,
+      repeat_count: 10,
+    });
+  });
+
+  it('records where an event happens', () => {
+    const event: WorkItem = { ...item, entity_type: 'event' };
+    const { onUpdate } = renderSheet({ item: event, items: [event] });
+
+    const field = screen.getByLabelText('Location');
+    fireEvent.change(field, { target: { value: "Dr Rao's clinic" } });
+    fireEvent.blur(field);
+
+    expect(onUpdate).toHaveBeenCalledWith({ location: "Dr Rao's clinic" });
+  });
+
+  it('shows no location on a task', () => {
+    renderSheet();
+    expect(screen.queryByLabelText('Location')).toBeNull();
+  });
+
+  it('clears the clock when an item is marked all day', () => {
+    const timed: WorkItem = { ...item, start_at: '2026-09-30T14:00:00', remind_at: '2026-09-30T14:00:00' };
+    const { onUpdate } = renderSheet({ item: timed, items: [timed] });
+
+    fireEvent.click(screen.getByLabelText('All day'));
+
+    expect(onUpdate).toHaveBeenCalledWith({
+      is_all_day: true,
+      start_at: null,
+      end_at: null,
+      remind_at: null,
+    });
   });
 
   /*
@@ -160,6 +209,7 @@ describe('TaskDetailSheet', () => {
     const { onUpdate } = renderSheet();
     // The item already estimates 30 minutes; pressing it again clears it.
     fireEvent.click(screen.getByRole('button', { name: '30m' }));
-    expect(onUpdate).toHaveBeenCalledWith({ estimated_minutes: 0 });
+    // Null, not zero: the column's CHECK allows NULL but rejects 0.
+    expect(onUpdate).toHaveBeenCalledWith({ estimated_minutes: null });
   });
 });
