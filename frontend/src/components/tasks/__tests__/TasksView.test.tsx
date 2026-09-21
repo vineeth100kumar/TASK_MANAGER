@@ -181,4 +181,81 @@ describe('TasksView', () => {
     expect(heading).toBeInTheDocument();
     expect(within(heading).getByText('1')).toBeInTheDocument();
   });
+
+  /*
+   * The create form collected a date and nothing else, so anything made here
+   * as an Event landed in the day with no clock on it and the calendar had
+   * nowhere to draw it. An event needs a start, and it should be able to have
+   * an end.
+   */
+  describe('the create form', () => {
+    function openCreateForm() {
+      const handlers = renderView();
+      fireEvent.click(screen.getByRole('button', { name: /new task/i }));
+      return handlers;
+    }
+
+    it('gives an event a start time and an end time', () => {
+      const { onCreateItem } = openCreateForm();
+
+      fireEvent.click(screen.getByRole('button', { name: 'Event' }));
+      fireEvent.change(screen.getByLabelText('Title'), {
+        target: { value: 'Dentist' },
+      });
+      fireEvent.change(screen.getByLabelText('Date'), {
+        target: { value: '2026-10-02' },
+      });
+      fireEvent.change(screen.getByLabelText('Starts at'), {
+        target: { value: '14:30' },
+      });
+      fireEvent.change(screen.getByLabelText('Ends at'), {
+        target: { value: '15:15' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Add event' }));
+
+      expect(onCreateItem).toHaveBeenCalledTimes(1);
+      const created = onCreateItem.mock.calls[0][0];
+      expect(created.entity_type).toBe('event');
+      expect(created.due_date).toBe('2026-10-02');
+      expect(created.start_at).toBe('2026-10-02T14:30:00');
+      expect(created.end_at).toBe('2026-10-02T15:15:00');
+      // An event is reminded about before it starts, not as it starts.
+      expect(created.remind_at).toBe('2026-10-02T14:15:00');
+    });
+
+    it('gives a dated task its time of day', () => {
+      const { onCreateItem } = openCreateForm();
+
+      fireEvent.change(screen.getByLabelText('Title'), {
+        target: { value: 'Call the bank' },
+      });
+      fireEvent.change(screen.getByLabelText('Due date'), {
+        target: { value: '2026-10-02' },
+      });
+      fireEvent.change(screen.getByLabelText('Time'), {
+        target: { value: '09:00' },
+      });
+      fireEvent.click(screen.getByRole('button', { name: 'Add task' }));
+
+      const created = onCreateItem.mock.calls[0][0];
+      expect(created.start_at).toBe('2026-10-02T09:00:00');
+      expect(created.end_at).toBeUndefined();
+    });
+
+    it('takes more than one context, the way the detail sheet does', () => {
+      const { onCreateItem } = openCreateForm();
+
+      fireEvent.change(screen.getByLabelText('Title'), {
+        target: { value: 'Errand run' },
+      });
+      // The screen behind the sheet has context filter chips with the same
+      // names, so ask the dialog for its own.
+      const dialog = within(screen.getByRole('dialog'));
+      fireEvent.click(dialog.getByRole('button', { name: '@errands' }));
+      fireEvent.click(dialog.getByRole('button', { name: '@phone' }));
+      fireEvent.click(dialog.getByRole('button', { name: 'Add task' }));
+
+      expect(onCreateItem.mock.calls[0][0].context_tags).toBe('@errands @phone');
+    });
+  });
 });

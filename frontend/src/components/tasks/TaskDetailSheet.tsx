@@ -43,6 +43,19 @@ const REPEAT_RULES: { value: string; label: string }[] = [
 
 const ESTIMATES = [15, 30, 45, 60, 90, 120];
 
+const ENTITY_TYPES: { value: WorkItem['entity_type']; label: string }[] = [
+  { value: 'task', label: 'Task' },
+  { value: 'event', label: 'Event' },
+  { value: 'reminder', label: 'Reminder' },
+];
+
+/* HH:MM out of an ISO string, or empty. */
+function clockOf(iso?: string | null): string {
+  if (!iso) return '';
+  const at = iso.includes('T') ? iso.split('T')[1] : '';
+  return at ? at.slice(0, 5) : '';
+}
+
 export interface TaskDetailSheetProps {
   item: WorkItem;
   items: WorkItem[];
@@ -262,6 +275,31 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
               className="field w-32"
             />
           </div>
+          {/* An event runs between two times. Until now the sheet only ever
+              showed the one it starts at, so a meeting's length was something
+              you could set when capturing it and never see again. */}
+          {item.entity_type === 'event' && (
+            <div className="flex items-center gap-2 pt-1">
+              <span className="text-meta text-ink-2 shrink-0 w-10">Ends</span>
+              <input
+                type="time"
+                aria-label="Ends at"
+                value={clockOf(item.end_at)}
+                disabled={!item.start_at}
+                onChange={(e) => {
+                  const day = (item.start_at || item.due_date || '').slice(0, 10);
+                  onUpdate({ end_at: e.target.value && day ? `${day}T${e.target.value}:00` : null });
+                }}
+                className="field w-32 disabled:opacity-40"
+              />
+              {item.end_at && item.start_at && clockOf(item.end_at) <= clockOf(item.start_at) && (
+                <span className="text-caption text-late-500 dark:text-late-400">
+                  Ends before it starts
+                </span>
+              )}
+            </div>
+          )}
+
           <div className="flex items-center gap-2 pt-1">
             <RotateCw className="w-3.5 h-3.5 text-ink-3 shrink-0" />
             <select
@@ -274,6 +312,40 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
                 <option key={r.value} value={r.value}>{r.label}</option>
               ))}
             </select>
+          </div>
+        </div>
+
+        {/* Type. Things get captured as the wrong kind all the time — a note
+            about a meeting arrives as a task — and until now the only way to
+            correct it was to delete it and write it again. */}
+        <div className="space-y-1.5">
+          <span className="label">Type</span>
+          <div className="bg-sunken rounded-control p-0.5 flex items-center" role="group" aria-label="Type">
+            {ENTITY_TYPES.map((t) => (
+              <button
+                key={t.value}
+                type="button"
+                aria-pressed={item.entity_type === t.value}
+                onClick={() => {
+                  if (item.entity_type === t.value) return;
+                  // Re-derive the moment, because the three kinds put their
+                  // reminder in different places.
+                  const clock = timeInputValue(itemMoment(item));
+                  onUpdate({
+                    entity_type: t.value,
+                    ...withTimeOfDay(t.value, item.due_date ? item.due_date.slice(0, 10) : null, clock || null),
+                    ...(t.value === 'event' ? {} : { end_at: null }),
+                  });
+                }}
+                className={`flex-1 px-2 py-1.5 rounded-control text-meta transition-colors ${
+                  item.entity_type === t.value
+                    ? 'bg-surface text-ink font-medium shadow-sm'
+                    : 'text-ink-2 hover:text-ink'
+                }`}
+              >
+                {t.label}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -410,6 +482,7 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
         </div>
 
         {/* Estimate */}
+        {item.entity_type !== 'event' && (
         <div className="space-y-1.5">
           <span className="label flex items-center gap-1.5"><Clock className="w-3.5 h-3.5" /> Estimate</span>
           <div className="flex flex-wrap gap-1.5">
@@ -418,7 +491,7 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
                 key={mins}
                 type="button"
                 aria-pressed={item.estimated_minutes === mins}
-                onClick={() => onUpdate({ estimated_minutes: mins })}
+                onClick={() => onUpdate({ estimated_minutes: item.estimated_minutes === mins ? 0 : mins })}
                 className={`px-2.5 py-1 rounded-control text-meta tabular transition-colors ${
                   item.estimated_minutes === mins
                     ? 'bg-accent-500 text-white'
@@ -430,6 +503,7 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
             ))}
           </div>
         </div>
+        )}
 
         {/* Dependencies */}
         <div className="space-y-2">
@@ -475,11 +549,9 @@ export const TaskDetailSheet: React.FC<TaskDetailSheetProps> = ({
           >
             <option value="">Add something this waits on…</option>
             {items
-              .filter((i) => i.id !== item.id && !item.depends_on?.includes(i.id))
+              .filter((i) => i.id !== item.id && !i.is_completed && !item.depends_on?.includes(i.id))
               .map((i) => (
-                <option key={i.id} value={i.id}>
-                  {i.is_completed ? '✓ ' : ''}{i.title}
-                </option>
+                <option key={i.id} value={i.id}>{i.title}</option>
               ))}
           </select>
         </div>

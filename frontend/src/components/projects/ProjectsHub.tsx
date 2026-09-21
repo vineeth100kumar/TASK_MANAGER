@@ -30,15 +30,22 @@ interface ProjectsHubProps {
   onOpenWhiteboard?: (projectId: string) => void;
 }
 
-const COLOR_PRESETS = [
-  '#3b82f6', // blue
-  '#10b981', // emerald
-  '#8b5cf6', // purple
-  '#f59e0b', // amber
-  '#ef4444', // red
-  '#06b6d4', // cyan
-  '#ec4899', // pink
-  '#6366f1', // indigo
+/*
+ * Project colours, named.
+ *
+ * These were eight raw Tailwind hexes — pink, cyan, violet — none of which
+ * exist anywhere else in the app. A project dot was the only place the
+ * interface used a hue the palette had never heard of. These six are drawn
+ * from the four ramps plus two neighbours that sit with them, so a board full
+ * of projects still reads as one product.
+ */
+const COLOR_PRESETS: { value: string; name: string }[] = [
+  { value: '#0A6CFF', name: 'Blue' },
+  { value: '#1C7A4A', name: 'Green' },
+  { value: '#A8641B', name: 'Amber' },
+  { value: '#B3261E', name: 'Red' },
+  { value: '#5B4FCF', name: 'Indigo' },
+  { value: '#6B6F78', name: 'Grey' },
 ];
 
 export const ProjectsHub: React.FC<ProjectsHubProps> = ({
@@ -58,7 +65,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   onDeleteSubtask,
   onOpenWhiteboard,
 }) => {
-  // View mode: 'list' (dossiers) or 'map' (interactive project map)
+  // View mode: 'list' or 'map' (interactive project map)
   const [viewMode, setViewMode] = useState<'list' | 'map'>('list');
   const [mappedProjectId, setMappedProjectId] = useState<string | null>(
     projects.length > 0 ? projects[0].id : null
@@ -69,7 +76,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
   const [deletingMilestoneId, setDeletingMilestoneId] = useState<string | null>(null);
   const [newProjectName, setNewProjectName] = useState('');
   const [newProjectDesc, setNewProjectDesc] = useState('');
-  const [newProjectColor, setNewProjectColor] = useState(COLOR_PRESETS[0]);
+  const [newProjectColor, setNewProjectColor] = useState(COLOR_PRESETS[0].value);
   
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(
     projects.length > 0 ? projects[0].id : null
@@ -110,6 +117,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
     setQuickTaskTitle(prev => ({ ...prev, [projectId]: '' }));
   };
 
+  const isDuplicateName = projects.some(
+    p => p.name.trim().toLowerCase() === newProjectName.trim().toLowerCase()
+  );
+
   const handleCreateProjectSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newProjectName.trim()) return;
@@ -120,6 +131,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
     });
     setNewProjectName('');
     setNewProjectDesc('');
+    setNewProjectColor(COLOR_PRESETS[0].value);
     setShowCreateModal(false);
   };
 
@@ -156,10 +168,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                 type="button"
                 onClick={() => setViewMode('list')}
                 className={`px-3 py-1 rounded-control font-medium transition-colors ${
-                  viewMode === 'list'
-                    ? 'bg-surface text-ink shadow-xs'
-                    : 'text-ink-3 hover:text-ink'
-                }`}
+ viewMode === 'list'
+ ? 'bg-surface text-ink shadow-xs'
+ : 'text-ink-3 hover:text-ink'
+ }`}
               >
                 List
               </button>
@@ -172,10 +184,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                   setViewMode('map');
                 }}
                 className={`px-3 py-1 rounded-control font-medium flex items-center gap-1.5 transition-colors ${
-                  viewMode === 'map'
-                    ? 'bg-surface text-ink shadow-xs'
-                    : 'text-ink-3 hover:text-ink'
-                }`}
+ viewMode === 'map'
+ ? 'bg-surface text-ink shadow-xs'
+ : 'text-ink-3 hover:text-ink'
+ }`}
               >
                 <Network className="w-3.5 h-3.5 text-blue-500" />
                 Project Map
@@ -213,16 +225,18 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
             <Skeleton variant="card" count={3} />
           </div>
         ) : (
-        <div className="text-center py-16 bg-sunken border border-stone-300 dark:border-stone-800 rounded-control relative">          <Folder className="w-12 h-12 text-ink-2 mx-auto mb-3" />
-          <h3 className="text-lg font-bold text-stone-900 dark:text-zinc-100">No Active Dossiers</h3>
-          <p className="text-meta text-ink-3 dark:text-zinc-400 max-w-sm mx-auto mt-1 mb-4">
-            Create your first strategic dossier like "Pi Home Lab Setup", "Half Marathon Prep", or "Q4 Tax Planning".
+        <div className="surface-sunken text-center px-6 py-16">
+          <Folder className="w-8 h-8 text-ink-3 mx-auto" aria-hidden="true" />
+          <h3 className="text-lead font-semibold text-ink mt-3">No projects yet</h3>
+          <p className="text-meta text-ink-2 max-w-xs mx-auto mt-1.5 leading-relaxed">
+            A project holds the tasks that belong together, like a home lab build
+            or this year's taxes.
           </p>
           <button
             onClick={() => setShowCreateModal(true)}
-            className="px-4 py-2 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold transition-all"
+            className="h-10 px-4 mt-5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97]"
           >
-            + Create Dossier
+            New project
           </button>
         </div>
         )
@@ -239,26 +253,26 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
             return (
               <div 
                 key={proj.id}
-                className="bg-sunken border border-stone-300 dark:border-stone-800 rounded-control overflow-hidden transition-all shadow-sm relative"
+                className="bg-sunken border border-hairline rounded-control overflow-hidden transition-all shadow-sm relative"
               >                {/* Project Header Bar */}
                 <div 
-                  className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-black/5 dark:hover:bg-stone-800/30 transition-colors"
+                  className="p-5 flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:bg-ink/5 transition-colors"
                   onClick={() => setExpandedProjectId(isExpanded ? null : proj.id)}
                 >
                   <div className="flex items-start md:items-center gap-3">
                     <div 
-                      className="w-2.5 h-10 rounded-control border border-stone-400 dark:border-stone-600 flex-shrink-0"
+                      className="w-2.5 h-10 rounded-control border border-hairline flex-shrink-0"
                       style={{ backgroundColor: proj.color || '#d97706' }}
                     />
                     <div>
                       <div className="flex items-center gap-2">
-                        <h3 className="text-lg font-bold text-stone-900 dark:text-stone-100 tracking-tight">{proj.name}</h3>
-                        <span className="text-caption px-2 py-0.5 rounded-control bg-paper-white dark:bg-stone-800 text-stone-700 dark:text-stone-300 border border-stone-300 dark:border-stone-700">
+                        <h3 className="text-lead font-semibold text-ink tracking-tight">{proj.name}</h3>
+                        <span className="text-caption px-2 py-0.5 rounded-control bg-sunken text-ink-2 border border-hairline">
                           {completedCount}/{totalCount} tasks
                         </span>
                       </div>
                       {proj.description && (
-                        <p className="italic text-meta text-ink-3 dark:text-stone-400 mt-0.5 max-w-xl">{proj.description}</p>
+                        <p className="italic text-meta text-ink-2 mt-0.5 max-w-xl">{proj.description}</p>
                       )}
                     </div>
                   </div>
@@ -268,10 +282,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                     {/* Progress Bar */}
                     <div className="flex-1 md:w-48">
                       <div className="flex items-center justify-between text-meta mb-1">
-                        <span className="text-ink-3 dark:text-zinc-400">Progress</span>
-                        <span className="font-bold text-stone-900 dark:text-white">{progressPct}%</span>
+                        <span className="text-ink-2">Progress</span>
+                        <span className="font-semibold text-ink">{progressPct}%</span>
                       </div>
-                      <div className="h-2 w-full bg-stone-200 dark:bg-zinc-800 rounded-control overflow-hidden border border-stone-300 dark:border-stone-700">
+                      <div className="h-2 w-full bg-sunken rounded-control overflow-hidden border border-hairline">
                         <div 
                           className="h-full rounded-control transition-all duration-500"
                           style={{ 
@@ -289,7 +303,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                           onOpenWhiteboard(proj.id);
                         }}
                         aria-label={`Open Whiteboard for ${proj.name}`}
-                        className="p-1.5 rounded-control text-ink-3 dark:text-stone-400 hover:text-amber-700 dark:hover:text-amber-400 border border-stone-300 dark:border-stone-700 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+                        className="p-1.5 rounded-control text-ink-2 hover:text-accent-600 dark:hover:text-accent-400 border border-hairline hover:bg-ink/5 transition-colors"
                         title="Open whiteboard"
                       >
                         <PenTool className="w-4 h-4" />
@@ -303,7 +317,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                         setViewMode('map');
                       }}
                       aria-label={`Open Project Map for ${proj.name}`}
-                      className="p-1.5 rounded-control text-ink-3 dark:text-stone-400 hover:text-blue-600 dark:hover:text-blue-400 border border-stone-300 dark:border-stone-700 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+                      className="p-1.5 rounded-control text-ink-2 hover:text-accent-600 dark:hover:text-accent-400 border border-hairline hover:bg-ink/5 transition-colors"
                       title="Open project map"
                     >
                       <Network className="w-4 h-4" />
@@ -315,7 +329,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                         setDeletingProjectId(proj.id);
                       }}
                       aria-label={`Delete project: ${proj.name}`}
-                      className="p-1.5 rounded-control text-ink-3 hover:text-rose-600 dark:hover:text-rose-400 border border-stone-300 dark:border-stone-700 hover:bg-black/5 dark:hover:bg-stone-800 transition-colors"
+                      className="p-1.5 rounded-control text-ink-3 hover:text-danger-600 dark:hover:text-danger-400 border border-hairline hover:bg-ink/5 transition-colors"
                       title="Delete project"
                     >
                       <Trash2 className="w-4 h-4" />
@@ -329,17 +343,17 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
 
                 {/* Expanded Details: Milestones & Tasks */}
                 {isExpanded && (
-                  <div className="border-t border-ink-base/15 dark:border-stone-800 p-5 bg-paper-white dark:bg-sunken/60 space-y-6 animate-in fade-in">
+                  <div className="border-t border-hairline p-5 bg-surface dark:bg-sunken/60 space-y-6 animate-in fade-in">
                     {/* Milestones Section */}
                     <div>
                       <div className="flex items-center justify-between mb-3">
-                        <h4 className="text-meta font-bold text-stone-700 dark:text-zinc-400 flex items-center gap-1.5">
-                          <Flag className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                        <h4 className="text-meta font-semibold text-ink-2 flex items-center gap-1.5">
+                          <Flag className="w-3.5 h-3.5 text-accent-500" />
                           Milestones ({projectMilestones.length})
                         </h4>
                         <button
                           onClick={() => setAddingMilestoneForProject(addingMilestoneForProject === proj.id ? null : proj.id)}
-                          className="flex items-center gap-1 text-meta text-amber-700 dark:text-amber-400 hover:text-amber-800 font-bold"
+                          className="flex items-center gap-1 text-meta text-accent-600 dark:text-accent-400 hover:text-accent-700 font-semibold"
                         >
                           <Plus className="w-3.5 h-3.5" /> Add milestone
                         </button>
@@ -347,29 +361,29 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
 
                       {/* Add Milestone Inline */}
                       {addingMilestoneForProject === proj.id && (
-                        <div className="p-3 mb-3 rounded-control bg-paper-base dark:bg-stone-800/80 border border-stone-300 dark:border-stone-700 flex flex-wrap gap-2 items-center animate-in fade-in">
+                        <div className="p-3 mb-3 rounded-control bg-sunken border border-hairline flex flex-wrap gap-2 items-center animate-in fade-in">
                           <input
                             type="text"
                             placeholder="Milestone title (e.g. Sub-25m 5K Time Trial)"
                             value={newMilestoneTitle}
                             onChange={e => setNewMilestoneTitle(e.target.value)}
-                            className="flex-1 min-w-[200px] bg-paper-white dark:bg-zinc-900 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-1.5 text-meta text-stone-900 dark:text-white focus:outline-none"
+                            className="flex-1 min-w-[200px] bg-sunken border border-hairline rounded-control px-3 py-1.5 text-meta text-ink focus:outline-none"
                           />
                           <input
                             type="date"
                             value={newMilestoneDueDate}
                             onChange={e => setNewMilestoneDueDate(e.target.value)}
-                            className="bg-paper-white dark:bg-zinc-900 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-1.5 text-meta text-stone-900 dark:text-zinc-300 focus:outline-none"
+                            className="bg-sunken border border-hairline rounded-control px-3 py-1.5 text-meta text-ink focus:outline-none"
                           />
                           <button
                             onClick={() => handleAddMilestoneSubmit(proj.id)}
-                            className="px-3 py-1.5 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold"
+                            className="px-3 py-1.5 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-semibold"
                           >
                             Add
                           </button>
                           <button
                             onClick={() => setAddingMilestoneForProject(null)}
-                            className="px-2 py-1.5 text-meta text-ink-3 hover:text-stone-900 dark:hover:text-white"
+                            className="px-2 py-1.5 text-meta text-ink-3 hover:text-ink"
                           >
                             Cancel
                           </button>
@@ -378,7 +392,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
 
                       {/* Milestones List */}
                       {projectMilestones.length === 0 ? (
-                        <p className="text-meta text-ink-3 italic p-3 rounded-lg bg-surface/30 border border-hairline/60">
+                        <p className="text-meta text-ink-3 px-3 py-4">
                           No milestones set yet for this project.
                         </p>
                       ) : (
@@ -386,14 +400,14 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                           {projectMilestones.map(m => (
                             <div 
                               key={m.id}
-                              className="p-3 rounded-control bg-sunken border border-stone-300 dark:border-zinc-800 flex items-center justify-between text-meta"
+                              className="p-3 rounded-control bg-sunken border border-hairline flex items-center justify-between text-meta"
                             >
                               <div className="flex items-center gap-2.5 truncate pr-2">
-                                <Flag className={`w-3.5 h-3.5 ${m.status === 'achieved' ? 'text-emerald-600 dark:text-emerald-400' : 'text-amber-600 dark:text-amber-400'}`} />
-                                <span className="font-semibold text-stone-900 dark:text-zinc-200 truncate">{m.title}</span>
+                                <Flag className={`w-3.5 h-3.5 ${m.status === 'achieved' ? 'text-done-500 dark:text-done-400' : 'text-accent-500'}`} />
+                                <span className="font-semibold text-ink truncate">{m.title}</span>
                               </div>
                               <div className="flex items-center gap-2 flex-shrink-0">
-                                <span className="text-meta text-ink-3 dark:text-zinc-400 flex items-center gap-1">
+                                <span className="text-meta text-ink-2 flex items-center gap-1">
                                   <Calendar className="w-3 h-3 text-ink-2" />
                                   {formatRelativeDate(m.due_date)}
                                 </span>
@@ -403,7 +417,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                     const el = document.getElementById(`quick-add-task-${proj.id}`);
                                     el?.focus();
                                   }}
-                                  className="px-2 py-0.5 rounded-control bg-paper-white dark:bg-zinc-800 hover:bg-stone-200 dark:hover:bg-zinc-700 text-stone-800 dark:text-zinc-300 text-caption border border-stone-300 dark:border-stone-700 transition-colors"
+                                  className="px-2 py-0.5 rounded-control bg-sunken hover:bg-hairline text-ink text-caption border border-hairline transition-colors"
                                   title="Add task for this milestone"
                                 >
                                   Task
@@ -411,7 +425,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                 <button
                                   onClick={() => setDeletingMilestoneId(m.id)}
                                   aria-label={`Delete milestone: ${m.title}`}
-                                  className="p-1 text-ink-3 hover:text-rose-600 dark:hover:text-rose-400 rounded-control transition-colors"
+                                  className="p-1 text-ink-3 hover:text-danger-600 dark:hover:text-danger-400 rounded-control transition-colors"
                                   title="Delete milestone"
                                 >
                                   <Trash2 className="w-3 h-3" />
@@ -426,7 +440,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                     {/* Linked Tasks Section */}
                     <div>
                       <div className="flex items-center justify-between mb-2.5">
-                        <h4 className="text-meta font-bold text-ink-2">
+                        <h4 className="text-meta font-semibold text-ink-2">
                           Tasks ({completedCount} of {totalCount} done)
                         </h4>
                         {totalCount > 0 && (
@@ -443,7 +457,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                       </div>
 
                       {/* Inline Quick Task Adder */}
-                      <div className="p-2.5 mb-3 rounded-control bg-paper-base dark:bg-zinc-900/90 border border-stone-300 dark:border-zinc-800 flex flex-wrap gap-2 items-center">
+                      <div className="p-2.5 mb-3 rounded-control bg-sunken border border-hairline flex flex-wrap gap-2 items-center">
                         <input
                           id={`quick-add-task-${proj.id}`}
                           type="text"
@@ -453,22 +467,22 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                           onKeyDown={e => {
                             if (e.key === 'Enter') handleQuickAddTask(proj.id);
                           }}
-                          className="flex-1 min-w-[180px] bg-paper-white dark:bg-zinc-800/80 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-1.5 text-meta text-stone-900 dark:text-white placeholder-stone-400 focus:outline-none focus:border-amber-600"
+                          className="flex-1 min-w-[180px] bg-sunken border border-hairline rounded-control px-3 py-1.5 text-meta text-ink placeholder:text-ink-3 focus:outline-none focus:border-accent-500"
                         />
                         <select
                           value={quickTaskMilestone[proj.id] || ''}
                           onChange={e => setQuickTaskMilestone(prev => ({ ...prev, [proj.id]: e.target.value }))}
-                          className="bg-paper-white dark:bg-zinc-800 border border-stone-300 dark:border-zinc-700 rounded-control px-2 py-1.5 text-meta text-stone-800 dark:text-zinc-300 focus:outline-none"
+                          className="field w-auto text-meta"
                         >
                           <option value="">No milestone</option>
                           {projectMilestones.map(m => (
-                            <option key={m.id} value={m.id}>🏁 {m.title}</option>
+                            <option key={m.id} value={m.id}>{m.title}</option>
                           ))}
                         </select>
                         <select
                           value={quickTaskPriority[proj.id] || 'medium'}
                           onChange={e => setQuickTaskPriority(prev => ({ ...prev, [proj.id]: e.target.value }))}
-                          className="bg-paper-white dark:bg-zinc-800 border border-stone-300 dark:border-zinc-700 rounded-control px-2 py-1.5 text-meta text-stone-800 dark:text-zinc-300 focus:outline-none"
+                          className="field w-auto text-meta"
                         >
                           <option value="low">Low</option>
                           <option value="medium">Med</option>
@@ -477,7 +491,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                         </select>
                         <button
                           onClick={() => handleQuickAddTask(proj.id)}
-                          className="px-3 py-1.5 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold transition-all shadow-sm active:scale-95"
+                          className="h-11 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] shrink-0"
                         >
                           Add task
                         </button>
@@ -485,8 +499,8 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
 
                       {/* Tasks List */}
                       {projectTasks.length === 0 ? (
-                        <p className="text-meta text-ink-3 italic p-3 rounded-lg bg-surface/30 border border-hairline/60">
-                          No tasks linked to this project yet. Use the box above to quickly add deliverables!
+                        <p className="text-meta text-ink-3 px-3 py-4">
+                          No tasks here yet. Add the first one above.
                         </p>
                       ) : (
                         <div className="space-y-1.5">
@@ -501,11 +515,11 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                               return (
                                   <div
                                     key={task.id}
-                                    className="rounded-control bg-surface border border-stone-200 dark:border-stone-800/80 hover:border-stone-400 transition-colors shadow-sm overflow-hidden"
+                                    className="rounded-control bg-surface border border-hairline hover:border-hairline transition-colors shadow-sm overflow-hidden"
                                   >
                                     <div
                                       onClick={() => onSelectItem(task)}
-                                      className="flex items-center justify-between p-2.5 cursor-pointer text-meta hover:bg-black/5 dark:hover:bg-stone-800/20 transition-colors"
+                                      className="flex items-center justify-between p-2.5 cursor-pointer text-meta hover:bg-ink/5 transition-colors"
                                     >
                                       <div className="flex items-center gap-2.5 truncate pr-2">
                                         <button
@@ -514,16 +528,16 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                             e.stopPropagation();
                                             onToggleComplete?.(task);
                                           }}
-                                          className="p-0.5 rounded-control text-ink-2 hover:text-stone-900 dark:hover:text-white transition-colors"
+                                          className="p-0.5 rounded-control text-ink-2 hover:text-ink transition-colors"
                                           title={task.is_completed ? "Mark incomplete" : "Mark complete"}
                                         >
                                           {task.is_completed ? (
-                                            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
+                                            <CheckCircle2 className="w-4 h-4 text-done-500 dark:text-done-400 flex-shrink-0" />
                                           ) : (
                                             <Circle className="w-4 h-4 text-ink-2 hover:text-ink-3 flex-shrink-0" />
                                           )}
                                         </button>
-                                        <span className={`font-semibold truncate ${task.is_completed ? 'line-through text-ink-2 dark:text-zinc-500 italic' : 'text-stone-900 dark:text-zinc-100'}`}>
+                                        <span className={`font-semibold truncate ${task.is_completed ? 'line-through text-ink-2 italic' : 'text-ink'}`}>
                                           {task.title}
                                         </span>
                                       </div>
@@ -531,19 +545,19 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                       <div className="flex items-center gap-2 flex-shrink-0">
                                         {taskMilestone && (
                                           <span className="text-caption px-1.5 py-0.5 rounded-control bg-amber-100 dark:bg-amber-500/10 border border-amber-300 dark:border-amber-500/20 text-amber-800 dark:text-amber-300 flex items-center gap-1">
-                                            🏁 {taskMilestone.title}
+                                            {taskMilestone.title}
                                           </span>
                                         )}
                                         {task.due_date && (
-                                          <span className="text-caption text-ink-3 dark:text-zinc-400">
+                                          <span className="text-caption text-ink-2">
                                             {formatRelativeDate(task.due_date)}
                                           </span>
                                         )}
-                                        <span className={`text-caption px-1.5 py-0.5 rounded-control font-bold border ${
-                                          task.priority === 'urgent' ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-700' :
-                                          task.priority === 'high' ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-700' :
-                                          'bg-paper-aged dark:bg-zinc-800 text-stone-700 dark:text-zinc-400 border-stone-300 dark:border-stone-700'
-                                        }`}>
+                                        <span className={`text-caption px-1.5 py-0.5 rounded-control font-semibold border ${
+ task.priority === 'urgent' ? 'bg-rose-100 text-rose-800 border-rose-300 dark:bg-rose-500/20 dark:text-rose-300 dark:border-rose-700' :
+ task.priority === 'high' ? 'bg-amber-100 text-amber-800 border-amber-300 dark:bg-amber-500/20 dark:text-amber-300 dark:border-amber-700' :
+ 'bg-sunken text-ink-2 border-hairline'
+ }`}>
                                           {task.priority}
                                         </span>
 
@@ -555,10 +569,10 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                             setExpandedTaskSubtasks(prev => ({ ...prev, [task.id]: !prev[task.id] }));
                                           }}
                                           className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-caption font-medium transition-colors ${
-                                            taskSubtasks.length > 0
-                                              ? 'bg-sunken text-ink hover:bg-hairline'
-                                              : 'text-ink-3 hover:text-ink'
-                                          }`}
+ taskSubtasks.length > 0
+ ? 'bg-sunken text-ink hover:bg-hairline'
+ : 'text-ink-3 hover:text-ink'
+ }`}
                                           title="Toggle subtasks"
                                         >
                                           <CheckSquare className="w-3 h-3" />
@@ -578,14 +592,14 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                             {taskSubtasks.map(st => (
                                               <div
                                                 key={st.id}
-                                                className="group flex items-center justify-between p-1.5 rounded-lg bg-surface border border-hairline/60 hover:border-hairline transition-colors"
+                                                className="group flex items-center justify-between p-1.5 rounded-control bg-surface border border-hairline/60 hover:border-hairline transition-colors"
                                               >
                                                 <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
                                                   <input
                                                     type="checkbox"
                                                     checked={st.is_completed}
                                                     onChange={() => onToggleSubtask?.(task.id, st.id)}
-                                                    className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-zinc-600 cursor-pointer"
+                                                    className="w-3.5 h-3.5 rounded text-blue-600 bg-sunken border-hairline cursor-pointer"
                                                   />
                                                   <span className={`text-meta truncate ${st.is_completed ? 'line-through text-ink-3' : 'text-ink'}`}>
                                                     {st.title}
@@ -620,7 +634,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                                 }
                                               }
                                             }}
-                                            className="flex-1 bg-surface border border-hairline rounded px-2.5 py-1 text-meta text-ink placeholder-ink-3 focus:outline-none focus:border-amber-600"
+                                            className="flex-1 bg-surface border border-hairline rounded px-2.5 py-1 text-meta text-ink placeholder-ink-3 focus:outline-none focus:border-accent-500"
                                           />
                                           <button
                                             type="button"
@@ -632,7 +646,7 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
                                                 setTaskSubtaskInput(prev => ({ ...prev, [task.id]: '' }));
                                               }
                                             }}
-                                            className="px-2.5 py-1 rounded bg-amber-600 hover:bg-amber-500 text-stone-950 font-bold text-caption disabled:opacity-40 disabled:pointer-events-none transition-colors"
+                                            className="px-2.5 py-1 rounded bg-accent-500 hover:bg-accent-600 text-white font-semibold text-caption disabled:opacity-40 disabled:pointer-events-none transition-colors"
                                           >
                                             Add
                                           </button>
@@ -653,83 +667,94 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
         </div>
       )}
 
-      {/* Create Project Modal */}
+      {/* New project */}
       <Modal
         isOpen={showCreateModal}
         onClose={() => setShowCreateModal(false)}
-        title="Create New Project"
-        icon={<Folder className="w-4 h-4 text-blue-400" />}
-        maxWidth="max-w-md"
+        title="New project"
+        maxWidth="md"
+        hasUnsavedChanges={!!newProjectName.trim() || !!newProjectDesc.trim()}
       >
-        <form onSubmit={handleCreateProjectSubmit} className="space-y-4">
-              <div>
-                <label className="block text-meta font-semibold text-ink-2 mb-1">
-                  Project Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Raspberry Pi Cluster Automation"
-                  value={newProjectName}
-                  onChange={e => setNewProjectName(e.target.value)}
-                  className="w-full bg-paper-base dark:bg-zinc-800 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-2 text-sm text-stone-900 dark:text-white focus:outline-none focus:border-amber-600"
-                />
-              </div>
+        <form onSubmit={handleCreateProjectSubmit} className="space-y-5">
+          <div className="space-y-1.5">
+            <label htmlFor="new-project-name" className="label">Name</label>
+            <input
+              id="new-project-name"
+              type="text"
+              required
+              autoFocus
+              placeholder="e.g. Home network rebuild"
+              value={newProjectName}
+              onChange={e => setNewProjectName(e.target.value)}
+              className="field"
+            />
+            {isDuplicateName && (
+              <p className="text-caption text-late-500 dark:text-late-400">
+                A project already has this name.
+              </p>
+            )}
+          </div>
 
-              <div>
-                <label className="block text-meta font-semibold text-ink-2 mb-1">
-                  Description
-                </label>
-                <textarea
-                  rows={2}
-                  placeholder="Optional: Leave blank to auto-generate strategic scope upon saving..."
-                  value={newProjectDesc}
-                  onChange={e => setNewProjectDesc(e.target.value)}
-                  className="w-full bg-paper-base dark:bg-zinc-800 border border-stone-300 dark:border-zinc-700 rounded-control px-3 py-2 text-sm text-stone-900 dark:text-white focus:outline-none focus:border-amber-600 resize-none"
-                />
-              </div>
+          <div className="space-y-1.5">
+            <label htmlFor="new-project-desc" className="label">Description</label>
+            <textarea
+              id="new-project-desc"
+              rows={2}
+              placeholder="Leave this empty and Sage will write one for you"
+              value={newProjectDesc}
+              onChange={e => setNewProjectDesc(e.target.value)}
+              className="field resize-y"
+            />
+          </div>
 
-              <div>
-                <label className="block text-meta font-semibold text-ink-2 mb-1.5">
-                  Theme Color
-                </label>
-                <div className="flex items-center gap-2">
-                  {COLOR_PRESETS.map(c => (
-                    <button
-                      key={c}
-                      type="button"
-                      onClick={() => setNewProjectColor(c)}
-                      className={`w-7 h-7 rounded-full transition-transform ${newProjectColor === c ? 'scale-125 ring-2 ring-white ring-offset-2 ring-offset-zinc-900' : 'hover:scale-110'}`}
-                      style={{ backgroundColor: c }}
-                    />
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2 border-t border-stone-300 dark:border-stone-800">
+          <div className="space-y-1.5">
+            <span className="label">Colour</span>
+            <div className="flex items-center gap-2.5" role="radiogroup" aria-label="Project colour">
+              {COLOR_PRESETS.map(c => (
                 <button
+                  key={c.value}
                   type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-control text-meta text-ink-3 dark:text-zinc-400 hover:text-stone-900 dark:hover:text-white transition-colors"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 rounded-control bg-amber-600 hover:bg-amber-500 text-stone-950 text-meta font-bold transition-all"
-                >
-                  Create Dossier
-                </button>
-              </div>
-            </form>
+                  role="radio"
+                  aria-checked={newProjectColor === c.value}
+                  aria-label={c.name}
+                  title={c.name}
+                  onClick={() => setNewProjectColor(c.value)}
+                  className={`w-7 h-7 rounded-full transition-transform duration-200 ease-spring ${
+ newProjectColor === c.value
+ ? 'scale-110 ring-2 ring-accent-500 ring-offset-2 ring-offset-surface'
+ : 'hover:scale-110'
+ }`}
+                  style={{ backgroundColor: c.value }}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-1">
+            <button
+              type="button"
+              onClick={() => setShowCreateModal(false)}
+              className="h-10 px-4 rounded-control text-meta font-medium text-ink-2 hover:text-ink hover:bg-sunken transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={!newProjectName.trim()}
+              className="h-10 px-4 rounded-control bg-accent-500 hover:bg-accent-600 text-white text-meta font-medium transition-all duration-200 ease-spring active:scale-[0.97] disabled:opacity-40 disabled:pointer-events-none"
+            >
+              Create project
+            </button>
+          </div>
+        </form>
       </Modal>
 
       {/* Delete Project Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deletingProjectId}
-        title="Delete Project"
-        message={`Are you sure you want to delete "${projects.find(p => p.id === deletingProjectId)?.name || 'this project'}"? Linked tasks will not be deleted, and you can undo this via the undo notification or Ctrl+Z.`}
-        confirmLabel="Delete Project"
+        title="Delete this project?"
+        message={`"${projects.find(p => p.id === deletingProjectId)?.name || 'This project'}" will go. Its tasks stay where they are, and Ctrl+Z brings the project back.`}
+        confirmLabel="Delete"
         confirmVariant="danger"
         onConfirm={() => {
           if (deletingProjectId) {
@@ -743,9 +768,9 @@ export const ProjectsHub: React.FC<ProjectsHubProps> = ({
       {/* Delete Milestone Confirmation Dialog */}
       <ConfirmDialog
         isOpen={!!deletingMilestoneId}
-        title="Delete Milestone"
-        message={`Are you sure you want to delete milestone "${milestones.find(m => m.id === deletingMilestoneId)?.title || 'this milestone'}"? This can be undone via the undo notification or Ctrl+Z.`}
-        confirmLabel="Delete Milestone"
+        title="Delete this milestone?"
+        message={`"${milestones.find(m => m.id === deletingMilestoneId)?.title || 'This milestone'}" will go. Ctrl+Z brings it back.`}
+        confirmLabel="Delete"
         confirmVariant="danger"
         onConfirm={() => {
           if (deletingMilestoneId) {

@@ -109,4 +109,57 @@ describe('TaskDetailSheet', () => {
 
     expect(onUpdate).toHaveBeenCalledWith({ repeat_rule: 'weekly:mon' });
   });
+
+  /*
+   * An event runs between two times. The sheet only ever showed the one it
+   * starts at, so a meeting's length was something you could set while
+   * capturing it and never see again.
+   */
+  it('lets an event be given an end time', () => {
+    const event: WorkItem = {
+      ...item,
+      entity_type: 'event',
+      due_date: '2026-09-30',
+      start_at: '2026-09-30T14:00:00',
+    };
+    const { onUpdate } = renderSheet({ item: event, items: [event] });
+
+    fireEvent.change(screen.getByLabelText('Ends at'), { target: { value: '15:30' } });
+    expect(onUpdate).toHaveBeenCalledWith({ end_at: '2026-09-30T15:30:00' });
+  });
+
+  it('warns when an event ends before it starts', () => {
+    const event: WorkItem = {
+      ...item,
+      entity_type: 'event',
+      start_at: '2026-09-30T14:00:00',
+      end_at: '2026-09-30T13:00:00',
+    };
+    renderSheet({ item: event, items: [event] });
+    expect(screen.getByText('Ends before it starts')).toBeTruthy();
+  });
+
+  it('shows no end time on a task', () => {
+    renderSheet();
+    expect(screen.queryByLabelText('Ends at')).toBeNull();
+  });
+
+  /*
+   * Things get captured as the wrong kind all the time — a note about a
+   * meeting arrives as a task. Until now the only fix was to delete it and
+   * write it again.
+   */
+  it('can turn a task into an event', () => {
+    const { onUpdate } = renderSheet();
+    fireEvent.click(screen.getByRole('button', { name: 'Event' }));
+    expect(onUpdate).toHaveBeenCalledTimes(1);
+    expect(onUpdate.mock.calls[0][0].entity_type).toBe('event');
+  });
+
+  it('lets an estimate be taken back off', () => {
+    const { onUpdate } = renderSheet();
+    // The item already estimates 30 minutes; pressing it again clears it.
+    fireEvent.click(screen.getByRole('button', { name: '30m' }));
+    expect(onUpdate).toHaveBeenCalledWith({ estimated_minutes: 0 });
+  });
 });

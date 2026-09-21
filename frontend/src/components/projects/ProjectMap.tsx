@@ -182,7 +182,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
   };
 
   return (
-    <div className="flex flex-col h-full bg-ground border border-stone-300 dark:border-stone-800 rounded-2xl shadow-sm overflow-hidden animate-in fade-in">
+    <div className="flex flex-col h-full bg-ground border border-hairline rounded-surface shadow-sm overflow-hidden animate-in fade-in">
       {/* Top Map Toolbar */}
       <div className="flex flex-wrap items-center justify-between gap-3 p-3.5 bg-surface border-b border-hairline/80 z-20">
         <div className="flex items-center gap-3 flex-wrap">
@@ -193,7 +193,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
               <select
                 value={project.id}
                 onChange={(e) => onSelectProject(e.target.value)}
-                className="bg-sunken border border-hairline rounded-control px-2.5 py-1 text-meta font-bold text-ink focus:outline-none"
+                className="bg-sunken border border-hairline rounded-control px-2.5 py-1 text-meta font-semibold text-ink focus:outline-none"
               >
                 {allProjects.map((p) => (
                   <option key={p.id} value={p.id}>
@@ -208,7 +208,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                 className="w-3 h-3 rounded-full shadow-sm"
                 style={{ backgroundColor: project.color || '#3b82f6' }}
               />
-              <span className="text-body font-bold text-ink">{project.name}</span>
+              <span className="text-body font-semibold text-ink">{project.name}</span>
             </div>
           )}
 
@@ -251,10 +251,10 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                 key={mode}
                 onClick={() => setFilterMode(mode)}
                 className={`px-2 py-0.5 rounded capitalize transition-colors ${
-                  filterMode === mode
-                    ? 'bg-surface text-ink font-semibold shadow-xs'
-                    : 'text-ink-3 hover:text-ink'
-                }`}
+ filterMode === mode
+ ? 'bg-surface text-ink font-semibold shadow-xs'
+ : 'text-ink-3 hover:text-ink'
+ }`}
               >
                 {mode}
               </button>
@@ -329,32 +329,32 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
           <div className="inline-flex flex-col gap-10 items-start pb-40 pr-40">
             {/* ---------------- PROJECT ROOT NODE ---------------- */}
             <div
-              className="interactive-node relative rounded-2xl bg-surface border-2 shadow-md p-5 min-w-[320px] max-w-md transition-all hover:shadow-lg"
+              className="interactive-node relative rounded-surface bg-surface border-2 shadow-md p-5 min-w-[320px] max-w-md transition-all hover:shadow-lg"
               style={{ borderColor: project.color || '#3b82f6' }}
             >
               <div className="flex items-start justify-between gap-3">
                 <div className="flex items-center gap-2.5">
                   <div
-                    className="w-8 h-8 rounded-xl flex items-center justify-center text-white shadow-sm"
+                    className="w-8 h-8 rounded-surface flex items-center justify-center text-white shadow-sm"
                     style={{ backgroundColor: project.color || '#3b82f6' }}
                   >
                     <Folder className="w-4 h-4" />
                   </div>
                   <div>
-                    <span className="text-caption uppercase tracking-wider text-ink-3 font-bold block">Strategic Project</span>
-                    <h2 className="text-lg font-bold text-ink leading-tight">{project.name}</h2>
+                    <span className="text-caption uppercase tracking-wider text-ink-3 font-semibold block">Strategic Project</span>
+                    <h2 className="text-lead font-semibold text-ink leading-tight">{project.name}</h2>
                   </div>
                 </div>
 
                 {/* Progress Dial */}
                 <div className="text-right">
-                  <span className="text-xl font-extrabold text-ink font-mono">{progressPct}%</span>
+                  <span className="text-title font-semibold text-ink tabular">{progressPct}%</span>
                   <span className="text-caption text-ink-3 block">completed</span>
                 </div>
               </div>
 
               {project.description && (
-                <p className="text-meta text-ink-2 mt-2.5 leading-relaxed bg-sunken/60 p-2.5 rounded-lg border border-hairline/60">
+                <p className="text-meta text-ink-2 mt-2.5 leading-relaxed bg-sunken/60 p-2.5 rounded-control border border-hairline/60">
                   {project.description}
                 </p>
               )}
@@ -390,7 +390,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
               {isAddingMilestone && (
                 <form
                   onSubmit={handleAddMilestoneSubmit}
-                  className="mt-3 p-2.5 rounded-xl bg-sunken border border-hairline flex flex-col gap-2"
+                  className="mt-3 p-2.5 rounded-surface bg-sunken border border-hairline flex flex-col gap-2"
                 >
                   <input
                     type="text"
@@ -410,7 +410,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                     />
                     <button
                       type="submit"
-                      className="px-3 py-1 bg-accent-500 text-white rounded text-caption font-bold"
+                      className="px-3 py-1 bg-accent-500 text-white rounded text-caption font-semibold"
                     >
                       Save
                     </button>
@@ -430,7 +430,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
             <div className="flex items-start gap-8 pl-6 relative">
               {/* Vertical trunk connecting root down to streams */}
               <div
-                className="absolute -top-10 left-6 w-0.5 bg-gradient-to-b from-stone-400 to-transparent dark:from-stone-600 h-10"
+                className="absolute -top-10 left-6 w-0.5 bg-gradient-to-b from-hairline to-transparent h-10"
               />
 
               {/* 1. Milestone Columns */}
@@ -444,24 +444,24 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                 return (
                   <div key={m.id} className="flex flex-col gap-3 min-w-[300px] max-w-[340px]">
                     {/* Milestone Header Card */}
-                    <div className="interactive-node p-3.5 rounded-xl bg-surface border border-stone-300 dark:border-stone-800 shadow-sm relative group hover:border-amber-500/60 transition-colors">
+                    <div className="interactive-node p-3.5 rounded-surface bg-surface border border-hairline shadow-sm relative group hover:border-amber-500/60 transition-colors">
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex items-center gap-2">
                           <Flag
                             className={`w-4 h-4 ${
-                              m.status === 'achieved'
-                                ? 'text-emerald-500'
-                                : 'text-amber-500'
-                            }`}
+ m.status === 'achieved'
+ ? 'text-emerald-500'
+ : 'text-amber-500'
+ }`}
                           />
-                          <h3 className="text-meta font-bold text-ink truncate max-w-[180px]">{m.title}</h3>
+                          <h3 className="text-meta font-semibold text-ink truncate max-w-[180px]">{m.title}</h3>
                         </div>
                         <span
-                          className={`text-[10px] uppercase font-bold px-1.5 py-0.5 rounded-full ${
-                            m.status === 'achieved'
-                              ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
-                              : 'bg-amber-500/10 text-amber-600 dark:text-amber-400'
-                          }`}
+                          className={`text-caption font-medium px-1.5 py-0.5 rounded-full ${
+ m.status === 'achieved'
+ ? 'bg-emerald-500/10 text-done-500 dark:text-done-400'
+ : 'bg-amber-500/10 text-accent-500'
+ }`}
                         >
                           {m.status}
                         </span>
@@ -513,7 +513,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                           />
                           <button
                             onClick={() => handleQuickAddTaskSubmit(m.id)}
-                            className="px-2 py-1 bg-accent-500 text-white rounded text-caption font-bold"
+                            className="px-2 py-1 bg-accent-500 text-white rounded text-caption font-semibold"
                           >
                             Add
                           </button>
@@ -522,9 +522,9 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                     </div>
 
                     {/* Task Cards in this Milestone */}
-                    <div className="flex flex-col gap-2 pl-2 border-l-2 border-dashed border-stone-300 dark:border-stone-800 ml-3">
+                    <div className="flex flex-col gap-2 pl-2 border-l-2 border-dashed border-hairline ml-3">
                       {streamTasks.length === 0 ? (
-                        <div className="p-3 text-caption text-ink-3 italic bg-sunken/40 rounded-lg border border-dashed border-hairline">
+                        <div className="p-3 text-caption text-ink-3 italic bg-sunken/40 rounded-control border border-dashed border-hairline">
                           No deliverables linked to this milestone yet.
                         </div>
                       ) : (
@@ -553,11 +553,11 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
               {/* 2. Unassigned / Backlog Stream */}
               {(tasksByMilestone['unassigned'] || []).length > 0 || quickAddMilestoneId === 'unassigned' ? (
                 <div className="flex flex-col gap-3 min-w-[300px] max-w-[340px]">
-                  <div className="interactive-node p-3.5 rounded-xl bg-surface border border-stone-300 dark:border-stone-800 shadow-sm relative">
+                  <div className="interactive-node p-3.5 rounded-surface bg-surface border border-hairline shadow-sm relative">
                     <div className="flex items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <Folder className="w-4 h-4 text-ink-3" />
-                        <h3 className="text-meta font-bold text-ink">General & Backlog</h3>
+                        <h3 className="text-meta font-semibold text-ink">General & Backlog</h3>
                       </div>
                       <span className="text-caption font-semibold px-2 py-0.5 rounded-full bg-sunken text-ink-3">
                         {(tasksByMilestone['unassigned'] || []).length} tasks
@@ -593,7 +593,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                         />
                         <button
                           onClick={() => handleQuickAddTaskSubmit('unassigned')}
-                          className="px-2 py-1 bg-accent-500 text-white rounded text-caption font-bold"
+                          className="px-2 py-1 bg-accent-500 text-white rounded text-caption font-semibold"
                         >
                           Add
                         </button>
@@ -602,7 +602,7 @@ export const ProjectMap: React.FC<ProjectMapProps> = ({
                   </div>
 
                   {/* Tasks List */}
-                  <div className="flex flex-col gap-2 pl-2 border-l-2 border-dashed border-stone-300 dark:border-stone-800 ml-3">
+                  <div className="flex flex-col gap-2 pl-2 border-l-2 border-dashed border-hairline ml-3">
                     {(tasksByMilestone['unassigned'] || []).map((task) => (
                       <TaskMapCard
                         key={task.id}
@@ -659,20 +659,26 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
   const subtasksCount = subtasks.length;
   const hasBlockers = (task.depends_on || []).length > 0;
 
+  /*
+   * One ramp per priority. These used to be rose / amber / blue / stone, and
+   * since the palette re-points amber and blue onto the same accent, "high"
+   * and "medium" drew as the same chip — the map showed four priorities in
+   * three colours.
+   */
   const priorityColors: { [key: string]: string } = {
-    urgent: 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-300 dark:border-rose-800',
-    high: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-300 dark:border-amber-800',
-    medium: 'bg-blue-500/10 text-blue-600 dark:text-blue-400 border-blue-300 dark:border-blue-800',
-    low: 'bg-stone-500/10 text-stone-600 dark:text-stone-400 border-stone-300 dark:border-stone-800',
+    urgent: 'bg-danger-500/10 text-danger-600 dark:text-danger-400 border-danger-500/30',
+    high: 'bg-late-500/10 text-late-500 dark:text-late-400 border-late-500/30',
+    medium: 'bg-accent-500/10 text-accent-600 dark:text-accent-400 border-accent-500/30',
+    low: 'bg-ink/5 text-ink-3 border-hairline',
   };
 
   return (
     <div
-      className={`interactive-node rounded-xl p-3 bg-surface border transition-all duration-150 shadow-xs hover:shadow-sm ${
-        task.is_completed
-          ? 'border-hairline bg-surface/60 opacity-80'
-          : 'border-stone-300 dark:border-stone-700/80 hover:border-stone-400'
-      }`}
+      className={`interactive-node rounded-surface p-3 bg-surface border transition-all duration-150 shadow-xs hover:shadow-sm ${
+ task.is_completed
+ ? 'border-hairline bg-surface/60 opacity-80'
+ : 'border-hairline hover:border-hairline'
+ }`}
     >
       {/* Top row: Checkbox, Title, Priority */}
       <div className="flex items-start justify-between gap-2">
@@ -693,8 +699,8 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
           <div className="min-w-0 flex-1">
             <span
               className={`text-meta font-medium leading-snug block break-words ${
-                task.is_completed ? 'line-through text-ink-3' : 'text-ink'
-              }`}
+ task.is_completed ? 'line-through text-ink-3' : 'text-ink'
+ }`}
             >
               {task.title}
             </span>
@@ -708,9 +714,9 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
         </div>
 
         <span
-          className={`text-[10px] font-bold px-1.5 py-0.5 rounded border capitalize flex-shrink-0 ${
-            priorityColors[task.priority] || priorityColors.medium
-          }`}
+          className={`text-caption font-semibold px-1.5 py-0.5 rounded border capitalize flex-shrink-0 ${
+ priorityColors[task.priority] || priorityColors.medium
+ }`}
         >
           {task.priority}
         </span>
@@ -732,7 +738,7 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
             </span>
           )}
           {hasBlockers && (
-            <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400 font-semibold" title="Has dependencies">
+            <span className="flex items-center gap-1 text-accent-500 font-semibold" title="Has dependencies">
               <Lock className="w-3 h-3" /> Blocked
             </span>
           )}
@@ -742,10 +748,10 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
         <button
           onClick={onToggleExpanded}
           className={`flex items-center gap-1 px-1.5 py-0.5 rounded text-caption font-medium transition-colors ${
-            subtasksCount > 0
-              ? 'bg-sunken text-ink hover:bg-hairline'
-              : 'text-ink-3 hover:text-ink'
-          }`}
+ subtasksCount > 0
+ ? 'bg-sunken text-ink hover:bg-hairline'
+ : 'text-ink-3 hover:text-ink'
+ }`}
         >
           <CheckSquare className="w-3 h-3" />
           <span>
@@ -764,19 +770,19 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
               {subtasks.map((st) => (
                 <div
                   key={st.id}
-                  className="group flex items-center justify-between p-1.5 rounded-lg bg-sunken/60 hover:bg-sunken border border-hairline/50 transition-colors"
+                  className="group flex items-center justify-between p-1.5 rounded-control bg-sunken/60 hover:bg-sunken border border-hairline/50 transition-colors"
                 >
                   <label className="flex items-center gap-2 flex-1 min-w-0 cursor-pointer">
                     <input
                       type="checkbox"
                       checked={st.is_completed}
                       onChange={() => onToggleSubtask(st.id)}
-                      className="w-3 h-3 rounded text-accent-500 bg-sunken border-zinc-600 cursor-pointer"
+                      className="w-3 h-3 rounded text-accent-500 bg-sunken border-hairline cursor-pointer"
                     />
                     <span
                       className={`text-caption truncate ${
-                        st.is_completed ? 'line-through text-ink-3' : 'text-ink'
-                      }`}
+ st.is_completed ? 'line-through text-ink-3' : 'text-ink'
+ }`}
                     >
                       {st.title}
                     </span>
@@ -810,7 +816,7 @@ const TaskMapCard: React.FC<TaskMapCardProps> = ({
             <button
               onClick={onAddSubtask}
               disabled={!newSubtaskTitle.trim()}
-              className="px-2 py-0.5 rounded bg-accent-500 hover:bg-accent-600 text-white text-[11px] font-bold disabled:opacity-40 disabled:pointer-events-none transition-colors"
+              className="px-2 py-0.5 rounded bg-accent-500 hover:bg-accent-600 text-white text-caption font-semibold disabled:opacity-40 disabled:pointer-events-none transition-colors"
             >
               Add
             </button>
