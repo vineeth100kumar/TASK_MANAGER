@@ -668,15 +668,22 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
             // Red: 90%+
             const isDanger = pct >= 90;
             const isWarning = pct >= 70 && pct < 90;
-            const barColor = isDanger 
-              ? 'bg-gradient-to-r from-red-500 to-rose-600' 
-              : isWarning 
-              ? 'bg-gradient-to-r from-amber-400 to-orange-500' 
-              : 'bg-gradient-to-r from-emerald-400 to-teal-500';
+            /*
+             * Three flat states, one ramp each. These were gradients written
+             * in the old raw palette; once those names were repointed onto
+             * four ramps, "amber to orange" came out as accent-to-late — a
+             * warning bar that started blue. A budget meter is a reading, not
+             * an ornament, so it is one colour.
+             */
+            const barColor = isDanger
+              ? 'bg-danger-500'
+              : isWarning
+              ? 'bg-late-500'
+              : 'bg-done-500';
 
             return (
               <div key={cat.id} className={`p-3.5 rounded-surface bg-surface border transition-all space-y-2.5 ${
- isDanger ? 'border-rose-500/40 shadow-sm' : isWarning ? 'border-amber-500/30' : 'border-hairline/80'
+ isDanger ? 'border-danger-500/40 shadow-sm' : isWarning ? 'border-late-500/30' : 'border-hairline/80'
  }`}>
                 <div className="flex items-center justify-between text-meta">
                   <div className="flex items-center gap-2">
@@ -686,7 +693,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                         setEditingBudgetCat(cat);
                         setNewBudgetLimit(cat.monthly_budget.toString());
                       }}
-                      className="text-ink-3 hover:text-blue-400 p-0.5 rounded"
+                      className="text-ink-3 hover:text-accent-500 p-0.5 rounded"
                       title="Adjust monthly limit"
                     >
                       <Pencil className="w-3 h-3" />
@@ -777,8 +784,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               {/* Amount */}
               <div>
-                <label className="label block mb-1.5">Amount</label>
+                <label htmlFor="fin-amount-1" className="label block mb-1.5">Amount</label>
                 <input
+                  id="fin-amount-1"
                   type="number"
                   step="any"
                   min="0"
@@ -827,8 +835,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               {/* Account Selector */}
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label block mb-1.5">Account</label>
+                  <label htmlFor="fin-account-2" className="label block mb-1.5">Account</label>
                   <select
+                    id="fin-account-2"
                     value={accountId}
                     onChange={(e) => setAccountId(e.target.value)}
                     className="field"
@@ -843,8 +852,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
                 {type === 'transfer' ? (
                   <div>
-                    <label className="label block mb-1.5">Into</label>
+                    <label htmlFor="fin-into-3" className="label block mb-1.5">Into</label>
                     <select
+                      id="fin-into-3"
                       value={transferToAccountId}
                       onChange={(e) => setTransferToAccountId(e.target.value)}
                       className="field"
@@ -857,8 +867,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                   </div>
                 ) : (
                   <div>
-                    <label className="label block mb-1.5">Category</label>
+                    <label htmlFor="fin-category-4" className="label block mb-1.5">Category</label>
                     <select
+                      id="fin-category-4"
                       value={categoryId}
                       onChange={(e) => setCategoryId(e.target.value)}
                       className="field"
@@ -874,8 +885,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               {/* Description */}
               <div>
-                <label className="label block mb-1.5">Description</label>
+                <label htmlFor="fin-description-5" className="label block mb-1.5">Description</label>
                 <input
+                  id="fin-description-5"
                   type="text"
                   placeholder="e.g. Swiggy order, Metro recharge, Grocery store..."
                   value={description}
@@ -913,8 +925,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         {editingAccount && (
           <form onSubmit={handleSaveAccount} className="space-y-4">
               <div>
-                <label className="label block mb-1.5">Name</label>
+                <label htmlFor="fin-name-6" className="label block mb-1.5">Name</label>
                 <input
+                  id="fin-name-6"
                   type="text"
                   value={editName}
                   onChange={(e) => setEditName(e.target.value)}
@@ -924,8 +937,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               </div>
 
               <div>
-                <label className="label block mb-1.5">Balance</label>
+                <label htmlFor="fin-balance-7" className="label block mb-1.5">Balance</label>
                 <input
+                  id="fin-balance-7"
                   type="number"
                   step="0.01"
                   min="0"
@@ -997,8 +1011,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       >
         <form onSubmit={handleCreateAccount} className="space-y-4">
               <div>
-                <label className="label block mb-1.5">Name</label>
+                <label htmlFor="fin-name-8" className="label block mb-1.5">Name</label>
                 <input
+                  id="fin-name-8"
                   type="text"
                   placeholder="e.g. HDFC Salary, SBI Savings, Cash in Wallet..."
                   value={newAccName}
@@ -1010,8 +1025,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label block mb-1.5">Type</label>
+                  <label htmlFor="fin-type-9" className="label block mb-1.5">Type</label>
                   <select
+                    id="fin-type-9"
                     value={newAccType}
                     onChange={(e) => setNewAccType(e.target.value)}
                     className="field"
@@ -1023,8 +1039,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="label block mb-1.5">Opening balance</label>
+                  <label htmlFor="fin-opening-balance-10" className="label block mb-1.5">Opening balance</label>
                   <input
+                    id="fin-opening-balance-10"
                     type="number"
                     step="0.01"
                     min="0"
@@ -1081,8 +1098,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
       >
         <form onSubmit={handleAddBill} className="space-y-4">
               <div>
-                <label className="label block mb-1.5">Name</label>
+                <label htmlFor="fin-name-11" className="label block mb-1.5">Name</label>
                 <input
+                  id="fin-name-11"
                   type="text"
                   required
                   placeholder="e.g. Netflix, Airtel Broadband, Gym Membership"
@@ -1094,8 +1112,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
 
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label block mb-1.5">Amount</label>
+                  <label htmlFor="fin-amount-12" className="label block mb-1.5">Amount</label>
                   <input
+                    id="fin-amount-12"
                     type="number"
                     step="0.01"
                     min="0"
@@ -1109,8 +1128,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
                 </div>
 
                 <div>
-                  <label className="label block mb-1.5">Due on</label>
+                  <label htmlFor="fin-due-on-13" className="label block mb-1.5">Due on</label>
                   <select
+                    id="fin-due-on-13"
                     value={newBillDueDay}
                     onChange={(e) => setNewBillDueDay(e.target.value)}
                     className="field"
@@ -1125,8 +1145,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               </div>
 
               <div>
-                <label className="label block mb-1.5">Category</label>
+                <label htmlFor="fin-category-14" className="label block mb-1.5">Category</label>
                 <input
+                  id="fin-category-14"
                   type="text"
                   placeholder="Utilities & Bills, Entertainment, Housing..."
                   value={newBillCategory}
@@ -1164,7 +1185,7 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
         {editingBudgetCat && (
           <form onSubmit={handleSaveBudget} className="space-y-4">
               <div>
-                <label className="label block mb-1.5">Category</label>
+                <span className="label block mb-1.5">Category</span>
                 <p className="text-body font-medium text-ink">{editingBudgetCat.name}</p>
                 <p className="text-meta text-ink-2 mt-1">
                   Spent this month ₹{editingBudgetCat.spent_this_month.toLocaleString('en-IN')}
@@ -1172,8 +1193,9 @@ export const FinanceView: React.FC<FinanceViewProps> = ({
               </div>
 
               <div>
-                <label className="label block mb-1.5">Monthly limit</label>
+                <label htmlFor="fin-monthly-limit-16" className="label block mb-1.5">Monthly limit</label>
                 <input
+                  id="fin-monthly-limit-16"
                   type="number"
                   step="100"
                   min="0"
