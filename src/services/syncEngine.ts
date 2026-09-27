@@ -12,9 +12,13 @@
 
 import { getDB, getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, SyncOpRecord } from './db';
 import { tabCoordinator } from './tabSync';
+import { piBackendUrl, piHeaders } from './piBackend';
 
 const GAS_URL = import.meta.env.VITE_GAS_URL || 'https://script.google.com/macros/s/AKfycbzIuKgou3uO98HBkH3olHt-JDAum6muOfR7v59VTUg72K9IkyTX9ATgK0ntZQrNdrJo/exec';
-const PI_BACKEND_URL = import.meta.env.VITE_PI_BACKEND_URL || '';
+const PI_BACKEND_URL = piBackendUrl();
+
+// Headers for a sync request: the Pi server wants its key, Apps Script must get none.
+export const syncHeaders = (headers: Record<string, string> = {}) => (PI_BACKEND_URL ? piHeaders(headers) : headers);
 const AUTH_KEY = import.meta.env.VITE_GAS_AUTH_KEY || '';
 
 export const getGasUrl = (action = '') => {
@@ -291,7 +295,7 @@ class SyncEngine {
 
         const response = await fetch(getGasUrl(),  {
           method: 'POST',
-          headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+          headers: syncHeaders({ 'Content-Type': 'text/plain;charset=utf-8' }),
           body: JSON.stringify(batchPayload)
         });
 
@@ -371,7 +375,7 @@ class SyncEngine {
     try {
       const baseUrl = getGasUrl('getChangesSince');
       const url = baseUrl.includes('?') ? `${baseUrl}&sinceRevision=${this.serverRevision}` : `${baseUrl}?sinceRevision=${this.serverRevision}`;
-      const response = await fetch(url);
+      const response = await fetch(url, { headers: syncHeaders() });
       if (!response.ok) return;
 
       const json = await response.json();

@@ -1,0 +1,3822 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+  <title>LUMO Smart Controller</title>
+  <style>
+    :root {
+      --bg: #090a0f;
+      --card: rgba(25, 28, 38, 0.75);
+      --card-border: rgba(255, 255, 255, 0.09);
+      --accent: #0a84ff;
+      --green: #30d158;
+      --warm: #ff9f0a;
+      --red: #ff453a;
+      --text: #ffffff;
+      --muted: #8e8e93;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", Roboto, sans-serif;
+      background-color: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 16px 14px 80px 14px;
+      min-height: 100vh;
+      background-image: radial-gradient(circle at 50% 0%, rgba(10, 132, 255, 0.15) 0%, transparent 65%);
+    }
+    .container { width: 100%; max-width: 440px; }
+    
+    /* Header */
+    .header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 16px; padding: 4px;
+    }
+    .header h1 { font-size: 1.5rem; font-weight: 700; letter-spacing: -0.5px; }
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-radius: 20px; font-size: 0.8rem; font-weight: 600;
+      background: rgba(255,255,255,0.06); border: 1px solid var(--card-border);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #666; }
+    .dot.online { background: var(--green); box-shadow: 0 0 8px var(--green); }
+    .dot.offline { background: var(--red); }
+
+    /* Glass Cards */
+    .card {
+      background: var(--card);
+      border: 1px solid var(--card-border);
+      backdrop-filter: blur(24px);
+      -webkit-backdrop-filter: blur(24px);
+      border-radius: 20px;
+      padding: 18px;
+      margin-bottom: 14px;
+    }
+    .card-title {
+      font-size: 0.85rem; font-weight: 700; color: var(--muted);
+      text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+    }
+
+    /* Screen Selector Grid */
+    .screen-grid {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 6px;
+    }
+    .screen-btn {
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      gap: 6px; padding: 12px 6px; border-radius: 14px;
+      background: rgba(255,255,255,0.05); border: 1px solid var(--card-border);
+      color: var(--muted); cursor: pointer; transition: all 0.2s; font-size: 0.8rem; font-weight: 600;
+    }
+    .screen-btn.active {
+      background: rgba(10, 132, 255, 0.2);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(10, 132, 255, 0.3);
+    }
+    .screen-btn .icon { font-size: 1.3rem; }
+
+    /* Buttons */
+    button {
+      background: rgba(255,255,255,0.08); border: 1px solid var(--card-border);
+      color: var(--text); border-radius: 12px; padding: 10px 14px;
+      font-size: 0.9rem; font-weight: 600; cursor: pointer; transition: all 0.2s;
+    }
+    button:active { transform: scale(0.97); }
+    button.primary { background: var(--accent); border: none; }
+    button.danger { background: var(--red); border: none; }
+    button.warm { background: var(--warm); border: none; color: #000; }
+
+    .btn-group { display: flex; gap: 8px; width: 100%; }
+    .btn-group button { flex: 1; text-align: center; padding: 10px 4px; }
+
+    /* Sliders */
+    .slider-row { margin: 12px 0 4px 0; }
+    .slider-label { display: flex; justify-content: space-between; font-size: 0.82rem; color: var(--muted); margin-bottom: 6px; }
+    input[type=range] {
+      width: 100%; -webkit-appearance: none; background: rgba(255,255,255,0.12);
+      height: 8px; border-radius: 4px; outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb {
+      -webkit-appearance: none; width: 22px; height: 22px; border-radius: 50%;
+      background: #ffffff; box-shadow: 0 2px 6px rgba(0,0,0,0.4); cursor: pointer;
+    }
+
+    /* System Stats Grid */
+    .stats-grid {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 10px;
+    }
+    .stat-box {
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 14px; padding: 12px; text-align: center;
+    }
+    .stat-val { font-size: 1.4rem; font-weight: 700; color: var(--text); margin-top: 2px; }
+    .stat-lbl { font-size: 0.75rem; color: var(--muted); text-transform: uppercase; letter-spacing: 0.5px; }
+
+    /* Lists */
+    .list-item {
+      display: flex; justify-content: space-between; align-items: center;
+      padding: 10px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .list-item:last-child { border-bottom: none; }
+
+    /* Optimized Task Item Rows for Long Information */
+    .task-item-row {
+      display: flex; align-items: flex-start; gap: 12px;
+      padding: 12px 0; border-bottom: 1px solid rgba(255,255,255,0.06);
+    }
+    .task-item-row:last-child { border-bottom: none; }
+    .task-item-content {
+      flex: 1; min-width: 0; word-break: break-word; overflow-wrap: break-word;
+    }
+    .task-item-title {
+      font-size: 0.95rem; font-weight: 600; color: #fff; line-height: 1.4;
+      word-break: break-word; overflow-wrap: break-word;
+    }
+    .task-item-notes {
+      font-size: 0.82rem; color: var(--muted); margin-top: 6px; line-height: 1.45;
+      word-break: break-word; overflow-wrap: break-word; white-space: pre-wrap;
+      background: rgba(0, 0, 0, 0.25); padding: 8px 12px; border-radius: 8px;
+      border-left: 2px solid rgba(0, 229, 255, 0.4); max-height: 200px; overflow-y: auto;
+    }
+    .task-badges {
+      display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px;
+    }
+    .task-badge {
+      display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px;
+      border-radius: 6px; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.2px;
+    }
+    .badge-due {
+      background: rgba(10, 132, 255, 0.15); color: #5ac8fa;
+      border: 1px solid rgba(10, 132, 255, 0.25);
+    }
+    .badge-overdue {
+      background: rgba(255, 69, 58, 0.18); color: #ff453a;
+      border: 1px solid rgba(255, 69, 58, 0.3);
+    }
+    .badge-urgent {
+      background: rgba(255, 69, 58, 0.2); color: #ff453a;
+      border: 1px solid rgba(255, 69, 58, 0.4);
+    }
+    .badge-high {
+      background: rgba(255, 159, 10, 0.2); color: #ff9f0a;
+      border: 1px solid rgba(255, 159, 10, 0.35);
+    }
+    .badge-low {
+      background: rgba(255, 255, 255, 0.08); color: var(--muted);
+    }
+    .badge-tag {
+      background: rgba(255, 255, 255, 0.06); color: #8e8e93;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+    .task-item-actions {
+      flex-shrink: 0; display: flex; align-items: center; margin-top: 1px;
+    }
+    .task-del-btn {
+      background: rgba(255, 69, 58, 0.08); border: 1px solid rgba(255, 69, 58, 0.2);
+      color: var(--red); padding: 5px 9px; font-size: 0.8rem; border-radius: 8px;
+      cursor: pointer; transition: all 0.15s ease;
+    }
+    .task-del-btn:hover {
+      background: rgba(255, 69, 58, 0.25); color: #fff;
+    }
+    .item-left { display: flex; flex-direction: column; gap: 2px; }
+    .item-time { font-size: 1.2rem; font-weight: 600; }
+    .item-label { font-size: 0.8rem; color: var(--muted); }
+
+    .toggle-switch, .switch { position: relative; width: 46px; height: 26px; display: inline-block; flex-shrink: 0; }
+    .toggle-switch input, .switch input { opacity: 0; width: 0; height: 0; }
+    .slider-toggle {
+      position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+      background-color: rgba(255,255,255,0.15); transition: .3s; border-radius: 26px;
+    }
+    .slider-toggle:before {
+      position: absolute; content: ""; height: 20px; width: 20px; left: 3px; bottom: 3px;
+      background-color: white; transition: .3s; border-radius: 50%;
+    }
+    input:checked + .slider-toggle { background-color: var(--green); }
+    input:checked + .slider-toggle:before { transform: translateX(20px); }
+
+    .add-row { display: flex; gap: 8px; margin-top: 12px; }
+    .add-row input {
+      flex: 1; background: rgba(255,255,255,0.06); border: 1px solid var(--card-border);
+      border-radius: 12px; padding: 10px 12px; color: #fff; font-size: 0.9rem; outline: none;
+    }
+
+    /* Color Palette */
+    .palette-row {
+      display: flex; gap: 10px; justify-content: space-around; margin: 10px 0 4px 0;
+    }
+    .color-dot {
+      width: 38px; height: 38px; border-radius: 50%; cursor: pointer;
+      border: 3px solid transparent; transition: all 0.2s;
+    }
+    .color-dot.active {
+      transform: scale(1.18); border-color: #fff; box-shadow: 0 0 14px rgba(255,255,255,0.7);
+    }
+    .anim-grid {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 8px;
+    }
+    .anim-btn {
+      padding: 10px 4px; font-size: 0.78rem; border-radius: 12px; display: flex; flex-direction: column; align-items: center; gap: 4px;
+    }
+    .anim-btn .icon { font-size: 1.25rem; }
+
+    #alarmBanner {
+      display: none; background: var(--red); padding: 16px; border-radius: 16px;
+      margin-bottom: 14px; text-align: center; animation: pulse 1s infinite alternate;
+    }
+    @keyframes pulse { from { opacity: 0.85; } to { opacity: 1.0; } }
+
+    /* Live 2.8" LCD Display Mirror */
+    .lcd-wrapper {
+      background: #0d1117;
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 18px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .lcd-bezel {
+      position: relative;
+      width: 100%;
+      max-width: 440px;
+      margin: 0 auto;
+      aspect-ratio: 4 / 3;
+      background: #000;
+      border: 12px solid #1c2128;
+      border-radius: 16px;
+      box-shadow: inset 0 0 16px rgba(0,0,0,0.9), 0 8px 24px rgba(0,0,0,0.7);
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    #lcdCanvas {
+      width: 100%;
+      height: 100%;
+      display: block;
+      image-rendering: pixelated;
+      background: #000;
+    }
+    .lcd-scanlines {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.22) 50%);
+      background-size: 100% 3px;
+      pointer-events: none;
+      opacity: 0.5;
+    }
+    .lcd-glare {
+      position: absolute;
+      top: 0; left: 0; width: 100%; height: 100%;
+      background: linear-gradient(135deg, rgba(255,255,255,0.06) 0%, rgba(255,255,255,0) 60%);
+      pointer-events: none;
+    }
+    /* JARVIS Voice Console */
+    .ptt-btn.recording {
+      background: linear-gradient(135deg, rgba(255, 69, 58, 0.45), rgba(255, 23, 68, 0.35)) !important;
+      border-color: #ff1744 !important;
+      box-shadow: 0 0 22px rgba(255, 23, 68, 0.5) !important;
+      animation: pttPulse 1.2s infinite alternate;
+    }
+    .ptt-btn.thinking {
+      background: linear-gradient(135deg, rgba(255, 159, 10, 0.35), rgba(255, 179, 0, 0.25)) !important;
+      border-color: #ffb300 !important;
+    }
+    .ptt-btn.speaking {
+      background: linear-gradient(135deg, rgba(0, 229, 255, 0.35), rgba(10, 132, 255, 0.25)) !important;
+      border-color: #00E5FF !important;
+      box-shadow: 0 0 18px rgba(0, 229, 255, 0.4) !important;
+    }
+    @keyframes pttPulse {
+      0% { transform: scale(1.0); }
+      100% { transform: scale(1.02); }
+    }
+    .voice-chip {
+      padding: 6px 12px;
+      font-size: 0.78rem;
+      font-weight: 600;
+      border-radius: 8px;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.08);
+      color: var(--muted);
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .voice-chip:hover {
+      color: #fff;
+      border-color: rgba(0,229,255,0.4);
+      background: rgba(0,229,255,0.12);
+      transform: translateY(-1px);
+    }
+
+    /* Memories Card & Modal Modern UI */
+    .mem-hero {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      background: #090a10;
+      border-radius: 16px;
+      overflow: hidden;
+      border: 1px solid var(--card-border);
+      box-shadow: 0 8px 30px rgba(0,0,0,0.5);
+      margin-bottom: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.25s ease;
+    }
+    .mem-hero.live-glow {
+      border-color: rgba(0, 229, 255, 0.45);
+      box-shadow: 0 0 24px rgba(0, 229, 255, 0.25);
+    }
+    .mem-hero.drag-active {
+      border: 2px dashed var(--accent) !important;
+      background: rgba(10, 132, 255, 0.15) !important;
+    }
+    .mem-overlay-actions {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      display: flex;
+      gap: 6px;
+      z-index: 5;
+    }
+    .mem-icon-btn {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: rgba(15, 18, 25, 0.82);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      border: 1px solid rgba(255,255,255,0.14);
+      color: #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      font-size: 0.85rem;
+      padding: 0;
+      transition: all 0.15s ease;
+    }
+    .mem-icon-btn:hover {
+      transform: scale(1.08);
+      background: rgba(25, 30, 42, 0.95);
+      border-color: var(--accent);
+    }
+    .mem-icon-btn.danger:hover {
+      border-color: var(--red);
+      background: rgba(255, 69, 58, 0.25);
+    }
+    .mem-source-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 3px 8px;
+      border-radius: 12px;
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.4px;
+    }
+    .mem-source-badge.shortcut {
+      background: rgba(48, 209, 88, 0.15);
+      color: var(--green);
+      border: 1px solid rgba(48, 209, 88, 0.3);
+    }
+    .mem-source-badge.obex {
+      background: rgba(10, 132, 255, 0.15);
+      color: var(--accent);
+      border: 1px solid rgba(10, 132, 255, 0.3);
+    }
+    .mem-source-badge.upload {
+      background: rgba(191, 90, 242, 0.15);
+      color: #bf5af2;
+      border: 1px solid rgba(191, 90, 242, 0.3);
+    }
+    .mem-thumb-item {
+      position: relative;
+      width: 68px;
+      height: 52px;
+      border-radius: 10px;
+      overflow: hidden;
+      cursor: pointer;
+      flex-shrink: 0;
+      border: 2px solid transparent;
+      transition: all 0.2s ease;
+      background: #000;
+    }
+    .mem-thumb-item img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    .mem-thumb-item:hover {
+      transform: translateY(-2px);
+    }
+    .mem-thumb-item.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 12px rgba(10, 132, 255, 0.5);
+    }
+    .mem-grid-card {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 12px;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.2s ease;
+      position: relative;
+    }
+    .mem-grid-card:hover {
+      border-color: rgba(0, 229, 255, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.4);
+    }
+    .mem-grid-card.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 14px rgba(0, 229, 255, 0.35);
+    }
+    .mem-grid-card img {
+      width: 100%;
+      height: 90px;
+      object-fit: cover;
+      cursor: pointer;
+      display: block;
+    }
+    .mem-grid-info {
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      font-size: 0.72rem;
+    }
+    .mem-grid-title {
+      font-weight: 600;
+      color: #fff;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .mem-grid-actions {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 4px;
+      padding-top: 4px;
+      border-top: 1px solid rgba(255, 255, 255, 0.05);
+    }
+    .mem-filter-pill {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      border-radius: 12px;
+      padding: 4px 10px;
+      font-size: 0.72rem;
+      font-weight: 600;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    .mem-filter-pill:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.12);
+    }
+    .mem-filter-pill.active {
+      background: rgba(0, 229, 255, 0.15);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 10px rgba(0, 229, 255, 0.25);
+    }
+    .mem-filter-pill span {
+      background: rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      padding: 1px 5px;
+      font-size: 0.65rem;
+    }
+    .mem-cat-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 3px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      font-size: 0.60rem;
+      font-weight: 700;
+      letter-spacing: 0.3px;
+      text-transform: uppercase;
+    }
+    .mem-cat-badge.portrait {
+      background: linear-gradient(135deg, rgba(142,68,173,0.9), rgba(155,89,182,0.9));
+      color: #fff;
+      border: 1px solid rgba(175, 122, 197, 0.5);
+    }
+    .mem-cat-badge.nature {
+      background: linear-gradient(135deg, rgba(39,174,96,0.9), rgba(46,204,113,0.9));
+      color: #fff;
+      border: 1px solid rgba(46, 204, 113, 0.5);
+    }
+    .mem-cat-badge.other {
+      background: rgba(0, 0, 0, 0.75);
+      color: #ff9f0a;
+      border: 1px solid rgba(255, 159, 10, 0.4);
+    }
+    .mem-grid-card.filtered-dim {
+      opacity: 0.58;
+      border-style: dashed;
+    }
+    .mem-dropzone {
+      border: 1.5px dashed rgba(255,255,255,0.18);
+      border-radius: 14px;
+      padding: 14px 12px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: rgba(255,255,255,0.02);
+      margin-bottom: 12px;
+    }
+    .mem-dropzone:hover, .mem-dropzone.dragover {
+      border-color: var(--accent);
+      background: rgba(10, 132, 255, 0.08);
+    }
+    .lumo-modal-backdrop {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.82);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      z-index: 1000;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      animation: fadeIn 0.2s ease;
+    }
+    .lumo-modal-card {
+      background: #141721;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 24px;
+      max-width: 440px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      padding: 22px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+      animation: slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .modal-tab-bar {
+      display: flex;
+      background: rgba(255,255,255,0.06);
+      border-radius: 12px;
+      padding: 3px;
+      margin: 14px 0;
+      gap: 4px;
+    }
+    .modal-tab-btn {
+      flex: 1;
+      font-size: 0.76rem;
+      padding: 8px 4px;
+      border-radius: 9px;
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-weight: 600;
+      transition: all 0.15s;
+    }
+    .modal-tab-btn.active {
+      background: rgba(255,255,255,0.15);
+      color: #fff;
+    }
+    .code-pill {
+      background: rgba(0,0,0,0.45);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 10px 12px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.75rem;
+      color: #00e5ff;
+      word-break: break-all;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .step-badge {
+      width: 22px;
+      height: 22px;
+      border-radius: 50%;
+      background: var(--accent);
+      color: #fff;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.72rem;
+      font-weight: 700;
+      flex-shrink: 0;
+    }
+    @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+    @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <!-- Top Bar -->
+  <div class="header">
+    <h1>LUMO Control</h1>
+    <div class="badge" id="statusBadge">
+      <div class="dot" id="statusDot"></div>
+      <span id="statusText">Connecting...</span>
+    </div>
+  </div>
+
+  <!-- Alarm Ringing Banner -->
+  <div id="alarmBanner">
+    <h2 style="font-size:1.2rem; margin-bottom: 8px;">ALARM RINGING!</h2>
+    <div style="display:flex; gap:10px; justify-content:center;">
+      <button onclick="dismissAlarm()" class="primary" style="background:#fff; color:#000;">Dismiss</button>
+      <button onclick="snoozeAlarm()" style="background:rgba(0,0,0,0.3);">Snooze 5m</button>
+    </div>
+  </div>
+
+  <!-- Live 2.8" LCD Screen Mirror (320x240) -->
+  <div class="lcd-wrapper">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:0.85rem; font-weight:700; text-transform:uppercase; letter-spacing:0.5px; color:#fff;">Live LCD Display Mirror</span>
+        <span class="badge" style="font-size:0.7rem; background:rgba(0,229,255,0.15); color:var(--accent); border-radius:6px; padding:2px 6px;">2.8" 320×240</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px; font-size:0.75rem; color:var(--muted);">
+        <span id="lcdSyncDot" style="width:8px; height:8px; border-radius:50%; background:var(--green); display:inline-block; box-shadow:0 0 6px var(--green);"></span>
+        <span id="lcdModeLabel" style="font-weight:700; color:#fff;">FACE</span>
+      </div>
+    </div>
+
+    <!-- Realistic LCD Bezel Enclosure -->
+    <div class="lcd-bezel">
+      <canvas id="lcdCanvas" width="320" height="240"></canvas>
+      <div class="lcd-scanlines"></div>
+      <div class="lcd-glare"></div>
+    </div>
+  </div>
+
+  <!-- JARVIS Voice Assistant Companion -->
+  <div class="card" id="jarvisVoiceCard" style="border-color: rgba(0, 229, 255, 0.25); background: linear-gradient(180deg, rgba(20, 26, 40, 0.85) 0%, rgba(13, 16, 26, 0.9) 100%);">
+    <div class="card-title" style="display:flex; justify-content:space-between; align-items:center;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:1.15rem;">🎙️</span>
+        <span style="color:#fff; font-weight:700; letter-spacing:0.3px;">JARVIS Voice Companion</span>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span class="badge" id="voiceStateBadge" style="background:rgba(255,255,255,0.08); color:var(--muted); font-size:0.75rem; padding:4px 10px;">
+          <span class="dot" id="voiceStateDot" style="width:7px; height:7px; background:#888;"></span>
+          <span id="voiceStateText">IDLE</span>
+        </span>
+      </div>
+    </div>
+
+    <!-- Insecure Context Warning & 1-Click Upgrade for Phone/Browser Mic -->
+    <div id="insecureContextNotice" style="display:none; background: rgba(255, 159, 10, 0.15); border: 1px solid rgba(255, 159, 10, 0.4); border-radius: 12px; padding: 12px 14px; margin-bottom: 12px; font-size: 0.8rem; line-height: 1.45; color: #ffb300;">
+      <div style="font-weight: 700; margin-bottom: 4px; display: flex; align-items: center; gap: 6px;">
+        <span>🔒</span> <span>Phone / Browser Mic Requires HTTPS</span>
+      </div>
+      <div>Mobile browsers block microphone access over plain HTTP. Tap below to switch to HTTPS mode:</div>
+      <div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+        <a id="httpsUpgradeLink" href="#" style="display:inline-block; padding: 5px 12px; background: #ff9f0a; color: #000; font-weight: 700; text-decoration: none; border-radius: 8px; font-size: 0.78rem;">Switch to HTTPS 👉</a>
+        <span style="font-size: 0.72rem; color: #aaa;">(Tap "Advanced → Proceed" on the security warning)</span>
+      </div>
+    </div>
+
+    <!-- Push-To-Talk Center Button -->
+    <div style="display:flex; flex-direction:column; align-items:center; margin: 10px 0 14px 0;">
+      <button id="pttButton" class="ptt-btn" style="
+        width: 100%;
+        padding: 16px 20px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, rgba(10, 132, 255, 0.22), rgba(0, 229, 255, 0.12));
+        border: 2px solid rgba(0, 229, 255, 0.35);
+        color: #fff;
+        font-size: 1rem;
+        font-weight: 700;
+        letter-spacing: 0.3px;
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        gap: 10px;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        user-select: none;
+      ">
+        <span id="pttIcon" style="font-size: 1.3rem;">🎙️</span>
+        <span id="pttLabel">Hold Spacebar or Click to Speak</span>
+      </button>
+
+      <!-- Live VU meter bar -->
+      <div id="vuMeterContainer" style="width: 100%; height: 6px; background: rgba(255,255,255,0.08); border-radius: 4px; margin-top: 10px; overflow: hidden; display: none;">
+        <div id="vuMeterBar" style="height: 100%; width: 0%; background: linear-gradient(90deg, #30d158, #00E5FF, #ff9f0a); transition: width 0.05s ease;"></div>
+      </div>
+    </div>
+
+    <!-- Live Conversation Transcript -->
+    <div style="background: rgba(0,0,0,0.35); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 12px; margin-bottom: 12px; min-height: 64px; font-size: 0.85rem; line-height: 1.45;">
+      <div id="voiceUserBox" style="color: var(--muted); margin-bottom: 6px; display: none;">
+        <span style="color: var(--accent); font-weight: 600;">You:</span> <span id="voiceUserText">...</span>
+      </div>
+      <div id="voiceJarvisBox" style="color: #fff;">
+        <span style="color: #00E5FF; font-weight: 600;">JARVIS:</span> <span id="voiceJarvisText">"Ready for your command, sir."</span>
+      </div>
+    </div>
+
+    <!-- Text Prompt Fallback Input -->
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <input type="text" id="voiceTextInput" placeholder="Or type a command for Jarvis..." style="
+        flex: 1;
+        background: rgba(255,255,255,0.06);
+        border: 1px solid var(--card-border);
+        border-radius: 10px;
+        padding: 8px 12px;
+        color: #fff;
+        font-size: 0.85rem;
+        outline: none;
+      " onkeydown="if(event.key==='Enter') sendTypedVoicePrompt()">
+      <button onclick="sendTypedVoicePrompt()" style="padding:8px 14px; font-size:0.85rem; background:var(--accent); color:#fff; border-radius:10px;">Send</button>
+    </div>
+
+    <!-- Quick Prompt Chips -->
+    <div style="display:flex; flex-wrap:wrap; gap:6px;">
+      <button class="voice-chip" onclick="sendVoicePrompt('Change optics to cyan')">Optics Cyan</button>
+      <button class="voice-chip" onclick="sendVoicePrompt('How hot is the processor?')">Pi Vitals</button>
+      <button class="voice-chip" onclick="sendVoicePrompt('Scan the area')">Scan Visor</button>
+      <button class="voice-chip" onclick="sendVoicePrompt('Play music')">Play Music</button>
+      <button class="voice-chip" onclick="sendVoicePrompt('Set alarm for 7:30 AM')">7:30 Alarm</button>
+    </div>
+
+    <!-- Hardware Microphone Selector -->
+    <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(255,255,255,0.06); display:flex; justify-content:space-between; align-items:center; font-size:0.78rem;">
+      <span style="color:var(--muted);">🎙️ Pi Hardware Mic:</span>
+      <select id="voiceDeviceSelect" onchange="changeVoiceDevice(this.value)" style="
+        background: rgba(255,255,255,0.08);
+        border: 1px solid var(--card-border);
+        color: #fff;
+        border-radius: 8px;
+        padding: 4px 8px;
+        font-size: 0.75rem;
+        max-width: 230px;
+        outline: none;
+      ">
+        <option value="default">System Default (PipeWire/ALSA)</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- 1. Display Screen Switcher (Zero Buttons Needed) -->
+  <div class="card">
+    <div class="card-title">Display Screen Mode</div>
+    <div class="screen-grid">
+      <div class="screen-btn active" id="btnScrFace" onclick="switchDisplay('FACE')">
+        <span class="icon">🤖</span><span>Face</span>
+      </div>
+      <div class="screen-btn" id="btnScrClock" onclick="switchDisplay('CLOCK')">
+        <span class="icon">⏰</span><span>Clock</span>
+      </div>
+      <div class="screen-btn" id="btnScrSystem" onclick="switchDisplay('SYSTEM')">
+        <span class="icon">📊</span><span>Pi Vitals</span>
+      </div>
+      <div class="screen-btn" id="btnScrSpotify" onclick="switchDisplay('SPOTIFY')">
+        <span class="icon">🎵</span><span>Music</span>
+      </div>
+      <div class="screen-btn" id="btnScrTasks" onclick="switchDisplay('TASKS')">
+        <span class="icon">📝</span><span>Tasks</span>
+      </div>
+      <div class="screen-btn" id="btnScrMemory" onclick="switchDisplay('MEMORY')">
+        <span class="icon">🖼️</span><span>Memories</span>
+      </div>
+      <div class="screen-btn" onclick="postApi('/api/haptic?ms=70')">
+        <span class="icon">📳</span><span>Haptic</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. LUMO Cybernetic Face Studio -->
+  <div class="card">
+    <div class="card-title">Cybernetic Face & Optics Color</div>
+    <div class="palette-row">
+      <div class="color-dot active" id="dotCyan" style="background:#00E5FF;" onclick="setEyeColor('cyan')" title="Electric Cyan"></div>
+      <div class="color-dot" id="dotAmber" style="background:#FFB300;" onclick="setEyeColor('amber')" title="Cyberpunk Amber"></div>
+      <div class="color-dot" id="dotGreen" style="background:#00FF66;" onclick="setEyeColor('green')" title="Matrix Green"></div>
+      <div class="color-dot" id="dotWhite" style="background:#E0F7FA;" onclick="setEyeColor('white')" title="Stealth White"></div>
+      <div class="color-dot" id="dotPurple" style="background:#9D00FF;" onclick="setEyeColor('purple')" title="Synthwave Violet"></div>
+      <div class="color-dot" id="dotRed" style="background:#FF1744;" onclick="setEyeColor('red')" title="Combat Red"></div>
+    </div>
+    <div class="anim-grid">
+      <button class="anim-btn" onclick="playAnim('focused')"><span class="icon">🎯</span><span>Focus</span></button>
+      <button class="anim-btn" onclick="playAnim('smirk')"><span class="icon">😏</span><span>Smirk</span></button>
+      <button class="anim-btn" onclick="playAnim('scan')"><span class="icon">⚡</span><span>Scan</span></button>
+      <button class="anim-btn" onclick="playAnim('dance')"><span class="icon">🎵</span><span>Groove</span></button>
+      <button class="anim-btn" onclick="playAnim('curious')"><span class="icon">🧐</span><span>Curious</span></button>
+      <button class="anim-btn" onclick="playAnim('alert')"><span class="icon">🚨</span><span>Alert</span></button>
+      <button class="anim-btn" onclick="playAnim('standby')"><span class="icon">💤</span><span>Standby</span></button>
+      <button class="anim-btn" onclick="playAnim('normal')"><span class="icon">🤖</span><span>Normal</span></button>
+    </div>
+  </div>
+
+  <!-- 3. Pi 5 Hardware Vitals -->
+  <div class="card">
+    <div class="card-title">Pi 5 System Vitals</div>
+    <div class="stats-grid">
+      <div class="stat-box">
+        <div class="stat-lbl">CPU Temp</div>
+        <div class="stat-val" id="valCpuTemp">--.- °C</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">CPU Load</div>
+        <div class="stat-val" id="valCpuLoad">-- %</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">RAM Usage</div>
+        <div class="stat-val" id="valRam">-- %</div>
+      </div>
+      <div class="stat-box">
+        <div class="stat-lbl">Disk Storage</div>
+        <div class="stat-val" id="valDisk">-- %</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Ambient Lighting -->
+  <div class="card">
+    <div class="card-title">Ambient Lighting</div>
+    <div class="btn-group">
+      <button onclick="setLightMode('WARM')" id="btnWarm" class="warm">Warm</button>
+      <button onclick="setLightMode('COLOR')" id="btnColor">Color</button>
+      <button onclick="setLightMode('BREATHE')" id="btnBreathe">Breathe</button>
+      <button onclick="setLightMode('OFF')" id="btnOff">Off</button>
+    </div>
+
+    <div class="slider-row">
+      <div class="slider-label"><span>Brightness</span><span id="briVal">40%</span></div>
+      <input type="range" id="briSlider" min="5" max="100" value="40" oninput="onLightSliderChange()">
+    </div>
+
+    <div class="slider-row" id="hueRow" style="display:none;">
+      <div class="slider-label"><span>Color Hue</span><span id="hueVal">0°</span></div>
+      <input type="range" id="hueSlider" min="0" max="360" value="0" oninput="onLightSliderChange()">
+    </div>
+  </div>
+
+  <!-- 5. Music Remote (Spotify & iPhone Bluetooth) -->
+  <div class="card">
+    <div class="card-title">Music Player <span id="musicSourceBadge" style="font-size:0.75rem; color:var(--accent); text-transform:none;">(Spotify / iPhone)</span></div>
+    <div style="text-align:center; margin-bottom: 12px;">
+      <div id="spTitle" style="font-size:1.05rem; font-weight:600;">No Track Playing</div>
+      <div id="spArtist" style="font-size:0.85rem; color:var(--muted); margin-top:2px;">Idle</div>
+    </div>
+    <div class="btn-group">
+      <button onclick="postApi('/api/spotify/prev')">Prev</button>
+      <button onclick="postApi('/api/spotify/toggle')" class="primary">Play / Pause</button>
+      <button onclick="postApi('/api/spotify/next')">Next</button>
+    </div>
+    <div style="display:flex; gap:8px; margin-top:10px;">
+      <button onclick="postApi('/api/music/resend-art')" style="flex:1; padding:6px; font-size:0.75rem; background:rgba(255,255,255,0.06);" title="Re-fetches and streams artwork">🔄 Refresh Art</button>
+      <button onclick="postApi('/api/music/toggle-swap')" style="flex:1; padding:6px; font-size:0.75rem; background:rgba(255,255,255,0.06);" title="Toggles High/Low byte endianness">🎨 Swap Bytes</button>
+      <button onclick="postApi('/api/music/toggle-bgr')" style="flex:1; padding:6px; font-size:0.75rem; background:rgba(255,255,255,0.06);" title="Toggles Red and Blue channels">🔴/🔵 RGB/BGR</button>
+    </div>
+  </div>
+
+  <!-- 6. Bluetooth Device & Pairing Manager -->
+  <div class="card">
+    <div class="card-title">
+      <span>Bluetooth Pairing Assistant</span>
+      <span id="btStatusBadge" class="badge" style="font-size:0.75rem; background:rgba(255,255,255,0.08); padding:4px 8px; border-radius:8px;">Checking...</span>
+    </div>
+
+    <!-- Active Connected Device Banner -->
+    <div id="btConnectedBox" style="display:none; background:rgba(48,209,88,0.12); border:1px solid rgba(48,209,88,0.3); border-radius:12px; padding:12px; margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center;">
+        <div>
+          <div style="font-size:0.75rem; color:var(--green); text-transform:uppercase; font-weight:700;">Paired & Connected</div>
+          <div id="btConnectedName" style="font-size:1.1rem; font-weight:700; color:#fff; margin-top:2px;">iPhone</div>
+          <div id="btConnectedMac" style="font-size:0.75rem; color:var(--muted);">--:--:--:--:--:--</div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button onclick="pingBluetooth()" style="padding:6px 10px; font-size:0.8rem;">Ping 📳</button>
+          <button onclick="disconnectBluetooth()" class="danger" style="padding:6px 10px; font-size:0.8rem;">Disconnect</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Pairing Mode Banner & Countdown -->
+    <div id="btPairingBox" style="display:none; background:rgba(10,132,255,0.15); border:1px solid var(--accent); border-radius:12px; padding:12px; margin-bottom:12px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-weight:700; color:var(--accent); font-size:0.9rem;">📡 Pairing Mode Active</span>
+        <span id="btTimerVal" style="font-size:0.85rem; font-weight:700; color:#fff;">180s</span>
+      </div>
+      <div style="font-size:0.82rem; color:#eee; line-height:1.45;">
+        1. Open <b>Settings &gt; Bluetooth</b> on your iPhone.<br>
+        2. Look under <b>Other Devices</b> for <b>"LUMO Companion"</b>.<br>
+        3. Tap <b>Pair</b> (and Allow Notifications if prompted).
+      </div>
+      <button onclick="stopPairingMode()" style="width:100%; margin-top:10px; padding:8px; font-size:0.8rem;">Cancel Pairing Mode</button>
+    </div>
+
+    <!-- Pair Button (when idle) -->
+    <div id="btIdleBox" style="margin-bottom:12px;">
+      <button onclick="startPairingMode()" class="primary" style="width:100%; display:flex; align-items:center; justify-content:center; gap:8px;">
+        <span>📡</span><span>Pair New Phone / Device</span>
+      </button>
+    </div>
+
+    <!-- Mode Explainer -->
+    <div style="font-size:0.75rem; color:var(--accent); margin-bottom:10px; display:flex; align-items:center; gap:6px;">
+      <span>⌚</span><span>Mode: Wearable Smartwatch (Audio plays on your AirPods/Phone, NOT on LUMO)</span>
+    </div>
+
+    <!-- Paired Devices List -->
+    <div style="font-size:0.78rem; color:var(--muted); text-transform:uppercase; margin-bottom:6px; letter-spacing:0.5px;">Paired Devices</div>
+    <div id="btDeviceList" style="font-size:0.85rem; color:var(--muted); text-align:center; padding:6px 0;">No devices paired yet</div>
+    <button onclick="applyWearableMode()" style="padding:6px 10px; font-size:0.75rem; background:rgba(255,255,255,0.05); margin-top:10px; width:100%;">Force Wearable Mode (Disable Audio Hijacking)</button>
+  </div>
+
+  <!-- 7. LUMO Memories Photo Frame -->
+  <div class="card" id="memoriesCard">
+    <div class="card-title">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <span style="font-size:1.1rem;">🖼️</span>
+        <span style="color:#fff; font-weight:700;">Memories Frame</span>
+        <span id="memDeskLiveBadge" class="badge" style="display:none; font-size:0.68rem; padding:3px 8px; background:rgba(0,255,102,0.15); color:var(--green); border-color:rgba(0,255,102,0.3);">● ON DESK</span>
+        <span id="memVisionAiHeaderBadge" class="badge" style="font-size:0.68rem; padding:3px 8px; border-radius:12px; display:inline-flex; align-items:center; gap:5px; background:rgba(142,68,173,0.25); color:#d2a8ff; border:1px solid rgba(175,122,197,0.45); font-weight:600;">
+          <span id="memVisionAiPulse" style="width:7px; height:7px; border-radius:50%; background:#2ecc71; box-shadow:0 0 8px #2ecc71; display:inline-block;"></span>
+          <span id="memVisionAiHeaderStatus">✨ Vision AI: Active</span>
+        </span>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button onclick="openShortcutModal()" style="padding:4px 9px; font-size:0.72rem; border-radius:12px; background:linear-gradient(135deg, rgba(10,132,255,0.25), rgba(48,209,88,0.2)); border:1px solid rgba(0,229,255,0.3); color:#fff; display:flex; align-items:center; gap:4px; cursor:pointer;">
+          <span>📱</span> iOS Shortcuts
+        </button>
+        <button onclick="toggleMemSettings()" class="mem-icon-btn" title="Frame Settings" style="width:28px; height:28px; font-size:0.75rem;">⚙️</button>
+      </div>
+    </div>
+
+    <!-- Active Photo Hero Box with Hover Overlay -->
+    <div id="memHeroBox" class="mem-hero">
+      <img id="memCurrentImg" src="" style="width:100%; height:100%; object-fit:cover; display:none; cursor:pointer;" alt="Memory" onclick="openMemoryLightbox()">
+
+      <!-- Live Curation Eligibility Badge (Top-Left overlay) -->
+      <div id="memHeroCurationTag" style="display:none; position:absolute; top:10px; left:10px; z-index:4; align-items:center; gap:6px; padding:4px 10px; border-radius:8px; font-size:0.72rem; font-weight:700; backdrop-filter:blur(8px); -webkit-backdrop-filter:blur(8px); box-shadow:0 4px 14px rgba(0,0,0,0.6);">
+        <span id="memHeroTagDot">●</span> <span id="memHeroTagText">DISPLAYABLE ON DESK</span>
+      </div>
+      
+      <!-- Top Action Floating Pills -->
+      <div id="memOverlayActions" class="mem-overlay-actions" style="display:none;">
+        <button onclick="openMemoryLightbox()" class="mem-icon-btn" title="Fullscreen Lightbox">🔍</button>
+        <button onclick="downloadCurrentMemory()" class="mem-icon-btn" title="Download">⬇️</button>
+        <button onclick="deleteCurrentMemory()" class="mem-icon-btn danger" title="Delete Photo">🗑️</button>
+      </div>
+
+      <!-- Empty State Placeholder -->
+      <div id="memEmptyPlaceholder" style="text-align:center; color:var(--muted); padding:28px 20px;">
+        <div style="font-size:2.4rem; margin-bottom:8px; filter:drop-shadow(0 0 12px rgba(10,132,255,0.4));">📷</div>
+        <div style="font-weight:700; color:#fff; font-size:1.05rem;">No Memories Ingested Yet</div>
+        <div style="font-size:0.8rem; margin-top:6px; max-width:270px; line-height:1.45;">Drop photos here, share via Bluetooth, or tap <b>iOS Shortcuts</b> above to beam from your iPhone.</div>
+      </div>
+
+      <!-- Bottom Glass Caption Bar -->
+      <div id="memCaptionBar" style="display:none; position:absolute; bottom:0; left:0; right:0; background:linear-gradient(transparent, rgba(7,9,14,0.75) 30%, rgba(7,9,14,0.95)); padding:12px 14px; justify-content:space-between; align-items:flex-end; backdrop-filter:blur(6px); -webkit-backdrop-filter:blur(6px);">
+        <div>
+          <div style="display:flex; align-items:center; gap:8px; margin-bottom:4px; flex-wrap:wrap;">
+            <div id="memCaptionText" style="font-size:0.95rem; font-weight:700; color:#fff;">-</div>
+            <span id="memIndexBadge" style="font-size:0.68rem; color:var(--muted); background:rgba(255,255,255,0.08); padding:2px 6px; border-radius:6px;">1/1</span>
+            <span id="memCategoryPreviewBadge"></span>
+          </div>
+          <div style="display:flex; align-items:center; gap:6px;">
+            <span id="memSourceBadge" class="mem-source-badge upload">via Web Upload</span>
+            <span id="memDateText" style="font-size:0.7rem; color:var(--muted);">Today</span>
+          </div>
+        </div>
+        <button onclick="pushMemoryToDisplay()" class="primary" style="padding:6px 12px; font-size:0.8rem; border-radius:10px; display:flex; align-items:center; gap:5px; box-shadow:0 0 14px rgba(10,132,255,0.4);">
+          <span>📺</span> Display
+        </button>
+      </div>
+
+      <!-- Drag & Drop Dropzone Overlay indicator -->
+      <div id="memDragOverlay" style="display:none; position:absolute; inset:0; background:rgba(10,132,255,0.2); backdrop-filter:blur(4px); -webkit-backdrop-filter:blur(4px); border:2px dashed var(--accent); border-radius:16px; align-items:center; justify-content:center; flex-direction:column; z-index:10; pointer-events:none;">
+        <div style="font-size:2rem; margin-bottom:6px;">📥</div>
+        <div style="font-weight:700; color:#fff;">Drop to Beam to LUMO Frame</div>
+      </div>
+    </div>
+
+    <!-- Quick Navigation Bar -->
+    <div class="btn-group" style="margin-bottom:12px;">
+      <button onclick="prevMemory()" style="padding:9px;">◀ Prev</button>
+      <button onclick="pushMemoryToDisplay()" class="primary" style="padding:9px; background:linear-gradient(135deg, var(--accent), #00d2ff);">Stream to LUMO 📺</button>
+      <button onclick="nextMemory()" style="padding:9px;">Next ▶</button>
+    </div>
+
+    <!-- Thumbnails Filmstrip & Gallery Grid Header -->
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+      <div style="display:flex; align-items:center; gap:6px;">
+        <span style="font-size:0.75rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">All Memories</span>
+        <span id="memCountBadge" class="badge" style="font-size:0.72rem; padding:2px 8px; background:rgba(0,229,255,0.1); color:var(--accent);">0 / 50 Photos</span>
+      </div>
+      <div style="display:flex; background:rgba(255,255,255,0.06); border-radius:8px; padding:2px; gap:2px;">
+        <button id="btnViewFilmstrip" onclick="setMemViewMode('filmstrip')" style="padding:3px 7px; font-size:0.7rem; border-radius:6px; background:rgba(255,255,255,0.15); color:#fff; border:none; cursor:pointer;" title="Filmstrip view">🎞️ Strip</button>
+        <button id="btnViewGrid" onclick="setMemViewMode('grid')" style="padding:3px 7px; font-size:0.7rem; border-radius:6px; background:transparent; color:var(--muted); border:none; cursor:pointer;" title="Grid gallery view">▦ Grid</button>
+      </div>
+    </div>
+
+    <!-- Vision AI Engine Live Status Banner -->
+    <div id="memVisionStatusBar" style="display:flex; justify-content:space-between; align-items:center; background:linear-gradient(135deg, rgba(142,68,173,0.18), rgba(46,204,113,0.14)); border:1px solid rgba(46,204,113,0.35); border-radius:10px; padding:9px 12px; margin-bottom:10px; font-size:0.75rem;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:1.2rem;" id="memVisionEngineIcon">✨</span>
+        <div>
+          <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+            <span style="font-weight:700; color:#fff;" id="memVisionStatusTitle">Vision AI: Active (Portraits &amp; Nature Only)</span>
+            <span id="memVisionEngineBadge" class="badge" style="font-size:0.62rem; padding:1px 6px; background:rgba(0,255,102,0.15); color:#2ecc71; border:1px solid rgba(0,255,102,0.3); font-weight:700;">OPENCV READY</span>
+          </div>
+          <div style="font-size:0.68rem; color:var(--muted); margin-top:2px;" id="memVisionStatusSubtitle">
+            Filtering desk display: only photos with human faces or natural landscapes are displayed on ESP32.
+          </div>
+        </div>
+      </div>
+      <div style="display:flex; align-items:center; gap:6px;">
+        <button id="btnBannerScan" onclick="scanAndCurateLibrary()" style="padding:5px 11px; font-size:0.72rem; font-weight:600; border-radius:8px; background:linear-gradient(135deg, rgba(142,68,173,0.35), rgba(46,204,113,0.35)); border:1px solid rgba(46,204,113,0.4); color:#fff; cursor:pointer; display:flex; align-items:center; gap:5px;" title="Re-scan all photos with OpenCV">
+          <span>🔍</span> Re-scan Library
+        </button>
+      </div>
+    </div>
+
+    <!-- Category Filter Pills (All, Portraits, Nature, Filtered) -->
+    <div id="memCategoryFilterBar" style="display:flex; gap:6px; overflow-x:auto; margin-bottom:10px; padding-bottom:2px; scrollbar-width:none;">
+      <button class="mem-filter-pill active" id="pillCatAll" onclick="setGalleryCategoryFilter('all')">All <span id="cntPillAll">0</span></button>
+      <button class="mem-filter-pill" id="pillCatPortrait" onclick="setGalleryCategoryFilter('portrait')">👤 Portraits <span id="cntPillPortrait">0</span></button>
+      <button class="mem-filter-pill" id="pillCatNature" onclick="setGalleryCategoryFilter('nature')">🌿 Nature <span id="cntPillNature">0</span></button>
+      <button class="mem-filter-pill" id="pillCatOther" onclick="setGalleryCategoryFilter('other')">📁 Filtered <span id="cntPillOther">0</span></button>
+    </div>
+
+    <!-- 1. Filmstrip Carousel View -->
+    <div id="memThumbsStrip" style="display:flex; gap:8px; overflow-x:auto; padding-bottom:8px; margin-bottom:12px; scrollbar-width:thin;">
+    </div>
+
+    <!-- 2. Multi-Column Grid View (shows all photos side by side) -->
+    <div id="memGalleryGrid" style="display:none; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap:10px; margin-bottom:14px; max-height: 380px; overflow-y:auto; padding-right:4px;">
+    </div>
+
+    <!-- Drag & Drop / Direct Multi-Photo Ingestion Area -->
+    <div id="memDropzone" class="mem-dropzone" onclick="document.getElementById('memFileInput').click()">
+      <div style="display:flex; align-items:center; justify-content:center; gap:8px; margin-bottom:6px;">
+        <span style="font-size:1.2rem;">📤</span>
+        <span style="font-weight:600; color:#fff; font-size:0.85rem;">Add Photos to Frame</span>
+      </div>
+      <div style="font-size:0.74rem; color:var(--muted); line-height:1.4;">
+        Drag &amp; drop images here or <b>browse files</b> (JPEG, PNG, HEIC).<br>
+        Upload any number of images &bull; Auto-optimized to 320&times;240 for LCD.
+      </div>
+      <input type="file" id="memFileInput" accept="image/*" multiple style="display:none;" onchange="handleFileInput(this.files)">
+    </div>
+
+    <!-- Optional Custom Caption Bar -->
+    <div style="display:flex; gap:8px; margin-bottom:12px;">
+      <input type="text" id="memCaptionInput" placeholder="Custom photo caption (optional, e.g. Vacation)..." style="flex:1; background:rgba(255,255,255,0.06); border:1px solid var(--card-border); color:#fff; border-radius:10px; padding:7px 10px; font-size:0.78rem; outline:none;">
+      <button onclick="uploadWithCaption()" style="padding:7px 12px; font-size:0.78rem; border-radius:10px; background:rgba(255,255,255,0.1);">Upload</button>
+    </div>
+
+    <!-- Collapsible Advanced Frame Settings -->
+    <div id="memSettingsTray" style="display:none; background:rgba(0,0,0,0.25); border:1px solid rgba(255,255,255,0.06); border-radius:12px; padding:12px; margin-bottom:8px;">
+      <div style="font-size:0.75rem; font-weight:700; color:var(--muted); text-transform:uppercase; margin-bottom:10px; letter-spacing:0.5px;">Display Configuration &amp; Quotas</div>
+      
+      <!-- Quota summary bar -->
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(255,255,255,0.06); border-radius:10px; padding:8px 12px; margin-bottom:12px; font-size:0.78rem;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <span style="color:var(--muted);">Total Capacity:</span>
+          <span style="color:#fff; font-weight:600;"><span id="memTotalStoredText">0</span> / 50 Photos (Rolling Overwrite)</span>
+        </div>
+        <div style="font-size:0.7rem; color:var(--muted); line-height:1.35;">
+          Upload any number of images. Once the library reaches 50 photos, older photos are automatically overwritten.
+        </div>
+      </div>
+
+      <!-- Vision AI Curation Toggle (Portraits & Nature Only) -->
+      <div style="background:linear-gradient(135deg, rgba(142,68,173,0.18), rgba(46,204,113,0.14)); border:1px solid rgba(46,204,113,0.35); border-radius:10px; padding:10px 12px; margin-bottom:12px;">
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div>
+            <div style="font-size:0.82rem; font-weight:700; color:#fff; display:flex; align-items:center; gap:6px;">
+              <span>✨ Curate: Portraits &amp; Nature Only</span>
+            </div>
+            <div style="font-size:0.68rem; color:var(--muted); margin-top:2px;" id="memCurationSummaryText">
+              Desk display only plays photos with human faces or natural landscapes
+            </div>
+          </div>
+          <label class="toggle-switch">
+            <input type="checkbox" id="memCurateDisplayToggle" onchange="toggleMemCurateDisplay(this.checked)" checked>
+            <span class="slider-toggle"></span>
+          </label>
+        </div>
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:8px; padding-top:8px; border-top:1px solid rgba(255,255,255,0.06);">
+          <span style="font-size:0.7rem; color:#85e89d;" id="memCuratedCountBadge">32 of 50 photos curated</span>
+          <button onclick="scanAndCurateLibrary()" id="btnScanCurate" style="padding:4px 9px; font-size:0.7rem; border-radius:6px; background:rgba(255,255,255,0.12); border:1px solid rgba(255,255,255,0.18); color:#fff; cursor:pointer;" title="Re-scan all photos in library with Vision AI">
+            🔍 Re-scan Library
+          </button>
+        </div>
+      </div>
+
+      <!-- Deduplication Toggle -->
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:0.82rem;">
+        <div>
+          <span style="color:#eee;">Replace Duplicates</span>
+          <div style="font-size:0.68rem; color:var(--muted);">Update existing photo instead of creating a duplicate</div>
+        </div>
+        <label class="toggle-switch">
+          <input type="checkbox" id="memReplaceDuplicatesToggle" onchange="toggleMemReplaceDuplicates(this.checked)" checked>
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px; font-size:0.82rem;">
+        <span style="color:#eee;">Ambient Idle Auto-Rotate (after 2m)</span>
+        <label class="toggle-switch">
+          <input type="checkbox" id="memAutoRotateToggle" onchange="toggleMemAutoRotate(this.checked)">
+          <span class="slider-toggle"></span>
+        </label>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--muted); margin-bottom:10px;">
+        <span>Rotation Interval:</span>
+        <select id="memIntervalSelect" onchange="changeMemInterval(this.value)" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; border-radius:8px; padding:4px 8px; font-size:0.75rem; outline:none;">
+          <option value="10">10 seconds</option>
+          <option value="20" selected>20 seconds</option>
+          <option value="30">30 seconds</option>
+          <option value="60">1 minute</option>
+          <option value="300">5 minutes</option>
+        </select>
+      </div>
+      <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.8rem; color:var(--muted); margin-bottom:10px;">
+        <span>GIF Repeat Playback:</span>
+        <select id="memGifLoopsSelect" onchange="changeMemGifLoops(this.value)" style="background:rgba(255,255,255,0.08); border:1px solid var(--card-border); color:#fff; border-radius:8px; padding:4px 8px; font-size:0.75rem; outline:none;">
+          <option value="1">1 loop</option>
+          <option value="2">2 loops</option>
+          <option value="3" selected>3 loops (Default)</option>
+          <option value="5">5 loops</option>
+          <option value="10">10 loops</option>
+        </select>
+      </div>
+      <div style="display:flex; gap:8px;">
+        <button onclick="toggleMemSwap()" style="flex:1; padding:6px; font-size:0.75rem; background:rgba(255,255,255,0.06);">Swap Bytes</button>
+        <button onclick="toggleMemBgr()" style="flex:1; padding:6px; font-size:0.75rem; background:rgba(255,255,255,0.06);">RGB/BGR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 7. iPhone Smartwatch Alerts -->
+  <div class="card">
+    <div class="card-title">iPhone Notification Alert (Haptic Buzz)</div>
+    <div class="add-row" style="margin-top:0;">
+      <input type="text" id="notifApp" value="WhatsApp" style="max-width:110px;" placeholder="App">
+      <input type="text" id="notifTitle" value="Alex" style="max-width:110px;" placeholder="Sender">
+      <input type="text" id="notifBody" value="Hey, dinner is ready!" placeholder="Message">
+    </div>
+    <button onclick="sendNotificationAlert()" class="primary" style="width:100%; margin-top:10px;">Test Notification on LUMO</button>
+  </div>
+
+  <!-- 5. Alarms Manager -->
+  <div class="card">
+    <div class="card-title">Alarms</div>
+    <div id="alarmList"></div>
+
+    <div class="add-row">
+      <input type="time" id="newAlarmTime" value="07:30" style="max-width:110px;">
+      <input type="text" id="newAlarmLabel" placeholder="Label">
+      <button onclick="addAlarm()" class="primary">Add</button>
+    </div>
+  </div>
+
+  <!-- 6. Tasks List -->
+  <div class="card">
+    <div class="card-title">
+      <span>Tasks (Synced with Sage OS)</span>
+      <span id="taskCountBadge" class="badge" style="font-size:0.75rem; background:rgba(0,229,255,0.12); color:var(--accent);">0 Open</span>
+    </div>
+    <div id="taskList"></div>
+
+    <div class="add-row">
+      <input type="text" id="newTaskText" placeholder="Enter task (e.g. Finish report tomorrow at 5pm #work)..." onkeydown="if(event.key==='Enter') addTask()">
+      <button onclick="addTask()" class="primary">Add</button>
+    </div>
+  </div>
+
+  <!-- 7. Companion Personality -->
+  <div class="card">
+    <div class="card-title">LUMO Personality</div>
+    <div class="btn-group">
+      <button onclick="setEmotion('HAPPY')">Happy</button>
+      <button onclick="setEmotion('EXCITED')">Excited</button>
+      <button onclick="setEmotion('BORED')">Bored</button>
+      <button onclick="setEmotion('NORMAL')">Normal</button>
+    </div>
+</div>
+
+<!-- Apple Shortcuts Setup Modal -->
+<div id="shortcutModal" class="lumo-modal-backdrop" onclick="if(event.target===this)closeShortcutModal()">
+  <div class="lumo-modal-card">
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+      <div style="display:flex; align-items:center; gap:8px;">
+        <span style="font-size:1.3rem;">📱</span>
+        <h2 style="font-size:1.15rem; font-weight:700; color:#fff;">Apple Shortcuts for LUMO</h2>
+      </div>
+      <button onclick="closeShortcutModal()" style="background:none; border:none; color:var(--muted); font-size:1.3rem; cursor:pointer; padding:0 4px;">&times;</button>
+    </div>
+
+    <div style="font-size:0.8rem; color:var(--muted); line-height:1.45; margin-bottom:14px;">
+      Send photos directly from your iPhone/iPad Photos app in 1 tap, or automate sync when charging at night.
+    </div>
+
+    <!-- Quick Copy Endpoint URL -->
+    <div style="margin-bottom:14px;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+        <span style="font-size:0.72rem; color:var(--muted); text-transform:uppercase; letter-spacing:0.5px;">Your LUMO Shortcut Ingestion URL</span>
+        <span style="font-size:0.68rem; color:#30d158; background:rgba(48,209,88,0.15); padding:2px 6px; border-radius:6px; font-weight:600;">Port 8081 &bull; No SSL Error</span>
+      </div>
+      <div class="code-pill">
+        <span id="shortcutUrlText">http://...:8081/api/memories/shortcut</span>
+        <button onclick="copyShortcutUrl()" id="btnCopyShortcutUrl" style="padding:4px 8px; font-size:0.72rem; background:var(--accent); border:none; border-radius:6px; color:#fff; cursor:pointer;">Copy</button>
+      </div>
+      <div style="font-size:0.72rem; color:#ff9f0a; margin-top:5px; line-height:1.35;">
+        ⚡ <b>Uses plain HTTP on port 8081:</b> Completely eliminates iOS "invalid certificate" warnings!
+      </div>
+    </div>
+
+    <!-- Modal Tabs -->
+    <!-- Modal Tabs -->
+    <div class="modal-tab-bar">
+      <button class="modal-tab-btn active" id="tabBtnShare" onclick="switchShortcutTab('share')">⚡ Multi-Photo Share Sheet</button>
+      <button class="modal-tab-btn" id="tabBtnAuto" onclick="switchShortcutTab('auto')">🌙 Nightly Batch Sync</button>
+      <button class="modal-tab-btn" id="tabBtnSelect" onclick="switchShortcutTab('select')">🖼️ Multi-Photo Picker</button>
+      <button class="modal-tab-btn" id="tabBtnCurl" onclick="switchShortcutTab('curl')">🧪 cURL / API</button>
+    </div>
+
+    <!-- Tab 1: Multi-Photo Share Sheet -->
+    <div id="shortcutTabShare" style="font-size:0.8rem; line-height:1.55;">
+      <div style="margin-bottom:10px; color:#ddd;">Send <b>one or multiple photos</b> at once from the iOS Photos app via Share Sheet:</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">1</div>
+          <div>Open <b>Shortcuts</b> app on iPhone &gt; Tap <b>+</b> &gt; Name it <b>Send to LUMO</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">2</div>
+          <div>Tap the <b>(i) Details</b> icon at bottom &gt; Turn ON <b>Show in Share Sheet</b> &gt; Select <b>Images</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">3</div>
+          <div>Add Action: <b>Repeat with Each</b> &gt; Input: <i>Shortcut Input</i>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">4</div>
+          <div>Inside loop, Add Action:
+            <ul style="margin:4px 0 0 16px; color:#ddd; font-size:0.76rem;">
+              <li><b>Static Photos:</b> <b>Convert Image</b> &gt; input <i>Repeat Item</i> to <b>JPEG</b>.</li>
+              <li><b>Live Photos &amp; Motion:</b> <b>Make GIF</b> &gt; input <i>Repeat Item</i> (Seconds Per Frame: <code>0.15</code>, Auto-Size: ON).</li>
+            </ul>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">5</div>
+          <div>Inside loop, Add Action: <b>Get Contents of URL</b>:
+            <ul style="margin:4px 0 0 16px; color:var(--muted); font-size:0.76rem;">
+              <li>URL: <span style="color:#00e5ff;">Paste the copied URL above</span></li>
+              <li>Method: <b>POST</b></li>
+              <li>Request Body: <b>File</b> &gt; select <i>Converted Image</i> (or <i>GIF</i>)</li>
+            </ul>
+          </div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">6</div>
+          <div>Outside loop, Add Action: <b>Show Notification</b> &gt; <i>"✨ Synced photos to LUMO Frame!"</i></div>
+        </div>
+      </div>
+      <div style="background:rgba(255,45,85,0.1); border:1px solid rgba(255,45,85,0.3); border-radius:10px; padding:10px; margin-top:12px; font-size:0.75rem; color:#ff7597;">
+        🎞️ <b>Live Photos &amp; GIFs Supported:</b> LUMO natively loops animated GIFs on your desk screen 3 times before advancing to the next memory!
+      </div>
+      <div style="background:rgba(48,209,88,0.1); border:1px solid rgba(48,209,88,0.25); border-radius:10px; padding:10px; margin-top:8px; font-size:0.75rem; color:#85e89d;">
+        🎉 <b>Multiple photos supported!</b> In the Photos app, tap <b>Select</b>, pick any number of photos or Live Photos, tap <b>Share</b> &gt; <b>Send to LUMO</b>. They will all beam to LUMO in batch!
+      </div>
+    </div>
+
+    <!-- Tab 2: Autonomous Nightly Batch Sync -->
+    <div id="shortcutTabAuto" style="display:none; font-size:0.8rem; line-height:1.55;">
+      <div style="margin-bottom:10px; color:#ddd;">Automatically sync your favorite photos taken today every night when charging:</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">1</div>
+          <div>Open <b>Shortcuts</b> app &gt; Tap <b>Automation</b> tab at the bottom &gt; Tap <b>+</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">2</div>
+          <div>Choose <b>Charger</b> &gt; <i>When iPhone is Connected to Power</i> (or <i>At 10:00 PM</i>) &gt; Select <b>Run Immediately</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">3</div>
+          <div>Add Action: <b>Find Photos</b> &gt; Filter where <i>Is a Favorite is Yes</i> &amp; <i>Date Taken is Today</i> (or <i>in the last 1 day</i>).</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">4</div>
+          <div>(Optional) Add Action: <b>Get Items from List</b> or skip this step to sync <b>all favorite photos</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">5</div>
+          <div>Add Action: <b>Repeat with Each</b> &gt; Input: <i>Photos</i> (or <i>Items from List</i>).</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">6</div>
+          <div>Inside loop, Add Action: <b>Convert Image</b> &gt; input <i>Repeat Item</i> to <b>JPEG</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">7</div>
+          <div>Inside loop, Add Action: <b>Get Contents of URL</b> &gt; POST to shortcut URL above (Request Body: File &gt; Converted Image).</div>
+        </div>
+      </div>
+      <div style="background:rgba(255,45,85,0.1); border:1px solid rgba(255,45,85,0.3); border-radius:10px; padding:10px; margin-top:12px; font-size:0.75rem; color:#ff7597;">
+        🎞️ <b>Tip for Live Photos:</b> In step 6, replace <b>Convert Image</b> with <b>Make GIF</b> (Seconds Per Frame: <code>0.15</code>) to sync your favorite Live Photos as looping motion memories!
+      </div>
+      <div style="background:rgba(10,132,255,0.1); border:1px solid rgba(10,132,255,0.25); border-radius:10px; padding:10px; margin-top:8px; font-size:0.75rem; color:#85d7ff;">
+        🌙 <b>Quota &amp; Storage:</b> LUMO maintains a rolling queue of <b>50 photos total</b>. Upload any number of photos; after 50, older memories automatically make room for new ones on a rolling basis.
+      </div>
+    </div>
+
+    <!-- Tab 3: Dedicated Multi-Photo Picker Shortcut -->
+    <div id="shortcutTabSelect" style="display:none; font-size:0.8rem; line-height:1.55;">
+      <div style="margin-bottom:10px; color:#ddd;">A standalone 1-tap Home Screen button to select multiple photos and send immediately:</div>
+      <div style="display:flex; flex-direction:column; gap:10px;">
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">1</div>
+          <div>Open <b>Shortcuts</b> app &gt; Tap <b>+</b> &gt; Name it <b>Beam Photos to LUMO</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">2</div>
+          <div>Add Action: <b>Select Photos</b> &gt; Tap the arrow (<b>&gt;</b>) &gt; Turn ON <b>Select Multiple</b>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">3</div>
+          <div>Add Action: <b>Repeat with Each</b> &gt; Input: <i>Photos</i>.</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">4</div>
+          <div>Inside loop: <b>Convert Image</b> (Repeat Item to JPEG) &gt; <b>Get Contents of URL</b> (POST File).</div>
+        </div>
+        <div style="display:flex; gap:10px; align-items:flex-start;">
+          <div class="step-badge">5</div>
+          <div>Tap the share icon at bottom &gt; <b>Add to Home Screen</b> (or assign to Action Button).</div>
+        </div>
+      </div>
+      <div style="background:rgba(255,159,10,0.1); border:1px solid rgba(255,159,10,0.25); border-radius:10px; padding:10px; margin-top:12px; font-size:0.75rem; color:#ffb300;">
+        📲 <b>Home Screen Widget:</b> Tap the icon anytime, pick 10 photos from your gallery, and they will all stream to LUMO!
+      </div>
+    </div>
+
+    <!-- Tab 4: cURL / Batch API -->
+    <div id="shortcutTabCurl" style="display:none; font-size:0.8rem; line-height:1.55;">
+      <div style="margin-bottom:8px; color:#ddd;">Single or batch multi-photo upload via cURL:</div>
+      <div style="font-size:0.72rem; color:var(--muted); margin-bottom:4px;">Single Photo:</div>
+      <div class="code-pill" style="margin-bottom:8px;">
+        <span id="curlExampleText">curl -X POST -F "file=@photo.jpg" http://...:8081/api/memories/shortcut</span>
+        <button onclick="copyCurlExample()" id="btnCopyCurl" style="padding:4px 8px; font-size:0.72rem; background:var(--accent); border:none; border-radius:6px; color:#fff; cursor:pointer;">Copy</button>
+      </div>
+      <div style="font-size:0.72rem; color:var(--muted); margin-bottom:4px;">Multiple Photos in 1 Batch:</div>
+      <div class="code-pill" style="margin-bottom:10px;">
+        <span>curl -X POST -F "files=@pic1.jpg" -F "files=@pic2.jpg" -F "files=@pic3.jpg" http://...:8081/api/memories/shortcut</span>
+      </div>
+      <button onclick="testShortcutEndpoint()" class="primary" style="width:100%; padding:9px; font-size:0.8rem; margin-top:6px;">🧪 Run Test Upload via Browser</button>
+      <div id="testUploadResult" style="margin-top:8px; font-size:0.75rem; color:var(--muted); display:none;"></div>
+    </div>
+
+    <div style="margin-top:16px; text-align:right;">
+      <button onclick="closeShortcutModal()" style="padding:7px 14px; font-size:0.8rem; border-radius:10px;">Done</button>
+    </div>
+  </div>
+</div>
+
+<!-- Fullscreen Lightbox Modal -->
+<div id="memLightbox" class="lumo-modal-backdrop" onclick="if(event.target===this)closeMemoryLightbox()">
+  <div style="position:relative; max-width:92vw; max-height:92vh; display:flex; flex-direction:column; align-items:center;">
+    <button onclick="closeMemoryLightbox()" style="position:absolute; top:-38px; right:0; background:rgba(255,255,255,0.1); border:none; border-radius:50%; width:32px; height:32px; color:#fff; font-size:1.2rem; cursor:pointer;">&times;</button>
+    <img id="lightboxImg" src="" style="max-width:100%; max-height:75vh; border-radius:14px; border:1px solid rgba(255,255,255,0.15); box-shadow:0 12px 40px rgba(0,0,0,0.8); object-fit:contain;">
+    <div style="margin-top:12px; text-align:center;">
+      <div id="lightboxCaption" style="font-weight:700; color:#fff; font-size:1.05rem;">-</div>
+      <div id="lightboxSource" style="font-size:0.78rem; color:var(--muted); margin-top:2px;">-</div>
+    </div>
+  </div>
+</div>
+
+<script>
+  let currentLightMode = "WARM";
+  let activeScreenMode = "FACE";
+
+  async function switchDisplay(mode) {
+    activeScreenMode = mode;
+    updateScreenButtons(mode);
+    if (typeof lcdState !== 'undefined') {
+      lcdState.screen = mode;
+      const lbl = document.getElementById("lcdModeLabel");
+      if (lbl) lbl.textContent = mode;
+    }
+    const liveBadge = document.getElementById("memDeskLiveBadge");
+    if (liveBadge) liveBadge.style.display = (mode === "MEMORY") ? "inline-flex" : "none";
+    const hero = document.getElementById("memHeroBox");
+    if (hero) hero.classList.toggle("live-glow", mode === "MEMORY");
+    await postApi("/api/screen", { screen: mode });
+  }
+
+  function updateScreenButtons(mode) {
+    const screens = ["FACE", "CLOCK", "SYSTEM", "SPOTIFY", "TASKS", "MEMORY"];
+    screens.forEach(s => {
+      const btn = document.getElementById("btnScr" + s.charAt(0) + s.slice(1).toLowerCase());
+      if (btn) {
+        if (s === mode) btn.classList.add("active");
+        else btn.classList.remove("active");
+      }
+    });
+  }
+
+  async function fetchStatus() {
+    try {
+      const res = await fetch("/api/status");
+      const data = await res.json();
+
+      const dot = document.getElementById("statusDot");
+      const txt = document.getElementById("statusText");
+      const syncDot = document.getElementById("lcdSyncDot");
+      if (data.esp32_connected) {
+        dot.className = "dot online";
+        txt.textContent = "ESP32 Online";
+        if (syncDot) syncDot.style.background = "var(--green)";
+      } else {
+        dot.className = "dot offline";
+        txt.textContent = "ESP32 Offline";
+        if (syncDot) syncDot.style.background = "var(--red)";
+      }
+
+      if (data.screen && data.screen !== activeScreenMode) {
+        activeScreenMode = data.screen;
+        updateScreenButtons(data.screen);
+        const liveBadge = document.getElementById("memDeskLiveBadge");
+        if (liveBadge) liveBadge.style.display = (activeScreenMode === "MEMORY") ? "inline-flex" : "none";
+        const hero = document.getElementById("memHeroBox");
+        if (hero) hero.classList.toggle("live-glow", activeScreenMode === "MEMORY");
+      }
+
+      if (data.sage) window.sageStatus = data.sage;
+
+      if (typeof updateLcdSimulatorState === 'function') {
+        updateLcdSimulatorState(data);
+      }
+
+      if (data.eye_color) {
+        updateActiveColorDot(data.eye_color);
+      }
+
+      // Music display (Spotify or iPhone Bluetooth / YouTube Music)
+      let title = "No Track Playing";
+      let artist = "Idle";
+      let sourceText = "";
+      if (data.ios_music && (data.ios_music.playing || data.ios_music.title)) {
+        title = data.ios_music.title || "Unknown Track";
+        artist = data.ios_music.artist || "iPhone Audio";
+        sourceText = "(iPhone / YouTube Music)";
+      } else if (data.spotify && data.spotify.playing) {
+        title = data.spotify.title || "Playing on Spotify";
+        artist = "Spotify";
+        sourceText = "(Spotify)";
+      }
+      document.getElementById("spTitle").textContent = title;
+      document.getElementById("spArtist").textContent = artist;
+      if (sourceText) {
+        document.getElementById("musicSourceBadge").textContent = sourceText;
+      }
+
+      if (data.system) {
+        document.getElementById("valCpuTemp").textContent = `${data.system.cpu_temp} °C`;
+        document.getElementById("valCpuLoad").textContent = `${data.system.cpu_pct} %`;
+        document.getElementById("valRam").textContent = `${data.system.ram_pct} %`;
+        document.getElementById("valDisk").textContent = `${data.system.disk_pct} %`;
+      }
+
+      // Voice Assistant Status
+      if (data.voice) {
+        updateVoiceUI(data.voice);
+      }
+
+      // Bluetooth Pairing & Connection Status
+      if (data.bluetooth) {
+        updateBluetoothUI(data.bluetooth);
+      }
+
+      const banner = document.getElementById("alarmBanner");
+      banner.style.display = data.alarm_ringing ? "block" : "none";
+    } catch(e) {}
+  }
+
+  // ===================== JARVIS VOICE COMPANION JS =====================
+  let mediaRecorder = null;
+  let mediaStream = null;
+  let audioChunks = [];
+  let isRecording = false;
+  let isStartingRecord = false;
+  let recordStartTime = 0;
+  let pressStartTime = 0;
+  let didHold = false;
+  let pressTimer = null;
+  let recordTimer = null;
+  let audioCtx = null;
+  let analyserNode = null;
+  let animFrameId = null;
+  let jarvisAudio = new Audio();
+  let audioUnlocked = false;
+
+  function unlockAudioPlayback() {
+    if (audioUnlocked) return;
+    try {
+      if (!jarvisAudio) jarvisAudio = new Audio();
+      // Play 1-sample silent WAV during user gesture to lift iOS/Android autoplay blocks
+      jarvisAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA";
+      jarvisAudio.play().then(() => { audioUnlocked = true; }).catch(() => {});
+    } catch (e) {}
+  }
+
+  function getSupportedAudioMime() {
+    const candidates = [
+      "audio/webm;codecs=opus",
+      "audio/webm",
+      "audio/mp4",
+      "audio/aac",
+      "audio/ogg;codecs=opus",
+      "audio/wav"
+    ];
+    for (const c of candidates) {
+      if (window.MediaRecorder && typeof MediaRecorder.isTypeSupported === "function" && MediaRecorder.isTypeSupported(c)) {
+        return c;
+      }
+    }
+    return "";
+  }
+
+  function updateVoiceUI(v) {
+    if (!v) return;
+    const badge = document.getElementById("voiceStateBadge");
+    const dot = document.getElementById("voiceStateDot");
+    const text = document.getElementById("voiceStateText");
+    const pttBtn = document.getElementById("pttButton");
+    const pttLabel = document.getElementById("pttLabel");
+    const pttIcon = document.getElementById("pttIcon");
+
+    const st = v.state || "IDLE";
+    text.textContent = st;
+
+    if (st === "LISTENING") {
+      dot.style.background = "#30d158";
+      dot.style.boxShadow = "0 0 8px #30d158";
+      badge.style.background = "rgba(48,209,88,0.2)";
+      badge.style.color = "#30d158";
+      if (!isRecording) {
+        pttBtn.className = "ptt-btn recording";
+        pttLabel.textContent = "Listening to Mic...";
+        if (pttIcon) pttIcon.textContent = "🎙️";
+      }
+    } else if (st === "THINKING") {
+      dot.style.background = "#ff9f0a";
+      dot.style.boxShadow = "0 0 8px #ff9f0a";
+      badge.style.background = "rgba(255,159,10,0.2)";
+      badge.style.color = "#ff9f0a";
+      pttBtn.className = "ptt-btn thinking";
+      pttLabel.textContent = "JARVIS is Thinking...";
+      if (pttIcon) pttIcon.textContent = "⚙️";
+    } else if (st === "SPEAKING") {
+      dot.style.background = "#00E5FF";
+      dot.style.boxShadow = "0 0 10px #00E5FF";
+      badge.style.background = "rgba(0,229,255,0.2)";
+      badge.style.color = "#00E5FF";
+      pttBtn.className = "ptt-btn speaking";
+      pttLabel.textContent = "JARVIS is Speaking...";
+      if (pttIcon) pttIcon.textContent = "🔊";
+    } else {
+      dot.style.background = "#888";
+      dot.style.boxShadow = "none";
+      badge.style.background = "rgba(255,255,255,0.08)";
+      badge.style.color = "var(--muted)";
+      if (!isRecording && !isStartingRecord) {
+        pttBtn.className = "ptt-btn";
+        pttLabel.textContent = "Hold Spacebar or Click to Speak";
+        if (pttIcon) pttIcon.textContent = "🎙️";
+      }
+    }
+
+    if (v.last_transcript) {
+      document.getElementById("voiceUserBox").style.display = "block";
+      document.getElementById("voiceUserText").textContent = `"${v.last_transcript}"`;
+    }
+    if (v.last_reply) {
+      document.getElementById("voiceJarvisText").textContent = `"${v.last_reply}"`;
+    }
+  }
+
+  function resetPttButton() {
+    isRecording = false;
+    isStartingRecord = false;
+    const pttBtn = document.getElementById("pttButton");
+    const pttLabel = document.getElementById("pttLabel");
+    const pttIcon = document.getElementById("pttIcon");
+    if (pttBtn) pttBtn.className = "ptt-btn";
+    if (pttLabel) pttLabel.textContent = "Hold Spacebar or Click to Speak";
+    if (pttIcon) pttIcon.textContent = "🎙️";
+  }
+
+  async function startRecording() {
+    if (isRecording || isStartingRecord) return;
+    isStartingRecord = true;
+    unlockAudioPlayback();
+
+    const pttBtn = document.getElementById("pttButton");
+    const pttLabel = document.getElementById("pttLabel");
+    const pttIcon = document.getElementById("pttIcon");
+
+    try {
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error("INSECURE_CONTEXT");
+      }
+
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true
+        }
+      });
+      mediaStream = stream;
+      audioChunks = [];
+
+      // Web Audio API VU meter
+      try {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const source = audioCtx.createMediaStreamSource(stream);
+        analyserNode = audioCtx.createAnalyser();
+        analyserNode.fftSize = 256;
+        source.connect(analyserNode);
+
+        const vuContainer = document.getElementById("vuMeterContainer");
+        const vuBar = document.getElementById("vuMeterBar");
+        if (vuContainer) vuContainer.style.display = "block";
+
+        const dataArray = new Uint8Array(analyserNode.frequencyBinCount);
+        function updateVu() {
+          if (!isRecording) return;
+          analyserNode.getByteFrequencyData(dataArray);
+          let sum = 0;
+          for (let i = 0; i < dataArray.length; i++) sum += dataArray[i];
+          let avg = sum / dataArray.length;
+          let pct = Math.min(100, Math.round((avg / 128) * 100));
+          if (vuBar) vuBar.style.width = pct + "%";
+          animFrameId = requestAnimationFrame(updateVu);
+        }
+        updateVu();
+      } catch (e) {
+        console.warn("VU meter init note:", e);
+      }
+
+      const chosenMime = getSupportedAudioMime();
+      const options = chosenMime ? { mimeType: chosenMime } : {};
+      mediaRecorder = new MediaRecorder(stream, options);
+
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data && e.data.size > 0) {
+          audioChunks.push(e.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        if (animFrameId) cancelAnimationFrame(animFrameId);
+        if (recordTimer) { clearInterval(recordTimer); recordTimer = null; }
+        const vuContainer = document.getElementById("vuMeterContainer");
+        if (vuContainer) vuContainer.style.display = "none";
+
+        if (mediaStream) {
+          mediaStream.getTracks().forEach(t => t.stop());
+          mediaStream = null;
+        }
+        if (audioCtx && audioCtx.state !== 'closed') {
+          try { audioCtx.close(); } catch(e) {}
+        }
+
+        const dur = Date.now() - recordStartTime;
+        if (audioChunks.length === 0 || dur < 350) {
+          // Disregard accidental ultra-short taps
+          resetPttButton();
+          return;
+        }
+
+        if (pttBtn) pttBtn.className = "ptt-btn thinking";
+        if (pttLabel) pttLabel.textContent = "JARVIS is Thinking...";
+        if (pttIcon) pttIcon.textContent = "⚙️";
+
+        const finalMime = mediaRecorder.mimeType || chosenMime || "audio/webm";
+        const audioBlob = new Blob(audioChunks, { type: finalMime });
+        await uploadVoiceAudio(audioBlob, finalMime);
+      };
+
+      mediaRecorder.start(100);
+      isRecording = true;
+      recordStartTime = Date.now();
+
+      if (pttBtn) pttBtn.className = "ptt-btn recording";
+      if (pttIcon) pttIcon.textContent = "🔴";
+      if (pttLabel) pttLabel.textContent = "Listening... Tap to Send";
+
+      let sec = 0;
+      recordTimer = setInterval(() => {
+        sec++;
+        if (isRecording && pttLabel) {
+          pttLabel.textContent = `Listening (${sec}s)... Tap to Send`;
+        }
+      }, 1000);
+
+    } catch (err) {
+      console.error("Microphone access error:", err);
+      resetPttButton();
+      if (err.message === "INSECURE_CONTEXT" || !window.isSecureContext) {
+        const notice = document.getElementById("insecureContextNotice");
+        if (notice) notice.style.display = "block";
+        alert("Microphone Notice:\n\nBrowsers block web microphone access over plain HTTP (http://" + window.location.host + ").\n\nPlease switch to HTTPS at: https://" + window.location.hostname + ":" + (window.location.port || 8080) + " (accept the self-signed certificate in Advanced options) to use your phone or computer mic.");
+      } else if (err.name === "NotAllowedError" || err.name === "PermissionDeniedError") {
+        alert("Microphone permission was not granted. Please check your browser's site permissions and allow Microphone access.");
+      } else {
+        alert("Microphone error: " + (err.message || err.name));
+      }
+    } finally {
+      isStartingRecord = false;
+    }
+  }
+
+  function stopRecording() {
+    if (!isRecording && !isStartingRecord) return;
+    if (isStartingRecord) {
+      setTimeout(stopRecording, 200);
+      return;
+    }
+    isRecording = false;
+    if (mediaRecorder && mediaRecorder.state === "recording") {
+      try { mediaRecorder.requestData(); } catch(e) {}
+      mediaRecorder.stop();
+    }
+  }
+
+  async function uploadVoiceAudio(blob, mimeType) {
+    try {
+      const res = await fetch("/api/voice/push-to-talk", {
+        method: "POST",
+        headers: {
+          "Content-Type": mimeType || "audio/webm"
+        },
+        body: blob
+      });
+      const data = await res.json();
+      if (data.transcript) {
+        document.getElementById("voiceUserBox").style.display = "block";
+        document.getElementById("voiceUserText").textContent = `"${data.transcript}"`;
+      }
+      if (data.reply) {
+        document.getElementById("voiceJarvisText").textContent = `"${data.reply}"`;
+        if (!jarvisAudio) jarvisAudio = new Audio();
+        jarvisAudio.src = "/api/voice/last-audio.mp3?t=" + Date.now();
+        jarvisAudio.play().catch(e => console.log("Web audio play note:", e));
+      }
+      fetchStatus();
+    } catch (e) {
+      console.error("Failed to send voice payload:", e);
+    } finally {
+      resetPttButton();
+    }
+  }
+
+  async function sendVoicePrompt(text) {
+    if (!text || !text.trim()) return;
+    unlockAudioPlayback();
+    const pttBtn = document.getElementById("pttButton");
+    const pttLabel = document.getElementById("pttLabel");
+    const pttIcon = document.getElementById("pttIcon");
+    if (pttBtn) pttBtn.className = "ptt-btn thinking";
+    if (pttLabel) pttLabel.textContent = "JARVIS is Thinking...";
+    if (pttIcon) pttIcon.textContent = "⚙️";
+
+    document.getElementById("voiceUserBox").style.display = "block";
+    document.getElementById("voiceUserText").textContent = `"${text}"`;
+
+    try {
+      const res = await fetch("/api/voice/text-command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text })
+      });
+      const data = await res.json();
+      if (data.reply) {
+        document.getElementById("voiceJarvisText").textContent = `"${data.reply}"`;
+        if (!jarvisAudio) jarvisAudio = new Audio();
+        jarvisAudio.src = "/api/voice/last-audio.mp3?t=" + Date.now();
+        jarvisAudio.play().catch(e => console.log("Web audio note:", e));
+      }
+      fetchStatus();
+    } catch (e) {
+      console.error("Text command failed:", e);
+    } finally {
+      resetPttButton();
+    }
+  }
+
+  function sendTypedVoicePrompt() {
+    const inp = document.getElementById("voiceTextInput");
+    const val = inp.value.trim();
+    if (!val) return;
+    inp.value = "";
+    sendVoicePrompt(val);
+  }
+
+  function initVoiceControls() {
+    const pttBtn = document.getElementById("pttButton");
+    if (pttBtn) {
+      // Pointer events seamlessly handle Touch, Pen, and Mouse
+      pttBtn.addEventListener("pointerdown", (e) => {
+        e.preventDefault();
+        unlockAudioPlayback();
+        pressStartTime = Date.now();
+        didHold = false;
+
+        if (isRecording) {
+          // Second tap stops recording and sends
+          stopRecording();
+          return;
+        }
+
+        startRecording();
+
+        pressTimer = setTimeout(() => {
+          didHold = true;
+        }, 350);
+      });
+
+      pttBtn.addEventListener("pointerup", (e) => {
+        e.preventDefault();
+        clearTimeout(pressTimer);
+        if (didHold && isRecording) {
+          // User held the button down and now released
+          stopRecording();
+        }
+        // If not didHold, user did a single tap: let it keep recording until next tap
+      });
+
+      pttBtn.addEventListener("pointercancel", (e) => {
+        clearTimeout(pressTimer);
+        if (isRecording && didHold) stopRecording();
+      });
+    }
+
+    // Keyboard Spacebar: Hold spacebar to speak, release to send
+    window.addEventListener("keydown", (e) => {
+      if (e.code === "Space") {
+        const tag = document.activeElement ? document.activeElement.tagName : "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        if (!isRecording && !isStartingRecord) {
+          unlockAudioPlayback();
+          startRecording();
+        }
+      }
+    });
+
+    window.addEventListener("keyup", (e) => {
+      if (e.code === "Space") {
+        const tag = document.activeElement ? document.activeElement.tagName : "";
+        if (tag === "INPUT" || tag === "TEXTAREA") return;
+        e.preventDefault();
+        if (isRecording) {
+          stopRecording();
+        }
+      }
+    });
+
+    // Check secure context and configure HTTPS upgrade banner
+    if (!window.isSecureContext && window.location.protocol === "http:") {
+      const notice = document.getElementById("insecureContextNotice");
+      const link = document.getElementById("httpsUpgradeLink");
+      if (notice && link) {
+        link.href = `https://${window.location.hostname}:${window.location.port || 8080}`;
+        notice.style.display = "block";
+      }
+    }
+
+    fetchVoiceDevices();
+  }
+
+  async function fetchVoiceDevices() {
+    try {
+      const res = await fetch("/api/voice/devices");
+      const data = await res.json();
+      const select = document.getElementById("voiceDeviceSelect");
+      if (!select || !data.devices) return;
+      select.innerHTML = '<option value="default">System Default (PipeWire/ALSA)</option>';
+      data.devices.forEach(d => {
+        const opt = document.createElement("option");
+        opt.value = d.index;
+        opt.textContent = `${d.name} (${d.channels}ch)`;
+        if (d.index === data.current_device || (data.current_device === "default" && d.is_default)) {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    } catch(e) {}
+  }
+
+  async function changeVoiceDevice(val) {
+    await postApi("/api/voice/device", { device: val });
+    fetchStatus();
+  }
+
+  let activeBtMac = "";
+
+  function updateBluetoothUI(bt) {
+    const badge = document.getElementById("btStatusBadge");
+    const connBox = document.getElementById("btConnectedBox");
+    const pairBox = document.getElementById("btPairingBox");
+    const idleBox = document.getElementById("btIdleBox");
+    const devList = document.getElementById("btDeviceList");
+
+    if (bt.connected && bt.connected_device) {
+      activeBtMac = bt.connected_device.mac;
+      badge.textContent = "Connected";
+      badge.style.background = "rgba(48,209,88,0.2)";
+      badge.style.color = "var(--green)";
+
+      connBox.style.display = "block";
+      pairBox.style.display = "none";
+      idleBox.style.display = "none";
+
+      document.getElementById("btConnectedName").textContent = bt.connected_device.name || "Bluetooth Device";
+      document.getElementById("btConnectedMac").textContent = bt.connected_device.mac;
+    } else if (bt.pairing_mode) {
+      badge.textContent = "Pairing Active";
+      badge.style.background = "rgba(10,132,255,0.2)";
+      badge.style.color = "var(--accent)";
+
+      connBox.style.display = "none";
+      pairBox.style.display = "block";
+      idleBox.style.display = "none";
+      document.getElementById("btTimerVal").textContent = `${bt.seconds_left}s left`;
+    } else {
+      activeBtMac = "";
+      badge.textContent = "Disconnected";
+      badge.style.background = "rgba(255,255,255,0.08)";
+      badge.style.color = "var(--muted)";
+
+      connBox.style.display = "none";
+      pairBox.style.display = "none";
+      idleBox.style.display = "block";
+    }
+
+    if (bt.devices && bt.devices.length > 0) {
+      devList.innerHTML = "";
+      bt.devices.forEach(d => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.style.padding = "8px 0";
+        item.innerHTML = `
+          <div style="display:flex; flex-direction:column;">
+            <span style="font-weight:600; font-size:0.9rem;">${d.name || 'Unknown Device'}</span>
+            <span style="font-size:0.75rem; color:var(--muted);">${d.mac} ${d.connected ? '• <span style="color:var(--green)">Connected</span>' : ''}</span>
+          </div>
+          <div style="display:flex; gap:6px;">
+            ${!d.connected ? `<button onclick="connectBluetoothDevice('${d.mac}')" style="padding:4px 8px; font-size:0.75rem; background:var(--accent); color:#fff;">Connect</button>` : ''}
+            <button onclick="removeBluetoothDevice('${d.mac}')" style="padding:4px 8px; font-size:0.75rem; color:var(--red);">Forget</button>
+          </div>
+        `;
+        devList.appendChild(item);
+      });
+    } else {
+      devList.innerHTML = '<div style="text-align:center; padding:6px 0; color:var(--muted);">No devices paired yet</div>';
+    }
+  }
+
+  async function startPairingMode() {
+    await postApi("/api/bluetooth/pair-mode");
+    fetchStatus();
+  }
+
+  async function stopPairingMode() {
+    await postApi("/api/bluetooth/pair-mode/stop");
+    fetchStatus();
+  }
+
+  async function connectBluetoothDevice(mac) {
+    await postApi("/api/bluetooth/connect", { mac });
+    fetchStatus();
+  }
+
+  async function disconnectBluetooth() {
+    if (activeBtMac) {
+      await postApi("/api/bluetooth/disconnect", { mac: activeBtMac });
+      fetchStatus();
+    }
+  }
+
+  async function removeBluetoothDevice(mac) {
+    await fetch(`/api/bluetooth/device/${mac}`, { method: "DELETE" });
+    fetchStatus();
+  }
+
+  async function pingBluetooth() {
+    await postApi("/api/bluetooth/ping");
+  }
+
+  async function applyWearableMode() {
+    await postApi("/api/bluetooth/wearable-mode");
+    alert("Applied Wearable Smartwatch Mode! Audio will stay on your phone/AirPods.");
+    fetchStatus();
+  }
+
+  async function playAnim(anim) {
+    await postApi("/api/animation/play", { anim: anim, duration: (anim === 'heart' ? 3.5 : 2.5) });
+  }
+
+  async function setEyeColor(color) {
+    updateActiveColorDot(color);
+    await postApi("/api/animation/color", { color: color });
+  }
+
+  function updateActiveColorDot(color) {
+    const colors = ["cyan", "amber", "green", "white", "purple", "red"];
+    colors.forEach(c => {
+      const dot = document.getElementById("dot" + c.charAt(0).toUpperCase() + c.slice(1));
+      if (dot) {
+        if (c === color.toLowerCase()) dot.classList.add("active");
+        else dot.classList.remove("active");
+      }
+    });
+  }
+
+  async function sendNotificationAlert() {
+    const app = document.getElementById("notifApp").value || "iPhone";
+    const title = document.getElementById("notifTitle").value || "Alert";
+    const body = document.getElementById("notifBody").value || "Test Notification";
+    await postApi("/api/notification", { app, title, body });
+  }
+
+  // Tasks and alarms come from Sage now, so an empty list has three possible
+  // meanings and the panel should say which.
+  function sageEmptyReason(noun) {
+    const sage = window.sageStatus;
+    if (!sage) return `No ${noun}`;
+    if (!sage.configured) return "No task manager key. Reinstall lumo.service and restart.";
+    if (!sage.online) return "Task manager unreachable. Is sage-backend running?";
+    if (sage.last_error) return sage.last_error;
+    return `No ${noun}`;
+  }
+
+  function renderEmpty(list, noun) {
+    const row = document.createElement("div");
+    row.className = "list-item";
+    row.style.opacity = "0.6";
+    row.textContent = sageEmptyReason(noun);
+    list.appendChild(row);
+  }
+
+  async function fetchAlarms() {
+    try {
+      const res = await fetch("/api/alarms");
+      const alarms = await res.json();
+      const list = document.getElementById("alarmList");
+      list.innerHTML = "";
+
+      alarms.forEach(a => {
+        const item = document.createElement("div");
+        item.className = "list-item";
+        item.innerHTML = `
+          <div class="item-left">
+            <div class="item-time">${String(a.h).padStart(2,'0')}:${String(a.m).padStart(2,'0')}</div>
+            <div class="item-label">${a.label || 'Alarm'}</div>
+          </div>
+          <div style="display:flex; align-items:center; gap:12px;">
+            <label class="toggle-switch">
+              <input type="checkbox" ${a.enabled ? 'checked' : ''} onchange="toggleAlarm('${a.id}')">
+              <span class="slider-toggle"></span>
+            </label>
+            <button onclick="deleteAlarm('${a.id}')" style="padding:4px 8px; color:var(--red);">X</button>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+      if (!alarms.length) renderEmpty(list, "alarms");
+    } catch(e) {}
+  }
+
+  function escapeHtml(str) {
+    if (!str) return "";
+    return String(str)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+  }
+
+  function formatDueDate(dueStr) {
+    if (!dueStr) return "";
+    try {
+      const d = new Date(dueStr);
+      if (isNaN(d.getTime())) {
+        return `<span class="task-badge badge-due">📅 ${escapeHtml(dueStr)}</span>`;
+      }
+      const now = new Date();
+      const isToday = d.toDateString() === now.toDateString();
+      const tomorrow = new Date(now);
+      tomorrow.setDate(now.getDate() + 1);
+      const isTomorrow = d.toDateString() === tomorrow.toDateString();
+      const isPast = d < now && !isToday;
+
+      const timeStr = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      const hasTime = dueStr.includes("T") || dueStr.includes(":");
+
+      let label = "";
+      if (isToday) {
+        label = hasTime ? `Today, ${timeStr}` : `Today`;
+      } else if (isTomorrow) {
+        label = hasTime ? `Tomorrow, ${timeStr}` : `Tomorrow`;
+      } else {
+        const datePart = d.toLocaleDateString([], { month: 'short', day: 'numeric' });
+        label = hasTime ? `${datePart}, ${timeStr}` : datePart;
+      }
+
+      const cls = isPast ? "badge-overdue" : "badge-due";
+      const icon = isPast ? "⚠️" : "📅";
+      return `<span class="task-badge ${cls}">${icon} ${label}</span>`;
+    } catch (e) {
+      return `<span class="task-badge badge-due">📅 ${escapeHtml(dueStr)}</span>`;
+    }
+  }
+
+  function formatPriority(p) {
+    if (!p) return "";
+    const lp = String(p).toLowerCase();
+    if (lp === "urgent") {
+      return `<span class="task-badge badge-urgent">🔴 Urgent</span>`;
+    } else if (lp === "high") {
+      return `<span class="task-badge badge-high">🟠 High</span>`;
+    } else if (lp === "low") {
+      return `<span class="task-badge badge-low">Low</span>`;
+    }
+    return "";
+  }
+
+  function formatTags(tags) {
+    if (!tags) return "";
+    let tagList = [];
+    if (Array.isArray(tags)) tagList = tags;
+    else if (typeof tags === "string") tagList = tags.split(",").map(s => s.trim()).filter(Boolean);
+
+    return tagList.map(tag => `<span class="task-badge badge-tag">#${escapeHtml(tag)}</span>`).join(" ");
+  }
+
+  async function fetchTasks() {
+    try {
+      const res = await fetch("/api/tasks");
+      const data = await res.json();
+      window.cachedTasks = data.tasks || [];
+      const items = data.items || [];
+      window.cachedTaskItems = items;
+      
+      const badge = document.getElementById("taskCountBadge");
+      if (badge) badge.textContent = `${items.length} Open`;
+
+      const list = document.getElementById("taskList");
+      list.innerHTML = "";
+
+      items.forEach(t => {
+        const item = document.createElement("div");
+        item.className = "task-item-row";
+
+        const dueHtml = formatDueDate(t.due_date || t.start_at);
+        const priorityHtml = formatPriority(t.priority);
+        const tagsHtml = formatTags(t.context_tags);
+        const notesHtml = t.notes ? `<div class="task-item-notes">${escapeHtml(t.notes)}</div>` : "";
+
+        item.innerHTML = `
+          <input type="checkbox" onclick="completeTask('${t.id}')" title="Mark completed" style="width:19px; height:19px; margin-top:2px; flex-shrink:0; cursor:pointer; accent-color:var(--green);">
+          <div class="task-item-content">
+            <div class="task-item-title">${escapeHtml(t.title || 'Untitled')}</div>
+            ${notesHtml}
+            <div class="task-badges">
+              ${dueHtml}
+              ${priorityHtml}
+              ${tagsHtml}
+            </div>
+          </div>
+          <div class="task-item-actions">
+            <button onclick="deleteTask('${t.id}')" class="task-del-btn" title="Delete task">✕</button>
+          </div>
+        `;
+        list.appendChild(item);
+      });
+      if (!items.length) renderEmpty(list, "tasks");
+    } catch(e) {}
+  }
+
+  async function postApi(url, body=null) {
+    await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: body ? JSON.stringify(body) : null
+    });
+  }
+
+  function setLightMode(mode) {
+    currentLightMode = mode;
+    document.getElementById("hueRow").style.display = (mode === 'COLOR') ? "block" : "none";
+    sendLightState();
+  }
+
+  function onLightSliderChange() {
+    const bri = document.getElementById("briSlider").value;
+    const hue = document.getElementById("hueSlider").value;
+    document.getElementById("briVal").textContent = `${bri}%`;
+    document.getElementById("hueVal").textContent = `${hue}°`;
+    sendLightState();
+  }
+
+  function sendLightState() {
+    const bri = parseInt(document.getElementById("briSlider").value);
+    const hue = parseInt(document.getElementById("hueSlider").value);
+    postApi("/api/lights", { mode: currentLightMode, brightness: bri, hue: hue });
+  }
+
+  async function addAlarm() {
+    const timeVal = document.getElementById("newAlarmTime").value;
+    const label = document.getElementById("newAlarmLabel").value;
+    if (!timeVal) return;
+    const [h, m] = timeVal.split(":").map(Number);
+    await postApi("/api/alarms", { h, m, label });
+    document.getElementById("newAlarmLabel").value = "";
+    fetchAlarms();
+  }
+
+  async function deleteAlarm(id) {
+    await fetch(`/api/alarms/${id}`, { method: "DELETE" });
+    fetchAlarms();
+  }
+
+  async function toggleAlarm(id) {
+    await postApi(`/api/alarms/${id}/toggle`);
+    fetchAlarms();
+  }
+
+  async function snoozeAlarm() { await postApi("/api/alarms/snooze"); fetchStatus(); }
+  async function dismissAlarm() { await postApi("/api/alarms/dismiss"); fetchStatus(); }
+
+  async function addTask() {
+    const input = document.getElementById("newTaskText");
+    const text = input.value.trim();
+    if (!text) return;
+    await postApi("/api/tasks", { text });
+    input.value = "";
+    fetchTasks();
+  }
+
+  async function completeTask(id) {
+    await postApi(`/api/tasks/${id}/complete`);
+    fetchTasks();
+  }
+
+  async function deleteTask(id) {
+    await fetch(`/api/tasks/${id}`, { method: "DELETE" });
+    fetchTasks();
+  }
+
+  function setEmotion(mood) { postApi("/api/emotion", { mood }); }
+
+  // ==============================================================================
+  // Memories Photo Frame Client Logic
+  // ==============================================================================
+  let cachedMemories = [];
+  let currentMemoryIndex = 0;
+  let galleryCategoryFilter = 'all'; // 'all' | 'portrait' | 'nature' | 'other'
+  let memCurateDisplay = true;
+  let memCurationStats = { total: 0, portrait: 0, nature: 0, other: 0, curated_displayable: 0 };
+  const liveMemoryImg = new Image();
+  let lastLoadedMemoryId = "";
+
+  async function fetchMemories() {
+    try {
+      const res = await fetch("/api/memories");
+      const data = await res.json();
+      cachedMemories = data.photos || [];
+      currentMemoryIndex = data.current_index || 0;
+
+      const maxP = data.max_photos || 50;
+      const nightlyUsed = data.nightly_used !== undefined ? data.nightly_used : 0;
+      const nightlyQuota = data.nightly_quota || 0;
+
+      const countBadge = document.getElementById("memCountBadge");
+      if (countBadge) {
+        if (nightlyQuota > 0) {
+          countBadge.textContent = `${cachedMemories.length} / ${maxP} Photos (${nightlyUsed}/${nightlyQuota} tonight)`;
+        } else {
+          countBadge.textContent = `${cachedMemories.length} / ${maxP} Photos`;
+        }
+      }
+
+      const totalStored = document.getElementById("memTotalStoredText");
+      if (totalStored) totalStored.textContent = cachedMemories.length;
+
+      const autoToggle = document.getElementById("memAutoRotateToggle");
+      if (autoToggle) autoToggle.checked = !!data.auto_rotate;
+
+      const intervalSel = document.getElementById("memIntervalSelect");
+      if (intervalSel) intervalSel.value = data.interval_sec || 20;
+
+      const gifLoopsSel = document.getElementById("memGifLoopsSelect");
+      if (gifLoopsSel && data.gif_loops !== undefined) gifLoopsSel.value = String(data.gif_loops);
+
+      const dupToggle = document.getElementById("memReplaceDuplicatesToggle");
+      if (dupToggle) dupToggle.checked = (data.replace_duplicates !== false);
+
+      memCurateDisplay = (data.curate_display !== false);
+      const curateToggle = document.getElementById("memCurateDisplayToggle");
+      if (curateToggle) curateToggle.checked = memCurateDisplay;
+
+      if (data.curation_stats) {
+        memCurationStats = data.curation_stats;
+      } else {
+        const pCount = cachedMemories.filter(m => m.category === "portrait").length;
+        const nCount = cachedMemories.filter(m => m.category === "nature").length;
+        const oCount = cachedMemories.length - pCount - nCount;
+        memCurationStats = { total: cachedMemories.length, portrait: pCount, nature: nCount, other: oCount, curated_displayable: pCount + nCount };
+      }
+
+      const isCvReady = data.opencv_available || (memCurationStats && memCurationStats.opencv_available);
+      const dispCount = memCurationStats.curated_displayable !== undefined ? memCurationStats.curated_displayable : (memCurationStats.portrait + memCurationStats.nature);
+      const portCount = memCurationStats.portrait || 0;
+      const natCount = memCurationStats.nature || 0;
+      const otherCount = memCurationStats.other || 0;
+
+      // Update Header AI Status Badge
+      const hdrBadge = document.getElementById("memVisionAiHeaderBadge");
+      const hdrPulse = document.getElementById("memVisionAiPulse");
+      const hdrStatus = document.getElementById("memVisionAiHeaderStatus");
+      if (hdrBadge && hdrPulse && hdrStatus) {
+        if (memCurateDisplay) {
+          hdrPulse.style.background = "#2ecc71";
+          hdrPulse.style.boxShadow = "0 0 8px #2ecc71";
+          hdrStatus.textContent = `✨ Vision AI: Active (${dispCount}/${cachedMemories.length} on Desk)`;
+          hdrBadge.style.borderColor = "rgba(46,204,113,0.4)";
+          hdrBadge.style.color = "#85e89d";
+        } else {
+          hdrPulse.style.background = "var(--muted)";
+          hdrPulse.style.boxShadow = "none";
+          hdrStatus.textContent = "✨ Vision AI: Paused (Showing All)";
+          hdrBadge.style.borderColor = "rgba(255,255,255,0.15)";
+          hdrBadge.style.color = "var(--muted)";
+        }
+      }
+
+      // Update Vision AI Live Status Banner
+      const engineBadge = document.getElementById("memVisionEngineBadge");
+      const statusTitle = document.getElementById("memVisionStatusTitle");
+      const statusSub = document.getElementById("memVisionStatusSubtitle");
+      if (engineBadge) {
+        if (isCvReady) {
+          engineBadge.textContent = "OPENCV READY";
+          engineBadge.style.background = "rgba(0,255,102,0.15)";
+          engineBadge.style.color = "#2ecc71";
+          engineBadge.style.borderColor = "rgba(0,255,102,0.3)";
+        } else {
+          engineBadge.textContent = "PASS-THROUGH (NO OPENCV)";
+          engineBadge.style.background = "rgba(255,159,10,0.15)";
+          engineBadge.style.color = "#ff9f0a";
+          engineBadge.style.borderColor = "rgba(255,159,10,0.3)";
+        }
+      }
+
+      if (statusTitle && statusSub) {
+        if (memCurateDisplay) {
+          statusTitle.textContent = "Vision AI: Active (Portraits & Nature Only)";
+          statusSub.textContent = `${dispCount} of ${cachedMemories.length} photos on desk (${portCount} Portrait${portCount !== 1 ? 's' : ''}, ${natCount} Nature) • ${otherCount} filtered out`;
+        } else {
+          statusTitle.textContent = "Vision AI Curation: Paused";
+          statusSub.textContent = `Desk display will cycle through all ${cachedMemories.length} photos without filtering.`;
+        }
+      }
+
+      const curateBadge = document.getElementById("memCuratedCountBadge");
+      if (curateBadge) {
+        curateBadge.textContent = `${dispCount} of ${cachedMemories.length} photos curated for display`;
+      }
+
+      const cntAll = document.getElementById("cntPillAll");
+      const cntPort = document.getElementById("cntPillPortrait");
+      const cntNat = document.getElementById("cntPillNature");
+      const cntOth = document.getElementById("cntPillOther");
+      if (cntAll) cntAll.textContent = cachedMemories.length;
+      if (cntPort) cntPort.textContent = portCount;
+      if (cntNat) cntNat.textContent = natCount;
+      if (cntOth) cntOth.textContent = otherCount;
+
+      const liveBadge = document.getElementById("memDeskLiveBadge");
+      if (liveBadge) liveBadge.style.display = (activeScreenMode === "MEMORY") ? "inline-flex" : "none";
+
+      const hero = document.getElementById("memHeroBox");
+      if (hero) hero.classList.toggle("live-glow", activeScreenMode === "MEMORY");
+
+      renderMemoryPreview();
+      renderMemoryThumbs();
+      renderMemoryGrid();
+    } catch (e) {
+      console.error("fetchMemories error:", e);
+    }
+  }
+
+  async function resetTonightSync() {
+    await postApi("/api/memories/config", { reset_nightly: true });
+    await fetchMemories();
+  }
+
+  function setGalleryCategoryFilter(filter) {
+    galleryCategoryFilter = filter;
+    const pills = {
+      all: document.getElementById("pillCatAll"),
+      portrait: document.getElementById("pillCatPortrait"),
+      nature: document.getElementById("pillCatNature"),
+      other: document.getElementById("pillCatOther")
+    };
+    Object.keys(pills).forEach(key => {
+      if (pills[key]) {
+        pills[key].classList.toggle("active", key === filter);
+      }
+    });
+    renderMemoryGrid();
+  }
+
+  async function toggleMemCurateDisplay(val) {
+    memCurateDisplay = val;
+    await postApi("/api/memories/config", { curate_display: val });
+    if (activeScreenMode === "MEMORY") {
+      await postApi("/api/memories/push");
+    }
+    await fetchMemories();
+  }
+
+  async function scanAndCurateLibrary(force = true) {
+    const btnTray = document.getElementById("btnScanCurate");
+    const btnBanner = document.getElementById("btnBannerScan");
+    [btnTray, btnBanner].forEach(b => {
+      if (b) {
+        b.disabled = true;
+        b.innerHTML = `<span>⏳</span> Scanning with OpenCV...`;
+      }
+    });
+
+    const statusSub = document.getElementById("memVisionStatusSubtitle");
+    if (statusSub) statusSub.textContent = `⏳ Analyzing ${cachedMemories.length} photos with OpenCV Haar Cascades & Nature Color Engine...`;
+
+    try {
+      const res = await postApi("/api/memories/curate/scan?force=" + (force ? "true" : "false"), { force });
+      if (res && res.counts) {
+        const toast = document.createElement("div");
+        toast.style.cssText = "position:fixed; bottom:20px; right:20px; background:#141721; border:1px solid rgba(46,204,113,0.7); border-radius:12px; padding:14px 20px; color:#fff; font-size:0.85rem; z-index:9999; box-shadow:0 12px 36px rgba(0,0,0,0.7); display:flex; align-items:center; gap:10px;";
+        toast.innerHTML = `<span style="font-size:1.3rem;">✨</span> <div><div style="font-weight:700; color:#85e89d;">Vision AI Scan Complete!</div><div style="font-size:0.75rem; color:#ccc; margin-top:2px;">Scanned ${res.counts.total} photos: <b>👤 ${res.counts.portrait} Portraits</b>, <b>🌿 ${res.counts.nature} Nature</b>, <b>📁 ${res.counts.other} Filtered</b>. (${res.counts.curated}/${res.counts.total} on Desk)</div></div>`;
+        document.body.appendChild(toast);
+        setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 4500);
+      }
+      await fetchMemories();
+    } catch (e) {
+      console.error("Scan curation error:", e);
+    } finally {
+      if (btnTray) {
+        btnTray.disabled = false;
+        btnTray.innerHTML = `🔍 Re-scan Library`;
+      }
+      if (btnBanner) {
+        btnBanner.disabled = false;
+        btnBanner.innerHTML = `<span>🔍</span> Re-scan Library`;
+      }
+    }
+  }
+
+  async function cycleCategory(photoId, currentCat) {
+    const cycleMap = {
+      portrait: "nature",
+      nature: "other",
+      other: "auto",
+      auto: "portrait"
+    };
+    const nextCat = cycleMap[currentCat] || "portrait";
+    try {
+      await postApi("/api/memories/curate/override", { id: photoId, category: nextCat });
+      await fetchMemories();
+    } catch (e) {
+      console.error("Override category error:", e);
+    }
+  }
+
+  function renderMemoryPreview() {
+    const imgEl = document.getElementById("memCurrentImg");
+    const emptyEl = document.getElementById("memEmptyPlaceholder");
+    const capBar = document.getElementById("memCaptionBar");
+    const capText = document.getElementById("memCaptionText");
+    const srcBadge = document.getElementById("memSourceBadge");
+    const dateText = document.getElementById("memDateText");
+    const indexBadge = document.getElementById("memIndexBadge");
+    const overlayActions = document.getElementById("memOverlayActions");
+    const catBadge = document.getElementById("memCategoryPreviewBadge");
+    const heroTag = document.getElementById("memHeroCurationTag");
+    const heroTagDot = document.getElementById("memHeroTagDot");
+    const heroTagText = document.getElementById("memHeroTagText");
+
+    if (!cachedMemories.length) {
+      if (imgEl) imgEl.style.display = "none";
+      if (emptyEl) emptyEl.style.display = "block";
+      if (capBar) capBar.style.display = "none";
+      if (overlayActions) overlayActions.style.display = "none";
+      if (catBadge) catBadge.style.display = "none";
+      if (heroTag) heroTag.style.display = "none";
+      return;
+    }
+
+    if (currentMemoryIndex >= cachedMemories.length) {
+      currentMemoryIndex = Math.max(0, cachedMemories.length - 1);
+    }
+
+    const cur = cachedMemories[currentMemoryIndex];
+    if (!cur) return;
+
+    if (imgEl) {
+      imgEl.src = cur.url;
+      imgEl.style.display = "block";
+    }
+    if (emptyEl) emptyEl.style.display = "none";
+    if (capBar) capBar.style.display = "flex";
+    if (overlayActions) overlayActions.style.display = "flex";
+
+    if (capText) capText.textContent = cur.caption || "Memory Photo";
+    if (indexBadge) indexBadge.textContent = `${currentMemoryIndex + 1} / ${cachedMemories.length}`;
+
+    // Live Hero Desk Eligibility Overlay
+    const isDeskPlayable = !memCurateDisplay || (cur.category === "portrait" || cur.category === "nature" || cur.curated_override === true);
+    if (heroTag) {
+      heroTag.style.display = "inline-flex";
+      if (!memCurateDisplay) {
+        heroTag.style.background = "rgba(20,24,35,0.85)";
+        heroTag.style.border = "1px solid rgba(255,255,255,0.2)";
+        heroTag.style.color = "var(--muted)";
+        if (heroTagDot) heroTagDot.textContent = "○";
+        if (heroTagText) heroTagText.textContent = "DESK DISPLAY (Curation Paused)";
+      } else if (isDeskPlayable) {
+        heroTag.style.background = "rgba(16,44,28,0.92)";
+        heroTag.style.border = "1px solid rgba(46,204,113,0.7)";
+        heroTag.style.color = "#7ee787";
+        if (heroTagDot) heroTagDot.textContent = "●";
+        if (heroTagText) heroTagText.textContent = cur.curated_override ? "INCLUDED ON DESK (Manual Override ★)" : "INCLUDED ON DESK (Curated)";
+      } else {
+        heroTag.style.background = "rgba(45,24,12,0.92)";
+        heroTag.style.border = "1px solid rgba(255,159,10,0.7)";
+        heroTag.style.color = "#ffb347";
+        if (heroTagDot) heroTagDot.textContent = "⊘";
+        if (heroTagText) heroTagText.textContent = "FILTERED FROM DESK (Other)";
+      }
+    }
+
+    if (catBadge) {
+      catBadge.style.display = "inline-flex";
+      const cat = cur.category || "other";
+      let catText = "📁 Filtered";
+      let catCls = "other";
+      if (cat === "portrait") {
+        const faces = cur.face_count || 1;
+        catText = `👤 Portrait (${faces} Face${faces > 1 ? 's' : ''})`;
+        catCls = "portrait";
+      } else if (cat === "nature") {
+        catText = cur.subtype ? `🌿 Nature (${cur.subtype})` : "🌿 Nature";
+        catCls = "nature";
+      } else {
+        catText = cur.subtype ? `📁 Filtered (${cur.subtype})` : "📁 Filtered";
+        catCls = "other";
+      }
+      if (cur.curated_override) {
+        catText += " ★";
+      }
+      catBadge.className = "mem-cat-badge " + catCls;
+      catBadge.textContent = catText;
+      catBadge.title = cur.classification_reason || (cur.curated_override ? "Manual user override" : (cur.vision_label || cat));
+    }
+
+    if (srcBadge) {
+      const src = (cur.source || "").toLowerCase();
+      if (cur.is_gif) {
+        srcBadge.className = "mem-source-badge shortcut";
+        srcBadge.style.background = "linear-gradient(135deg, rgba(255,45,85,0.25), rgba(255,59,48,0.35))";
+        srcBadge.style.borderColor = "rgba(255,45,85,0.5)";
+        srcBadge.style.color = "#ff375f";
+        srcBadge.textContent = (src === "apple_shortcut" || src === "shortcut") ? "🍏 Live Photo (GIF)" : "🎞️ Animated GIF";
+      } else {
+        srcBadge.style.background = "";
+        srcBadge.style.borderColor = "";
+        srcBadge.style.color = "";
+        if (src === "apple_shortcut" || src === "shortcut") {
+          srcBadge.className = "mem-source-badge shortcut";
+          srcBadge.textContent = "🍏 iOS Shortcut";
+        } else if (src === "obex") {
+          srcBadge.className = "mem-source-badge obex";
+          srcBadge.textContent = "📡 Bluetooth";
+        } else {
+          srcBadge.className = "mem-source-badge upload";
+          srcBadge.textContent = "🌐 Web Upload";
+        }
+      }
+    }
+
+    if (dateText && cur.added_at) {
+      try {
+        const d = new Date(cur.added_at);
+        dateText.textContent = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+      } catch {
+        dateText.textContent = "";
+      }
+    }
+  }
+
+  function renderMemoryThumbs() {
+    const strip = document.getElementById("memThumbsStrip");
+    if (!strip) return;
+    strip.innerHTML = "";
+    cachedMemories.forEach((m, idx) => {
+      const item = document.createElement("div");
+      const isDeskPlayable = !memCurateDisplay || (m.category === "portrait" || m.category === "nature" || m.curated_override === true);
+      const isFilteredOut = memCurateDisplay && !isDeskPlayable;
+      item.className = "mem-thumb-item" + (idx === currentMemoryIndex ? " active" : "");
+      if (isFilteredOut) item.style.opacity = "0.55";
+      item.title = `${m.caption || 'Photo'} [${m.category || 'other'}] - ${isDeskPlayable ? 'On Desk' : 'Filtered'}`;
+      item.style.position = "relative";
+
+      const img = document.createElement("img");
+      img.src = m.thumb_url;
+      img.alt = m.caption || "";
+      item.appendChild(img);
+
+      // Category indicator badge (top-left)
+      const catIcon = document.createElement("span");
+      catIcon.style.cssText = "position:absolute; top:2px; left:2px; font-size:0.55rem; background:rgba(0,0,0,0.75); padding:1px 3px; border-radius:3px; pointer-events:none;";
+      catIcon.textContent = (m.category === "portrait") ? "👤" : ((m.category === "nature") ? "🌿" : "📁");
+      item.appendChild(catIcon);
+
+      // Desk eligibility indicator dot (bottom-left)
+      const deskDot = document.createElement("span");
+      deskDot.style.cssText = `position:absolute; bottom:2px; left:2px; width:6px; height:6px; border-radius:50%; background:${isDeskPlayable ? '#2ecc71' : '#ff9f0a'}; box-shadow:0 0 5px ${isDeskPlayable ? '#2ecc71' : '#ff9f0a'}; pointer-events:none;`;
+      deskDot.title = isDeskPlayable ? "Will display on desk" : "Filtered from desk";
+      item.appendChild(deskDot);
+
+      if (m.is_gif) {
+        const gifBadge = document.createElement("span");
+        gifBadge.style.cssText = "position:absolute; bottom:2px; right:2px; font-size:0.5rem; background:rgba(0,0,0,0.8); color:#ff375f; padding:1px 3px; border-radius:3px; font-weight:700; pointer-events:none;";
+        gifBadge.textContent = "GIF";
+        item.appendChild(gifBadge);
+      }
+
+      item.onclick = async () => {
+        currentMemoryIndex = idx;
+        renderMemoryPreview();
+        renderMemoryThumbs();
+        renderMemoryGrid();
+        if (activeScreenMode === "MEMORY") {
+          await postApi("/api/memories/push?id=" + encodeURIComponent(m.id));
+        }
+      };
+      strip.appendChild(item);
+    });
+
+    // Auto-scroll active thumbnail into view
+    const activeThumb = strip.querySelector(".mem-thumb-item.active");
+    if (activeThumb) {
+      activeThumb.scrollIntoView({ behavior: "smooth", inline: "nearest", block: "nearest" });
+    }
+  }
+
+  function renderMemoryGrid() {
+    const grid = document.getElementById("memGalleryGrid");
+    if (!grid) return;
+    grid.innerHTML = "";
+
+    if (!cachedMemories.length) {
+      grid.innerHTML = '<div style="grid-column: 1/-1; text-align:center; color:var(--muted); padding:24px; font-size:0.8rem;">No memories stored yet.</div>';
+      return;
+    }
+
+    let itemsToDisplay = cachedMemories.map((m, originalIdx) => ({ photo: m, originalIdx }));
+    if (galleryCategoryFilter !== "all") {
+      itemsToDisplay = itemsToDisplay.filter(item => (item.photo.category || "other") === galleryCategoryFilter);
+    }
+
+    if (!itemsToDisplay.length) {
+      const filterNames = { portrait: "portraits", nature: "nature photos", other: "filtered non-curated photos" };
+      grid.innerHTML = `<div style="grid-column: 1/-1; text-align:center; color:var(--muted); padding:24px; font-size:0.8rem;">No ${filterNames[galleryCategoryFilter] || 'matching photos'} found in your library.</div>`;
+      return;
+    }
+
+    itemsToDisplay.forEach(({ photo: m, originalIdx: idx }) => {
+      const card = document.createElement("div");
+      const isActive = (idx === currentMemoryIndex);
+      const isDeskPlayable = !memCurateDisplay || (m.category === "portrait" || m.category === "nature" || m.curated_override === true);
+      const isFilteredOut = memCurateDisplay && !isDeskPlayable;
+      card.className = "mem-grid-card" + (isActive ? " active" : "") + (isFilteredOut ? " filtered-dim" : "");
+
+      const isShortcut = (m.source === "apple_shortcut" || m.source === "shortcut");
+      const cat = m.category || "other";
+      let catLabel = "📁 Filtered";
+      if (cat === "portrait") {
+        const faces = m.face_count || 1;
+        catLabel = `👤 ${faces > 1 ? faces + ' Faces' : 'Portrait'}`;
+      } else if (cat === "nature") {
+        catLabel = "🌿 Nature";
+      }
+
+      card.innerHTML = `
+        <div style="position:relative;">
+          <img src="${m.thumb_url}" alt="${m.caption || ''}" onclick="selectMemoryIndex(${idx})">
+          ${isActive ? '<span style="position:absolute; top:4px; left:4px; font-size:0.58rem; font-weight:700; background:rgba(0,255,102,0.9); color:#000; padding:1px 5px; border-radius:4px; z-index:2;">● LIVE</span>' : ''}
+          <span class="mem-cat-badge ${cat}" style="position:absolute; top:4px; ${isActive ? 'left:54px;' : 'left:4px;'} z-index:2;" title="${m.curated_override ? 'Manual override' : (m.classification_reason || m.vision_label || cat)}">
+            ${catLabel}${m.curated_override ? ' ★' : ''}
+          </span>
+          ${m.is_gif ? '<span style="position:absolute; top:4px; right:4px; font-size:0.58rem; font-weight:700; background:rgba(255,45,85,0.85); color:#fff; padding:1px 5px; border-radius:4px; z-index:2;">🎞️ GIF</span>' : ''}
+          <span style="position:absolute; bottom:4px; left:4px; font-size:0.55rem; font-weight:700; background:rgba(0,0,0,0.82); padding:1px 5px; border-radius:3px; z-index:2; border:1px solid ${isDeskPlayable ? 'rgba(46,204,113,0.6)' : 'rgba(255,159,10,0.6)'}; color:${isDeskPlayable ? '#85e89d' : '#ff9f0a'};">
+            ${isDeskPlayable ? '● DESK' : '⊘ FILTERED'}
+          </span>
+          <span style="position:absolute; bottom:4px; right:4px; font-size:0.58rem; background:rgba(0,0,0,0.7); color:#fff; padding:1px 4px; border-radius:3px; z-index:2;">#${idx + 1}</span>
+        </div>
+        <div class="mem-grid-info">
+          <div class="mem-grid-title" title="${m.caption || ''}">${m.caption || 'Memory Photo'}</div>
+          <div style="display:flex; justify-content:space-between; align-items:center; font-size:0.65rem; color:var(--muted); margin-top:2px;">
+            <span>${isShortcut ? '🍏 Shortcut' : '🌐 Web'}</span>
+            <span>${m.added_at ? new Date(m.added_at).toLocaleDateString(undefined, {month:'short', day:'numeric'}) : ''}</span>
+          </div>
+          <div class="mem-grid-actions">
+            <button onclick="streamMemory(${idx})" style="padding:2px 7px; font-size:0.65rem; background:rgba(0,229,255,0.15); color:var(--accent); border-radius:4px; border:none; cursor:pointer;" title="Stream to screen">📺 Show</button>
+            <button onclick="cycleCategory('${m.id}', '${cat}')" style="padding:2px 7px; font-size:0.65rem; background:rgba(255,255,255,0.1); color:#fff; border-radius:4px; border:none; cursor:pointer;" title="Switch category (Portrait ➔ Nature ➔ Filtered)">🏷️</button>
+            <button onclick="deleteMemoryById('${m.id}')" style="padding:2px 7px; font-size:0.65rem; background:rgba(255,23,68,0.15); color:#ff1744; border-radius:4px; border:none; cursor:pointer;" title="Delete">🗑️</button>
+          </div>
+        </div>
+      `;
+      grid.appendChild(card);
+    });
+  }
+
+  function setMemViewMode(mode) {
+    const strip = document.getElementById("memThumbsStrip");
+    const grid = document.getElementById("memGalleryGrid");
+    const btnStrip = document.getElementById("btnViewFilmstrip");
+    const btnGrid = document.getElementById("btnViewGrid");
+
+    if (mode === "grid") {
+      if (strip) strip.style.display = "none";
+      if (grid) grid.style.display = "grid";
+      if (btnStrip) { btnStrip.style.background = "transparent"; btnStrip.style.color = "var(--muted)"; }
+      if (btnGrid) { btnGrid.style.background = "rgba(255,255,255,0.15)"; btnGrid.style.color = "#fff"; }
+    } else {
+      if (strip) strip.style.display = "flex";
+      if (grid) grid.style.display = "none";
+      if (btnStrip) { btnStrip.style.background = "rgba(255,255,255,0.15)"; btnStrip.style.color = "#fff"; }
+      if (btnGrid) { btnGrid.style.background = "transparent"; btnGrid.style.color = "var(--muted)"; }
+    }
+  }
+
+  async function selectMemoryIndex(idx) {
+    currentMemoryIndex = idx;
+    renderMemoryPreview();
+    renderMemoryThumbs();
+    renderMemoryGrid();
+  }
+
+  async function streamMemory(idx) {
+    currentMemoryIndex = idx;
+    renderMemoryPreview();
+    renderMemoryThumbs();
+    renderMemoryGrid();
+    const cur = cachedMemories[idx];
+    const pushUrl = (cur && cur.id) ? ("/api/memories/push?id=" + encodeURIComponent(cur.id)) : "/api/memories/push";
+    if (activeScreenMode !== "MEMORY") {
+      await switchDisplay("MEMORY");
+      await postApi(pushUrl);
+    } else {
+      await postApi(pushUrl);
+    }
+  }
+
+  async function deleteMemoryById(id) {
+    if (!confirm("Delete this photo from LUMO?")) return;
+    try {
+      const res = await fetch("/api/memories/" + id, { method: "DELETE" });
+      const data = await res.json();
+      if (data.ok) {
+        await fetchMemories();
+      }
+    } catch (e) {
+      console.error("Delete error:", e);
+    }
+  }
+
+
+  async function nextMemory() {
+    const res = await postApi("/api/memories/next");
+    if (res && res.index !== undefined) {
+      currentMemoryIndex = res.index;
+      renderMemoryPreview();
+      renderMemoryThumbs();
+      renderMemoryGrid();
+    } else {
+      fetchMemories();
+    }
+  }
+
+  async function prevMemory() {
+    const res = await postApi("/api/memories/prev");
+    if (res && res.index !== undefined) {
+      currentMemoryIndex = res.index;
+      renderMemoryPreview();
+      renderMemoryThumbs();
+      renderMemoryGrid();
+    } else {
+      fetchMemories();
+    }
+  }
+
+  async function pushMemoryToDisplay() {
+    if (activeScreenMode !== "MEMORY") {
+      await switchDisplay("MEMORY");
+    } else {
+      await postApi("/api/memories/push");
+    }
+    const liveBadge = document.getElementById("memDeskLiveBadge");
+    if (liveBadge) liveBadge.style.display = "inline-flex";
+    const hero = document.getElementById("memHeroBox");
+    if (hero) hero.classList.add("live-glow");
+  }
+
+  async function deleteCurrentMemory() {
+    if (!cachedMemories.length) return;
+    const cur = cachedMemories[currentMemoryIndex];
+    if (!cur) return;
+    if (!confirm(`Delete memory "${cur.caption || 'photo'}" from LUMO?`)) return;
+    await fetch(`/api/memories/${cur.id}`, { method: "DELETE" });
+    await fetchMemories();
+  }
+
+  function downloadCurrentMemory() {
+    if (!cachedMemories.length) return;
+    const cur = cachedMemories[currentMemoryIndex];
+    if (!cur) return;
+    const a = document.createElement("a");
+    a.href = cur.url;
+    a.download = (cur.caption || cur.id) + ".jpg";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  }
+
+  async function uploadFiles(files, customCaption) {
+    if (!files || !files.length) return;
+    const toast = document.createElement("div");
+    toast.style.cssText = "position:fixed; bottom:20px; right:20px; background:#141721; border:1px solid rgba(0,229,255,0.4); border-radius:12px; padding:12px 18px; color:#fff; font-size:0.82rem; z-index:9999; box-shadow:0 10px 30px rgba(0,0,0,0.6); display:flex; align-items:center; gap:8px;";
+    toast.innerHTML = `<span>⏳</span> Ingesting ${files.length} photo${files.length > 1 ? 's' : ''}...`;
+    document.body.appendChild(toast);
+
+    let successCount = 0;
+    let serverMsg = "";
+    try {
+      const fd = new FormData();
+      for (let i = 0; i < files.length; i++) {
+        fd.append("files", files[i]);
+      }
+      if (customCaption) fd.append("caption", customCaption);
+
+      const res = await fetch("/api/memories/upload", { method: "POST", body: fd });
+      const data = await res.json();
+      if (data.ok) {
+        successCount = data.count || files.length;
+        if (data.message) serverMsg = data.message;
+      }
+    } catch (err) {
+      console.error("Batch upload error, falling back to sequential:", err);
+      for (let i = 0; i < files.length; i++) {
+        try {
+          const sfd = new FormData();
+          sfd.append("file", files[i]);
+          if (customCaption) sfd.append("caption", customCaption);
+          const sres = await fetch("/api/memories/upload", { method: "POST", body: sfd });
+          const sdata = await sres.json();
+          if (sdata.ok) {
+            successCount++;
+            if (sdata.message) serverMsg = sdata.message;
+          }
+        } catch (e) {}
+      }
+    }
+
+    toast.innerHTML = `<span>✅</span> ` + (serverMsg || `Ingested ${successCount} photo${successCount > 1 ? 's' : ''}!`);
+    setTimeout(() => { if (toast.parentNode) toast.parentNode.removeChild(toast); }, 2800);
+
+    const input = document.getElementById("memFileInput");
+    if (input) input.value = "";
+    const capInput = document.getElementById("memCaptionInput");
+    if (capInput) capInput.value = "";
+
+    await fetchMemories();
+  }
+
+  function handleFileInput(files) {
+    uploadFiles(files, null);
+  }
+
+  function uploadWithCaption() {
+    const input = document.getElementById("memFileInput");
+    const capInput = document.getElementById("memCaptionInput");
+    const caption = capInput ? capInput.value.trim() : "";
+
+    if (input && input.files && input.files.length) {
+      uploadFiles(input.files, caption);
+    } else {
+      // Trigger file selector
+      input.onchange = () => {
+        uploadFiles(input.files, caption);
+        input.onchange = (e) => handleFileInput(e.target.files);
+      };
+      input.click();
+    }
+  }
+
+  function toggleMemSettings() {
+    const tray = document.getElementById("memSettingsTray");
+    if (tray) {
+      tray.style.display = (tray.style.display === "none" || !tray.style.display) ? "block" : "none";
+    }
+  }
+
+  async function toggleMemReplaceDuplicates(val) {
+    await postApi("/api/memories/config", { replace_duplicates: val });
+  }
+
+  async function toggleMemAutoRotate(val) {
+    await postApi("/api/memories/config", { auto_rotate: val });
+  }
+
+  async function changeMemInterval(val) {
+    await postApi("/api/memories/config", { interval_sec: parseInt(val) });
+  }
+
+  async function changeMemGifLoops(val) {
+    await postApi("/api/memories/config", { gif_loops: parseInt(val, 10) });
+  }
+
+  async function toggleMemSwap() {
+    const res = await fetch("/api/memories");
+    const data = await res.json();
+    await postApi("/api/memories/config", { swap_bytes: !data.swap_bytes });
+    if (activeScreenMode === "MEMORY") await postApi("/api/memories/push");
+  }
+
+  async function toggleMemBgr() {
+    const res = await fetch("/api/memories");
+    const data = await res.json();
+    await postApi("/api/memories/config", { bgr_mode: !data.bgr_mode });
+    if (activeScreenMode === "MEMORY") await postApi("/api/memories/push");
+  }
+
+  // --- Drag and Drop Handlers ---
+  const heroBox = document.getElementById("memHeroBox");
+  const dragOverlay = document.getElementById("memDragOverlay");
+  const dropzone = document.getElementById("memDropzone");
+
+  [heroBox, dropzone].forEach(el => {
+    if (!el) return;
+    el.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dragOverlay) dragOverlay.style.display = "flex";
+      if (heroBox) heroBox.classList.add("drag-active");
+      if (dropzone) dropzone.classList.add("dragover");
+    });
+
+    el.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    el.addEventListener("dragleave", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (e.target === el || e.target === dragOverlay) {
+        if (dragOverlay) dragOverlay.style.display = "none";
+        if (heroBox) heroBox.classList.remove("drag-active");
+        if (dropzone) dropzone.classList.remove("dragover");
+      }
+    });
+
+    el.addEventListener("drop", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      if (dragOverlay) dragOverlay.style.display = "none";
+      if (heroBox) heroBox.classList.remove("drag-active");
+      if (dropzone) dropzone.classList.remove("dragover");
+
+      const dt = e.dataTransfer;
+      if (dt && dt.files && dt.files.length) {
+        uploadFiles(dt.files, null);
+      }
+    });
+  });
+
+  // --- Fullscreen Lightbox ---
+  function openMemoryLightbox() {
+    if (!cachedMemories.length) return;
+    const cur = cachedMemories[currentMemoryIndex];
+    if (!cur) return;
+    const modal = document.getElementById("memLightbox");
+    const img = document.getElementById("lightboxImg");
+    const cap = document.getElementById("lightboxCaption");
+    const src = document.getElementById("lightboxSource");
+
+    if (img) img.src = cur.url;
+    if (cap) cap.textContent = cur.caption || "Memory Photo";
+    if (src) src.textContent = (cur.source === "apple_shortcut") ? "Ingested via Apple Shortcuts Automation" : (cur.source === "obex" ? "Received via Bluetooth OBEX" : "Uploaded via Dashboard");
+    if (modal) modal.style.display = "flex";
+  }
+
+  function closeMemoryLightbox() {
+    const modal = document.getElementById("memLightbox");
+    if (modal) modal.style.display = "none";
+  }
+
+  // --- Apple Shortcuts Modal Logic ---
+  function openShortcutModal() {
+    const modal = document.getElementById("shortcutModal");
+    const urlEl = document.getElementById("shortcutUrlText");
+    const curlEl = document.getElementById("curlExampleText");
+
+    // Apple Shortcuts uses plain HTTP on port 8081 to bypass self-signed SSL certificate errors
+    const fullUrl = `http://${window.location.hostname}:8081/api/memories/shortcut`;
+    if (urlEl) urlEl.textContent = fullUrl;
+    if (curlEl) curlEl.textContent = `curl -X POST -F "file=@photo.jpg" "${fullUrl}"`;
+
+    if (modal) modal.style.display = "flex";
+  }
+
+  function closeShortcutModal() {
+    const modal = document.getElementById("shortcutModal");
+    if (modal) modal.style.display = "none";
+  }
+
+  function copyShortcutUrl() {
+    const urlEl = document.getElementById("shortcutUrlText");
+    if (!urlEl) return;
+    navigator.clipboard.writeText(urlEl.textContent).then(() => {
+      const btn = document.getElementById("btnCopyShortcutUrl");
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = "Copied! ✓";
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      }
+    });
+  }
+
+  function copyCurlExample() {
+    const curlEl = document.getElementById("curlExampleText");
+    if (!curlEl) return;
+    navigator.clipboard.writeText(curlEl.textContent).then(() => {
+      const btn = document.getElementById("btnCopyCurl");
+      if (btn) {
+        const orig = btn.textContent;
+        btn.textContent = "Copied! ✓";
+        setTimeout(() => { btn.textContent = orig; }, 2000);
+      }
+    });
+  }
+
+  function switchShortcutTab(tab) {
+    const tabs = ["share", "auto", "select", "curl"];
+    tabs.forEach(t => {
+      const btn = document.getElementById("tabBtn" + t.charAt(0).toUpperCase() + t.slice(1));
+      const pane = document.getElementById("shortcutTab" + t.charAt(0).toUpperCase() + t.slice(1));
+      if (btn) btn.classList.toggle("active", t === tab);
+      if (pane) pane.style.display = (t === tab) ? "block" : "none";
+    });
+  }
+
+  async function testShortcutEndpoint() {
+    const resBox = document.getElementById("testUploadResult");
+    if (resBox) {
+      resBox.style.display = "block";
+      resBox.style.color = "var(--muted)";
+      resBox.textContent = "Generating test pattern and uploading to /api/memories/shortcut...";
+    }
+
+    try {
+      // Create a test 320x240 gradient canvas
+      const c = document.createElement("canvas");
+      c.width = 320; c.height = 240;
+      const ctx = c.getContext("2d");
+      const grad = ctx.createLinearGradient(0, 0, 320, 240);
+      grad.addColorStop(0, "#00E5FF");
+      grad.addColorStop(0.5, "#7928CA");
+      grad.addColorStop(1, "#FF0080");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 320, 240);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 22px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("iOS Shortcut Test", 160, 110);
+      ctx.font = "14px monospace";
+      ctx.fillText(new Date().toLocaleTimeString(), 160, 140);
+
+      const blob = await new Promise(r => c.toBlob(r, "image/jpeg", 0.9));
+      const fd = new FormData();
+      fd.append("file", blob, "shortcut_test.jpg");
+      fd.append("caption", "Shortcut Test");
+
+      const res = await fetch("/api/memories/shortcut", { method: "POST", body: fd });
+      const data = await res.json();
+
+      if (data.ok) {
+        if (resBox) {
+          resBox.style.color = "var(--green)";
+          resBox.textContent = "✓ Success! " + (data.message || "Saved and streamed to LUMO!");
+        }
+        await fetchMemories();
+        if (typeof switchDisplay === "function") switchDisplay("MEMORY");
+      } else {
+        if (resBox) {
+          resBox.style.color = "var(--red)";
+          resBox.textContent = "Failed: " + (data.detail || "Server error");
+        }
+      }
+    } catch (err) {
+      if (resBox) {
+        resBox.style.color = "var(--red)";
+        resBox.textContent = "Error: " + err;
+      }
+    }
+  }
+
+  // ==============================================================================
+  // 2.8" ILI9341 LCD Live Screen Simulator (320x240)
+  // ==============================================================================
+  const lcdCanvas = document.getElementById("lcdCanvas");
+  const lcdCtx = lcdCanvas ? lcdCanvas.getContext("2d") : null;
+
+  let lcdState = {
+    screen: "FACE",
+    time: "12:00",
+    date: "Sun 20 Sep",
+    temp_c: 24.5,
+    weather_icon: "cloudy",
+    eye_color: "cyan",
+    animation: "normal",
+    alarm_ringing: false,
+    system: { cpu_temp: 45, cpu_pct: 12, ram_pct: 35, disk_pct: 22 },
+    spotify: { playing: false, title: "", artist: "", progress_ms: 0, duration_ms: 0 },
+    ios_music: { connected: false, playing: false, title: "", artist: "", progress_ms: 0, duration_ms: 0, has_art: false },
+    voice: { state: "IDLE", subtitle: "", volume: 0.0 },
+    memories: { count: 0, current_index: 0, auto_rotate: true, current: null }
+  };
+
+  const eyeColorPalette = {
+    cyan: "#00E5FF",
+    amber: "#FFB300",
+    green: "#00FF66",
+    white: "#E0F7FA",
+    purple: "#9D00FF",
+    red: "#FF1744",
+    happy: "#FFB300",
+    excited: "#00FF66",
+    bored: "#0088A3",
+    sad: "#5C7CFA",
+    sleep: "#334466"
+  };
+
+  const liveArtImg = new Image();
+  let lastLoadedArtTrack = "";
+
+  let simGazeX = 0, targetGazeX = 0;
+  let simGazeY = 0, targetGazeY = 0;
+  let nextBlinkTime = Date.now() + 3000;
+  let nextGazeTime = Date.now() + 2000;
+
+  function updateLcdSimulatorState(data) {
+    if (!data) return;
+    lcdState.screen = (data.screen || "FACE").toUpperCase();
+    lcdState.time = data.time || "12:00";
+    lcdState.date = data.date || "20 Sep";
+    lcdState.temp_c = data.temp_c || 25;
+    lcdState.weather_icon = data.weather_icon || "cloudy";
+    lcdState.eye_color = data.eye_color || "cyan";
+    lcdState.animation = data.animation || "normal";
+    lcdState.alarm_ringing = !!data.alarm_ringing;
+    if (data.system) lcdState.system = data.system;
+    if (data.spotify) lcdState.spotify = data.spotify;
+    if (data.ios_music) lcdState.ios_music = data.ios_music;
+    if (data.voice) lcdState.voice = data.voice;
+    if (data.memories) {
+      lcdState.memories = data.memories;
+      if (data.memories.current && data.memories.current.filename) {
+        if (data.memories.current.id !== lastLoadedMemoryId) {
+          lastLoadedMemoryId = data.memories.current.id;
+          liveMemoryImg.src = "/static/memories/library/" + data.memories.current.filename + "?t=" + Date.now();
+        }
+      }
+    }
+
+    const label = document.getElementById("lcdModeLabel");
+    if (label) label.textContent = lcdState.screen;
+
+    // Load artwork if track changed or has art
+    const music = (lcdState.ios_music && (lcdState.ios_music.playing || lcdState.ios_music.title)) ? lcdState.ios_music : lcdState.spotify;
+    if (music && music.title && music.title !== lastLoadedArtTrack) {
+      lastLoadedArtTrack = music.title;
+      liveArtImg.src = "/api/music/art?t=" + Date.now();
+    }
+  }
+
+  function formatTimeMs(ms) {
+    if (!ms || isNaN(ms)) return "0:00";
+    const totalSec = Math.floor(ms / 1000);
+    const m = Math.floor(totalSec / 60);
+    const s = totalSec % 60;
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  }
+
+  function drawCurvedMouthCanvas(ctx, mcx, mcy, anim, mood, color) {
+    ctx.save();
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.lineJoin = "round";
+
+    if (anim === "smirk") {
+      // Wry asymmetric smirk curling high on right
+      ctx.beginPath();
+      ctx.moveTo(mcx - 12, mcy + 2);
+      ctx.quadraticCurveTo(mcx - 4, mcy + 2, mcx + 4, mcy);
+      ctx.lineTo(mcx + 14, mcy - 3);
+      ctx.stroke();
+    } else if (anim === "focused") {
+      // Minimalist precision sensor bar
+      ctx.beginPath();
+      ctx.moveTo(mcx - 16, mcy);
+      ctx.lineTo(mcx + 16, mcy);
+      ctx.stroke();
+      ctx.strokeStyle = "#4a5568";
+      ctx.lineWidth = 1.5;
+      ctx.beginPath();
+      ctx.moveTo(mcx - 8, mcy + 4);
+      ctx.lineTo(mcx + 8, mcy + 4);
+      ctx.stroke();
+    } else if (anim === "alert") {
+      // Surprised rounded O-mouth sensor
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.roundRect(mcx - 6, mcy - 3, 12, 8, 4);
+      ctx.stroke();
+    } else if (mood === "sad") {
+      // Melancholy downward arc
+      ctx.beginPath();
+      ctx.moveTo(mcx - 14, mcy + 4);
+      ctx.quadraticCurveTo(mcx, mcy - 1, mcx + 14, mcy + 4);
+      ctx.stroke();
+    } else {
+      // Warm friendly curved smile
+      ctx.beginPath();
+      ctx.moveTo(mcx - 14, mcy);
+      ctx.quadraticCurveTo(mcx, mcy + 5, mcx + 14, mcy);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  function drawCyberneticEye(ctx, cx, cy, w, h, r, isLeft, color, gazeX, gazeY, heightScale, browSlant) {
+    ctx.save();
+    const currH = Math.max(4, h * heightScale);
+    const top = cy - currH / 2 + gazeY;
+    const left = cx - w / 2 + gazeX;
+    const rad = Math.min(r || 8, currH / 2);
+
+    // Visor eye rounded capsule
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.roundRect(left, top, w, currH, rad);
+    ctx.fill();
+
+    // Eyelid-scaled angular brow slant cut
+    const browScale = Math.max(0, Math.min(1, (heightScale - 0.2) / 0.8));
+    if (browScale > 0.05 && browSlant !== 0) {
+      ctx.fillStyle = "#000000";
+      ctx.beginPath();
+      const slantH = Math.min(Math.abs(browSlant), 18) * browScale;
+      const slantW = Math.min(w / 3, 20) * browScale;
+
+      if (browSlant > 0) {
+        // Inward determined brow
+        if (isLeft) {
+          ctx.moveTo(left + w - slantW, top);
+          ctx.lineTo(left + w + 1, top);
+          ctx.lineTo(left + w + 1, top + slantH);
+        } else {
+          ctx.moveTo(left - 1, top);
+          ctx.lineTo(left + slantW, top);
+          ctx.lineTo(left - 1, top + slantH);
+        }
+      } else {
+        // Outward curious brow
+        if (isLeft) {
+          ctx.moveTo(left - 1, top);
+          ctx.lineTo(left + slantW, top);
+          ctx.lineTo(left - 1, top + slantH);
+        } else {
+          ctx.moveTo(left + w - slantW, top);
+          ctx.lineTo(left + w + 1, top);
+          ctx.lineTo(left + w + 1, top + slantH);
+        }
+      }
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    // High-Tech Cyber Catchlight with 3D Convex Parallax
+    if (heightScale > 0.35 && currH > 14) {
+      const catchX = Math.max(left + 4, Math.min(left + w - 16, cx - Math.round(gazeX * 0.6) + 4));
+      const catchY = Math.max(top + 3, Math.min(top + currH - 6, cy - h / 2 + 6 - Math.round(gazeY * 0.5)));
+      const cW = heightScale < 0.7 ? 8 : 14;
+      const cH = heightScale < 0.7 ? 3 : 4;
+      ctx.fillStyle = "#ffffff";
+      ctx.beginPath();
+      ctx.roundRect(catchX, catchY, cW, cH, 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  function renderLcdFrame() {
+    if (!lcdCtx) return;
+    const ctx = lcdCtx;
+    const now = Date.now();
+
+    // Gaze and blink physics (Organic alive micro-saccades)
+    if (now > nextGazeTime) {
+      if (Math.random() < 0.25) {
+        targetGazeX = 0;
+        targetGazeY = 0;
+      } else {
+        targetGazeX = (Math.random() - 0.5) * 8; // ±4px
+        targetGazeY = (Math.random() - 0.5) * 4; // ±2px
+      }
+      nextGazeTime = now + 2400 + Math.random() * 3000;
+    }
+    simGazeX += (targetGazeX - simGazeX) * 0.25;
+    simGazeY += (targetGazeY - simGazeY) * 0.25;
+
+    // Organic Asymmetric & Staggered blinks
+    let heightScaleL = 1.0, heightScaleR = 1.0;
+    if (now > nextBlinkTime) {
+      const blinkElapsed = now - nextBlinkTime;
+      const stagger = 22; // 22ms organic lag between eyes
+      if (blinkElapsed < 95) {
+        heightScaleL = Math.max(0.08, 1.0 - (blinkElapsed / 95) * 0.92);
+      } else if (blinkElapsed < 190) {
+        heightScaleL = Math.min(1.0, 0.08 + ((blinkElapsed - 95) / 95) * 0.92);
+      } else {
+        heightScaleL = 1.0;
+        nextBlinkTime = now + 3500 + Math.random() * 4000;
+      }
+
+      const rightElapsed = Math.max(0, blinkElapsed - stagger);
+      if (rightElapsed < 95) {
+        heightScaleR = Math.max(0.08, 1.0 - (rightElapsed / 95) * 0.92);
+      } else if (rightElapsed < 190) {
+        heightScaleR = Math.min(1.0, 0.08 + ((rightElapsed - 95) / 95) * 0.92);
+      } else {
+        heightScaleR = 1.0;
+      }
+    }
+
+    // Clear black screen (320x240)
+    ctx.fillStyle = "#000000";
+    ctx.fillRect(0, 0, 320, 240);
+
+    const scr = lcdState.screen;
+
+    if (scr === "FACE") {
+      // Top Bar
+      ctx.fillStyle = "#8892b0";
+      ctx.font = "12px monospace";
+      ctx.textAlign = "center";
+      ctx.fillText("LUMO", 160, 18);
+      ctx.textAlign = "right";
+      ctx.fillText(lcdState.time, 308, 18);
+
+      const anim = (lcdState.animation || "normal").toLowerCase();
+      const mood = (lcdState.mood || "normal").toLowerCase();
+
+      // Expressive dynamic eye dimensions (Anki Vector / Cozmo style)
+      let eyeWL = 56, eyeWR = 56;
+      let eyeHL = 48, eyeHR = 48;
+      let eyeRad = 8;
+      let browL = 0, browR = 0;
+
+      if (anim === "focused") {
+        eyeWL = 52; eyeWR = 52; eyeHL = 34; eyeHR = 34; eyeRad = 6;
+        browL = 12; browR = 12;
+      } else if (anim === "smirk") {
+        eyeWL = 54; eyeWR = 56; eyeHL = 46; eyeHR = 40; eyeRad = 8;
+        browL = 14; browR = -6;
+      } else if (anim === "curious") {
+        eyeWL = 58; eyeWR = 52; eyeHL = 52; eyeHR = 42; eyeRad = 10;
+        browL = -10; browR = 8;
+      } else if (anim === "alert") {
+        eyeWL = 60; eyeWR = 60; eyeHL = 54; eyeHR = 54; eyeRad = 14;
+        browL = 6; browR = 6;
+      } else if (mood === "happy" || mood === "excited") {
+        eyeWL = 62; eyeWR = 62; eyeHL = 36; eyeHR = 36; eyeRad = 10;
+        browL = 4; browR = 4;
+      } else if (mood === "sad") {
+        eyeWL = 50; eyeWR = 50; eyeHL = 38; eyeHR = 38; eyeRad = 7;
+        browL = -8; browR = -8;
+      }
+
+      // Mood-based eye coloration
+      let eyeCol = eyeColorPalette[lcdState.eye_color];
+      if (!eyeCol) {
+        if (anim === "alert") eyeCol = eyeColorPalette.red;
+        else if (mood === "happy") eyeCol = eyeColorPalette.happy;
+        else if (mood === "excited") eyeCol = eyeColorPalette.green;
+        else if (mood === "sad") eyeCol = eyeColorPalette.sad;
+        else if (mood === "bored") eyeCol = eyeColorPalette.bored;
+        else eyeCol = eyeColorPalette.cyan;
+      }
+
+      // Visor Eyes with dynamic dimensions, parallax catchlight, and brow cuts
+      drawCyberneticEye(ctx, 96, 94, eyeWL, eyeHL, eyeRad, true, eyeCol, simGazeX, simGazeY, heightScaleL, browL);
+      drawCyberneticEye(ctx, 224, 94, eyeWR, eyeHR, eyeRad, false, eyeCol, simGazeX, simGazeY, heightScaleR, browR);
+
+      // Curved Expressive Mouth
+      if (anim !== "dance") {
+        drawCurvedMouthCanvas(ctx, 160 + simGazeX, 134 + simGazeY, anim, mood, eyeCol);
+      }
+
+      // Dance Equalizer Bars
+      if (anim === "dance") {
+        ctx.fillStyle = eyeCol;
+        for (let i = 0; i < 7; i++) {
+          const barH = 6 + Math.abs(Math.sin(now * 0.009 + i * 0.8)) * 26;
+          ctx.fillRect(100 + i * 18, 175 - barH, 10, barH);
+        }
+      }
+
+      // Bottom Time Bar / Voice Subtitle
+      ctx.fillStyle = "#141824";
+      ctx.fillRect(0, 204, 320, 36);
+      ctx.strokeStyle = "#1e2330";
+      ctx.beginPath(); ctx.moveTo(20, 204); ctx.lineTo(300, 204); ctx.stroke();
+
+      const v = lcdState.voice;
+      if (v && v.state && v.state !== "IDLE") {
+        if (v.state === "LISTENING") {
+          ctx.fillStyle = "#30d158";
+          ctx.font = "bold 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("● JARVIS // LISTENING...", 160, 227);
+        } else if (v.state === "THINKING") {
+          ctx.fillStyle = "#ff9f0a";
+          ctx.font = "bold 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("⚙ JARVIS // THINKING...", 160, 227);
+        } else if (v.state === "SPEAKING") {
+          ctx.fillStyle = "#00E5FF";
+          ctx.font = "bold 12px sans-serif";
+          ctx.textAlign = "center";
+          const sub = (v.subtitle || "Speaking...").substring(0, 38);
+          ctx.fillText(`"${sub}"`, 160, 227);
+        } else {
+          ctx.fillStyle = "#ff453a";
+          ctx.font = "bold 13px sans-serif";
+          ctx.textAlign = "center";
+          ctx.fillText("! JARVIS // ERROR", 160, 227);
+        }
+      } else {
+        ctx.fillStyle = "#00E5FF";
+        ctx.font = "bold 15px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(lcdState.time, 24, 228);
+
+        ctx.fillStyle = "#8892b0";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText(lcdState.alarm_ringing ? "ALARM RINGING" : "ALARM OFF", 296, 227);
+      }
+    }
+    else if (scr === "CLOCK") {
+      ctx.fillStyle = "#00E5FF";
+      ctx.font = "12px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText(`🌤️ ${lcdState.temp_c}°C`, 14, 20);
+      ctx.textAlign = "right";
+      ctx.fillText("LUMO", 306, 20);
+      ctx.strokeStyle = "#282c37";
+      ctx.beginPath(); ctx.moveTo(10, 28); ctx.lineTo(310, 28); ctx.stroke();
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 52px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText(lcdState.time, 160, 105);
+
+      ctx.fillStyle = "#00E5FF";
+      ctx.font = "16px sans-serif";
+      ctx.fillText(lcdState.date, 160, 145);
+
+      ctx.fillStyle = lcdState.alarm_ringing ? "#FF1744" : "#8892b0";
+      ctx.font = "13px sans-serif";
+      ctx.fillText(lcdState.alarm_ringing ? "⏰ ALARM RINGING!" : "⏰ 07:30 ALARM OFF", 160, 180);
+
+      ctx.fillStyle = "#4a5568";
+      ctx.font = "11px monospace";
+      ctx.fillText("Tasks ←    → Music", 160, 222);
+    }
+    else if (scr === "SYSTEM") {
+      ctx.fillStyle = "#00E5FF";
+      ctx.font = "bold 15px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("Pi 5 Hardware Vitals", 14, 24);
+      ctx.strokeStyle = "#282c37";
+      ctx.beginPath(); ctx.moveTo(10, 32); ctx.lineTo(310, 32); ctx.stroke();
+
+      const stats = [
+        { lbl: "CPU Temp", val: `${lcdState.system.cpu_temp || 0} °C`, pct: (lcdState.system.cpu_temp || 0) / 85, col: "#FFB300" },
+        { lbl: "CPU Load", val: `${lcdState.system.cpu_pct || 0} %`, pct: (lcdState.system.cpu_pct || 0) / 100, col: "#00E5FF" },
+        { lbl: "RAM Usage", val: `${lcdState.system.ram_pct || 0} %`, pct: (lcdState.system.ram_pct || 0) / 100, col: "#00FF66" },
+        { lbl: "Disk Storage", val: `${lcdState.system.disk_pct || 0} %`, pct: (lcdState.system.disk_pct || 0) / 100, col: "#8892b0" }
+      ];
+
+      stats.forEach((s, idx) => {
+        const y = 50 + idx * 46;
+        ctx.fillStyle = "#8892b0";
+        ctx.font = "11px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(s.lbl, 14, y);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.textAlign = "right";
+        ctx.fillText(s.val, 306, y);
+
+        ctx.fillStyle = "#1e222d";
+        ctx.fillRect(14, y + 6, 292, 8);
+
+        ctx.fillStyle = s.col;
+        const fillW = Math.max(0, Math.min(292, 292 * s.pct));
+        ctx.fillRect(14, y + 6, fillW, 8);
+      });
+    }
+    else if (scr === "SPOTIFY") {
+      ctx.fillStyle = "#00FF66";
+      ctx.font = "bold 14px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("Now Playing", 14, 22);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.textAlign = "right";
+      ctx.fillText("LUMO", 306, 22);
+      ctx.strokeStyle = "#282c37";
+      ctx.beginPath(); ctx.moveTo(10, 32); ctx.lineTo(310, 32); ctx.stroke();
+
+      const m = (lcdState.ios_music && (lcdState.ios_music.playing || lcdState.ios_music.title)) ? lcdState.ios_music : lcdState.spotify;
+
+      // Album Art (100x100 at 12, 44)
+      ctx.strokeStyle = "#3a3f4d";
+      ctx.strokeRect(10, 42, 104, 104);
+
+      if (liveArtImg.complete && liveArtImg.naturalWidth > 0) {
+        ctx.drawImage(liveArtImg, 12, 44, 100, 100);
+      } else {
+        ctx.fillStyle = "#0d1117";
+        ctx.fillRect(12, 44, 100, 100);
+        ctx.strokeStyle = "#00E5FF";
+        ctx.strokeRect(13, 45, 98, 98);
+        ctx.fillStyle = "#00E5FF";
+        ctx.font = "32px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("♫", 62, 106);
+      }
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 15px sans-serif";
+      ctx.textAlign = "left";
+      const title = (m.title || "No Track").substring(0, 15);
+      ctx.fillText(title, 124, 62);
+
+      ctx.fillStyle = "#8892b0";
+      ctx.font = "12px sans-serif";
+      const artist = (m.artist || "Idle").substring(0, 16);
+      ctx.fillText(artist, 124, 86);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "11px monospace";
+      const progStr = `${formatTimeMs(m.progress_ms)} / ${formatTimeMs(m.duration_ms)}`;
+      ctx.fillText(progStr, 124, 116);
+
+      ctx.fillStyle = m.playing ? "#00FF66" : "#8892b0";
+      ctx.fillText(m.playing ? "[PLAYING]" : "[PAUSED]", 124, 136);
+
+      ctx.fillStyle = "#222633";
+      ctx.fillRect(12, 162, 296, 8);
+      const pct = (m.duration_ms > 0) ? Math.min(1.0, m.progress_ms / m.duration_ms) : 0;
+      ctx.fillStyle = "#00FF66";
+      ctx.fillRect(12, 162, 296 * pct, 8);
+
+      ctx.fillStyle = "#4a5568";
+      ctx.font = "10px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("Controlled via Local Web Dashboard", 160, 222);
+    }
+    else if (scr === "TASKS") {
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 15px sans-serif";
+      ctx.textAlign = "left";
+      ctx.fillText("Tasks", 14, 22);
+
+      const taskList = window.cachedTasks || [];
+      const taskItems = window.cachedTaskItems || [];
+
+      // Open task count indicator
+      ctx.fillStyle = "#00E5FF";
+      ctx.font = "11px monospace";
+      ctx.textAlign = "right";
+      ctx.fillText(`${taskList.length} open`, 306, 22);
+
+      ctx.strokeStyle = "#282c37";
+      ctx.beginPath(); ctx.moveTo(10, 30); ctx.lineTo(310, 30); ctx.stroke();
+
+      if (!taskList.length) {
+        ctx.fillStyle = "#4a5568";
+        ctx.font = "12px sans-serif";
+        ctx.textAlign = "left";
+        ctx.fillText(sageEmptyReason("tasks").substring(0, 38), 14, 62);
+      } else {
+        let currentY = 50;
+        const maxTasks = 4;
+
+        for (let i = 0; i < Math.min(taskList.length, maxTasks); i++) {
+          if (currentY > 195) break;
+
+          const itemData = taskItems[i] || {};
+          const fullText = taskList[i] || "";
+
+          // Bullet
+          ctx.fillStyle = "#00E5FF";
+          ctx.font = "bold 13px monospace";
+          ctx.textAlign = "left";
+          ctx.fillText(">", 12, currentY);
+
+          // Word-wrapped text for Line 1 and Line 2
+          ctx.fillStyle = "#ffffff";
+          ctx.font = "12px sans-serif";
+
+          const words = fullText.split(" ");
+          let line1 = "", line2 = "";
+          for (let w = 0; w < words.length; w++) {
+            const testLine = line1 ? line1 + " " + words[w] : words[w];
+            if (ctx.measureText(testLine).width < 235) {
+              line1 = testLine;
+            } else {
+              line2 = words.slice(w).join(" ");
+              break;
+            }
+          }
+
+          if (line2) {
+            if (ctx.measureText(line2).width > 235) {
+              while (line2.length > 0 && ctx.measureText(line2 + "...").width > 235) {
+                line2 = line2.slice(0, -1);
+              }
+              line2 += "...";
+            }
+          }
+
+          ctx.fillText(line1, 26, currentY);
+
+          if (line2) {
+            currentY += 16;
+            ctx.fillStyle = "#8892b0";
+            ctx.font = "11px sans-serif";
+            ctx.fillText(line2, 26, currentY);
+          }
+
+          // Due timestamp if present
+          if (itemData.due_date && currentY < 185) {
+            let dueStr = itemData.due_date;
+            if (dueStr.includes("T")) dueStr = dueStr.split("T")[1].substring(0, 5);
+            ctx.fillStyle = "#ff9f0a";
+            ctx.font = "10px monospace";
+            ctx.fillText(`📅 ${dueStr}`, 26, currentY + 13);
+            currentY += 13;
+          }
+
+          currentY += 22;
+        }
+
+        ctx.fillStyle = "#3a4154";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("Controlled via Web • Synced with Sage", 160, 226);
+      }
+    }
+    else if (scr === "ALARM") {
+      const flash = Math.floor(now / 500) % 2 === 0;
+      ctx.fillStyle = flash ? "#FF1744" : "#780000";
+      ctx.fillRect(0, 0, 320, 240);
+
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 28px sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("WAKE UP!", 160, 60);
+
+      ctx.font = "bold 44px sans-serif";
+      ctx.fillText(lcdState.time, 160, 125);
+
+      ctx.font = "bold 16px sans-serif";
+      ctx.fillText("PRESS ANY BUTTON", 160, 190);
+    }
+    else if (scr === "MEMORY") {
+      if (liveMemoryImg.complete && liveMemoryImg.naturalWidth > 0) {
+        ctx.drawImage(liveMemoryImg, 0, 0, 320, 240);
+      } else {
+        ctx.fillStyle = "#090a0f";
+        ctx.fillRect(0, 0, 320, 240);
+        ctx.fillStyle = "#8892b0";
+        ctx.font = "14px sans-serif";
+        ctx.textAlign = "center";
+        ctx.fillText("LUMO Memories Frame", 160, 110);
+        ctx.font = "11px sans-serif";
+        ctx.fillText("Upload photos or push via Bluetooth", 160, 130);
+      }
+
+      const caption = (lcdState.memories && lcdState.memories.current && lcdState.memories.current.caption) || "";
+      if (caption) {
+        ctx.fillStyle = "rgba(13, 17, 23, 0.85)";
+        ctx.fillRect(0, 214, 320, 26);
+        ctx.strokeStyle = "rgba(0, 229, 255, 0.3)";
+        ctx.beginPath(); ctx.moveTo(0, 214); ctx.lineTo(320, 214); ctx.stroke();
+
+        ctx.fillStyle = "#00E5FF";
+        ctx.font = "bold 10px monospace";
+        ctx.textAlign = "left";
+        ctx.fillText("MEMORY //", 10, 231);
+
+        ctx.fillStyle = "#ffffff";
+        ctx.font = "11px sans-serif";
+        ctx.fillText(caption, 74, 231);
+
+        ctx.fillStyle = "#8892b0";
+        ctx.font = "10px sans-serif";
+        ctx.textAlign = "right";
+        ctx.fillText("<  OK  >", 310, 231);
+      }
+    }
+    else {
+      ctx.fillStyle = "#8892b0";
+      ctx.font = "14px sans-serif";
+      ctx.textAlign = "center";
+      const dots = ".".repeat((Math.floor(now / 400) % 3) + 1);
+      ctx.fillText("Connecting to Pi" + dots, 160, 130);
+    }
+
+    requestAnimationFrame(renderLcdFrame);
+  }
+
+  // Start LCD Animation Loop
+  requestAnimationFrame(renderLcdFrame);
+
+  initVoiceControls();
+  fetchStatus();
+  fetchAlarms();
+  fetchTasks();
+  fetchMemories();
+  setInterval(fetchStatus, 2000);
+  setInterval(fetchMemories, 10000);
+  // Tasks and alarms used to change only from this page, so reading them once
+  // on load was enough. They come from Sage now and change from the phone, so
+  // the page has to keep asking.
+  setInterval(fetchTasks, 10000);
+  setInterval(fetchAlarms, 15000);
+</script>
+</body>
+</html>

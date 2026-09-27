@@ -1,0 +1,933 @@
+import asyncio
+import hashlib
+import io
+import json
+import logging
+import os
+import time
+import uuid
+from datetime import datetime
+from typing import Dict, List, Optional, Any
+from PIL import Image, ImageOps, ImageEnhance
+from services.vision_curator import VisionCurator
+
+logger = logging.getLogger("MemoriesService")
+
+class MemoriesService:
+    def __init__(self, base_dir: Optional[str] = None):
+        if not base_dir:
+            server_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            self.base_dir = os.path.join(server_dir, "static", "memories")
+        else:
+            self.base_dir = os.path.abspath(base_dir)
+
+        self.inbox_dir = os.path.join(self.base_dir, "inbox")
+        self.library_dir = os.path.join(self.base_dir, "library")
+        self.thumbs_dir = os.path.join(self.base_dir, "thumbs")
+        self.index_file = os.path.join(self.base_dir, "index.json")
+
+        for d in (self.inbox_dir, self.library_dir, self.thumbs_dir):
+            os.makedirs(d, exist_ok=True)
+
+        self.photos: List[Dict[str, Any]] = []
+        self.current_index = 0
+        self.auto_rotate = True
+        self.interval_sec = 20
+        self.max_photos = 50
+        self.nightly_quota = 0  # 0 = unlimited uploads per night
+        self.nightly_uploads: Dict[str, int] = {}
+        self.replace_duplicates = True
+        self.gif_loops = 3  # How many times to loop a GIF before advancing
+        self.active_gif_task: Optional[asyncio.Task] = None
+        self.gif_cancel_event = asyncio.Event()
+        self._gif_cache: Dict[str, List[List[bytes]]] = {}
+        self.swap_bytes = True
+        self.bgr_mode = False
+
+        # AI Vision Curation (Portraits & Nature Only)
+        self.curator = VisionCurator()
+        self.curate_display = True
+        self.cv_version = 5
+
+        self._load_index()
+
+    def _load_index(self):
+        if os.path.exists(self.index_file):
+            try:
+                with open(self.index_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    self.photos = data.get("photos", [])
+                    self.auto_rotate = data.get("auto_rotate", True)
+                    self.interval_sec = data.get("interval_sec", 20)
+                    self.max_photos = data.get("max_photos", 50)
+                    if self.max_photos < 50:
+                        self.max_photos = 50
+                    self.nightly_quota = data.get("nightly_quota", 0)
+                    if self.nightly_quota == 5:
+                        self.nightly_quota = 0  # upgrade from previous default to unlimited
+                    self.replace_duplicates = data.get("replace_duplicates", True)
+                    self.gif_loops = data.get("gif_loops", 3)
+                    self.curate_display = data.get("curate_display", True)
+
+                    # Backfill fingerprint hashes and curation for existing library if missing
+                    for p in self.photos:
+                        if not p.get("pixel_hash") or not p.get("dhash"):
+                            lib_p = os.path.join(self.library_dir, p.get("filename", ""))
+                            if os.path.exists(lib_p):
+                                try:
+                                    with Image.open(lib_p) as ex_img:
+                                        p["pixel_hash"] = hashlib.md5(ex_img.tobytes()).hexdigest()
+                                        p["dhash"] = self._calc_dhash(ex_img)
+                                except Exception:
+                                    pass
+                        if "category" not in p:
+                            p["category"] = "other"
+                            p["curated"] = False
+
+                        # Migration: clean up legacy boolean curated_override: False
+                        # which was set by early schemas and falsely blocked AI re-curation
+                        if p.get("curated_override") is False:
+                            p["curated_override"] = None
+                        elif p.get("curated_override") is True and p.get("category") not in ("portrait", "nature"):
+                            p["category"] = "portrait"
+                            p["curated"] = True
+
+                    # Enforce max quota on existing library
+                    while len(self.photos) > self.max_photos:
+                        old = self.photos.pop()
+                        self._delete_disk_files(old)
+
+                    saved_cv = data.get("cv_version", 0)
+                    saved_cascade_count = data.get("cascade_count", -1)
+                    current_cascade_count = self.curator.loaded_cascade_count if self.curator else 0
+                    self.cv_version = 5
+
+                    logger.info(f"Loaded {len(self.photos)} memories from index (Quota: {self.max_photos} max FIFO rolling buffer, Curate: {self.curate_display}).")
+
+                    # ✨ Auto-curate and smart-crop all library photos from scratch every time code runs
+                    if self.photos:
+                        logger.info(f"✨ Vision AI active: Automatically curating and smart-cropping all {len(self.photos)} library photos from scratch (resetting previous curation)...")
+                        self.scan_and_curate_all(force=True, reset_overrides=True, regen_binpacks=True)
+            except Exception as e:
+                logger.warning(f"Could not load memories index: {e}")
+                self.photos = []
+
+    def _save_index(self):
+        try:
+            with open(self.index_file, "w", encoding="utf-8") as f:
+                json.dump({
+                    "photos": self.photos,
+                    "auto_rotate": self.auto_rotate,
+                    "interval_sec": self.interval_sec,
+                    "max_photos": self.max_photos,
+                    "nightly_quota": self.nightly_quota,
+                    "nightly_uploads": self.nightly_uploads,
+                    "replace_duplicates": self.replace_duplicates,
+                    "gif_loops": self.gif_loops,
+                    "curate_display": self.curate_display,
+                    "cv_version": self.cv_version,
+                    "cascade_count": self.curator.loaded_cascade_count if self.curator else 0,
+                    "updated_at": datetime.now().isoformat()
+                }, f, indent=2)
+        except Exception as e:
+            logger.error(f"Failed to save memories index: {e}")
+
+    def set_gif_loops(self, loops: int):
+        self.gif_loops = 1
+        self._save_index()
+
+    def is_gif_streaming(self) -> bool:
+        return False
+
+    def stop_gif_playback(self):
+        """No-op: GIF playback disabled, all memories are static images."""
+        pass
+
+    def _crop_to_4_3(self, img: Image.Image) -> Image.Image:
+        """Center-crops image to 4:3 (320:240) aspect ratio."""
+        target_ratio = 320.0 / 240.0
+        curr_ratio = img.width / img.height
+        if curr_ratio > target_ratio:
+            new_w = int(img.height * target_ratio)
+            left = (img.width - new_w) // 2
+            return img.crop((left, 0, left + new_w, img.height))
+        elif curr_ratio < target_ratio:
+            new_h = int(img.width / target_ratio)
+            top = (img.height - new_h) // 2
+            return img.crop((0, top, img.width, top + new_h))
+        return img
+
+    def _smart_crop(self, img: Image.Image, face_boxes: Optional[List[List[float]]] = None) -> Image.Image:
+        """
+        Face-aware crop to 4:3 (320x240) ensuring no heads or faces are cropped off.
+        face_boxes: list of [x_frac, y_frac, w_frac, h_frac] as fractions of image dimensions.
+        Falls back to center crop if no face boxes are available.
+        """
+        if not face_boxes:
+            return self._crop_to_4_3(img)
+
+        W, H = img.width, img.height
+        TARGET_RATIO = 320.0 / 240.0
+
+        # Convert fractional boxes to pixel coordinates
+        px = []
+        for box in face_boxes:
+            if not isinstance(box, (list, tuple)) or len(box) < 4:
+                continue
+            xf, yf, wf, hf = box[:4]
+            x = max(0, min(W - 1, int(xf * W)))
+            y = max(0, min(H - 1, int(yf * H)))
+            w = max(1, min(W - x, int(wf * W)))
+            h = max(1, min(H - y, int(hf * H)))
+            px.append((x, y, w, h))
+
+        if not px:
+            return self._crop_to_4_3(img)
+
+        # Union bounding box of all detected faces
+        min_x = min(b[0] for b in px)
+        min_y = min(b[1] for b in px)
+        max_x = max(b[0] + b[2] for b in px)
+        max_y = max(b[1] + b[3] for b in px)
+        cx = (min_x + max_x) // 2
+        cy = (min_y + max_y) // 2
+
+        face_w = max_x - min_x
+        face_h = max_y - min_y
+
+        # Padding: extra top padding for hair/forehead headroom so heads are never clipped
+        pad_x = max(int(face_w * 0.25), int(W * 0.05), 20)
+        pad_y_top = max(int(face_h * 0.40), int(H * 0.08), 30)
+        pad_y_bottom = max(int(face_h * 0.30), int(H * 0.06), 25)
+
+        roi_min_x = max(0, min_x - pad_x)
+        roi_min_y = max(0, min_y - pad_y_top)
+        roi_max_x = min(W, max_x + pad_x)
+        roi_max_y = min(H, max_y + pad_y_bottom)
+
+        roi_w = roi_max_x - roi_min_x
+        roi_h = roi_max_y - roi_min_y
+
+        # Expand ROI to 4:3 aspect ratio
+        if roi_w / max(roi_h, 1) > TARGET_RATIO:
+            crop_w = roi_w
+            crop_h = int(crop_w / TARGET_RATIO)
+        else:
+            crop_h = roi_h
+            crop_w = int(crop_h * TARGET_RATIO)
+
+        # Minimum crop window size (avoid excessive zoom-in on single small face)
+        crop_w = max(crop_w, int(W * 0.35))
+        crop_h = max(crop_h, int(H * 0.35))
+        if crop_w / max(crop_h, 1) > TARGET_RATIO:
+            crop_h = int(crop_w / TARGET_RATIO)
+        else:
+            crop_w = int(crop_h * TARGET_RATIO)
+
+        # Cap at image dimensions
+        if crop_w > W:
+            crop_w = W
+            crop_h = int(W / TARGET_RATIO)
+        if crop_h > H:
+            crop_h = H
+            crop_w = int(H * TARGET_RATIO)
+
+        crop_w = min(crop_w, W)
+        crop_h = min(crop_h, H)
+
+        # Center around face centroid
+        left = cx - crop_w // 2
+        top = cy - crop_h // 2
+
+        # Ensure top boundary respects headroom above faces
+        headroom_limit = min_y - int(face_h * 0.20)
+        if top > headroom_limit:
+            top = headroom_limit
+
+        left = max(0, min(left, W - crop_w))
+        top = max(0, min(top, H - crop_h))
+
+        return img.crop((left, top, left + crop_w, top + crop_h))
+
+    def _render_frame_strips(self, img: Image.Image) -> List[bytes]:
+        """Converts a 320x240 RGB image into 12 pre-computed binary strip packets."""
+        strip_w = 320
+        strip_h = 20
+        total_strips = 12
+        strips = []
+        for i in range(total_strips):
+            y_off = i * strip_h
+            frame = bytearray(8 + strip_w * strip_h * 2)
+            frame[0] = 0xAA
+            frame[1] = 0xCC  # Frame type: MEMORY_STRIP
+            frame[2] = y_off & 0xFF
+            frame[3] = (y_off >> 8) & 0xFF
+            frame[4] = strip_h & 0xFF
+            frame[5] = (strip_h >> 8) & 0xFF
+            frame[6] = strip_w & 0xFF
+            frame[7] = (strip_w >> 8) & 0xFF
+
+            idx = 8
+            for y in range(y_off, y_off + strip_h):
+                for x in range(strip_w):
+                    r, g, b = img.getpixel((x, y))
+                    rgb565 = self._rgb888_to_rgb565(r, g, b)
+                    if self.swap_bytes:
+                        frame[idx]     = rgb565 & 0xFF
+                        frame[idx + 1] = (rgb565 >> 8) & 0xFF
+                    else:
+                        frame[idx]     = (rgb565 >> 8) & 0xFF
+                        frame[idx + 1] = rgb565 & 0xFF
+                    idx += 2
+            strips.append(bytes(frame))
+        return strips
+
+    def _save_binpack(self, photo_id: str, all_frames_strips: List[List[bytes]]):
+        """Persists pre-rendered RGB565 strips to library/{photo_id}.binpack."""
+        binpack_path = os.path.join(self.library_dir, f"{photo_id}.binpack")
+        try:
+            with open(binpack_path, "wb") as f:
+                for frame in all_frames_strips:
+                    for strip in frame:
+                        f.write(strip)
+        except Exception as e:
+            logger.warning(f"Failed to save binpack for {photo_id}: {e}")
+
+    def _load_gif_strips(self, photo_id: str) -> Optional[List[List[bytes]]]:
+        """Loads pre-rendered strips from memory cache or disk binpack."""
+        if photo_id in self._gif_cache:
+            return self._gif_cache[photo_id]
+
+        binpack_path = os.path.join(self.library_dir, f"{photo_id}.binpack")
+        if os.path.exists(binpack_path):
+            try:
+                with open(binpack_path, "rb") as f:
+                    data = f.read()
+                strip_size = 12808
+                strips_per_frame = 12
+                frame_size = strip_size * strips_per_frame
+                if len(data) >= frame_size:
+                    frame_data = data[:frame_size]
+                    frame_strips = [
+                        frame_data[s_idx * strip_size : (s_idx + 1) * strip_size]
+                        for s_idx in range(strips_per_frame)
+                    ]
+                    all_frames = [frame_strips]
+                    self._gif_cache[photo_id] = all_frames
+                    return all_frames
+            except Exception as e:
+                logger.warning(f"Failed to read binpack for {photo_id}: {e}")
+
+        return None
+
+    def _get_or_load_strips(self, photo: dict) -> Optional[List[List[bytes]]]:
+        """Returns pre-rendered binary strips for a photo, generating on-demand if missing."""
+        photo_id = photo.get("id", "")
+        cached = self._load_gif_strips(photo_id)
+        if cached:
+            return cached
+
+        # Generate on-the-fly from disk image
+        filename = photo.get("filename", "")
+        file_path = os.path.join(self.library_dir, filename)
+        if not os.path.exists(file_path):
+            file_path = os.path.join(self.thumbs_dir, photo.get("thumb", ""))
+            if not os.path.exists(file_path):
+                file_path = os.path.join(self.library_dir, f"{photo_id}.jpg")
+                if not os.path.exists(file_path):
+                    return None
+
+        try:
+            with Image.open(file_path) as img:
+                if getattr(img, "is_animated", False):
+                    try:
+                        img.seek(0)
+                    except Exception:
+                        pass
+                face_boxes = photo.get("face_boxes")
+                f_rgb = ImageOps.exif_transpose(img.convert("RGB"))
+                f_rgb = self._smart_crop(f_rgb, face_boxes=face_boxes).resize((320, 240), Image.Resampling.LANCZOS)
+                all_frames = [self._render_frame_strips(f_rgb)]
+
+                self._save_binpack(photo_id, all_frames)
+                self._gif_cache[photo_id] = all_frames
+                return all_frames
+        except Exception as e:
+            logger.error(f"Failed to generate strips on-the-fly for {photo_id}: {e}")
+            return None
+
+    @staticmethod
+    def _calc_dhash(img: Image.Image) -> str:
+        """Computes a 64-bit difference hash (dhash) for perceptual duplicate detection."""
+        try:
+            small = img.convert("L").resize((9, 8), Image.Resampling.LANCZOS)
+            pixels = list(small.get_flattened_data()) if hasattr(small, "get_flattened_data") else list(small.getdata())
+            diff = []
+            for row in range(8):
+                row_offset = row * 9
+                for col in range(8):
+                    diff.append(pixels[row_offset + col] > pixels[row_offset + col + 1])
+            decimal_val = 0
+            for bit in diff:
+                decimal_val = (decimal_val << 1) | int(bit)
+            return f"{decimal_val:016x}"
+        except Exception:
+            return ""
+
+    @staticmethod
+    def _hamming_distance(s1: str, s2: str) -> int:
+        """Returns bit difference between two 64-bit hex hash strings."""
+        if not s1 or not s2 or len(s1) != len(s2):
+            return 999
+        try:
+            return bin(int(s1, 16) ^ int(s2, 16)).count("1")
+        except ValueError:
+            return 999
+
+    def _get_logical_night_key(self) -> str:
+        """Returns the logical night date key (shifts midnight to 6:00 AM).
+        11:00 PM on Sept 21 and 2:00 AM on Sept 22 belong to the same night bucket.
+        """
+        from datetime import timedelta
+        now = datetime.now()
+        logical_date = now - timedelta(hours=6)
+        return logical_date.strftime("%Y-%m-%d")
+
+    def get_nightly_upload_count(self) -> int:
+        key = self._get_logical_night_key()
+        return self.nightly_uploads.get(key, 0)
+
+    def get_nightly_remaining(self) -> int:
+        if self.nightly_quota <= 0:
+            return 999999
+        return max(0, self.nightly_quota - self.get_nightly_upload_count())
+
+    def record_nightly_upload(self, count: int = 1):
+        if count <= 0:
+            return
+        key = self._get_logical_night_key()
+        self.nightly_uploads[key] = self.nightly_uploads.get(key, 0) + count
+        # Retain last 14 days of history
+        if len(self.nightly_uploads) > 14:
+            sorted_keys = sorted(self.nightly_uploads.keys())
+            for old_k in sorted_keys[:-14]:
+                del self.nightly_uploads[old_k]
+        self._save_index()
+
+    def reset_tonight_uploads(self):
+        key = self._get_logical_night_key()
+        if key in self.nightly_uploads:
+            del self.nightly_uploads[key]
+            self._save_index()
+
+    def set_quotas(self, max_photos: Optional[int] = None, nightly_quota: Optional[int] = None):
+        if max_photos is not None:
+            self.max_photos = max(1, max_photos)
+            while len(self.photos) > self.max_photos:
+                old = self.photos.pop()
+                self._delete_disk_files(old)
+        if nightly_quota is not None:
+            self.nightly_quota = max(0, nightly_quota)
+        self._save_index()
+
+    def _rgb888_to_rgb565(self, r: int, g: int, b: int) -> int:
+        if self.bgr_mode:
+            r, b = b, r
+        return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3)
+
+    def _extract_caption_date(self, img: Image.Image) -> str:
+        """Extracts date taken from EXIF if available, else current date."""
+        try:
+            exif = img.getexif()
+            if exif:
+                # 36867: DateTimeOriginal, 306: DateTime
+                dt_str = exif.get(36867) or exif.get(306)
+                if dt_str:
+                    # format usually "YYYY:MM:DD HH:MM:SS"
+                    parts = dt_str.split(" ")[0].split(":")
+                    if len(parts) == 3:
+                        dt = datetime(int(parts[0]), int(parts[1]), int(parts[2]))
+                        return dt.strftime("%d %b %Y")
+        except Exception:
+            pass
+        return datetime.now().strftime("%d %b %Y")
+
+    async def ingest_from_path(self, path: str, hub=None) -> Optional[Dict[str, Any]]:
+        """Called by the watchdog handler when a file arrives in the inbox."""
+        # Short settle delay to avoid reading partially-written files
+        await asyncio.sleep(0.6)
+        if not os.path.exists(path):
+            return None
+
+        filename = os.path.basename(path)
+        logger.info(f"Ingesting memory from inbox: {filename}")
+
+        try:
+            with open(path, "rb") as f:
+                raw = f.read()
+
+            os.remove(path)
+            return await self.ingest_bytes(raw, hub=hub, source="obex", filename=filename)
+        except Exception as e:
+            logger.error(f"Error processing inbox file {path}: {e}")
+            if os.path.exists(path):
+                try: os.remove(path)
+                except Exception: pass
+            return None
+
+    async def ingest_bytes(self, raw: bytes, hub=None, source: str = "upload", filename: str = "", caption: Optional[str] = None, notify: bool = True) -> Optional[Dict[str, Any]]:
+        """Shared processing core for Bluetooth OBEX, Web Upload, and iOS Shortcuts (supports both static photos and animated GIFs)."""
+        if not raw:
+            return None
+
+        try:
+            raw_img = Image.open(io.BytesIO(raw))
+            # If animated GIF / multi-frame image, seek to frame 0 to extract static photo
+            if getattr(raw_img, "is_animated", False):
+                try:
+                    raw_img.seek(0)
+                except Exception:
+                    pass
+
+            if raw_img.mode in ("RGBA", "LA") or (raw_img.mode == "P" and "transparency" in raw_img.info):
+                rgba = raw_img.convert("RGBA")
+                base_img = Image.new("RGB", raw_img.size, (0, 0, 0))
+                base_img.paste(rgba, (0, 0), rgba)
+            else:
+                base_img = raw_img.convert("RGB")
+
+            img = ImageOps.exif_transpose(base_img)
+            curation_res = self.curator.classify(img)
+            face_boxes = curation_res.get("face_boxes", [])
+            img = self._smart_crop(img, face_boxes=face_boxes)
+            display_img = img.resize((320, 240), Image.Resampling.LANCZOS)
+            try:
+                display_img = ImageEnhance.Color(display_img).enhance(1.10)
+                display_img = ImageEnhance.Contrast(display_img).enhance(1.05)
+            except Exception:
+                pass
+            thumb_img = display_img.resize((160, 120), Image.Resampling.LANCZOS)
+            frames_320 = [display_img]
+
+            if not caption or not caption.strip():
+                caption = self._extract_caption_date(raw_img)
+            else:
+                caption = str(caption).strip()[:24]
+
+            # Pre-render binary strips for the static frame (12 strips)
+            all_frame_strips = [self._render_frame_strips(display_img)]
+
+            # Fingerprints for deduplication
+            raw_hash = hashlib.md5(raw).hexdigest()
+            pixel_hash = hashlib.md5(display_img.tobytes()).hexdigest()
+            curr_dhash = self._calc_dhash(display_img)
+
+            # Check for existing duplicate if replace_duplicates is enabled
+            existing_match_idx = -1
+            if self.replace_duplicates:
+                for idx, p in enumerate(self.photos):
+                    if p.get("raw_hash") and p["raw_hash"] == raw_hash:
+                        existing_match_idx = idx
+                        break
+                    if p.get("pixel_hash") and p["pixel_hash"] == pixel_hash:
+                        existing_match_idx = idx
+                        break
+                    if p.get("dhash") and self._hamming_distance(p["dhash"], curr_dhash) <= 4:
+                        existing_match_idx = idx
+                        break
+
+            if existing_match_idx >= 0:
+                # DUPLICATE FOUND: Replace existing image in-place (do not duplicate!)
+                existing = self.photos.pop(existing_match_idx)
+                photo_id = existing["id"]
+
+                # Remove old files (could be converting legacy .gif -> .jpg)
+                self._delete_disk_files(existing)
+
+                lib_file = f"{photo_id}.jpg"
+                thumb_file = f"{photo_id}.jpg"
+
+                display_img.save(os.path.join(self.library_dir, lib_file), "JPEG", quality=92)
+                thumb_img.save(os.path.join(self.thumbs_dir, thumb_file), "JPEG", quality=85)
+                self._save_binpack(photo_id, all_frame_strips)
+                self._gif_cache[photo_id] = all_frame_strips
+
+                if caption and caption.strip():
+                    existing["caption"] = caption
+                existing["filename"] = lib_file
+                existing["thumb"] = thumb_file
+                existing["is_gif"] = False
+                existing["frame_count"] = 1
+                existing["added_at"] = datetime.now().isoformat()
+                existing["source"] = source
+                existing["raw_hash"] = raw_hash
+                existing["pixel_hash"] = pixel_hash
+                existing["dhash"] = curr_dhash
+                existing["is_replaced"] = True
+
+                # Update classification
+                existing["category"] = curation_res.get("category", "nature")
+                existing["curated"] = curation_res.get("curated", True)
+                existing["face_count"] = curation_res.get("face_count", 0)
+                existing["face_boxes"] = curation_res.get("face_boxes", [])
+                existing["nature_score"] = curation_res.get("nature_score", 0.0)
+                existing["subtype"] = curation_res.get("subtype", "")
+                existing["classification_tags"] = curation_res.get("tags", [])
+                existing["classification_reason"] = curation_res.get("reason", "")
+                existing["curated_override"] = None
+
+                self.photos.insert(0, existing)
+                self._save_index()
+                logger.info(f"Duplicate photo detected: replaced existing memory '{photo_id}' ({existing.get('caption')}, category={existing.get('category')}) without duplicating.")
+
+                if notify and hub and hub.connected:
+                    await hub.send_json({
+                        "cmd": "NOTIF",
+                        "app": "Memories",
+                        "title": "Photo Replaced",
+                        "body": existing.get("caption") or "Duplicate updated"
+                    })
+
+                return existing
+
+            # BRAND NEW MEMORY
+            photo_id = f"mem_{int(time.time())}_{uuid.uuid4().hex[:6]}"
+            lib_file = f"{photo_id}.jpg"
+            thumb_file = f"{photo_id}.jpg"
+
+            display_img.save(os.path.join(self.library_dir, lib_file), "JPEG", quality=92)
+            thumb_img.save(os.path.join(self.thumbs_dir, thumb_file), "JPEG", quality=85)
+            self._save_binpack(photo_id, all_frame_strips)
+            self._gif_cache[photo_id] = all_frame_strips
+
+            item = {
+                "id": photo_id,
+                "filename": lib_file,
+                "thumb": thumb_file,
+                "caption": caption,
+                "added_at": datetime.now().isoformat(),
+                "source": source,
+                "raw_hash": raw_hash,
+                "pixel_hash": pixel_hash,
+                "dhash": curr_dhash,
+                "is_gif": False,
+                "frame_count": 1,
+                "is_replaced": False,
+                "category": curation_res.get("category", "nature"),
+                "curated": curation_res.get("curated", True),
+                "face_count": curation_res.get("face_count", 0),
+                "face_boxes": curation_res.get("face_boxes", []),
+                "nature_score": curation_res.get("nature_score", 0.0),
+                "subtype": curation_res.get("subtype", ""),
+                "classification_tags": curation_res.get("tags", []),
+                "classification_reason": curation_res.get("reason", ""),
+                "curated_override": None
+            }
+
+            self.photos.insert(0, item)
+
+            while len(self.photos) > self.max_photos:
+                old = self.photos.pop()
+                self._delete_disk_files(old)
+
+            self._save_index()
+            logger.info(f"Successfully ingested memory '{photo_id}' ({caption}, category={item['category']}) from {source}")
+
+            if notify and hub and hub.connected:
+                await hub.send_json({
+                    "cmd": "NOTIF",
+                    "app": "Memories",
+                    "title": "New Memory Added!",
+                    "body": caption
+                })
+
+            return item
+
+        except Exception as e:
+            logger.error(f"Failed to ingest image bytes: {e}")
+            return None
+
+    def _delete_disk_files(self, photo: dict):
+        try:
+            pid = photo.get("id", "")
+            for ext in (".jpg", ".gif", ".binpack"):
+                p = os.path.join(self.library_dir, f"{pid}{ext}")
+                if os.path.exists(p):
+                    try: os.remove(p)
+                    except Exception: pass
+            lib_p = os.path.join(self.library_dir, photo.get("filename", ""))
+            if os.path.exists(lib_p):
+                try: os.remove(lib_p)
+                except Exception: pass
+            thumb_p = os.path.join(self.thumbs_dir, photo.get("thumb", ""))
+            if os.path.exists(thumb_p):
+                try: os.remove(thumb_p)
+                except Exception: pass
+            if pid in self._gif_cache:
+                del self._gif_cache[pid]
+        except Exception as e:
+            logger.warning(f"Error removing disk files for {photo.get('id')}: {e}")
+
+    def delete_photo(self, photo_id: str) -> bool:
+        idx = next((i for i, p in enumerate(self.photos) if p["id"] == photo_id), -1)
+        if idx == -1:
+            return False
+
+        photo = self.photos.pop(idx)
+        self._delete_disk_files(photo)
+        self._save_index()
+
+        if self.current_index >= len(self.photos):
+            self.current_index = max(0, len(self.photos) - 1)
+
+        logger.info(f"Deleted memory photo {photo_id}")
+        return True
+
+    def list_photos(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                **p,
+                "url": f"/static/memories/library/{p['filename']}",
+                "thumb_url": f"/static/memories/thumbs/{p['thumb']}"
+            }
+            for p in self.photos
+        ]
+
+    get_all_photos = list_photos
+
+    def get_displayable_photos(self) -> List[Dict[str, Any]]:
+        """Returns photos eligible for display on the ESP32 desk screen."""
+        if not self.photos:
+            return []
+        if not self.curate_display:
+            return self.photos
+
+        # Filter to only portraits & nature (or photos with manual positive override)
+        curated = [
+            p for p in self.photos
+            if (p.get("curated_override") in ("portrait", "nature") or p.get("curated_override") is True) or
+               (p.get("curated_override") not in ("other", False) and p.get("category", "other") in ("portrait", "nature"))
+        ]
+        # Graceful fallback: if no photos match, display all photos rather than black screen
+        return curated if curated else self.photos
+
+    def get_current(self) -> Optional[Dict[str, Any]]:
+        displayable = self.get_displayable_photos()
+        if not displayable:
+            return None
+        self.current_index = self.current_index % len(displayable)
+        return displayable[self.current_index]
+
+    def select_photo(self, photo_id: str) -> Optional[Dict[str, Any]]:
+        displayable = self.get_displayable_photos()
+        for idx, p in enumerate(displayable):
+            if p.get("id") == photo_id:
+                self.current_index = idx
+                return p
+        # If not in displayable (e.g. filtered out), locate in all photos
+        for p in self.photos:
+            if p.get("id") == photo_id:
+                return p
+        return None
+
+    def scan_and_curate_all(self, force: bool = False, reset_overrides: bool = False, regen_binpacks: bool = False) -> Dict[str, Any]:
+        """Retroactively analyzes, smart-crops, and classifies all photos in library from scratch."""
+        counts = {"total": len(self.photos), "curated": 0, "portrait": 0, "nature": 0, "other": 0}
+        for p in self.photos:
+            if reset_overrides:
+                p["curated_override"] = None
+            elif p.get("curated_override") is False:
+                p["curated_override"] = None
+
+            is_manual_override = (p.get("curated_override") in ("portrait", "nature", "other")) or (p.get("curated_override") is True)
+            if not force and is_manual_override:
+                cat = p.get("category", "other")
+                counts[cat] = counts.get(cat, 0) + 1
+                if p.get("curated"):
+                    counts["curated"] += 1
+                continue
+
+            pid = p.get("id", "")
+            orig_filename = p.get("filename", "")
+            lib_p = os.path.join(self.library_dir, orig_filename)
+            thumb_p = os.path.join(self.thumbs_dir, p.get("thumb", f"{pid}.jpg"))
+
+            # If it's a GIF or only a GIF exists on disk, locate source
+            target_path = lib_p if os.path.exists(lib_p) else thumb_p
+            if not os.path.exists(target_path):
+                gif_candidate = os.path.join(self.library_dir, f"{pid}.gif")
+                if os.path.exists(gif_candidate):
+                    target_path = gif_candidate
+
+            if os.path.exists(target_path):
+                try:
+                    with Image.open(target_path) as img:
+                        if getattr(img, "is_animated", False):
+                            try:
+                                img.seek(0)
+                            except Exception:
+                                pass
+                        f_rgb = ImageOps.exif_transpose(img.convert("RGB"))
+                        res = self.curator.classify(f_rgb)
+                        face_boxes = res.get("face_boxes", [])
+
+                        # Apply face-safe smart crop to 320x240
+                        f_cropped = self._smart_crop(f_rgb, face_boxes=face_boxes).resize((320, 240), Image.Resampling.LANCZOS)
+                        jpg_file = f"{pid}.jpg"
+                        jpg_path = os.path.join(self.library_dir, jpg_file)
+                        f_cropped.save(jpg_path, "JPEG", quality=92)
+
+                        # Update thumbnail
+                        new_thumb_path = os.path.join(self.thumbs_dir, jpg_file)
+                        f_cropped.resize((160, 120), Image.Resampling.LANCZOS).save(new_thumb_path, "JPEG", quality=85)
+
+                        # Clean up old .gif file if different from jpg_path
+                        if target_path.lower().endswith(".gif") and os.path.exists(target_path):
+                            try:
+                                os.remove(target_path)
+                            except Exception:
+                                pass
+
+                        # Pre-render single-frame static binary strips
+                        all_strips = [self._render_frame_strips(f_cropped)]
+                        self._save_binpack(pid, all_strips)
+                        self._gif_cache[pid] = all_strips
+
+                        p["filename"] = jpg_file
+                        p["thumb"] = jpg_file
+                        p["is_gif"] = False
+                        p["frame_count"] = 1
+                        p["category"] = res.get("category", "other")
+                        p["curated"] = res.get("curated", False)
+                        p["face_count"] = res.get("face_count", 0)
+                        p["face_boxes"] = face_boxes
+                        p["nature_score"] = res.get("nature_score", 0.0)
+                        p["subtype"] = res.get("subtype", "")
+                        p["classification_tags"] = res.get("tags", [])
+                        p["classification_reason"] = res.get("reason", "")
+                        if reset_overrides:
+                            p["curated_override"] = None
+                except Exception as e:
+                    logger.warning(f"Failed to classify photo {pid}: {e}")
+                    p["category"] = "other"
+                    p["curated"] = False
+                    p["face_boxes"] = []
+                    p["is_gif"] = False
+            else:
+                p["category"] = "other"
+                p["curated"] = False
+                p["face_boxes"] = []
+                p["is_gif"] = False
+
+            cat = p.get("category", "other")
+            counts[cat] = counts.get(cat, 0) + 1
+            if p.get("curated", False):
+                counts["curated"] += 1
+
+        self._save_index()
+        logger.info(f"✨ Vision AI Library Curation complete: {counts['portrait']} Portraits, {counts['nature']} Nature scenes, {counts['other']} Filtered from desk. ({counts['curated']}/{counts['total']} displayable on desk)")
+        return counts
+
+    def set_photo_category_override(self, photo_id: str, category: str) -> Optional[Dict[str, Any]]:
+        category = category.lower().strip()
+        if category not in ("portrait", "nature", "other", "auto", "reset"):
+            return None
+        for p in self.photos:
+            if p.get("id") == photo_id:
+                if category in ("auto", "reset"):
+                    p["curated_override"] = None
+                    lib_p = os.path.join(self.library_dir, p.get("filename", ""))
+                    thumb_p = os.path.join(self.thumbs_dir, p.get("thumb", ""))
+                    target_path = lib_p if os.path.exists(lib_p) else thumb_p
+                    if os.path.exists(target_path):
+                        try:
+                            with Image.open(target_path) as img:
+                                res = self.curator.classify(img)
+                                p["category"] = res.get("category", "other")
+                                p["curated"] = res.get("curated", False)
+                                p["face_count"] = res.get("face_count", 0)
+                                p["face_boxes"] = res.get("face_boxes", [])
+                                p["nature_score"] = res.get("nature_score", 0.0)
+                                p["subtype"] = res.get("subtype", "")
+                                p["classification_tags"] = res.get("tags", [])
+                                p["classification_reason"] = res.get("reason", "")
+                        except Exception:
+                            pass
+                else:
+                    p["category"] = category
+                    p["curated"] = (category in ("portrait", "nature"))
+                    p["curated_override"] = category
+                    p["classification_tags"] = [category, f"Manual {category.capitalize()}"]
+                    p["classification_reason"] = f"Manual user override to {category}"
+                self._save_index()
+                return p
+        return None
+
+    def get_curation_stats(self) -> Dict[str, Any]:
+        displayable = self.get_displayable_photos()
+        portraits = sum(1 for p in self.photos if p.get("category") == "portrait")
+        nature = sum(1 for p in self.photos if p.get("category") == "nature")
+        other = sum(1 for p in self.photos if p.get("category") == "other")
+        is_cv = getattr(self.curator, "is_available", False)
+        return {
+            "curate_display": self.curate_display,
+            "opencv_available": is_cv,
+            "engine": "OpenCV Haar Cascades + Nature Engine" if is_cv else "Pass-Through (OpenCV missing)",
+            "total": len(self.photos),
+            "total_photos": len(self.photos),
+            "curated_displayable": len(displayable),
+            "displayable_count": len(displayable),
+            "portrait": portraits,
+            "portraits_count": portraits,
+            "nature": nature,
+            "nature_count": nature,
+            "other": other,
+            "filtered_count": other,
+        }
+
+    async def push_current(self, hub, on_advance=None) -> bool:
+        """Streams current memory (static 320x240 frame) to ESP32."""
+        photo = self.get_current()
+        if not photo or not hub or not hub.connected:
+            return False
+
+        all_frames = self._get_or_load_strips(photo)
+        if not all_frames:
+            return False
+
+        caption = (photo.get("caption") or "")[:23]
+
+        # Send metadata once to set caption and clear screen
+        await hub.send_json({
+            "cmd": "MEMORY_META",
+            "caption": caption,
+            "strip_count": 12
+        })
+        await asyncio.sleep(0.02)
+
+        # Send 12 binary strips of the static image
+        for strip in all_frames[0]:
+            await hub.send_binary(strip)
+            await asyncio.sleep(0.015)
+        logger.info(f"Streamed static memory '{photo.get('id')}' to ESP32 ({caption})")
+        return True
+
+    async def next_photo(self, hub=None, on_advance=None) -> Optional[Dict[str, Any]]:
+        displayable = self.get_displayable_photos()
+        if not displayable:
+            return None
+        self.stop_gif_playback()
+        self.current_index = (self.current_index + 1) % len(displayable)
+        if hub:
+            await self.push_current(hub, on_advance=on_advance)
+        return self.get_current()
+
+    async def prev_photo(self, hub=None, on_advance=None) -> Optional[Dict[str, Any]]:
+        displayable = self.get_displayable_photos()
+        if not displayable:
+            return None
+        self.stop_gif_playback()
+        self.current_index = (self.current_index - 1) % len(displayable)
+        if hub:
+            await self.push_current(hub, on_advance=on_advance)
+        return self.get_current()

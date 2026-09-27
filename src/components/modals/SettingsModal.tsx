@@ -10,6 +10,7 @@ import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
+import { getPiApiKey, setPiApiKey } from '../../services/piBackend';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -25,6 +26,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
   const [confirmText, setConfirmText] = useState<string>('');
+  const [piKey, setPiKey] = useState<string>(() => getPiApiKey());
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -262,6 +264,37 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 <li><strong>Storage Safety:</strong> All mutations are persisted locally in IndexedDB first, guaranteeing offline durability.</li>
               </ul>
             </div>
+
+            {/* Raspberry Pi server key */}
+            <form
+              onSubmit={e => {
+                e.preventDefault();
+                setPiApiKey(piKey);
+                showToast(piKey.trim() ? 'Pi server key saved on this device' : 'Pi server key removed');
+                api.sync.forceSync();
+              }}
+              className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3"
+            >
+              <label htmlFor="pi-api-key" className="block text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                Raspberry Pi server key
+              </label>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                The API_SECRET from /etc/sage/sage.env on your Pi. It is stored in this browser only.
+              </p>
+              <div className="flex items-center gap-2">
+                <input
+                  id="pi-api-key"
+                  type="password"
+                  autoComplete="off"
+                  value={piKey}
+                  onChange={e => setPiKey(e.target.value)}
+                  className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
+                />
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm">
+                  Save
+                </button>
+              </div>
+            </form>
 
             {/* DANGER ZONE: Clear Database */}
             <div className="p-5 rounded-2xl bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 space-y-3">

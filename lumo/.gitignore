@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+venv/
+.venv/
+env/
+.env
+*.pem
+
+# Storage files (runtime generated)
+alarms.json
+tasks.json
+rpi_server/static/memories/inbox/
+rpi_server/static/memories/library/
+rpi_server/static/memories/thumbs/
+rpi_server/static/memories/index.json
+
+# Editors / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Arduino build artifacts
+*.hex
+*.bin
+*.elf
+
+# Firmware credentials (copy esp32_client/secrets.example.h to secrets.h)
+esp32_client/secrets.h

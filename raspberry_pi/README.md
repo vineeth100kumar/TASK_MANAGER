@@ -25,3 +25,19 @@ This Python server (FastAPI) acts as a middleman between your React app and Olla
 1. **Ollama's \ormat="json"\:** Forces the generation sequence to strictly abide by JSON grammar rules.
 2. **Zero-Temperature constraints:** Disables model creativity to ensure maximum predictability.
 3. **Safe Parse Fallback Regex:** A Python safe_parse_json utility that detects and automatically strips away any rogue Markdown formatting (json ...) that small 1.5B models occasionally accidentally output before returning the pure payload to the React app.
+
+## Sync server settings
+
+`db_server.py` reads these from the environment. On the Pi, `deploy/install_pi.sh` writes them to `/etc/sage/sage.env` and systemd loads that file for both Sage and LUMO.
+
+| Variable | Default | What it does |
+| --- | --- | --- |
+| `API_SECRET` | empty | Key every `/api/` request and the `/ws` stream must present (`Authorization: Bearer <key>`). Empty turns the check off, which is only safe when the server can't be reached from outside the Pi. |
+| `SAGE_DB_PATH` | `sage_sync.db` | SQLite file. |
+| `SAGE_DIST_DIR` | `../dist` | Built web app, served at `/` when present. |
+| `SAGE_CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. |
+| `SAGE_GAS_URL` | the existing Apps Script URL | Where the 4-hourly backup goes. |
+
+`/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO uses it to update the clock within a second of a change in the app.
+
+In the web app, enter the same key under Settings > System > Raspberry Pi server key.
