@@ -38,7 +38,7 @@ Install the following via the Arduino IDE Library Manager:
 
 ### Flashing:
 1. Open `esp32_client/esp32_client.ino` in the Arduino IDE.
-2. In `config.h`, check and update your Wi-Fi credentials (`WIFI_SSID` and `WIFI_PASS`).
+2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS` and `PI_HOSTNAME`. `secrets.h` is gitignored, so your password stays off GitHub.
 3. Select board: **ESP32C3 Dev Module**.
 4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**.
 5. Upload the sketch to your ESP32-C3.

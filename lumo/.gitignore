@@ -26,3 +26,6 @@ Thumbs.db
 *.hex
 *.bin
 *.elf
+
+# Firmware credentials (copy esp32_client/secrets.example.h to secrets.h)
+esp32_client/secrets.h

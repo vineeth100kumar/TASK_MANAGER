@@ -9,12 +9,17 @@
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
 
-// ===================== WIFI =====================
-#define WIFI_SSID  "YOUR_WIFI_SSID"
-#define WIFI_PASS  "YOUR_WIFI_PASSWORD"
+// ===================== WIFI + PI SERVER =====================
+// The Wi-Fi name, password and the Pi's address live in secrets.h, which is
+// gitignored so they never end up in the repository again. Copy
+// secrets.example.h to secrets.h and fill it in before flashing.
+#if __has_include("secrets.h")
+#include "secrets.h"
+#else
+#error "Missing esp32_client/secrets.h: copy secrets.example.h to secrets.h and set your Wi-Fi details."
+#endif
 
 // ===================== PI SERVER =====================
-#define PI_HOSTNAME  "lumo.local"
 #define PI_WS_PORT   8765
 #define PI_WS_PATH   "/"
 
