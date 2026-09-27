@@ -2,14 +2,15 @@
 """
 Check Lumo's connection to Sage, the shared task manager.
 
-Run this on the Pi after wiring the two together:
+Run this on the Pi after installing both services:
 
-    cd /home/pi/lumo_pi_system/rpi_server
-    sudo systemctl show sage-backend -p Environment   # where the key comes from
-    venv/bin/python test_sage.py
+    cd lumo/rpi_server
+    sudo systemctl status sage lumo
+    sudo -E env $(sudo cat /etc/sage/sage.env | xargs) venv/bin/python test_sage.py
 
-It reads the real lists, creates a throwaway alarm and removes it again, and
-waits a moment on the event stream. Nothing else is written.
+It reads the real lists, then does a full round trip through Sage's sync
+protocol: adds a task, sees it on the list and on the event stream, completes
+it, sets an alarm, and moves both to Sage's trash again.
 """
 
 import asyncio
@@ -24,26 +25,27 @@ async def main() -> int:
     sage = SageClient()
     print(f"Sage at {sage.base_url}")
 
-    if not sage.is_configured:
-        print("\nNo API key found. Looked in:")
+    if sage.is_configured:
+        print(f"Key found, ending in ...{sage.api_key[-4:]}")
+    else:
+        print("No API key found; carrying on in case Sage runs without one. Looked in:")
         for place in key_search_report().split("; "):
             print(f"    {place}")
-        print("\n  Running main.py by hand? Put the key in rpi_server/.env:")
-        print("    SAGE_API_KEY=<the same key the Sage app asks for>")
-        print("  Under systemd, lumo.service reads it from /etc/sage/sage.env.")
-        return 1
-    print(f"Key found, ending in ...{sage.api_key[-4:]}")
 
     tasks = TaskService(sage)
     alarms = AlarmManager(sage)
+    seen: list = []
+    listener = asyncio.create_task(sage.listen(lambda e: _note(seen, e)))
 
     await tasks.refresh()
     if not sage.online:
         print(f"\nCould not reach Sage: {sage.last_error}")
-        print("  Is it running?  sudo systemctl status sage-backend")
+        print("  Is it running?  sudo systemctl status sage")
+        listener.cancel()
         return 1
     if sage.last_error:
         print(f"\n{sage.last_error}")
+        listener.cancel()
         return 1
 
     open_tasks = tasks.get_tasks()
@@ -56,28 +58,56 @@ async def main() -> int:
     for a in alarms.list_alarms():
         print(f"  - {a['h']:02d}:{a['m']:02d}  {a['label']}  {'on' if a['enabled'] else 'off'}")
 
-    print("\nWriting a throwaway alarm...")
-    probe = await alarms.add_alarm(4, 44, "Lumo connection test")
-    if probe is None:
-        print(f"  Could not write to Sage: {sage.last_error}")
-        return 1
-    print(f"  Created {probe.id}, set for {probe.h:02d}:{probe.m:02d}")
-    await alarms.delete_alarm(probe.id)
-    print("  Removed it again")
-
-    print("\nListening for live events for 5 seconds...")
-    seen = []
-    listener = asyncio.create_task(sage.listen(lambda e: _note(seen, e)))
-    await asyncio.sleep(5)
-    listener.cancel()
-    if any(e.get("type") == "AUTH_OK" for e in seen):
-        print("  Event stream connected and authenticated")
-    else:
-        print("  No handshake seen. Reminders will not reach the display.")
+    await asyncio.sleep(1)
+    if not any(e.get("type") == "AUTH_OK" for e in seen):
+        print("\nThe event stream did not accept Lumo. Changes from the app will be up to "
+              "two minutes late on the clock.")
+        listener.cancel()
         await sage.close()
         return 1
+    print("\nEvent stream connected and authenticated")
 
+    failures = 0
+    print("\nRound trip:")
+    created = await sage.create_item({"title": "Lumo connection test", "entity_type": "task"})
+    if created is None:
+        print(f"  Could not write to Sage: {sage.last_error}")
+        listener.cancel()
+        return 1
+    await tasks.refresh()
+    ok = any(i["id"] == created["id"] for i in tasks.get_items())
+    failures += not ok
+    print(f"  {'ok ' if ok else 'BAD'} task created and listed")
+
+    await asyncio.sleep(1)
+    ok = any(
+        e.get("type") == "SYNC_APPLIED" and any(c.get("entityId") == created["id"] for c in e.get("changes") or [])
+        for e in seen
+    )
+    failures += not ok
+    print(f"  {'ok ' if ok else 'BAD'} change announced on the event stream")
+
+    ok = await tasks.complete_task(created["id"]) and not any(i["id"] == created["id"] for i in tasks.get_items())
+    failures += not ok
+    print(f"  {'ok ' if ok else 'BAD'} task completed and off the list")
+
+    probe = await alarms.add_alarm(4, 44, "Lumo connection test")
+    ok = probe is not None and any(a["id"] == probe.id for a in alarms.list_alarms())
+    failures += not ok
+    print(f"  {'ok ' if ok else 'BAD'} alarm set for 04:44")
+
+    await tasks.delete_task(created["id"])
+    if probe is not None:
+        await alarms.delete_alarm(probe.id)
+    ok = probe is None or not any(a["id"] == probe.id for a in alarms.list_alarms())
+    failures += not ok
+    print(f"  {'ok ' if ok else 'BAD'} test task and alarm moved to Sage's trash")
+
+    listener.cancel()
     await sage.close()
+    if failures:
+        print(f"\n{failures} check(s) failed. Last error: {sage.last_error or 'none'}")
+        return 1
     print("\nAll good. Lumo and Sage are sharing one list.")
     return 0
 

@@ -30,7 +30,8 @@ except ImportError:
 
 from config import WS_PORT, HTTP_PORT, HTTP_PLAIN_PORT, MDNS_NAME, SAGE_REFRESH_SECONDS
 from ws_hub import WSHub
-from services.sage_client import SageClient, key_search_report
+from services.sage_client import CLIENT_ID as SAGE_CLIENT_ID, WORK_ITEMS, SageClient, key_search_report
+from services.reminders import ReminderWatcher
 from services.spotify import SpotifyService
 from services.weather import WeatherService
 from services.alarms import AlarmManager
@@ -75,6 +76,7 @@ weather = WeatherService()
 alarms = AlarmManager(sage)
 emotion = EmotionEngine()
 tasks = TaskService(sage)
+reminders = ReminderWatcher(sage)
 system_stats = SystemStatsService()
 anim_engine = AnimationEngine()
 ios_companion = IOSCompanionService()
@@ -237,30 +239,24 @@ async def refresh_from_sage():
 
 async def on_sage_event(event: dict):
     """
-    Anything that happens in the task manager, felt at the desk.
+    Anything that changes in the task manager, felt at the desk.
 
-    A reminder falling due is either one of Lumo's alarms, in which case the
-    clock has already sounded it and this is the same event arriving a moment
-    later, or it is an ordinary Sage reminder, which becomes a buzz and a card
-    on the face.
+    Sage sends one SYNC_APPLIED event per batch any client saves. Lumo's own
+    writes already refreshed the lists, so only other clients' changes to
+    work items trigger a re-read.
     """
     kind = event.get("type")
-    data = event.get("data") or {}
-
-    if kind == "REMINDER_TRIGGERED":
-        item_id = data.get("id", "")
-        if any(a.id == item_id for a in alarms.alarms):
-            if alarms.mark_fired(item_id) and alarms.ringing_id is None:
-                alarms.ringing_id = item_id
-                await hub.send_json({"cmd": "ALARM_RING"})
-            return
-        title = data.get("title") or "Reminder"
-        logger.info(f"Sage reminder due: {title}")
-        await ios_companion.push_notification("Sage", title, "Due now", hub)
-        return
-
-    if kind in ("ITEM_CREATED", "ITEM_UPDATED", "ITEM_DELETED", "TASKS_MIGRATED"):
+    if kind == "SYNC_CLEARED":
         await refresh_from_sage()
+        return
+    if kind == "SYNC_APPLIED":
+        changes = event.get("changes") or []
+        if any(c.get("entityType") == WORK_ITEMS and c.get("clientId") != SAGE_CLIENT_ID for c in changes):
+            await refresh_from_sage()
+
+
+async def announce_reminder(title: str):
+    await ios_companion.push_notification("Sage", title, "Due now", hub)
 
 # ===================== BUTTON DISPATCHER =====================
 async def on_button_event(btn: str):
@@ -312,10 +308,10 @@ async def lifespan(app: FastAPI):
     # event missed while the connection was down.
     if not sage.is_configured:
         logger.warning(
-            "No Sage API key found, so tasks and alarms will be empty. "
-            "Put SAGE_API_KEY in rpi_server/.env (the same key the Sage app "
-            "asks for), or run Lumo under systemd, where lumo.service reads "
-            "it from /etc/sage/sage.env."
+            "No Sage API key found. That only works if Sage runs without "
+            "API_SECRET. Put SAGE_API_KEY in rpi_server/.env (the same key "
+            "the Sage app uses), or run Lumo under systemd, where lumo.service "
+            "reads it from /etc/sage/sage.env."
         )
         logger.warning(f"Looked in: {key_search_report()}")
     await refresh_from_sage()
@@ -325,6 +321,7 @@ async def lifespan(app: FastAPI):
 
     scheduler.add_job(spotify.poll, "interval", seconds=2, args=[hub, emotion])
     scheduler.add_job(alarms.poll, "interval", seconds=5, args=[hub])
+    scheduler.add_job(reminders.poll, "interval", seconds=15, args=[announce_reminder])
     scheduler.add_job(broadcast_clock, "interval", minutes=1)
     scheduler.add_job(weather.poll, "interval", minutes=30, args=[hub])
     scheduler.add_job(emotion.push_schedule, "interval", minutes=5, args=[hub])

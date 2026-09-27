@@ -21,9 +21,8 @@ WEATHER_LON = float(os.getenv("WEATHER_LON", 77.628993))
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # Sage (the task manager) is the single store for tasks, reminders and alarms.
-# Lumo reads and writes them through Sage's API on the loopback address rather
-# than opening its database, so Sage's own rules still apply and the phone app
-# hears about every change. See services/sage_client.py.
+# Lumo reads and writes them through Sage's sync API on the loopback address,
+# as one more sync client next to the web app. See services/sage_client.py.
 SAGE_API_URL = os.getenv("SAGE_API_URL", "http://127.0.0.1:8000")
 SAGE_REQUEST_TIMEOUT = float(os.getenv("SAGE_REQUEST_TIMEOUT", "8.0"))
 
@@ -31,7 +30,7 @@ SAGE_REQUEST_TIMEOUT = float(os.getenv("SAGE_REQUEST_TIMEOUT", "8.0"))
 # reads for both services. These two are fallbacks for running main.py by hand.
 SAGE_API_KEY = os.getenv("SAGE_API_KEY", "")
 SAGE_ENV_FILE = os.getenv("SAGE_ENV_FILE", "/etc/sage/sage.env")
-SAGE_SECRET_FILE = os.getenv("SAGE_SECRET_FILE", "/home/pi/sage-os/data/api_secret.txt")
+SAGE_SECRET_FILE = os.getenv("SAGE_SECRET_FILE", "/etc/sage/api_secret.txt")
 
 # Alarms are Sage reminders carrying this tag. The tag is how Lumo knows to
 # sound the buzzer for one rather than show it as a notification card.

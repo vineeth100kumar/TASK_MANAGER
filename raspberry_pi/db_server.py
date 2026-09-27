@@ -98,7 +98,7 @@ async def event_stream(socket: WebSocket):
             await socket.close(code=4401)
             return
     events.sockets.add(socket)
-    await socket.send_text(json.dumps({"type": "HELLO"}))
+    await socket.send_text(json.dumps({"type": "AUTH_OK"}))
     try:
         while True:
             await socket.receive_text()  # clients may ping; nothing else is expected
