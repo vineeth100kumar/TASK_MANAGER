@@ -1,0 +1,323 @@
+import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { 
+  Settings, Bell, Calendar, Download, Upload, ShieldAlert, 
+  Database, Check, X, FileText, Info, Sparkles, Trash2, AlertTriangle 
+} from 'lucide-react';
+import { api } from '../../services/api';
+import { notificationService } from '../../services/notificationService';
+import { downloadICSFile } from '../../utils/calendarExport';
+import { importCSVData } from '../../utils/dataImporter';
+import { useToast } from '../../context/ToastContext';
+import { LifeContext } from '../../services/types';
+
+interface SettingsModalProps {
+  onClose: () => void;
+  lifeContext: LifeContext;
+  onDataChanged?: () => void;
+}
+
+export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
+  const [activeTab, setActiveTab] = useState<'attention' | 'data' | 'system'>('attention');
+  const [resurfacingDays, setResurfacingDays] = useState<number>(14);
+  const [notificationStatus, setNotificationStatus] = useState<string>('default');
+  const [csvInput, setCsvInput] = useState<string>('');
+  const [isImporting, setIsImporting] = useState<boolean>(false);
+  const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
+  const [confirmText, setConfirmText] = useState<string>('');
+  const { showToast } = useToast();
+
+  useEffect(() => {
+    setNotificationStatus(notificationService.getPermissionStatus());
+    api.getMeta('resurfacing_days').then(val => {
+      if (val) setResurfacingDays(Number(val));
+    });
+  }, []);
+
+  const handleRequestNotifications = async () => {
+    const granted = await notificationService.requestPermission();
+    setNotificationStatus(granted ? 'granted' : 'denied');
+    showToast(granted ? 'Desktop notifications enabled' : 'Notifications blocked or denied');
+  };
+
+  const handleSetResurfacingDays = async (days: number) => {
+    setResurfacingDays(days);
+    await api.setMeta('resurfacing_days', days);
+    showToast(`Smart Resurfacing set to ${days} days`);
+    if (onDataChanged) onDataChanged();
+  };
+
+  const handleExportICS = () => {
+    const state = api.sync.getState();
+    downloadICSFile(state.workItems);
+    showToast('iCalendar (.ics) downloaded');
+  };
+
+  const handleImportCSV = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!csvInput.trim() || isImporting) return;
+    setIsImporting(true);
+    try {
+      const result = await importCSVData(csvInput, lifeContext);
+      showToast(`Imported ${result.imported} tasks from CSV!`);
+      setCsvInput('');
+      if (onDataChanged) onDataChanged();
+    } catch (err: any) {
+      showToast('Import failed: ' + err.message, 'error');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
+  const handleClearDatabase = async () => {
+    if (confirmText !== 'CLEAR') return;
+    try {
+      await api.clearAllData();
+      showToast('Database wiped successfully. Starting clean.');
+      setIsConfirmingClear(false);
+      if (onDataChanged) onDataChanged();
+      onClose();
+    } catch (err: any) {
+      showToast('Failed to clear database: ' + err.message, 'error');
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans">
+      <div className="absolute inset-0 bg-black/50 backdrop-blur-md" onClick={onClose} />
+      
+      <motion.div 
+        initial={{ opacity: 0, scale: 0.95, y: 15 }} 
+        animate={{ opacity: 1, scale: 1, y: 0 }} 
+        exit={{ opacity: 0, scale: 0.95, y: 15 }}
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-[32px] shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
+      >
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-500">
+            <Settings size={16} />
+            <span>Sage System Settings</span>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+        </div>
+
+        {/* Tab Navigation */}
+        <div className="flex bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
+          <button
+            onClick={() => setActiveTab('attention')}
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+              activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Attention & Alerts
+          </button>
+          <button
+            onClick={() => setActiveTab('data')}
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+              activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Data & Migration
+          </button>
+          <button
+            onClick={() => setActiveTab('system')}
+            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+              activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Cloud Limits & Reset
+          </button>
+        </div>
+
+        {/* Tab 1: Attention & Notifications */}
+        {activeTab === 'attention' && (
+          <div className="space-y-6">
+            {/* Desktop Push Notifications */}
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
+                    <Bell size={18} />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">Desktop Reminders</h4>
+                    <p className="text-xs text-gray-400">Receive native desktop popups when scheduled reminders are due.</p>
+                  </div>
+                </div>
+
+                {notificationStatus === 'granted' ? (
+                  <span className="px-3 py-1 bg-emerald-50 text-emerald-600 font-bold text-xs rounded-full flex items-center gap-1">
+                    <Check size={13} /> Enabled
+                  </span>
+                ) : (
+                  <button
+                    onClick={handleRequestNotifications}
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm"
+                  >
+                    Enable
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Smart Resurfacing Sensitivity */}
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Sparkles size={16} className="text-amber-500" />
+                <h4 className="font-bold text-sm text-gray-900 dark:text-white">Smart Resurfacing Threshold</h4>
+              </div>
+              <p className="text-xs text-gray-400">
+                Gently suggest uncompleted items in your Today surface if you haven't opened or touched them in:
+              </p>
+
+              <div className="grid grid-cols-4 gap-2">
+                {[7, 14, 21, 30].map(days => (
+                  <button
+                    key={days}
+                    onClick={() => handleSetResurfacingDays(days)}
+                    className={`py-2 text-xs font-bold rounded-xl transition-all ${
+                      resurfacingDays === days 
+                        ? 'bg-amber-500 text-white shadow-sm' 
+                        : 'bg-white dark:bg-white/5 border border-black/5 dark:border-white/5 text-gray-600 dark:text-gray-300'
+                    }`}
+                  >
+                    {days} Days
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 2: Data Portability & Migration */}
+        {activeTab === 'data' && (
+          <div className="space-y-6">
+            {/* Calendar Export */}
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <div className="p-2.5 rounded-xl bg-purple-50 dark:bg-purple-950/40 text-purple-600">
+                  <Calendar size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">iCalendar (.ics) Export</h4>
+                  <p className="text-xs text-gray-400">Export all time-bound tasks and events to Google/Apple Calendar.</p>
+                </div>
+              </div>
+
+              <button
+                onClick={handleExportICS}
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0"
+              >
+                <Download size={14} /> Export .ics
+              </button>
+            </div>
+
+            {/* CSV / Todoist Importer */}
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+              <div className="flex items-center gap-2">
+                <Upload size={16} className="text-blue-500" />
+                <h4 className="font-bold text-sm text-gray-900 dark:text-white">Import from CSV / Todoist</h4>
+              </div>
+              <p className="text-xs text-gray-400">
+                Paste raw CSV text or upload an export file from Todoist, Notion, or Google Tasks:
+              </p>
+
+              <form onSubmit={handleImportCSV} className="space-y-3">
+                <textarea
+                  value={csvInput}
+                  onChange={e => setCsvInput(e.target.value)}
+                  placeholder="Paste CSV contents here (Title, Due Date, Priority, Description)..."
+                  rows={4}
+                  className="w-full p-3 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
+                />
+
+                <div className="flex justify-end">
+                  <button
+                    type="submit"
+                    disabled={!csvInput.trim() || isImporting}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
+                  >
+                    <Upload size={13} /> {isImporting ? 'Importing...' : 'Run Import'}
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Tab 3: Google Sheets Backend Specs & Clear Database */}
+        {activeTab === 'system' && (
+          <div className="space-y-6">
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
+              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wider">
+                <Info size={16} />
+                <span>Google Sheets Backend Constraints</span>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-400 leading-relaxed">
+                Sage uses Google Sheets as a personal, zero-cost cloud replica. Below are the architectural bounds:
+              </p>
+              <ul className="text-xs text-gray-600 dark:text-gray-400 list-disc list-inside space-y-1 pt-1">
+                <li><strong>Capacity:</strong> Google Sheets supports up to 10 million cells (~100,000+ tasks).</li>
+                <li><strong>Concurrency:</strong> Writes are serialized via a 15-second atomic mutex (`LockService`).</li>
+                <li><strong>Bandwidth Optimization:</strong> Sage uses incremental pull (`getChangesSince`) to minimize data transfer.</li>
+                <li><strong>Storage Safety:</strong> All mutations are persisted locally in IndexedDB first, guaranteeing offline durability.</li>
+              </ul>
+            </div>
+
+            {/* DANGER ZONE: Clear Database */}
+            <div className="p-5 rounded-2xl bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 space-y-3">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-xs uppercase tracking-wider">
+                <AlertTriangle size={16} />
+                <span>Danger Zone · Clear Database</span>
+              </div>
+              <p className="text-xs text-gray-600 dark:text-gray-400">
+                Wipe all local IndexedDB stores, operations queue, and metadata. This resets Sage to a completely fresh installation.
+              </p>
+
+              {!isConfirmingClear ? (
+                <button
+                  type="button"
+                  onClick={() => setIsConfirmingClear(true)}
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-transform active:scale-95"
+                >
+                  <Trash2 size={14} /> Clear Local Database
+                </button>
+              ) : (
+                <div className="p-4 rounded-xl bg-white dark:bg-[#2c2c2e] border border-red-200 dark:border-red-900/40 space-y-3">
+                  <p className="text-xs font-bold text-red-600 dark:text-red-400">
+                    Type <span className="font-mono bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded">CLEAR</span> to confirm wiping all local records:
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      placeholder="Type CLEAR"
+                      value={confirmText}
+                      onChange={e => setConfirmText(e.target.value)}
+                      className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-red-200 dark:border-red-800 text-xs font-mono font-bold outline-none dark:text-white"
+                      autoFocus
+                    />
+                    <button
+                      type="button"
+                      disabled={confirmText !== 'CLEAR'}
+                      onClick={handleClearDatabase}
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-30 text-white font-bold text-xs rounded-xl shadow-sm"
+                    >
+                      Confirm Wipe
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setIsConfirmingClear(false); setConfirmText(''); }}
+                      className="px-3 py-2 text-xs font-semibold text-gray-500 hover:text-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+      </motion.div>
+    </div>
+  );
+}
