@@ -1,0 +1,17 @@
+[Unit]
+Description=Keep the Pi's Sage + LUMO checkout on origin/main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=@REPO@/deploy/auto_sync.sh
+Environment=SAGE_REPO=@REPO@
+Environment=SAGE_USER=@USER@
+# VITE_PI_BACKEND_URL for web builds can be set here too.
+EnvironmentFile=-/etc/sage/sage.env
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

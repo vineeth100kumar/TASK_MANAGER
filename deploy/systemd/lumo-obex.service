@@ -6,7 +6,7 @@ Requires=bluetooth.target
 [Service]
 Type=simple
 ExecStartPre=-/bin/chmod 777 /var/run/sdp
-ExecStart=/usr/bin/obexpushd -B -o /home/vk/lumo-pi-system/rpi_server/static/memories/inbox -n
+ExecStart=/usr/bin/obexpushd -B -o @REPO@/lumo/rpi_server/static/memories/inbox -n
 Restart=always
 RestartSec=3
 

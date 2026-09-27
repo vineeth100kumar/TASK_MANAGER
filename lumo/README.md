@@ -47,86 +47,61 @@ Install the following via the Arduino IDE Library Manager:
 
 ## 3. Raspberry Pi 5 Server Setup
 
-### Installation:
-1. Copy the `rpi_server` folder to your Raspberry Pi 5 (e.g. `/home/pi/lumo_pi_system/rpi_server`).
-2. Create and activate a Python virtual environment:
-   ```bash
-   cd /home/pi/lumo_pi_system/rpi_server
-   python3 -m venv venv
-   source venv/bin/activate
-   pip install -r requirements.txt
-   ```
-3. Copy `.env.example` to `.env`:
-   ```bash
-   cp .env.example .env
-   nano .env
-   ```
-4. Enter your Spotify credentials and location coordinates.
+LUMO now lives in the TASK_MANAGER repository next to Sage, and one installer
+sets up both. From the checkout on the Pi:
+
+```bash
+sudo deploy/install_pi.sh
+```
+
+That creates `lumo/rpi_server/venv`, copies `.env.example` to `.env` if there
+isn't one, and installs `lumo.service` and `lumo-obex.service` (templates in
+`deploy/systemd/`) for your user and checkout path. Put your Groq key, Spotify
+credentials and location in `lumo/rpi_server/.env`, then
+`sudo systemctl restart lumo`.
 
 ### Running Manually:
 ```bash
-python3 main.py
+cd lumo/rpi_server
+venv/bin/python main.py
 ```
 - Web dashboard will be live at: `http://<your-pi-ip>:8080` (or `http://lumo.local:8080`).
 - WebSocket server for the ESP32 will listen on: `ws://0.0.0.0:8765`.
-
-### Setting up Auto-Start Service (systemd):
-```bash
-sudo cp lumo.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable lumo.service
-sudo systemctl start lumo.service
-```
 
 ---
 
 ## 4. Shared Task Manager (Sage)
 
 Tasks, reminders and alarms are not stored on Lumo. They live in Sage, the task
-manager running on the same Pi, so a task added at the desk clock is on the
-phone and a reminder set on the phone rings at the desk.
+manager running on the same Pi, so a task added at the desk clock is in the
+app and a reminder set in the app rings at the desk.
 
-Lumo talks to Sage over the loopback address rather than opening its database,
-which means Sage's own rules still apply and its app refreshes the moment
-anything changes. Neither project imports a line of the other's code.
+Lumo is a client of Sage's sync API, the same one the web app uses, over the
+loopback address (`http://127.0.0.1:8000`). `services/sage_client.py` is the
+only file that knows Sage's field names.
 
 | What happens | Where it goes |
 | :--- | :--- |
-| "Jarvis, add a task" | Sage's capture engine, so times and dates are understood |
+| "Jarvis, add a task" | Sage's `/api/parse-task`, so dates are understood, then saved through sync |
 | Task list on the display and dashboard | Sage's open tasks, soonest first |
-| Alarms | Sage reminders tagged `alarm` |
+| Alarms | Sage reminders labelled `alarm` |
 | A Sage reminder falling due | A buzz and a notification card on the face |
+| A change made in the app | Arrives on Sage's `/ws` stream and updates the clock within a second |
 
-### Setup
+### The key
 
-The only thing Lumo needs is Sage's API key, and it does not get its own copy.
-Sage keeps the key in `/etc/sage/sage.env`, which is readable only by root, so
-Lumo's service file carries the same `EnvironmentFile` line Sage's does and
-systemd passes the value down:
+Sage keeps its key as `API_SECRET` in `/etc/sage/sage.env`, which only root
+can read. `lumo.service` has the same `EnvironmentFile` line Sage's unit has,
+so systemd passes the value down. Running `main.py` by hand instead? Put the
+same value in `.env` as `SAGE_API_KEY`.
 
-```ini
-# already present in lumo.service
-EnvironmentFile=-/etc/sage/sage.env
-```
-
-If you installed the service before this change, copy the unit again:
+Check the connection with a full round trip (adds a test task and alarm, then
+moves them to Sage's trash):
 
 ```bash
-sudo cp lumo.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl restart lumo.service
+cd lumo/rpi_server
+sudo env $(sudo cat /etc/sage/sage.env | xargs) venv/bin/python test_sage.py
 ```
-
-Then check the connection:
-
-```bash
-cd /home/pi/lumo_pi_system/rpi_server
-venv/bin/python test_sage.py
-```
-
-Running `main.py` by hand instead of through systemd? Put the key in `.env` as
-`SAGE_API_KEY` — it is the same value Sage uses, and the app asks for it on
-each device too.
 
 Sage being down is not fatal: the display keeps showing the last list it saw,
 and Lumo reconnects on its own.
