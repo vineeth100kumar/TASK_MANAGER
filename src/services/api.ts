@@ -14,7 +14,7 @@ import {
   getDB, getAllFromStore, getFromStore, putToStore, putBatchToStore, 
   deleteFromStore, clearStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId 
 } from './db';
-import { syncEngine, SyncEngineStatus, SyncState, getGasUrl } from './syncEngine';
+import { syncEngine, SyncEngineStatus, SyncState, getGasUrl, syncHeaders } from './syncEngine';
 
 export interface LocalState {
   workItems: WorkItem[];
@@ -174,7 +174,7 @@ export const api = {
       await initializeStore();
       try {
         const fetchUrl = getGasUrl('getAll');
-        const response = await fetch(fetchUrl);
+        const response = await fetch(fetchUrl, { headers: syncHeaders() });
         if (response.ok) {
           const json = await response.json();
           if (json.success && json.data) {
@@ -1124,7 +1124,7 @@ export const api = {
       const fetchUrl = getGasUrl('clearAll');
       await fetch(fetchUrl, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json;charset=utf-8' },
+        headers: syncHeaders({ 'Content-Type': 'application/json;charset=utf-8' }),
         body: JSON.stringify({ action: 'clearAll' })
       });
     } catch (e) {

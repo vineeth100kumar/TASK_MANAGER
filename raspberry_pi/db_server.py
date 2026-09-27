@@ -1,26 +1,111 @@
 import json
+import os
+import hmac
 import sqlite3
 import datetime
 import asyncio
+from pathlib import Path
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
+# Every setting can come from the environment. On the Pi, systemd loads them
+# from /etc/sage/sage.env (see deploy/). The defaults match how this server
+# ran before, so an existing sage_sync.db keeps being used.
+DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
+GOOGLE_SHEETS_URL = os.getenv(
+    "SAGE_GAS_URL",
+    "https://script.google.com/macros/s/AKfycbzIuKgou3uO98HBkH3olHt-JDAum6muOfR7v59VTUg72K9IkyTX9ATgK0ntZQrNdrJo/exec",
+)
+# The shared key every client sends as "Authorization: Bearer <key>". LUMO
+# reads the same value from the same file. Empty means no key check, which is
+# only safe when the server is not reachable from outside the Pi.
+API_SECRET = os.getenv("API_SECRET", "").strip()
+# The built web app (npm run build). Served at / when it exists.
+DIST_DIR = Path(os.getenv("SAGE_DIST_DIR", str(Path(__file__).resolve().parent.parent / "dist")))
+CORS_ORIGINS = [o.strip() for o in os.getenv("SAGE_CORS_ORIGINS", "*").split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=CORS_ORIGINS,
+    allow_credentials=CORS_ORIGINS != ["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-DB_PATH = "sage_sync.db"
-# Replace this with your actual Google Apps Script URL in your .env or export
-GOOGLE_SHEETS_URL = "https://script.google.com/macros/s/AKfycbzIuKgou3uO98HBkH3olHt-JDAum6muOfR7v59VTUg72K9IkyTX9ATgK0ntZQrNdrJo/exec"
+
+def key_matches(candidate: Optional[str]) -> bool:
+    return bool(candidate) and hmac.compare_digest(candidate.encode(), API_SECRET.encode())
+
+
+@app.middleware("http")
+async def require_api_key(request, call_next):
+    """
+    Every /api/ route needs the key once API_SECRET is set. CORS preflights
+    carry no headers, so they pass through, and /api/health stays open so
+    install scripts and monitors can check the server is up.
+    """
+    path = request.url.path
+    if (
+        API_SECRET
+        and path.startswith("/api/")
+        and path != "/api/health"
+        and request.method != "OPTIONS"
+    ):
+        auth = request.headers.get("authorization", "")
+        token = auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
+        if not key_matches(token):
+            return JSONResponse({"success": False, "error": "Missing or wrong Sage API key"}, status_code=401)
+    return await call_next(request)
+
+
+# --- Live event stream (/ws) ---
+# Clients connect, send {"type": "auth", "token": "<key>"} as the first frame,
+# then receive one {"type": "SYNC_APPLIED", ...} message per applied batch so
+# they can pull changes straight away instead of waiting for their next poll.
+class EventHub:
+    def __init__(self):
+        self.sockets: set = set()
+
+    async def broadcast(self, event: dict) -> None:
+        message = json.dumps(event)
+        for socket in list(self.sockets):
+            try:
+                await socket.send_text(message)
+            except Exception:
+                self.sockets.discard(socket)
+
+
+events = EventHub()
+
+
+@app.websocket("/ws")
+async def event_stream(socket: WebSocket):
+    await socket.accept()
+    if API_SECRET:
+        try:
+            first = json.loads(await asyncio.wait_for(socket.receive_text(), timeout=10))
+        except Exception:
+            await socket.close(code=4401)
+            return
+        if not (isinstance(first, dict) and first.get("type") == "auth" and key_matches(first.get("token"))):
+            await socket.close(code=4401)
+            return
+    events.sockets.add(socket)
+    await socket.send_text(json.dumps({"type": "HELLO"}))
+    try:
+        while True:
+            await socket.receive_text()  # clients may ping; nothing else is expected
+    except WebSocketDisconnect:
+        pass
+    finally:
+        events.sockets.discard(socket)
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
@@ -63,6 +148,15 @@ def init_db():
         )
     ''')
     
+    # server_revision records which server revision last changed a row, so
+    # /api/sync/changes can answer "what changed since revision N" correctly.
+    # The per-entity `revision` is the client's version counter and runs on a
+    # different scale, so comparing it with the server revision missed new
+    # rows written by other clients.
+    cursor.execute("PRAGMA table_info(entities)")
+    if "server_revision" not in {row[1] for row in cursor.fetchall()}:
+        cursor.execute("ALTER TABLE entities ADD COLUMN server_revision INTEGER")
+
     # Initialize Server Revision if not exists
     cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('serverRevision', '1')")
     conn.commit()
@@ -134,7 +228,14 @@ async def google_sheets_backup_worker():
 
 @app.on_event("startup")
 async def startup_event():
+    if not API_SECRET:
+        print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
     asyncio.create_task(google_sheets_backup_worker())
+
+
+@app.get("/api/health")
+def health():
+    return {"success": True, "auth": bool(API_SECRET), "webApp": (DIST_DIR / "index.html").is_file()}
 
 
 # --- API Endpoints ---
@@ -170,7 +271,10 @@ def get_changes_since(sinceRevision: int = 0):
     
     server_rev = get_server_revision(cursor)
     
-    cursor.execute("SELECT table_name, payload FROM entities WHERE revision > ?", (sinceRevision,))
+    cursor.execute(
+        "SELECT table_name, payload FROM entities WHERE COALESCE(server_revision, revision) > ? AND deleted = 0",
+        (sinceRevision,),
+    )
     rows = cursor.fetchall()
     
     changes = {}
@@ -234,17 +338,17 @@ async def process_operations(request: Request, background_tasks: BackgroundTasks
                     
                     cursor.execute('''
                         UPDATE entities 
-                        SET payload = ?, revision = ?, deleted = 0 
+                        SET payload = ?, revision = ?, deleted = 0, server_revision = ?
                         WHERE table_name = ? AND entity_id = ?
-                    ''', (json.dumps(merged), new_rev, table, op.entityId))
+                    ''', (json.dumps(merged), new_rev, new_server_rev, table, op.entityId))
                 else:
                     merged = op.payload or {}
                     new_rev = op.revision or 1
                     merged['revision'] = new_rev
                     cursor.execute('''
-                        INSERT INTO entities (table_name, entity_id, revision, payload, deleted) 
-                        VALUES (?, ?, ?, ?, 0)
-                    ''', (table, op.entityId, new_rev, json.dumps(merged)))
+                        INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) 
+                        VALUES (?, ?, ?, ?, 0, ?)
+                    ''', (table, op.entityId, new_rev, json.dumps(merged), new_server_rev))
                 
                 op_results.append({"operationId": op.operationId, "status": "applied", "entityRevision": new_rev})
                 
@@ -267,7 +371,17 @@ async def process_operations(request: Request, background_tasks: BackgroundTasks
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
-        
+
+    results_by_id = {r["operationId"]: r for r in op_results}
+    applied = [
+        {"entityType": op.entityType, "entityId": op.entityId, "operation": op.operation, "clientId": op.clientId}
+        for op in req.operations
+        if results_by_id.get(op.operationId, {}).get("status") == "applied"
+        and not results_by_id[op.operationId].get("idempotent")
+    ]
+    if applied:
+        await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": new_server_rev, "changes": applied})
+
     return {
         "success": True,
         "serverRevision": new_server_rev,
@@ -275,7 +389,7 @@ async def process_operations(request: Request, background_tasks: BackgroundTasks
     }
 
 @app.post("/api/sync/clear")
-def clear_all(background_tasks: BackgroundTasks):
+async def clear_all(background_tasks: BackgroundTasks):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM entities")
@@ -284,7 +398,8 @@ def clear_all(background_tasks: BackgroundTasks):
     cursor.execute("INSERT INTO unsynced_batches (payload) VALUES (?)", (json.dumps({"action": "clearAll"}),))
     conn.commit()
     conn.close()
-    
+
+    await events.broadcast({"type": "SYNC_CLEARED", "serverRevision": 1})
     return {"success": True, "serverRevision": 1, "message": "All database records wiped."}
 
 import re
@@ -403,6 +518,13 @@ def daily_briefing(req: DailyBriefingRequest):
         return {"success": True, "data": parsed_data}
     except Exception as e:
         raise HTTPException(status_code=500, detail="AI failed to generate briefing")
+
+# --- Web app ---
+# Mounted last so every /api route above wins over a same-named file.
+if (DIST_DIR / "index.html").is_file():
+    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
+else:
+    print(f"No built web app at {DIST_DIR}; run `npm run build` in the repo root to serve it here.")
 
 if __name__ == "__main__":
     import uvicorn
