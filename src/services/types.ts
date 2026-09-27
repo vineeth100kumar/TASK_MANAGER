@@ -59,6 +59,7 @@ export interface WorkItem {
   startAt?: string | null;   // ISO Datetime
   endAt?: string | null;     // ISO Datetime
   remindAt?: string | null;  // ISO Datetime
+  reminderLeadMinutes?: number | null; // minutes before startAt/dueDate that remindAt was set for; null = no lead-based reminder
   repeatRule?: string | null;
   
   // Details & Logistics

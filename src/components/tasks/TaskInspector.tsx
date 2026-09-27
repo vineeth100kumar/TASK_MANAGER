@@ -1,13 +1,22 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera } from 'lucide-react';
+import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
 import { api } from '../../services/api';
-import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS } from '../../services/mockDb';
+import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/mockDb';
 import { Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { downloadTaskImage } from '../../utils/imageExport';
 
 import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
+
+const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
+  { value: '', label: 'No reminder' },
+  { value: 0, label: 'At the time' },
+  { value: 10, label: '10 min before' },
+  { value: 30, label: '30 min before' },
+  { value: 60, label: '1 hour before' },
+  { value: 24 * 60, label: '1 day before' },
+];
 
 interface TaskInspectorProps {
   taskId: string;
@@ -249,9 +258,42 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                         </div>
                       </PropertyRow>
 
-                      <PropertyRow icon={FileText} label="Estimate" isLast>
+                      <PropertyRow icon={FileText} label="Estimate">
                         <input type="text" className="w-20 bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
                           value={task.estimated || ''} onChange={async (e) => { await onUpdateDetails(task, { estimated: e.target.value }); loadData(); }} placeholder="e.g. 2h" />
+                      </PropertyRow>
+
+                      <PropertyRow icon={FileText} label="Location">
+                        <input type="text" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
+                          value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Optional" />
+                      </PropertyRow>
+
+                      <PropertyRow icon={Activity} label="Recurrence">
+                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                          value={task.repeatRule || ''} onChange={async (e) => { await onUpdateDetails(task, { repeatRule: e.target.value || null }); loadData(); }}>
+                          <option value="" className="text-gray-900">Never</option>
+                          <option value="daily" className="text-gray-900">Daily</option>
+                          <option value="weekdays" className="text-gray-900">Every weekday</option>
+                          <option value="weekly" className="text-gray-900">Weekly</option>
+                          <option value="monthly" className="text-gray-900">Monthly</option>
+                          <option value="yearly" className="text-gray-900">Yearly</option>
+                        </select>
+                      </PropertyRow>
+
+                      <PropertyRow icon={Bell} label="Remind Me" isLast>
+                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                          value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
+                            const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                            const anchorDate = task.dueDate || task.startDate;
+                            let remindAt: string | null = null;
+                            if (val !== null && anchorDate) {
+                              remindAt = new Date(new Date(`${anchorDate}T09:00`).getTime() - val * 60000).toISOString().slice(0, 16);
+                            }
+                            await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
+                            loadData();
+                          }}>
+                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
+                        </select>
                       </PropertyRow>
                     </>
                   )}
@@ -282,9 +324,36 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                             loadData(); 
                           }} />
                       </PropertyRow>
-                      <PropertyRow icon={FileText} label="Location / Link" isLast>
+                      <PropertyRow icon={FileText} label="Location / Link">
                         <input type="text" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Zoom link or room..." />
+                      </PropertyRow>
+
+                      <PropertyRow icon={Activity} label="Recurrence">
+                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                          value={task.repeatRule || ''} onChange={async (e) => { await onUpdateDetails(task, { repeatRule: e.target.value || null }); loadData(); }}>
+                          <option value="" className="text-gray-900">Never</option>
+                          <option value="daily" className="text-gray-900">Daily</option>
+                          <option value="weekdays" className="text-gray-900">Every weekday</option>
+                          <option value="weekly" className="text-gray-900">Weekly</option>
+                          <option value="monthly" className="text-gray-900">Monthly</option>
+                          <option value="yearly" className="text-gray-900">Yearly</option>
+                        </select>
+                      </PropertyRow>
+
+                      <PropertyRow icon={Bell} label="Remind Me" isLast>
+                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                          value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
+                            const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                            let remindAt: string | null = null;
+                            if (val !== null && task.startAt) {
+                              remindAt = new Date(new Date(task.startAt).getTime() - val * 60000).toISOString().slice(0, 16);
+                            }
+                            await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
+                            loadData();
+                          }}>
+                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
+                        </select>
                       </PropertyRow>
                     </>
                   )}
@@ -347,6 +416,22 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                 </div>
 
                 <div>
+                  <h4 className="text-[12px] font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5"><Tag size={12} /> Tags</h4>
+                  <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-white/5 rounded-[24px] border border-gray-200 dark:border-white/10 shadow-sm p-4">
+                    {(task.labels || []).map((t: string) => (
+                      <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                        #{t}
+                        <button onClick={async () => { await onUpdateDetails(task, { labels: (task.labels || []).filter((x: string) => x !== t) }); loadData(); }}><X size={11} /></button>
+                      </span>
+                    ))}
+                    <TagAdder
+                      existing={task.labels || []}
+                      onAdd={async (tag: string) => { await onUpdateDetails(task, { labels: [...(task.labels || []), tag] }); loadData(); }}
+                    />
+                  </div>
+                </div>
+
+                <div>
                   <div className="flex items-center justify-between mb-3">
                      <h4 className="text-[12px] font-bold uppercase tracking-wider text-gray-400">Notes & Description</h4>
                      {isSavingDesc && <span className="text-[12px] font-medium text-gray-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> Saving...</span>}
@@ -397,6 +482,33 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
         </div>
       </motion.aside>
     </>
+  );
+}
+
+function TagAdder({ existing, onAdd }: { existing: string[]; onAdd: (tag: string) => void }) {
+  const [draft, setDraft] = useState('');
+  const commit = () => {
+    const clean = draft.trim().toLowerCase().replace(/^#/, '');
+    if (clean && !existing.includes(clean)) onAdd(clean);
+    setDraft('');
+  };
+  const suggestions = LABELS.filter(l => !existing.includes(l.name));
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <input
+        type="text"
+        value={draft}
+        onChange={e => setDraft(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); commit(); } }}
+        placeholder="Add a tag..."
+        className="bg-transparent border-none outline-none text-[13px] font-medium min-w-[100px]"
+      />
+      {suggestions.map(l => (
+        <button key={l.id} type="button" onClick={() => onAdd(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
+          + {l.name}
+        </button>
+      ))}
+    </div>
   );
 }
 
