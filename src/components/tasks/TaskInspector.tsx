@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
 import { api } from '../../services/api';
 import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/mockDb';
@@ -87,17 +87,20 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
   const submitTitle = async () => {
     if (editTitle !== task.title) {
-      const updated = await onUpdateDetails(task, { title: editTitle });
-      if (updated) loadData();
+      await onUpdateDetails(task, { title: editTitle });
+      loadData();
     }
   };
 
   const submitDesc = async () => {
     if (editDesc !== task.description) {
       setIsSavingDesc(true);
-      const updated = await onUpdateDetails(task, { description: editDesc });
-      setIsSavingDesc(false);
-      if (updated) loadData();
+      try {
+        await onUpdateDetails(task, { description: editDesc });
+        loadData();
+      } finally {
+        setIsSavingDesc(false);
+      }
     }
   };
 

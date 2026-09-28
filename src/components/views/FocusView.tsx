@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { Target, Circle, CheckCircle2, Clock, Trash2, ArrowUp, ArrowDown, Sparkles, X, Plus } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Target, Circle, ArrowUp, ArrowDown, Sparkles, X, Plus } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';

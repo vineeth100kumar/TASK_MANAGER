@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { Loader2, ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 

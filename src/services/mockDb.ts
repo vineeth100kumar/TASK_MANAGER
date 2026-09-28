@@ -1,5 +1,5 @@
 import { ShieldAlert, FileText, CheckSquare, Zap, Users, Bell, Flag } from 'lucide-react';
-import { User, Project, Area, Goal, Habit, Note, WorkItem } from './types';
+import { Project, Area, Goal, Habit, Note, WorkItem } from './types';
 
 export const ENTITY_TYPES = {
   TASK: 'task',
@@ -41,46 +41,14 @@ export const PRIORITIES = {
   urgent: { id: 'urgent', label: 'Urgent', color: 'text-red-500' },
 };
 
-export const TEAMS = [
-  { id: 'eng', name: 'Engineering' },
-  { id: 'product', name: 'Product' },
-  { id: 'design', name: 'Design' },
-  { id: 'marketing', name: 'Marketing' }
-];
-
 export const LABELS = [
   { id: 'lbl_backend', name: 'backend', color: 'bg-blue-100 text-blue-700' },
   { id: 'lbl_frontend', name: 'frontend', color: 'bg-amber-100 text-amber-700' },
   { id: 'lbl_urgent', name: 'urgent', color: 'bg-red-100 text-red-700' },
 ];
 
-export const ACTIVITY_EVENTS = {
-  CREATED: 'CREATED',
-  UPDATED: 'UPDATED',
-  STATUS_CHANGED: 'STATUS_CHANGED',
-  PRIORITY_CHANGED: 'PRIORITY_CHANGED',
-  ASSIGNED: 'ASSIGNED',
-  COMMENT_ADDED: 'COMMENT_ADDED',
-  DELETED: 'DELETED'
-};
-
-export const CURRENT_USER: User = {
-  id: 'usr_1',
-  name: 'You',
-  role: 'Owner',
-  avatar: 'bg-gradient-to-br from-blue-500 to-indigo-600 text-white',
-  email: ''
-};
-
-export const CURRENT_USER_ID = CURRENT_USER.id;
-
-export const DEFAULT_USERS: User[] = [
-  CURRENT_USER
-];
-
 export const uuid = () => crypto.randomUUID ? crypto.randomUUID() : `uuid-${Math.random().toString(36).substring(2, 9)}`;
 export const getISODate = (offsetDays = 0) => { const d = new Date(); d.setDate(d.getDate() + offsetDays); return d.toISOString().split('T')[0]; };
-export const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 export const INITIAL_PROJECTS: Project[] = [
   { id: 'proj_sage', name: 'Sage System', key: 'SAGE', color: 'bg-indigo-500', sequence: 1, type: 'standard', description: 'Core product workspace', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
@@ -104,18 +72,3 @@ export const INITIAL_NOTES: Note[] = [
 ];
 
 export const INITIAL_WORK_ITEMS: WorkItem[] = [];
-
-export const db = {
-  users: DEFAULT_USERS,
-  workspaces: [{ id: 'ws_1', name: 'Workspace' }],
-  projects: INITIAL_PROJECTS,
-  areas: INITIAL_AREAS,
-  goals: INITIAL_GOALS,
-  habits: INITIAL_HABITS,
-  notes: INITIAL_NOTES,
-  workItems: INITIAL_WORK_ITEMS,
-  dependencies: [],
-  subtasks: [],
-  comments: [],
-  activities: []
-};

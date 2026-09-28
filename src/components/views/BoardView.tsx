@@ -1,12 +1,10 @@
 import React, { useState } from 'react';
 import { Flag, CheckSquare, MessageSquare, Calendar as CalendarIcon, Check } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/mockDb';
-import { useToast } from '../../context/ToastContext';
 import { formatDateRange } from '../../utils/dateUtils';
 
 export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
   const [draggedTask, setDraggedTask] = useState<any>(null);
-  const { showToast } = useToast();
 
   const handleDragStart = (e: React.DragEvent, task: any) => {
     setDraggedTask(task);

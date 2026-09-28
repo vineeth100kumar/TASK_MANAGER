@@ -1,5 +1,3 @@
-import React from 'react';
-import { Filter, CheckCircle, Clock, Flag, LayoutGrid, Sparkles } from 'lucide-react';
 
 interface FilterBarProps {
   filters: any;

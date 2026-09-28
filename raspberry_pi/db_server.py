@@ -411,10 +411,6 @@ MODEL_NAME = "qwen2.5:1.5b"
 class TaskParseRequest(BaseModel):
     natural_language: str
 
-class ProjectBreakdownRequest(BaseModel):
-    goal: str
-    context: Optional[str] = ""
-
 class DailyBriefingRequest(BaseModel):
     tasks_json: str
 
@@ -469,31 +465,6 @@ def parse_task(req: TaskParseRequest):
     except Exception as e:
         print(f"Error parsing task: {e}")
         raise HTTPException(status_code=500, detail="AI failed to parse task reliably")
-
-@app.post("/api/breakdown-project")
-def breakdown_project(req: ProjectBreakdownRequest):
-    prompt = f"""
-    You are an expert project manager. Break down the following goal into logical sequential tasks.
-    Goal: {req.goal}
-    Context: {req.context}
-    Respond ONLY with a raw JSON dictionary matching this exact structure:
-    {{
-        "projectTitle": "Name of the project",
-        "tasks": [
-            {{ "id": "task_1", "title": "Step 1...", "dependsOn": [] }},
-            {{ "id": "task_2", "title": "Step 2...", "dependsOn": ["task_1"] }}
-        ]
-    }}
-    Keep the breakdown to 3-7 high-impact tasks. Ensure dependencies are logical.
-    """
-    try:
-        response = ollama.generate(
-            model=MODEL_NAME, prompt=prompt, format='json', options={"temperature": 0.15}
-        )
-        parsed_data = safe_parse_json(response['response'])
-        return {"success": True, "data": parsed_data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="AI failed to generate breakdown reliably")
 
 @app.post("/api/daily-briefing")
 def daily_briefing(req: DailyBriefingRequest):

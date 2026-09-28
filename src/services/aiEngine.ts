@@ -10,17 +10,6 @@ const getAiUrl = (endpoint: string) => {
 }
 
 export const aiEngine = {
-    parseBrainDump: async (text: string) => {
-        const res = await fetch(getAiUrl('/api/parse-task'), {
-            method: 'POST',
-            headers: piHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ natural_language: text })
-        });
-        const json = await res.json();
-        if (!json.success) throw new Error("AI failed to parse task");
-        return json.data; // Expecting an array of tasks
-    },
-
     getDailyBriefing: async (tasksJson: string) => {
         const res = await fetch(getAiUrl('/api/daily-briefing'), {
             method: 'POST',

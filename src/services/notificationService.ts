@@ -5,7 +5,6 @@
  */
 
 import { api } from './api';
-import { WorkItem } from './types';
 
 class NotificationService {
   private isSupported: boolean = false;
@@ -55,8 +54,6 @@ class NotificationService {
     try {
       const now = new Date();
       const nowTime = now.getTime();
-      const nowIso = now.toISOString();
-      const todayDate = nowIso.split('T')[0];
 
       const state = api.sync.getState();
       const activeItems = state.workItems.filter(i => !i.deletedAt && i.status !== 'done');

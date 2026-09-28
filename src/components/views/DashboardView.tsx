@@ -1,10 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Loader2, Sun, Moon, CheckCircle2, Circle, AlertTriangle, Clock, 
-  Calendar as CalendarIcon, Bell, Target, Activity, Zap, Hourglass, 
-  Sparkles, ChevronRight, Check, X, ShieldAlert, BrainCircuit 
-} from 'lucide-react';
+import { Loader2, Sun, CheckCircle2, Circle, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';

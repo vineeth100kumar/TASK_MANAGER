@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { X, Trash2, RotateCcw, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { X, Trash2, RotateCcw, CheckCircle2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';

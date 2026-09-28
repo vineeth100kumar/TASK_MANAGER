@@ -1,13 +1,8 @@
 import React, { useState, useEffect, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Network, ListTree, Sparkles, AlertTriangle, CheckCircle2, 
-  Plus, ChevronRight, X, Info, Workflow, LayoutGrid, RotateCcw, Flag,
-  Eye, Edit3, Move 
-} from 'lucide-react';
+import { Network, ListTree, Sparkles, AlertTriangle, Plus, X, Workflow, LayoutGrid, RotateCcw, Eye, Move } from 'lucide-react';
 import { WorkItem, Project } from '../../services/types';
 import { api } from '../../services/api';
-import { analyzeProjectGaps, ProjectGap } from '../../utils/projectGapAnalyzer';
+import { analyzeProjectGaps } from '../../utils/projectGapAnalyzer';
 import { ProjectFlowCanvas } from './ProjectFlowCanvas';
 import { ProjectTreeOutline } from './ProjectTreeOutline';
 import { useToast } from '../../context/ToastContext';
