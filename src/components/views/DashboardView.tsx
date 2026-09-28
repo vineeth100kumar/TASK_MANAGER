@@ -7,6 +7,8 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
+const FOCUS_DRAG_TYPE = 'application/x-sage-item';
+
 interface DashboardViewProps {
   workspaceId: string;
   onSelectTask: (id: string) => void;
@@ -21,6 +23,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const [isAiLoading, setIsAiLoading] = useState(false);
   // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
   const briefingRequested = useRef(false);
+  const [isFocusDropActive, setIsFocusDropActive] = useState(false);
   const { showToast } = useToast();
 
   const loadAttentionData = useCallback(async () => {
@@ -77,6 +80,18 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
     }
   };
 
+  const handleAddToFocus = async (itemId: string) => {
+    const item = [...(data?.dueToday || []), ...(data?.quickWins || [])].find((i: WorkItem) => i.id === itemId);
+    if (!item || item.isFocus) return;
+    try {
+      await api.focus.toggle(itemId);
+      showToast('Added to Focus');
+      loadAttentionData();
+    } catch (err: any) {
+      showToast('Could not add to Focus: ' + err.message, 'error');
+    }
+  };
+
   const handleToggleHabit = async (habitId: string, day: string, e: React.MouseEvent) => {
     e.stopPropagation();
     try {
@@ -94,6 +109,10 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       </div>
     );
   }
+
+  const hasScheduled = data.dueToday?.length > 0;
+  const hasQuickWins = data.quickWins?.length > 0;
+  const hasWaiting = data.waitingFor?.length > 0;
 
   const hour = time.getHours();
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
@@ -180,12 +199,17 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       {/* 3. Main Grid: Today's Focus & Scheduled Checkpoints */}
       <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
         
-        {/* Active Focus (Left: 7 cols) */}
-        <div className="md:col-span-7 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
+        {/* Active Focus (drop target: drag items here from Scheduled or Quick Wins) */}
+        <div
+          onDragOver={(e) => { if (e.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setIsFocusDropActive(true); } }}
+          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsFocusDropActive(false); }}
+          onDrop={(e) => { e.preventDefault(); setIsFocusDropActive(false); const id = e.dataTransfer.getData(FOCUS_DRAG_TYPE); if (id) handleAddToFocus(id); }}
+          className={`${hasScheduled ? 'md:col-span-7' : 'md:col-span-12'} bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border space-y-4 transition-colors ${isFocusDropActive ? 'border-amber-400 ring-4 ring-amber-400/15 bg-amber-50/60 dark:bg-amber-950/20' : 'border-black/5 dark:border-white/5'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-amber-500" />
               <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Focus</h3>
+              {data.todayFocus?.length > 0 && <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{data.todayFocus.length}</span>}
             </div>
             {onNavigateView && (
               <button onClick={() => onNavigateView('focus')} className="text-xs font-semibold text-blue-500 hover:underline flex items-center gap-1">
@@ -196,25 +220,26 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           </div>
 
           {(!data.todayFocus || data.todayFocus.length === 0) ? (
-            <div className="text-center py-10 bg-white dark:bg-[#2c2c2e] rounded-2xl border border-black/5 dark:border-white/5 space-y-2">
-              <Target size={24} className="text-gray-300 mx-auto" />
-              <p className="text-xs text-gray-400 font-semibold">No items pinned to focus right now.</p>
-              <button 
-                onClick={() => onNavigateView && onNavigateView('inbox')}
-                className="text-xs text-blue-500 font-bold hover:underline"
-              >
-                Pick from Inbox →
-              </button>
+            <div className={`flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 py-5 rounded-2xl border border-dashed text-center transition-colors ${isFocusDropActive ? 'border-amber-400 text-amber-600' : 'border-gray-300/80 dark:border-white/10 text-gray-400'}`}>
+              <Target size={18} className="shrink-0" />
+              <p className="text-[13px] font-medium">
+                {isFocusDropActive ? 'Drop to add to Focus' : hasScheduled ? 'Nothing in Focus yet. Drag an item here from Scheduled.' : 'Nothing in Focus yet.'}
+              </p>
+              {!isFocusDropActive && (
+                <button onClick={() => onNavigateView && onNavigateView('inbox')} className="text-[13px] text-blue-500 font-semibold hover:underline">
+                  Pick from Inbox →
+                </button>
+              )}
             </div>
           ) : (
-            <div className="space-y-2.5">
+            <div className="space-y-2">
               {data.todayFocus.map((item: WorkItem, index: number) => (
-                <div key={item.id} className="p-4 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-3 shadow-sm hover:border-amber-200 transition-all">
+                <div key={item.id} className="p-3.5 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-3 shadow-sm hover:border-amber-200 dark:hover:border-amber-500/30 transition-all">
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
                       {index + 1}
                     </span>
-                    <button onClick={() => handleComplete(item)} className="text-gray-300 hover:text-emerald-500 shrink-0">
+                    <button onClick={() => handleComplete(item)} className="text-gray-300 hover:text-emerald-500 shrink-0" aria-label="Complete">
                       <Circle size={18} />
                     </button>
                     <span onClick={() => onSelectTask(item.id)} className="font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
@@ -228,41 +253,49 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           )}
         </div>
 
-        {/* Due Today & Reminders (Right: 5 cols) */}
+        {/* Due Today (Right: 5 cols). Hidden when empty; see the summary strip below. */}
+        {hasScheduled && (
         <div className="md:col-span-5 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} className="text-blue-500" />
             <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
+            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{data.dueToday.length}</span>
           </div>
 
-          {(!data.dueToday || data.dueToday.length === 0) && (!data.reminders || data.reminders.length === 0) ? (
-            <div className="text-center py-10 bg-white dark:bg-[#2c2c2e] rounded-2xl border border-black/5 dark:border-white/5 space-y-1">
-              <CheckCircle2 size={24} className="text-emerald-500 mx-auto mb-2" />
-              <p className="text-xs font-semibold text-gray-800 dark:text-gray-200">Clear calendar today</p>
-              <p className="text-[11px] text-gray-400">No scheduled tasks or reminders due.</p>
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {data.dueToday?.map((item: WorkItem) => (
-                <div key={item.id} onClick={() => onSelectTask(item.id)} className="p-3.5 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-3 shadow-sm cursor-pointer hover:border-blue-200 transition-colors">
-                  <div className="min-w-0 flex-1">
-                    <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                    <span className="text-[10px] text-blue-500 font-semibold uppercase">{item.entityType}</span>
-                  </div>
-                  <button onClick={(e) => { e.stopPropagation(); handleComplete(item); }} className="text-gray-300 hover:text-emerald-500 shrink-0">
+          <div className="space-y-2">
+            {data.dueToday.map((item: WorkItem) => (
+              <div key={item.id}
+                draggable={!item.isFocus}
+                onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
+                onClick={() => onSelectTask(item.id)}
+                className={`p-3.5 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-3 shadow-sm cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 transition-colors ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'}`}>
+                <div className="min-w-0 flex-1">
+                  <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
+                  <span className="text-[10px] text-blue-500 font-semibold uppercase">{item.isFocus ? 'In Focus' : item.entityType}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {!item.isFocus && (
+                    <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 rounded-lg text-gray-300 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors" title="Add to Focus" aria-label="Add to Focus">
+                      <Target size={16} />
+                    </button>
+                  )}
+                  <button onClick={(e) => { e.stopPropagation(); handleComplete(item); }} className="p-1.5 text-gray-300 hover:text-emerald-500" aria-label="Complete">
                     <Circle size={16} />
                   </button>
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            ))}
+          </div>
         </div>
+        )}
       </div>
 
-      {/* 4. Quick Wins & Delegations (Waiting For) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
+      {/* 4. Quick Wins & Delegations (Waiting For). Each card only shows when it has items. */}
+      {(hasQuickWins || hasWaiting) && (
+      <div className={`grid grid-cols-1 ${hasQuickWins && hasWaiting ? 'md:grid-cols-2' : ''} gap-4 md:gap-6`}>
         
         {/* Quick Wins (<=15 min tasks) */}
+        {hasQuickWins && (
         <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-amber-500" />
@@ -270,30 +303,31 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           </div>
           <p className="text-xs text-gray-400">Have 10 minutes free? Knock these out quickly.</p>
 
-          {(!data.quickWins || data.quickWins.length === 0) ? (
-            <div className="text-xs text-gray-400 py-4 text-center">No short tasks tagged.</div>
-          ) : (
-            <div className="space-y-2">
-              {data.quickWins.map((item: WorkItem) => (
-                <div key={item.id} className="p-3 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 shadow-sm">
-                  <span onClick={() => onSelectTask(item.id)} className="font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
-                    {item.title}
-                  </span>
-                  <button onClick={() => handleComplete(item)} className="p-1 text-gray-300 hover:text-emerald-500">
-                    <Check size={14} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
+          <div className="space-y-2">
+            {data.quickWins.map((item: WorkItem) => (
+              <div key={item.id}
+                draggable={!item.isFocus}
+                onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
+                className={`p-3 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-black/5 dark:border-white/5 flex items-center justify-between gap-2 shadow-sm ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'}`}>
+                <span onClick={() => onSelectTask(item.id)} className="font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
+                  {item.title}
+                </span>
+                <button onClick={() => handleComplete(item)} className="p-1 text-gray-300 hover:text-emerald-500" aria-label="Complete">
+                  <Check size={14} />
+                </button>
+              </div>
+            ))}
+          </div>
         </div>
+        )}
 
         {/* Delegated Waiting For Summary */}
+        {hasWaiting && (
         <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Hourglass size={18} className="text-purple-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Waiting For ({data.waitingFor?.length || 0})</h3>
+              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Waiting For ({data.waitingFor.length})</h3>
             </div>
             {onNavigateView && (
               <button onClick={() => onNavigateView('waiting_for')} className="text-xs font-semibold text-purple-500 hover:underline">
@@ -303,24 +337,35 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           </div>
           <p className="text-xs text-gray-400">Awaiting someone else's response.</p>
 
-          {(!data.waitingFor || data.waitingFor.length === 0) ? (
-            <div className="text-xs text-gray-400 py-4 text-center">No pending delegations.</div>
-          ) : (
-            <div className="space-y-2">
-              {data.waitingFor.slice(0, 3).map((item: WorkItem) => (
-                <div key={item.id} onClick={() => onSelectTask(item.id)} className="p-3 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-purple-500/20 flex items-center justify-between gap-2 shadow-sm cursor-pointer">
-                  <div className="min-w-0 flex-1">
-                    <span className="text-[10px] font-semibold text-purple-500 uppercase block">{item.waitingFor?.who}</span>
-                    <span className="font-semibold text-[13px] text-gray-900 dark:text-white truncate block">{item.waitingFor?.about || item.title}</span>
-                  </div>
-                  <ChevronRight size={14} className="text-gray-400" />
+          <div className="space-y-2">
+            {data.waitingFor.slice(0, 3).map((item: WorkItem) => (
+              <div key={item.id} onClick={() => onSelectTask(item.id)} className="p-3 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-purple-500/20 flex items-center justify-between gap-2 shadow-sm cursor-pointer">
+                <div className="min-w-0 flex-1">
+                  <span className="text-[10px] font-semibold text-purple-500 uppercase block">{item.waitingFor?.who}</span>
+                  <span className="font-semibold text-[13px] text-gray-900 dark:text-white truncate block">{item.waitingFor?.about || item.title}</span>
                 </div>
-              ))}
-            </div>
-          )}
+                <ChevronRight size={14} className="text-gray-400" />
+              </div>
+            ))}
+          </div>
         </div>
+        )}
 
       </div>
+      )}
+
+      {/* Empty sections collapse into one quiet line instead of full-size cards. */}
+      {(!hasScheduled || !hasQuickWins || !hasWaiting) && (
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-[13px] text-gray-400">
+          {!hasScheduled && <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500" /> Nothing scheduled today</span>}
+          {!hasQuickWins && <span className="flex items-center gap-1.5"><Zap size={14} /> No quick wins</span>}
+          {!hasWaiting && (
+            <button onClick={() => onNavigateView && onNavigateView('waiting_for')} className="flex items-center gap-1.5 hover:text-purple-500 transition-colors">
+              <Hourglass size={14} /> Not waiting on anyone
+            </button>
+          )}
+        </div>
+      )}
 
       {/* 5. Smart Resurfacing ("You haven't touched this in 14 days") */}
       {data.slippedItems?.length > 0 && (
