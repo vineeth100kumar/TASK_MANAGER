@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
-import { Loader2, ShieldAlert, CheckCircle, LayoutList, Plus, Zap, RotateCcw } from 'lucide-react';
+import { Loader2, ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
 import { STATUSES } from './services/mockDb';
@@ -22,9 +22,7 @@ import { NotesView } from './components/views/NotesView';
 import { ProjectMapView } from './components/project-map/ProjectMapView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
-import { QuickCaptureModal } from './components/modals/QuickCaptureModal';
 import { SettingsModal } from './components/modals/SettingsModal';
-import { OnboardingModal } from './components/modals/OnboardingModal';
 import { ConflictResolutionModal } from './components/modals/ConflictResolutionModal';
 import { FilterBar } from './components/common/FilterBar';
 import { TaskInspector } from './components/tasks/TaskInspector';
@@ -50,9 +48,7 @@ function MainApp() {
   const [isLoading, setIsLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
-  const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [activeConflict, setActiveConflict] = useState<any>(null);
@@ -89,30 +85,20 @@ function MainApp() {
       });
     }
 
-    // Check First-run onboarding
-    api.getMeta('onboarding_completed').then(done => {
-      if (!done) {
-        setIsOnboardingOpen(true);
-      }
-    });
-
     return () => {
       unsubConflict();
       unsubEntity();
     };
   }, []);
 
-  // Global Keyboard Shortcuts (C = Quick Capture, N = Full Create, / = Search)
+  // Global Keyboard Shortcuts (N or C = Create, / = Search)
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeTag = (document.activeElement?.tagName || '').toLowerCase();
       const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
 
       if (!isInput) {
-        if (e.key === 'c' || e.key === 'C') {
-          e.preventDefault();
-          setIsQuickCaptureOpen(true);
-        } else if (e.key === 'n' || e.key === 'N') {
+        if (e.key === 'n' || e.key === 'N' || e.key === 'c' || e.key === 'C') {
           e.preventDefault();
           setIsCreateModalOpen(true);
         } else if (e.key === '/' || ((e.metaKey || e.ctrlKey) && e.key === 'k')) {
@@ -283,10 +269,10 @@ function MainApp() {
                     </div>
                     <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No items found</h3>
                     <p className="text-[15px] font-medium max-w-sm text-center">
-                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all') ? "Try adjusting your filter options above." : "Create your first item or press C to quick capture to Inbox."}
+                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all') ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
-                    <button onClick={() => setIsQuickCaptureOpen(true)} className="mt-6 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md flex items-center gap-2">
-                      <Zap size={16} /> Quick Capture (C)
+                    <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md flex items-center gap-2">
+                      <Plus size={16} /> Add Item (N)
                     </button>
                   </div>
                 ) : (
@@ -315,13 +301,13 @@ function MainApp() {
           </div>
         </div>
 
-        {/* Mobile Quick Capture Floating Action Button */}
+        {/* Mobile Add Item Floating Action Button */}
         <button 
-          onClick={() => setIsQuickCaptureOpen(true)} 
+          onClick={() => setIsCreateModalOpen(true)} 
           className="md:hidden fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform" 
-          aria-label="Quick Capture"
+          aria-label="Add Item"
         >
-          <Zap size={24} />
+          <Plus size={24} />
         </button>
       </main>
 
@@ -340,26 +326,6 @@ function MainApp() {
               fetchWorkItems(false);
             }}
             onClose={() => setActiveConflict(null)}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isQuickCaptureOpen && (
-          <QuickCaptureModal 
-            onClose={() => setIsQuickCaptureOpen(false)}
-            onCaptured={() => fetchWorkItems(false)}
-            lifeContext={lifeContext}
-          />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {isOnboardingOpen && (
-          <OnboardingModal
-            onClose={() => setIsOnboardingOpen(false)}
-            onComplete={() => fetchWorkItems(false)}
-            lifeContext={lifeContext}
           />
         )}
       </AnimatePresence>

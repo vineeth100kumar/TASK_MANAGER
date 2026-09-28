@@ -86,12 +86,12 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
 
         <button 
           onClick={() => {
-            const event = new KeyboardEvent('keydown', { key: 'c' });
+            const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
           className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
-          <Plus size={14} /> Add Item (C)
+          <Plus size={14} /> Add Item (N)
         </button>
       </div>
 

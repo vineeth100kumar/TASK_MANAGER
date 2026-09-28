@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Circle, ArrowRight, Zap, Clock, Trash2, Calendar, Target, Sparkles, ChevronRight, Check, X, BrainCircuit, Loader2 } from 'lucide-react';
+import { Inbox, CheckCircle2, Circle, ArrowRight, Plus, Clock, Trash2, Calendar, Target, Sparkles, ChevronRight, Check, X, BrainCircuit, Loader2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
@@ -180,12 +180,12 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
         <button 
           onClick={() => {
-            const event = new KeyboardEvent('keydown', { key: 'c' });
+            const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
           className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
-          <Zap size={14} /> Quick Capture (C)
+          <Plus size={14} /> Add Item (N)
         </button>
       </div>
 
@@ -222,7 +222,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           </div>
           <h3 className="text-base font-bold text-gray-900 dark:text-white">Your head is clear</h3>
           <p className="text-xs text-gray-400 max-w-sm mx-auto">
-            Everything captured has been organized or completed. Press <strong>C</strong> anywhere to capture a new thought.
+            Everything captured has been organized or completed. Press <strong>N</strong> anywhere to add a new item.
           </p>
         </div>
       ) : (
