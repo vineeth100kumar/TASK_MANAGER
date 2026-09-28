@@ -46,7 +46,7 @@ export function TrashModal({ onClose, onRestored }: TrashModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[85vh] border border-gray-100 dark:border-white/10">
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[85vh] border border-gray-100 dark:border-white/10">
         
         {/* Header */}
         <div className="h-16 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
@@ -66,14 +66,14 @@ export function TrashModal({ onClose, onRestored }: TrashModalProps) {
             <div key={item.id} className="p-4 rounded-2xl bg-[#f5f5f7] dark:bg-white/5 border border-black/5 dark:border-white/5 flex items-center justify-between gap-4">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 mb-1">
-                  <span className="text-[11px] font-bold text-gray-400 uppercase">{item.key}</span>
+                  <span className="text-[11px] font-semibold text-gray-400 uppercase">{item.key}</span>
                   <span className="text-[11px] font-semibold text-gray-400">Deleted {formatDisplayDate(item.deletedAt)}</span>
                 </div>
                 <h4 className="font-bold text-[15px] text-gray-900 dark:text-white truncate">{item.title}</h4>
               </div>
 
               <div className="flex items-center gap-2 shrink-0">
-                <button onClick={() => handleRestore(item.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-bold text-xs hover:bg-blue-100 transition-colors">
+                <button onClick={() => handleRestore(item.id)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 font-semibold text-xs hover:bg-blue-100 transition-colors">
                   <RotateCcw size={14} /> Restore
                 </button>
                 <button onClick={() => handlePermanentDelete(item.id)} className="p-2 rounded-xl text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/30 transition-colors" title="Delete Forever">

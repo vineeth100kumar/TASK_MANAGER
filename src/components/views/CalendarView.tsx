@@ -78,7 +78,7 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
       <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#1c1c1e] border border-gray-100 dark:border-white/5 rounded-2xl overflow-hidden shadow-sm">
         <div className="grid grid-cols-7 border-b border-gray-100 dark:border-white/5 bg-gray-50/50 dark:bg-black/20 shrink-0">
           {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-            <div key={d} className="p-3 text-center text-[12px] font-bold text-gray-400 uppercase tracking-wider">{d}</div>
+            <div key={d} className="p-3 text-center text-[12px] font-semibold text-gray-400 uppercase tracking-wider">{d}</div>
           ))}
         </div>
         
@@ -88,12 +88,12 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
                <div key={i} className={`min-h-[100px] p-2 border-b border-r border-gray-100 dark:border-white/5 ${!cell.isCurrentMonth ? 'bg-gray-50/50 dark:bg-white/[0.02]' : ''} ${(i+1)%7===0 ? 'border-r-0' : ''}`}>
                  {cell.isCurrentMonth && (
                    <>
-                     <div className={`text-[12px] font-bold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${cell.dateStr === getTodayString() ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>
+                     <div className={`text-[12px] font-semibold mb-1 w-6 h-6 flex items-center justify-center rounded-full ${cell.dateStr === getTodayString() ? 'bg-blue-600 text-white' : 'text-gray-400'}`}>
                        {cell.day}
                      </div>
                      <div className="space-y-1">
                        {cell.dateStr && dates.get(cell.dateStr)?.map(task => (
-                         <div key={task.id} onClick={() => onSelect(task.id)} className={`text-[11px] font-bold px-1.5 py-1 rounded truncate cursor-pointer hover:opacity-80 
+                         <div key={task.id} onClick={() => onSelect(task.id)} className={`text-[11px] font-semibold px-1.5 py-1 rounded truncate cursor-pointer hover:opacity-80 
                            ${task.entityType === 'event' ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400 border border-purple-200 dark:border-purple-500/30' : 
                              task.entityType === 'reminder' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400' :
                              task.status === 'done' ? 'bg-gray-100 text-gray-500 dark:bg-white/5 dark:text-gray-400 line-through' : 'bg-blue-50 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'}`}>

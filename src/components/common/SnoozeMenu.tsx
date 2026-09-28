@@ -88,7 +88,7 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
             >
               {!isCustomOpen ? (
                 <div className="space-y-0.5">
-                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-gray-400">
+                  <div className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-gray-400">
                     Snooze Until
                   </div>
                   <button onClick={() => handlePreset('later_today')} className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-200">
@@ -121,7 +121,7 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
               ) : (
                 <form onSubmit={handleCustomSubmit} className="p-2 space-y-2">
                   <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase text-gray-400">Custom Snooze</span>
+                    <span className="text-[10px] font-semibold uppercase text-gray-400">Custom Snooze</span>
                     <button type="button" onClick={() => setIsCustomOpen(false)}><X size={13} className="text-gray-400"/></button>
                   </div>
                   <input 

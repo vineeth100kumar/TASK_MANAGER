@@ -10,11 +10,11 @@ interface TableViewProps {
 
 export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
   return (
-    <div className="bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 overflow-hidden max-w-7xl mx-auto">
+    <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden max-w-7xl mx-auto">
       <div className="overflow-x-auto custom-scrollbar">
         <table className="w-full text-left whitespace-nowrap min-w-[700px]">
           <thead>
-            <tr className="bg-[#f5f5f7] dark:bg-black/20 text-[12px] font-bold uppercase tracking-wider text-gray-500">
+            <tr className="bg-[#f5f5f7] dark:bg-black/20 text-[12px] font-semibold uppercase tracking-wider text-gray-500">
               <th className="px-6 py-4">Key</th>
               <th className="px-6 py-4 w-1/3">Title</th>
               <th className="px-6 py-4">Status</th>

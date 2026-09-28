@@ -261,7 +261,7 @@ export function ProjectFlowCanvas({
 
         <button
           onClick={handleDownloadCanvasImage}
-          className="px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 text-xs font-bold flex items-center gap-1.5 transition-colors shadow-sm"
+          className="px-3 py-1.5 rounded-xl bg-gray-100 dark:bg-white/10 hover:bg-gray-200 dark:hover:bg-white/20 text-gray-700 dark:text-gray-200 text-xs font-semibold flex items-center gap-1.5 transition-colors shadow-sm"
           title="Download snapshot of this flowchart"
         >
           <Camera size={13} />
@@ -271,7 +271,7 @@ export function ProjectFlowCanvas({
 
       <div
         ref={canvasRef}
-        className="w-full h-[650px] relative overflow-auto rounded-[32px] bg-[#fafafa] dark:bg-[#121214] border border-black/5 dark:border-white/5 select-none custom-scrollbar"
+        className="w-full h-[650px] relative overflow-auto rounded-3xl bg-[#fafafa] dark:bg-[#121214] border border-black/5 dark:border-white/5 select-none custom-scrollbar"
         style={{
           backgroundImage: 'radial-gradient(circle, rgba(150, 150, 150, 0.15) 1px, transparent 1px)',
           backgroundSize: '24px 24px',
@@ -341,7 +341,7 @@ export function ProjectFlowCanvas({
                 )}
               </div>
 
-              <h4 className="font-bold text-xs text-gray-900 dark:text-white line-clamp-2 leading-snug pointer-events-none">
+              <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white line-clamp-2 leading-snug pointer-events-none">
                 {item.title}
               </h4>
 

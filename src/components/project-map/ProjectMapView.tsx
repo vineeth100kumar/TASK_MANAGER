@@ -218,13 +218,13 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-6 md:p-8 rounded-[32px] bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
             <Network size={18} />
             <span>Project Map & Flow Builder</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {project ? `${project.name} Flow` : 'All Work Dependencies'}
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -239,7 +239,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
             <div className="flex items-center bg-gray-200/60 dark:bg-white/10 p-1 rounded-2xl">
               <button
                 onClick={() => setFlowMode('view')}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   flowMode === 'view' 
                     ? 'bg-white dark:bg-[#2c2c2e] text-blue-600 dark:text-blue-400 shadow-sm' 
                     : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
@@ -249,7 +249,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
               </button>
               <button
                 onClick={() => setFlowMode('edit')}
-                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                   flowMode === 'edit' 
                     ? 'bg-amber-500 text-white shadow-sm' 
                     : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'
@@ -264,7 +264,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
           <div className="flex items-center bg-gray-200/60 dark:bg-white/10 p-1 rounded-2xl">
             <button
               onClick={() => setViewMode('canvas')}
-              className={`hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              className={`hidden md:flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 viewMode === 'canvas' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
               }`}
             >
@@ -272,7 +272,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
             </button>
             <button
               onClick={() => setViewMode('outline')}
-              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-bold transition-all ${
+              className={`flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs font-semibold transition-all ${
                 viewMode === 'outline' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
               }`}
             >
@@ -283,7 +283,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
       </div>
 
       {/* Quick Flow Creation & Action Bar */}
-      <div className="p-4 rounded-[28px] bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-sm">
+      <div className="p-4 rounded-3xl bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-3 shadow-sm">
         {/* Quick Add Step Input */}
         <form onSubmit={handleQuickAddStep} className="flex items-center gap-2 flex-1">
           <div className="relative flex-1">
@@ -298,7 +298,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
               <button
                 type="button"
                 onClick={() => setQuickStepType(t => t === 'task' ? 'milestone' : 'task')}
-                className={`px-2 py-1 rounded-lg text-[10px] font-bold uppercase transition-colors ${
+                className={`px-2 py-1 rounded-lg text-[10px] font-semibold uppercase transition-colors ${
                   quickStepType === 'milestone' 
                     ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' 
                     : 'bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-gray-300'
@@ -312,7 +312,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
           <button
             type="submit"
             disabled={!quickStepTitle.trim() || isAddingStep}
-            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0 active:scale-95 transition-transform"
+            className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0 active:scale-95 transition-transform"
           >
             <Plus size={14} /> Add to Flow
           </button>
@@ -322,7 +322,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
         <div className="flex items-center gap-2 shrink-0 border-t lg:border-t-0 pt-2 lg:pt-0 border-gray-100 dark:border-white/5">
           <button
             onClick={handleAutoSequenceFlow}
-            className="flex-1 lg:flex-none px-3.5 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 border border-blue-200/60 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-xs font-bold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95"
+            className="flex-1 lg:flex-none px-3.5 py-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 hover:bg-blue-100 border border-blue-200/60 dark:border-blue-800 text-blue-700 dark:text-blue-300 text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm active:scale-95"
             title="Auto-connect all tasks into sequential order"
           >
             <Workflow size={14} />
@@ -331,7 +331,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
 
           <button
             onClick={handleTidyLayout}
-            className="px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 hover:bg-gray-200 text-gray-700 dark:text-gray-300 text-xs font-bold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 hover:bg-gray-200 text-gray-700 dark:text-gray-300 text-xs font-semibold flex items-center gap-1.5 transition-colors"
             title="Clean up and organize node layout"
           >
             <LayoutGrid size={14} />
@@ -340,7 +340,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
 
           <button
             onClick={handleClearAllLinks}
-            className="px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 hover:bg-red-50 hover:text-red-600 text-gray-500 text-xs font-bold flex items-center gap-1.5 transition-colors"
+            className="px-3 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 hover:bg-red-50 hover:text-red-600 text-gray-500 text-xs font-semibold flex items-center gap-1.5 transition-colors"
             title="Clear all dependency connections"
           >
             <RotateCcw size={13} />
@@ -351,9 +351,9 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
 
       {/* Advisory Gap Finder Ribbon */}
       {gaps.length > 0 && (
-        <div className="p-5 rounded-[28px] bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/30 space-y-3">
+        <div className="p-5 rounded-3xl bg-amber-50/70 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/30 space-y-3">
           <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-700 dark:text-amber-300">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-700 dark:text-amber-300">
               <Sparkles size={15} />
               <span>Project Gap Suggestions ({gaps.length})</span>
             </div>
@@ -364,7 +364,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
             {gaps.map(gap => (
               <div key={gap.id} className="p-3.5 rounded-2xl bg-white dark:bg-[#2c2c2e] border border-amber-200/50 dark:border-amber-900/30 flex items-start justify-between gap-3 shadow-sm">
                 <div className="min-w-0 flex-1 space-y-0.5 cursor-pointer" onClick={() => onSelectTask(gap.targetId)}>
-                  <div className="flex items-center gap-1.5 text-xs font-bold text-gray-900 dark:text-white">
+                  <div className="flex items-center gap-1.5 text-xs font-semibold text-gray-900 dark:text-white">
                     <AlertTriangle size={13} className="text-amber-500 shrink-0" />
                     <span className="truncate">{gap.title}</span>
                   </div>
@@ -373,7 +373,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
 
                 <button
                   onClick={() => handleDismissGap(gap.id)}
-                  className="text-gray-400 hover:text-gray-600 p-1 text-xs font-bold"
+                  className="text-gray-400 hover:text-gray-600 p-1 text-xs font-semibold"
                   title="Dismiss suggestion"
                 >
                   <X size={14} />
@@ -386,7 +386,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
 
       {/* Main Canvas or Outline View */}
       {projectTasks.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 space-y-2">
+        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-2">
           <Network size={32} className="text-gray-300 mx-auto" />
           <h3 className="text-base font-bold text-gray-900 dark:text-white">No tasks in this project map</h3>
           <p className="text-xs text-gray-400">Use the input above or press N to add tasks and build your flow.</p>

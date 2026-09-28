@@ -6,6 +6,7 @@ import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { formatDateRange } from '../../utils/dateUtils';
 
 interface InboxViewProps {
   lifeContext: LifeContext;
@@ -113,13 +114,13 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-6 md:p-8 rounded-[32px] bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5 text-xs font-bold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
+          <div className="flex items-center gap-2.5 text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
             <Inbox size={18} />
             <span>Universal Inbox</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {items.length === 0 ? 'Inbox is Zero' : `${items.length} unclarified item${items.length === 1 ? '' : 's'}`}
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -132,7 +133,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> Add Item (N)
         </button>
@@ -140,7 +141,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
       {/* Inbox Items List */}
       {items.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 space-y-3">
+        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
             <CheckCircle2 size={24} />
           </div>
@@ -166,12 +167,12 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                 </button>
 
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => startClarify(item)}>
-                  <h4 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
+                  <h4 className="font-semibold text-sm text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
                     {item.title}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
                     <span>Captured {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                    {item.dueDate && <span className="text-blue-500 font-semibold">· Due {item.dueDate}</span>}
+                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
                     {item.isFocus && <span className="text-amber-500 font-bold">· In Focus</span>}
                   </div>
                 </div>
@@ -181,7 +182,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
               <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
                 <button 
                   onClick={(e) => handleToggleFocus(item, e)}
-                  className={`px-3 py-1.5 rounded-xl font-bold text-xs flex items-center gap-1.5 transition-colors ${
+                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-colors ${
                     item.isFocus 
                       ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400' 
                       : 'bg-gray-100 dark:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white'
@@ -196,7 +197,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
                 <button 
                   onClick={() => startClarify(item)}
-                  className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 font-bold text-xs rounded-xl flex items-center gap-1 transition-colors"
+                  className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 font-semibold text-xs rounded-xl flex items-center gap-1 transition-colors"
                 >
                   <span>Clarify</span>
                   <ChevronRight size={13} />
@@ -223,10 +224,10 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white dark:bg-[#1c1c1e] w-full max-w-lg rounded-[32px] shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-5"
+              className="bg-white dark:bg-[#1c1c1e] w-full max-w-lg rounded-3xl shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-5"
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-blue-500">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-500">
                   <Sparkles size={15} />
                   <span>Quick Clarify</span>
                 </div>
@@ -239,7 +240,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
               <form onSubmit={handleApplyClarify} className="space-y-4">
                 <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-2">What is this?</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-2">What is this?</label>
                   <div className="grid grid-cols-4 gap-2">
                     {[
                       { id: 'task', label: 'Task' },
@@ -251,7 +252,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                         type="button"
                         key={t.id}
                         onClick={() => setTargetType(t.id)}
-                        className={`py-2 rounded-xl text-xs font-bold transition-all ${
+                        className={`py-2 rounded-xl text-xs font-semibold transition-all ${
                           targetType === t.id 
                             ? 'bg-blue-600 text-white shadow-sm' 
                             : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400 hover:bg-gray-200'
@@ -265,7 +266,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">Project / Area</label>
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Project / Area</label>
                     <select 
                       value={targetProjectId || targetAreaId}
                       onChange={e => {
@@ -292,7 +293,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   </div>
 
                   <div>
-                    <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1.5">Target Date</label>
+                    <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Target Date</label>
                     <input 
                       type="date"
                       value={targetDueDate}
@@ -312,7 +313,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 shadow-md"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 shadow-md"
                   >
                     <Check size={14} /> Organize & Move Out
                   </button>
