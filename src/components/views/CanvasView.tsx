@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Plus, Trash2, Loader2, PenLine } from 'lucide-react';
+import { Plus, Trash2, Loader2, PenLine, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { Board } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -22,6 +22,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
   });
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
+  const [thinkOpen, setThinkOpen] = useState(false);
   const { showToast } = useToast();
 
   const loadBoards = async () => {
@@ -110,12 +111,21 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
         >
           <Plus size={15} /> New board
         </button>
+        {active && (
+          <button
+            onClick={() => setThinkOpen(open => !open)}
+            aria-pressed={thinkOpen}
+            className={`shrink-0 ml-auto flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold transition-colors ${thinkOpen ? 'bg-violet-600 text-white shadow-sm' : 'text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-500/10'}`}
+          >
+            <Sparkles size={15} /> Think with me
+          </button>
+        )}
       </div>
 
       <div className="sage-canvas flex-1 min-h-0 rounded-3xl overflow-hidden ring-1 ring-gray-200/80 dark:ring-white/[0.08] shadow-sm bg-white dark:bg-[#121212]">
         {active ? (
           <Suspense fallback={<CanvasLoading />}>
-            <ExcalidrawBoard key={active.id} board={active} isDarkMode={isDarkMode} />
+            <ExcalidrawBoard key={active.id} board={active} isDarkMode={isDarkMode} thinkOpen={thinkOpen} onCloseThink={() => setThinkOpen(false)} />
           </Suspense>
         ) : boards ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-6">
