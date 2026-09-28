@@ -6,12 +6,15 @@ import datetime
 import asyncio
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
+from urllib.parse import parse_qs, quote
+
+import access_gate
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -44,6 +47,17 @@ def key_matches(candidate: Optional[str]) -> bool:
     return bool(candidate) and hmac.compare_digest(candidate.encode(), API_SECRET.encode())
 
 
+def logged_in(request) -> bool:
+    """A browser that typed the password (see access_gate.py) counts as
+    holding the key, so the web app works on a new device without it."""
+    return access_gate.enabled and access_gate.session_valid(request.cookies.get(access_gate.COOKIE_NAME))
+
+
+def request_key(request) -> str:
+    auth = request.headers.get("authorization", "")
+    return auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
+
+
 @app.middleware("http")
 async def require_api_key(request, call_next):
     """
@@ -57,12 +71,77 @@ async def require_api_key(request, call_next):
         and path.startswith("/api/")
         and path != "/api/health"
         and request.method != "OPTIONS"
+        and not logged_in(request)
     ):
-        auth = request.headers.get("authorization", "")
-        token = auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
-        if not key_matches(token):
+        if not key_matches(request_key(request)):
             return JSONResponse({"success": False, "error": "Missing or wrong Sage API key"}, status_code=401)
     return await call_next(request)
+
+
+# --- Password gate (see access_gate.py) ---
+# Off until SAGE_ACCESS_PASSWORD_HASH is set. Then browsers need the login
+# cookie from /login, and LUMO and scripts get through with the API key alone.
+# The cookie also stands in for the key, so the password is all a browser needs.
+GATE_OPEN_PATHS = {"/login", "/logout", "/api/health"}
+
+
+@app.middleware("http")
+async def require_login(request, call_next):
+    path = request.url.path
+    if (
+        not access_gate.enabled
+        or request.method == "OPTIONS"
+        or path in GATE_OPEN_PATHS
+        or logged_in(request)
+        or (API_SECRET and key_matches(request_key(request)))
+    ):
+        return await call_next(request)
+    if path.startswith("/api/"):
+        return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
+    target = path + (f"?{request.url.query}" if request.url.query else "")
+    return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
+
+
+@app.get("/login", include_in_schema=False)
+def login_form(next: str = "/"):
+    return HTMLResponse(access_gate.login_page(access_gate.safe_next(next)))
+
+
+@app.post("/login", include_in_schema=False)
+async def login(request: Request):
+    form = parse_qs((await request.body()).decode(errors="replace"))
+    password = (form.get("password") or [""])[0]
+    next_path = access_gate.safe_next((form.get("next") or ["/"])[0])
+    if not access_gate.enabled:
+        return RedirectResponse(next_path, status_code=303)
+    ip = access_gate.client_ip(request)
+    wait = access_gate.locked_for(ip)
+    if wait:
+        minutes = max(1, round(wait / 60))
+        page = access_gate.login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
+        return HTMLResponse(page, status_code=429)
+    if not access_gate.verify_password(password):
+        access_gate.record_failure(ip)
+        print(f"Wrong Sage password from {ip}")
+        return HTMLResponse(access_gate.login_page(next_path, "Wrong password."), status_code=401)
+    access_gate.clear_failures(ip)
+    response = RedirectResponse(next_path, status_code=303)
+    response.set_cookie(
+        access_gate.COOKIE_NAME,
+        access_gate.new_session(),
+        max_age=access_gate.SESSION_DAYS * 86400,
+        httponly=True,
+        secure=access_gate.is_https(request),
+        samesite="lax",
+    )
+    return response
+
+
+@app.get("/logout", include_in_schema=False)
+def logout():
+    response = RedirectResponse("/login", status_code=303)
+    response.delete_cookie(access_gate.COOKIE_NAME)
+    return response
 
 
 # --- Live event stream (/ws) ---
@@ -88,7 +167,11 @@ events = EventHub()
 @app.websocket("/ws")
 async def event_stream(socket: WebSocket):
     await socket.accept()
-    if API_SECRET:
+    # Middleware doesn't see websockets, so the login cookie is checked here.
+    # Without it, the auth frame's key is the only way in.
+    if logged_in(socket):
+        pass
+    elif API_SECRET:
         try:
             first = json.loads(await asyncio.wait_for(socket.receive_text(), timeout=10))
         except Exception:
@@ -97,6 +180,9 @@ async def event_stream(socket: WebSocket):
         if not (isinstance(first, dict) and first.get("type") == "auth" and key_matches(first.get("token"))):
             await socket.close(code=4401)
             return
+    elif access_gate.enabled:
+        await socket.close(code=4401)
+        return
     events.sockets.add(socket)
     await socket.send_text(json.dumps({"type": "AUTH_OK"}))
     try:
@@ -228,6 +314,8 @@ async def google_sheets_backup_worker():
 
 @app.on_event("startup")
 async def startup_event():
+    if access_gate.enabled:
+        print("Password gate is on: browsers must log in at /login.")
     if not API_SECRET:
         print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
     asyncio.create_task(google_sheets_backup_worker())
@@ -235,7 +323,7 @@ async def startup_event():
 
 @app.get("/api/health")
 def health():
-    return {"success": True, "auth": bool(API_SECRET), "webApp": (DIST_DIR / "index.html").is_file()}
+    return {"success": True, "auth": bool(API_SECRET), "passwordGate": access_gate.enabled, "webApp": (DIST_DIR / "index.html").is_file()}
 
 
 # --- API Endpoints ---
@@ -290,8 +378,6 @@ def get_changes_since(sinceRevision: int = 0):
         "serverRevision": server_rev,
         "changes": changes
     }
-
-from fastapi import Request
 
 @app.post("/api/sync/operations")
 async def process_operations(request: Request, background_tasks: BackgroundTasks):
