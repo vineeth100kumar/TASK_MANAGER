@@ -1,0 +1,14 @@
+[Unit]
+Description=Cloudflare Tunnel to Sage (public URL for the web app)
+After=network-online.target sage.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Written by deploy/setup_tunnel.sh. apt keeps cloudflared updated.
+ExecStart=/usr/bin/cloudflared --no-autoupdate --config /etc/cloudflared/sage.yml tunnel run
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

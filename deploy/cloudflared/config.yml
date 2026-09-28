@@ -1,0 +1,11 @@
+# Cloudflare Tunnel for Sage. deploy/setup_tunnel.sh fills in the two
+# placeholders and writes this to /etc/cloudflared/sage.yml.
+tunnel: @TUNNEL_ID@
+credentials-file: /etc/cloudflared/sage.json
+
+ingress:
+  # Everything for the hostname goes to Sage on this Pi: the web app, /api
+  # and the /ws live stream (cloudflared carries websockets as-is).
+  - hostname: @HOSTNAME@
+    service: http://localhost:8000
+  - service: http_status:404
