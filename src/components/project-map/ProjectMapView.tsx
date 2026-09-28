@@ -394,7 +394,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
         <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 space-y-2">
           <Network size={32} className="text-gray-300 mx-auto" />
           <h3 className="text-base font-bold text-gray-900 dark:text-white">No tasks in this project map</h3>
-          <p className="text-xs text-gray-400">Use the input above or press C to add tasks and build your flow.</p>
+          <p className="text-xs text-gray-400">Use the input above or press N to add tasks and build your flow.</p>
         </div>
       ) : viewMode === 'canvas' ? (
         <ProjectFlowCanvas

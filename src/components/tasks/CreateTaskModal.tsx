@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Loader2, Tag } from 'lucide-react';
-import { PRIORITIES, WORK_ITEM_TYPES, ENTITY_TYPES, LABELS } from '../../services/mockDb';
+import { X, Loader2, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles } from 'lucide-react';
+import { ENTITY_TYPES, LABELS } from '../../services/mockDb';
 import { api } from '../../services/api';
 import { Project, Area } from '../../services/types';
+import { parseQuickAdd, QuickAddResult } from '../../utils/quickAddParser';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -13,6 +14,95 @@ const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: 60, label: '1 hour before' },
   { value: 24 * 60, label: '1 day before' },
 ];
+
+
+const SMART_PARSE_KEY = 'sage-smart-parse';
+
+const pad = (n: number) => String(n).padStart(2, '0');
+const toLocalDate = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+/** Local "YYYY-MM-DDTHH:mm" (what datetime-local inputs and remindAt use). toISOString() would shift it to UTC. */
+const toLocalDateTime = (d: Date) => `${toLocalDate(d)}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+const minutesBefore = (localDateTime: string, minutes: number) =>
+  toLocalDateTime(new Date(new Date(localDateTime).getTime() - minutes * 60000));
+
+/** Date the typed text points at: an explicit date, the next matching weekday for "every <day>", or today when only a time was typed. */
+function parsedDate(p: QuickAddResult | null): string {
+  if (!p) return '';
+  if (p.date) return p.date;
+  const weekly = p.repeatRule?.match(/^weekly:(\d)$/);
+  if (weekly) {
+    const d = new Date();
+    d.setDate(d.getDate() + ((parseInt(weekly[1], 10) - d.getDay() + 7) % 7));
+    return toLocalDate(d);
+  }
+  return p.time ? toLocalDate(new Date()) : '';
+}
+
+function parsedDateTime(p: QuickAddResult | null): string {
+  const date = parsedDate(p);
+  return date ? `${date}T${p?.time || '09:00'}` : '';
+}
+
+/** The form's recurrence selects only know the plain rules, so "every monday" (weekly:1) becomes weekly. */
+const parsedRepeat = (p: QuickAddResult | null) => (p?.repeatRule ? p.repeatRule.replace(/^weekly:\d$/, 'weekly') : '');
+
+function formatDuration(minutes: number | null | undefined): string {
+  if (!minutes) return '';
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return h ? (m ? `${h}h${m}m` : `${h}h`) : `${m}m`;
+}
+
+function durationToMinutes(text: string): number | undefined {
+  const h = text.match(/(\d+)\s*h/i);
+  const m = text.match(/(\d+)\s*m/i);
+  const total = (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
+  return total > 0 ? total : undefined;
+}
+
+const mergeTags = (manual: string[], parsed: QuickAddResult | null) => Array.from(new Set([...manual, ...(parsed?.tags || [])]));
+
+/**
+ * Keeps form fields in sync with what the title text says ("tomorrow 3pm #work !high").
+ * Fields the user has changed by hand are never overwritten; everything else follows
+ * the text, so deleting a token from the title clears the field it filled.
+ */
+function useParsedFields<T extends Record<string, any>>(
+  parsed: QuickAddResult | null,
+  derive: (p: QuickAddResult | null) => Partial<T>,
+  setPayload: React.Dispatch<React.SetStateAction<T>>
+) {
+  const manual = useRef(new Set<string>());
+  useEffect(() => {
+    const derived = derive(parsed);
+    setPayload(prev => {
+      let changed = false;
+      const next: any = { ...prev };
+      for (const [key, value] of Object.entries(derived)) {
+        if (!manual.current.has(key) && next[key] !== value) {
+          next[key] = value;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [parsed]);
+
+  return <K extends keyof T>(key: K, value: T[K]) => {
+    manual.current.add(key as string);
+    setPayload(prev => ({ ...prev, [key]: value }));
+  };
+}
+
+interface SmartTitleState {
+  title: string;
+  setTitle: (t: string) => void;
+  parsed: QuickAddResult | null;
+  enabled: boolean;
+  setEnabled: (v: boolean) => void;
+  entityType: string;
+  setEntityType: (t: string) => void;
+}
 
 interface CreateTaskModalProps {
   onClose: () => void;
@@ -24,6 +114,19 @@ interface CreateTaskModalProps {
 export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 'work' }: CreateTaskModalProps) {
   const [entityType, setEntityType] = useState('task');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [title, setTitle] = useState('');
+  const [smartEnabled, setSmartEnabled] = useState(() => {
+    try { return localStorage.getItem(SMART_PARSE_KEY) !== 'off'; } catch { return true; }
+  });
+  const parsed = useMemo(() => (smartEnabled && title.trim() ? parseQuickAdd(title) : null), [title, smartEnabled]);
+  const smart: SmartTitleState = {
+    title, setTitle, parsed, entityType, setEntityType,
+    enabled: smartEnabled,
+    setEnabled: (v: boolean) => {
+      setSmartEnabled(v);
+      try { localStorage.setItem(SMART_PARSE_KEY, v ? 'on' : 'off'); } catch { /* storage unavailable */ }
+    },
+  };
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
 
@@ -40,7 +143,7 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
   const handleSubmit = async (payload: any) => {
     setIsSubmitting(true);
     try {
-      await onCreate({ ...payload, entityType, lifeContext });
+      await onCreate({ ...payload, title: parsed?.title || title.trim(), entityType, lifeContext });
       onClose();
     } catch (e) {
       setIsSubmitting(false);
@@ -70,21 +173,62 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pt-2">
-          {entityType === 'task' && <TaskForm onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
-          {entityType === 'event' && <EventForm onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
-          {entityType === 'reminder' && <ReminderForm onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
-          {entityType === 'milestone' && <MilestoneForm onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
+          {entityType === 'task' && <TaskForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
+          {entityType === 'event' && <EventForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
+          {entityType === 'reminder' && <ReminderForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
+          {entityType === 'milestone' && <MilestoneForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
         </div>
       </motion.div>
     </div>
   );
 }
 
-const SharedTitle = ({ title, setTitle, disabled, placeholder = "Title" }: any) => (
-  <input autoFocus type="text" placeholder={placeholder} required disabled={disabled}
-    className="w-full text-xl font-bold bg-transparent outline-none placeholder-gray-400 dark:placeholder-gray-600 text-gray-900 dark:text-white mb-3"
-    value={title} onChange={e => setTitle(e.target.value)} />
-);
+function SmartTitle({ smart, disabled, placeholder = "Title" }: { smart: SmartTitleState; disabled?: boolean; placeholder?: string }) {
+  const { title, setTitle, parsed, enabled, setEnabled, entityType, setEntityType } = smart;
+  const chips: { icon: React.ElementType; label: string }[] = [];
+  if (parsed) {
+    if (parsed.dateLabel) chips.push({ icon: Calendar, label: parsed.dateLabel });
+    if (parsed.time) chips.push({ icon: Clock, label: parsed.time });
+    if (parsed.priority) chips.push({ icon: Flag, label: parsed.priority[0].toUpperCase() + parsed.priority.slice(1) });
+    if (parsed.repeatLabel) chips.push({ icon: Repeat, label: parsed.repeatLabel });
+    if (parsed.durationMinutes) chips.push({ icon: Timer, label: formatDuration(parsed.durationMinutes) });
+    if (parsed.location) chips.push({ icon: MapPin, label: parsed.location });
+    parsed.tags.forEach(t => chips.push({ icon: Tag, label: `#${t}` }));
+  }
+  const suggestedType = parsed && parsed.entityType !== 'task' && entityType === 'task' ? parsed.entityType : null;
+
+  return (
+    <div className="mb-3">
+      <input autoFocus type="text" placeholder={placeholder} required disabled={disabled}
+        className="w-full text-xl font-bold bg-transparent outline-none placeholder-gray-400 dark:placeholder-gray-600 text-gray-900 dark:text-white"
+        value={title} onChange={e => setTitle(e.target.value)} />
+      <div className="flex flex-wrap items-center gap-1.5 mt-2 min-h-[22px]">
+        <button type="button" onClick={() => setEnabled(!enabled)}
+          title={enabled ? 'Turn off reading dates, #tags, !priority, @place from the title' : 'Read dates, #tags, !priority, @place from the title'}
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold transition-colors ${enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' : 'bg-gray-100 dark:bg-white/10 text-gray-400'}`}>
+          <Sparkles size={10} /> Smart {enabled ? 'on' : 'off'}
+        </button>
+        {enabled && chips.map(({ icon: Icon, label }) => (
+          <span key={label} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+            <Icon size={10} /> {label}
+          </span>
+        ))}
+        {enabled && parsed && chips.length > 0 && parsed.title !== title.trim() && (
+          <span className="text-[11px] font-medium text-gray-400 truncate max-w-full">Saves as "{parsed.title}"</span>
+        )}
+        {suggestedType && (
+          <button type="button" onClick={() => setEntityType(suggestedType)}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200">
+            Make it {suggestedType === 'event' ? 'an event' : 'a reminder'}
+          </button>
+        )}
+        {enabled && !title && (
+          <span className="text-[11px] font-medium text-gray-400">Try "Call Sam tomorrow 5pm #family !high"</span>
+        )}
+      </div>
+    </div>
+  );
+}
 
 const SharedDesc = ({ desc, setDesc, disabled }: any) => (
   <textarea placeholder="Add details, links, or notes..." rows={3} disabled={disabled}
@@ -156,15 +300,22 @@ const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled
   </div>
 );
 
-function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
+function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
   const [payload, setPayload] = useState({
-    title: '', description: '', type: 'task', priority: 'medium',
+    description: '', type: 'task', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || '', startDate: '', dueDate: '', estimated: '',
     location: '', repeatRule: ''
   });
   const [tags, setTags] = useState<string[]>([]);
   const [reminderLead, setReminderLead] = useState<number | ''>('');
+  const set = useParsedFields(smart.parsed, p => ({
+    dueDate: parsedDate(p),
+    priority: p?.priority || 'medium',
+    location: p?.location || '',
+    repeatRule: parsedRepeat(p),
+    estimated: formatDuration(p?.durationMinutes),
+  }), setPayload);
 
   useEffect(() => {
     if (projects.length > 0 && (!payload.projectId || payload.projectId === 'all')) {
@@ -181,12 +332,12 @@ function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, 
     const dueDate = payload.dueDate ? payload.dueDate : (payload.startDate ? payload.startDate : null);
     let remindAt: string | null = null;
     if (reminderLead !== '' && dueDate) {
-      const anchor = new Date(`${dueDate}T09:00`);
-      remindAt = new Date(anchor.getTime() - reminderLead * 60000).toISOString().slice(0, 16);
+      remindAt = minutesBefore(`${dueDate}T${smart.parsed?.time || '09:00'}`, reminderLead);
     }
     onSubmit({
       ...payload,
-      labels: tags,
+      estimatedMinutes: durationToMinutes(payload.estimated),
+      labels: mergeTags(tags, smart.parsed),
       startDate,
       dueDate,
       remindAt,
@@ -196,22 +347,22 @@ function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, 
 
   return (
     <form onSubmit={handleSubmit}>
-      <SharedTitle title={payload.title} setTitle={(v:any) => setPayload({...payload, title: v})} disabled={isSubmitting} placeholder="What needs to be done?" />
-      <SharedDesc desc={payload.description} setDesc={(v:any) => setPayload({...payload, description: v})} disabled={isSubmitting} />
+      <SmartTitle smart={smart} disabled={isSubmitting} placeholder="What needs to be done?" />
+      <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
         {lifeContext === 'work' ? (
           <>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Project</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => setPayload({...payload, projectId: e.target.value})} disabled={isSubmitting}>
+              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
                 {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 {projects.length === 0 && <option value="">No Projects Yet</option>}
               </select>
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Priority</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.priority} onChange={e => setPayload({...payload, priority: e.target.value})} disabled={isSubmitting}>
+              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -220,29 +371,29 @@ function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, 
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Start Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startDate} onChange={e => setPayload({...payload, startDate: e.target.value})} disabled={isSubmitting} />
+              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Due Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => setPayload({...payload, dueDate: e.target.value})} disabled={isSubmitting} />
+              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1 col-span-2">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Estimated Time</label>
-              <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.estimated} onChange={e => setPayload({...payload, estimated: e.target.value})} disabled={isSubmitting} placeholder="e.g. 2h, 45m" />
+              <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.estimated} onChange={e => set('estimated', e.target.value)} disabled={isSubmitting} placeholder="e.g. 2h, 45m" />
             </div>
           </>
         ) : (
           <>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Life Area</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => setPayload({...payload, areaId: e.target.value})} disabled={isSubmitting}>
+              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
                 {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 {areas.length === 0 && <option value="">No Life Areas Yet</option>}
               </select>
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Priority</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.priority} onChange={e => setPayload({...payload, priority: e.target.value})} disabled={isSubmitting}>
+              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
                 <option value="low">Low</option>
                 <option value="medium">Normal</option>
                 <option value="high">High</option>
@@ -251,23 +402,23 @@ function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, 
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Start Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.startDate} onChange={e => setPayload({...payload, startDate: e.target.value})} disabled={isSubmitting} />
+              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1">
               <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Due Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.dueDate} onChange={e => setPayload({...payload, dueDate: e.target.value})} disabled={isSubmitting} />
+              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
             </div>
           </>
         )}
 
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Location</label>
-          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => setPayload({...payload, location: e.target.value})} disabled={isSubmitting} placeholder="Optional" />
+          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="Optional" />
         </div>
 
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Recurrence</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => setPayload({...payload, repeatRule: e.target.value})} disabled={isSubmitting}>
+          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -282,19 +433,29 @@ function TaskForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, 
         <SharedTags tags={tags} setTags={setTags} />
       </div>
 
-      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Task" disabled={!payload.title.trim()} />
+      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Task" disabled={!smart.title.trim()} />
     </form>
   );
 }
 
-function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
+function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
   const [payload, setPayload] = useState({
-    title: '', description: '', type: 'meeting', startAt: '', endAt: '', location: '', repeatRule: '',
+    description: '', type: 'meeting', startAt: '', endAt: '', location: '', repeatRule: '', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || ''
   });
   const [tags, setTags] = useState<string[]>([]);
   const [reminderLead, setReminderLead] = useState<number | ''>('');
+  const set = useParsedFields(smart.parsed, p => {
+    const startAt = parsedDateTime(p);
+    return {
+      startAt,
+      endAt: startAt ? minutesBefore(startAt, -(p?.durationMinutes || 60)) : '',
+      priority: p?.priority || 'medium',
+      location: p?.location || '',
+      repeatRule: parsedRepeat(p),
+    };
+  }, setPayload);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -304,11 +465,11 @@ function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext,
     const dueDate = endAt ? endAt.slice(0, 10) : startDate;
     let remindAt: string | null = null;
     if (reminderLead !== '' && startAt) {
-      remindAt = new Date(new Date(startAt).getTime() - reminderLead * 60000).toISOString().slice(0, 16);
+      remindAt = minutesBefore(startAt, reminderLead);
     }
     onSubmit({
       ...payload,
-      labels: tags,
+      labels: mergeTags(tags, smart.parsed),
       startAt,
       endAt,
       startDate,
@@ -320,19 +481,19 @@ function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext,
 
   return (
     <form onSubmit={handleSubmit}>
-      <SharedTitle title={payload.title} setTitle={(v:any) => setPayload({...payload, title: v})} disabled={isSubmitting} placeholder="Event Name" />
-      <SharedDesc desc={payload.description} setDesc={(v:any) => setPayload({...payload, description: v})} disabled={isSubmitting} />
+      <SmartTitle smart={smart} disabled={isSubmitting} placeholder="Event Name" />
+      <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => setPayload({...payload, areaId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => setPayload({...payload, projectId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -340,15 +501,15 @@ function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext,
         </div>
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Starts</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startAt} onChange={e => setPayload({...payload, startAt: e.target.value})} disabled={isSubmitting} />
+          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startAt} onChange={e => set('startAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Ends</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.endAt} onChange={e => setPayload({...payload, endAt: e.target.value})} disabled={isSubmitting} />
+          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Recurrence</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => setPayload({...payload, repeatRule: e.target.value})} disabled={isSubmitting}>
+          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -360,7 +521,7 @@ function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext,
 
         <div className="space-y-1 col-span-2">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Location or Meeting Link</label>
-          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => setPayload({...payload, location: e.target.value})} disabled={isSubmitting} placeholder="e.g. Zoom link, Cafe, Office" />
+          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="e.g. Zoom link, Cafe, Office" />
         </div>
 
         <SharedReminderLead value={reminderLead} setValue={setReminderLead} />
@@ -368,18 +529,23 @@ function EventForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext,
         <SharedTags tags={tags} setTags={setTags} />
       </div>
 
-      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Event" disabled={!payload.title.trim()} />
+      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Event" disabled={!smart.title.trim()} />
     </form>
   );
 }
 
-function ReminderForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
+function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
   const [payload, setPayload] = useState({
-    title: '', description: '', type: 'reminder', remindAt: '', repeatRule: '',
+    description: '', type: 'reminder', remindAt: '', repeatRule: '', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || ''
   });
   const [tags, setTags] = useState<string[]>([]);
+  const set = useParsedFields(smart.parsed, p => ({
+    remindAt: parsedDateTime(p),
+    priority: p?.priority || 'medium',
+    repeatRule: parsedRepeat(p),
+  }), setPayload);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -387,7 +553,7 @@ function ReminderForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeConte
     const dueDate = remindAt ? remindAt.slice(0, 10) : null;
     onSubmit({
       ...payload,
-      labels: tags,
+      labels: mergeTags(tags, smart.parsed),
       remindAt,
       dueDate,
       startDate: dueDate
@@ -396,17 +562,17 @@ function ReminderForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeConte
 
   return (
     <form onSubmit={handleSubmit}>
-      <SharedTitle title={payload.title} setTitle={(v:any) => setPayload({...payload, title: v})} disabled={isSubmitting} placeholder="What do you want to remember?" />
-      <SharedDesc desc={payload.description} setDesc={(v:any) => setPayload({...payload, description: v})} disabled={isSubmitting} />
+      <SmartTitle smart={smart} disabled={isSubmitting} placeholder="What do you want to remember?" />
+      <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Remind At</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.remindAt} onChange={e => setPayload({...payload, remindAt: e.target.value})} disabled={isSubmitting} />
+          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.remindAt} onChange={e => set('remindAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Repeat</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => setPayload({...payload, repeatRule: e.target.value})} disabled={isSubmitting}>
+          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -419,12 +585,12 @@ function ReminderForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeConte
         <div className="space-y-1 col-span-2">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => setPayload({...payload, areaId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => setPayload({...payload, projectId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -434,25 +600,29 @@ function ReminderForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeConte
         <SharedTags tags={tags} setTags={setTags} />
       </div>
 
-      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Set Reminder" disabled={!payload.title.trim()} />
+      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Set Reminder" disabled={!smart.title.trim()} />
     </form>
   );
 }
 
-function MilestoneForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
+function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [] }: any) {
   const [payload, setPayload] = useState({
-    title: '', description: '', type: 'milestone', dueDate: '',
+    description: '', type: 'milestone', dueDate: '', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || ''
   });
   const [tags, setTags] = useState<string[]>([]);
+  const set = useParsedFields(smart.parsed, p => ({
+    dueDate: parsedDate(p),
+    priority: p?.priority || 'medium',
+  }), setPayload);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const dueDate = payload.dueDate ? payload.dueDate : null;
     onSubmit({
       ...payload,
-      labels: tags,
+      labels: mergeTags(tags, smart.parsed),
       dueDate,
       startDate: dueDate
     });
@@ -460,24 +630,24 @@ function MilestoneForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeCont
 
   return (
     <form onSubmit={handleSubmit}>
-      <SharedTitle title={payload.title} setTitle={(v:any) => setPayload({...payload, title: v})} disabled={isSubmitting} placeholder="Milestone / Key Checkpoint Name" />
-      <SharedDesc desc={payload.description} setDesc={(v:any) => setPayload({...payload, description: v})} disabled={isSubmitting} />
+      <SmartTitle smart={smart} disabled={isSubmitting} placeholder="Milestone / Key Checkpoint Name" />
+      <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Target Checkpoint Date</label>
-          <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => setPayload({...payload, dueDate: e.target.value})} disabled={isSubmitting} required />
+          <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} required />
         </div>
 
         <div className="space-y-1">
           <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => setPayload({...payload, areaId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas</option>}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => setPayload({...payload, projectId: e.target.value})} disabled={isSubmitting}>
+            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No Projects</option>}
             </select>
@@ -487,7 +657,7 @@ function MilestoneForm({ onSubmit, isSubmitting, onCancel, workspaceId, lifeCont
         <SharedTags tags={tags} setTags={setTags} />
       </div>
 
-      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Milestone" disabled={!payload.title.trim() || !payload.dueDate} />
+      <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Milestone" disabled={!smart.title.trim() || !payload.dueDate} />
     </form>
   );
 }

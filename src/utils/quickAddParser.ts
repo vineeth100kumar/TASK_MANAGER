@@ -1,10 +1,11 @@
 /**
  * quickAddParser.ts
  *
- * Lightweight, fully client-side natural-language parsing for the Quick
- * Capture bar. Deliberately not the Ollama-backed /api/parse-task endpoint:
- * that call needs the Raspberry Pi backend to be configured and reachable,
- * and quick-add has to work instantly (and offline) on every keystroke.
+ * Lightweight, fully client-side natural-language parsing for the title
+ * field of the Add Item form (CreateTaskModal). Deliberately not the
+ * Ollama-backed /api/parse-task endpoint: that call needs the Raspberry Pi
+ * backend to be configured and reachable, and parsing has to work instantly
+ * (and offline) on every keystroke.
  *
  * Supported inline tokens (Todoist-style, stripped from the title once
  * recognized):
@@ -98,7 +99,8 @@ export function parseQuickAdd(input: string, now: Date = new Date()): QuickAddRe
   } else if ((m = text.match(/\bevery\s+(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)[a-z]*\b/i))) {
     const abbr = m[1].toLowerCase();
     repeatRule = `weekly:${WEEKDAY_ABBR[abbr]}`;
-    repeatLabel = `Every ${WEEKDAYS[WEEKDAY_ABBR[abbr]]}`;
+    const day = WEEKDAYS[WEEKDAY_ABBR[abbr]];
+    repeatLabel = `Every ${day[0].toUpperCase()}${day.slice(1)}`;
     text = strip(text, m);
   } else if ((m = text.match(/\b(daily|every day)\b/i))) {
     repeatRule = 'daily'; repeatLabel = 'Daily'; text = strip(text, m);
@@ -127,13 +129,6 @@ export function parseQuickAdd(input: string, now: Date = new Date()): QuickAddRe
     tags.push(tag.toLowerCase());
     return '';
   }).replace(/\s+/g, ' ').trim();
-
-  // --- Location: @location (rest of a token, up to next special char) ---
-  if ((m = text.match(/@([\w][\w .'-]*)/))) {
-    location = m[1].trim();
-    text = strip(text, m);
-    entityType = entityType === 'reminder' ? entityType : 'event';
-  }
 
   // --- Priority: !urgent / !high / !medium / !low ---
   if ((m = text.match(/!(urgent|high|medium|med|low)\b/i))) {
@@ -203,6 +198,14 @@ export function parseQuickAdd(input: string, now: Date = new Date()): QuickAddRe
     if (!isNaN(d.getTime())) {
       date = toDateString(d); dateLabel = `${month}/${day}`; text = strip(text, m);
     }
+  }
+
+  // --- Location: @location (parsed after dates/times so
+  // "@office tomorrow 9am" doesn't swallow the date into the location) ---
+  if ((m = text.match(/@([\w][\w .'-]*)/))) {
+    location = m[1].trim();
+    text = strip(text, m);
+    entityType = entityType === 'reminder' ? entityType : 'event';
   }
 
   // --- Event inference: meeting/call/lunch/etc, or has a time/location and isn't a reminder ---
