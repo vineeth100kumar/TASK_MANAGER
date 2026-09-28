@@ -1,7 +1,14 @@
 import React, { useState } from 'react';
 import { Flag, CheckSquare, MessageSquare, Calendar as CalendarIcon, Check } from 'lucide-react';
-import { STATUSES, PRIORITIES } from '../../services/mockDb';
+import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
+import { WorkItem } from '../../services/types';
+
+interface BoardViewProps {
+  tasks: WorkItem[];
+  onSelect: (id: string) => void;
+  onTransition: (task: WorkItem, toStatus: string) => void;
+}
 
 export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
   const [draggedTask, setDraggedTask] = useState<any>(null);
@@ -61,8 +68,8 @@ export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
 
                     <div className="flex justify-between items-center pt-3 border-t border-gray-100 dark:border-white/5">
                       <div className="flex gap-3 text-[12px] font-semibold text-gray-400">
-                        {task.subtaskCount > 0 && <span className="flex items-center gap-1" title={`${task.completedSubtaskCount} of ${task.subtaskCount} subtasks`}><CheckSquare size={13}/> {task.completedSubtaskCount}/{task.subtaskCount}</span>}
-                        {task.commentCount > 0 && <span className="flex items-center gap-1" title={`${task.commentCount} notes`}><MessageSquare size={13}/> {task.commentCount}</span>}
+                        {(task.subtaskCount ?? 0) > 0 && <span className="flex items-center gap-1" title={`${task.completedSubtaskCount} of ${task.subtaskCount} subtasks`}><CheckSquare size={13}/> {task.completedSubtaskCount}/{task.subtaskCount}</span>}
+                        {(task.commentCount ?? 0) > 0 && <span className="flex items-center gap-1" title={`${task.commentCount} notes`}><MessageSquare size={13}/> {task.commentCount}</span>}
                       </div>
                       <span className="text-[11px] font-bold text-gray-400">
                         {task.project?.name || task.area?.name || ''}

@@ -8,7 +8,8 @@
  */
 
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, LifeContext } from './types';
-import { LABELS, uuid, INITIAL_WORK_ITEMS, INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './mockDb';
+import { LABELS, uuid } from './constants';
+import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseDateString } from '../utils/dateUtils';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
@@ -66,7 +67,6 @@ async function initializeStore(): Promise<void> {
     // Sample data for local testing only (`npm run dev`). A real install starts
     // empty; the sample records are never queued for upload.
     if (import.meta.env.DEV && projects.length === 0 && areas.length === 0 && workItems.length === 0) {
-      state.workItems = [...INITIAL_WORK_ITEMS];
       state.projects = [...INITIAL_PROJECTS];
       state.areas = [...INITIAL_AREAS];
       state.goals = [...INITIAL_GOALS];
@@ -74,7 +74,6 @@ async function initializeStore(): Promise<void> {
       state.notes = [...INITIAL_NOTES];
 
       await Promise.all([
-        putBatchToStore('workItems', state.workItems),
         putBatchToStore('projects', state.projects),
         putBatchToStore('areas', state.areas),
         putBatchToStore('goals', state.goals),
@@ -146,6 +145,21 @@ function hydrateWorkItem(item: WorkItem): WorkItem {
     commentCount: commentsForItem.length,
     dependencies: { blocks: [], blockedBy: [] }
   };
+}
+
+type Table = keyof LocalState;
+
+// Save a record locally and queue it for upload.
+async function persist(table: Table, record: { id: string }, revision?: number): Promise<void> {
+  await putToStore(table, record);
+  syncEngine.enqueueOperation(table, record.id, 'save', record, revision);
+}
+
+// Remove a record locally and queue the delete for upload.
+async function removeRecord(table: Table, id: string): Promise<void> {
+  (state as any)[table] = (state[table] as Array<{ id: string }>).filter(r => r && r.id !== id);
+  await deleteFromStore(table, id);
+  syncEngine.enqueueOperation(table, id, 'delete', { id });
 }
 
 let externalEntityListeners: Array<(entityType: string, changes: any[]) => void> = [];
@@ -338,8 +352,7 @@ export const api = {
       };
 
       state.workItems.unshift(newItem);
-      await putToStore('workItems', newItem);
-      syncEngine.enqueueOperation('workItems', newItem.id, 'save', newItem, 1);
+      await persist('workItems', newItem);
 
       return hydrateWorkItem(newItem);
     },
@@ -366,8 +379,7 @@ export const api = {
       };
 
       state.workItems[index] = updated;
-      await putToStore('workItems', updated);
-      syncEngine.enqueueOperation('workItems', updated.id, 'save', updated, nextVersion);
+      await persist('workItems', updated, nextVersion);
 
       return hydrateWorkItem(updated);
     },
@@ -399,8 +411,7 @@ export const api = {
       };
 
       state.workItems[index] = updated;
-      await putToStore('workItems', updated);
-      syncEngine.enqueueOperation('workItems', updated.id, 'save', updated, nextVersion);
+      await persist('workItems', updated, nextVersion);
 
       // Auto-Advancing Occurrence Engine for Recurring Tasks
       if (toStatus === 'done' && existing.repeatRule) {
@@ -467,8 +478,7 @@ export const api = {
       };
 
       state.workItems[index] = updated;
-      await putToStore('workItems', updated);
-      syncEngine.enqueueOperation('workItems', id, 'save', updated, updated.version);
+      await persist('workItems', updated, updated.version);
     },
 
     restore: async (id: string): Promise<WorkItem> => {
@@ -486,16 +496,13 @@ export const api = {
       };
 
       state.workItems[index] = updated;
-      await putToStore('workItems', updated);
-      syncEngine.enqueueOperation('workItems', id, 'save', updated, updated.version);
+      await persist('workItems', updated, updated.version);
       return hydrateWorkItem(updated);
     },
 
     permanentDelete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.workItems = state.workItems.filter(i => i && i.id !== id);
-      await deleteFromStore('workItems', id);
-      syncEngine.enqueueOperation('workItems', id, 'delete', { id });
+      await removeRecord('workItems', id);
     }
   },
 
@@ -519,8 +526,7 @@ export const api = {
         updatedAt: now
       };
       state.projects.push(project);
-      await putToStore('projects', project);
-      syncEngine.enqueueOperation('projects', project.id, 'save', project);
+      await persist('projects', project);
       return project;
     },
     update: async (id: string, updates: Partial<Project>): Promise<Project> => {
@@ -533,15 +539,12 @@ export const api = {
         updatedAt: new Date().toISOString()
       };
       state.projects[index] = updated;
-      await putToStore('projects', updated);
-      syncEngine.enqueueOperation('projects', id, 'save', updated);
+      await persist('projects', updated);
       return updated;
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.projects = state.projects.filter(p => p && p.id !== id);
-      await deleteFromStore('projects', id);
-      syncEngine.enqueueOperation('projects', id, 'delete', { id });
+      await removeRecord('projects', id);
     }
   },
 
@@ -563,15 +566,12 @@ export const api = {
         updatedAt: now
       };
       state.areas.push(area);
-      await putToStore('areas', area);
-      syncEngine.enqueueOperation('areas', area.id, 'save', area);
+      await persist('areas', area);
       return area;
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.areas = state.areas.filter(a => a && a.id !== id);
-      await deleteFromStore('areas', id);
-      syncEngine.enqueueOperation('areas', id, 'delete', { id });
+      await removeRecord('areas', id);
     }
   },
 
@@ -604,8 +604,7 @@ export const api = {
         updatedAt: now
       };
       state.goals.push(goal);
-      await putToStore('goals', goal);
-      syncEngine.enqueueOperation('goals', goal.id, 'save', goal);
+      await persist('goals', goal);
       return goal;
     },
     updateProgress: async (id: string, progress: number): Promise<Goal> => {
@@ -614,15 +613,12 @@ export const api = {
       if (!g) throw new Error('Goal not found');
       g.progress = progress;
       g.updatedAt = new Date().toISOString();
-      await putToStore('goals', g);
-      syncEngine.enqueueOperation('goals', g.id, 'save', g);
+      await persist('goals', g);
       return g;
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.goals = state.goals.filter(g => g && g.id !== id);
-      await deleteFromStore('goals', id);
-      syncEngine.enqueueOperation('goals', id, 'delete', { id });
+      await removeRecord('goals', id);
     }
   },
 
@@ -646,8 +642,7 @@ export const api = {
         updatedAt: now
       };
       state.habits.push(habit);
-      await putToStore('habits', habit);
-      syncEngine.enqueueOperation('habits', habit.id, 'save', habit);
+      await persist('habits', habit);
       return habit;
     },
     toggleDay: async (id: string, day: string): Promise<Habit> => {
@@ -659,15 +654,12 @@ export const api = {
       h.history = has ? history.filter(d => d !== day) : [...history, day];
       h.streak = h.history.length;
       h.updatedAt = new Date().toISOString();
-      await putToStore('habits', h);
-      syncEngine.enqueueOperation('habits', h.id, 'save', h);
+      await persist('habits', h);
       return h;
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.habits = state.habits.filter(h => h && h.id !== id);
-      await deleteFromStore('habits', id);
-      syncEngine.enqueueOperation('habits', id, 'delete', { id });
+      await removeRecord('habits', id);
     }
   },
 
@@ -689,8 +681,7 @@ export const api = {
         updatedAt: now
       };
       state.notes.unshift(note);
-      await putToStore('notes', note);
-      syncEngine.enqueueOperation('notes', note.id, 'save', note);
+      await persist('notes', note);
       return note;
     },
     update: async (id: string, updates: Partial<Note>): Promise<Note> => {
@@ -706,9 +697,7 @@ export const api = {
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
-      state.notes = state.notes.filter(n => n && n.id !== id);
-      await deleteFromStore('notes', id);
-      syncEngine.enqueueOperation('notes', id, 'delete', { id });
+      await removeRecord('notes', id);
     }
   },
 
@@ -726,8 +715,7 @@ export const api = {
         createdAt: new Date().toISOString()
       };
       state.comments.push(comment);
-      await putToStore('comments', comment);
-      syncEngine.enqueueOperation('comments', comment.id, 'save', comment);
+      await persist('comments', comment);
       return comment;
     }
   },
@@ -748,8 +736,7 @@ export const api = {
         createdAt: new Date().toISOString()
       };
       state.subtasks.push(subtask);
-      await putToStore('subtasks', subtask);
-      syncEngine.enqueueOperation('subtasks', subtask.id, 'save', subtask);
+      await persist('subtasks', subtask);
       return subtask;
     },
     toggle: async (id: string, completed: boolean): Promise<Subtask> => {
@@ -757,8 +744,7 @@ export const api = {
       const s = state.subtasks.find(s => s.id === id);
       if (!s) throw new Error('Subtask not found');
       s.completed = completed;
-      await putToStore('subtasks', s);
-      syncEngine.enqueueOperation('subtasks', s.id, 'save', s);
+      await persist('subtasks', s);
       return s;
     }
   },
@@ -818,8 +804,7 @@ export const api = {
         const item = state.workItems.find(t => t && t.id === id);
         if (item) {
           item.focusOrder = i;
-          await putToStore('workItems', item);
-          syncEngine.enqueueOperation('workItems', id, 'save', item);
+          await persist('workItems', item);
         }
       }
     }

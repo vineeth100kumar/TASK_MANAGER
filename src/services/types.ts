@@ -12,7 +12,7 @@ export interface Project {
   id: string;
   name: string;
   key: string;
-  type: 'work' | 'personal';
+  type?: string; // not read anywhere; existing records hold 'standard'
   color: string;
   sequence: number;
   description?: string;
@@ -71,7 +71,7 @@ export interface WorkItem {
   // Attention & Cognitive Flow (Sage Attention Engine)
   isInbox?: boolean;
   isFocus?: boolean;
-  focusOrder?: number;
+  focusOrder?: number | null;
   snoozedUntil?: string | null; // ISO Datetime
   snoozeCount?: number;
   waitingFor?: {
@@ -81,7 +81,7 @@ export interface WorkItem {
     sinceDate: string;
   } | null;
   energy?: 'low' | 'medium' | 'high';
-  estimatedMinutes?: number;
+  estimatedMinutes?: number | null;
   lastTouchedAt?: string;
   
   // Metadata & Concurrency

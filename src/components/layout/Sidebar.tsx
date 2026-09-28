@@ -4,6 +4,7 @@ import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText,
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -98,20 +99,10 @@ export function Sidebar({
     }
   };
 
-  // Reload on any change, local or synced, so counts and lists stay current.
-  // Changes come in bursts (a sync batch, a bulk edit), so wait for them to settle.
   useEffect(() => {
     loadNavData();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = api.sync.onAnyChange(() => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(loadNavData, 150);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      unsubscribe();
-    };
   }, [lifeContext]);
+  useDataChanges(loadNavData);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();

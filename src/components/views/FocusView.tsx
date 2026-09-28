@@ -4,6 +4,7 @@ import { Target, Circle, ArrowUp, ArrowDown, Sparkles, X, Plus } from 'lucide-re
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
 interface FocusViewProps {
@@ -13,24 +14,21 @@ interface FocusViewProps {
 
 export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
   const [focusItems, setFocusItems] = useState<WorkItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const { showToast } = useToast();
 
   const loadFocus = async () => {
-    setIsLoading(true);
     try {
       const items = await api.focus.list(lifeContext);
       setFocusItems(items);
     } catch (e) {
       console.error(e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadFocus();
   }, [lifeContext]);
+  useDataChanges(loadFocus);
 
   const handleComplete = async (item: WorkItem, e: React.MouseEvent) => {
     e.stopPropagation();

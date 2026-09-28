@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Loader2, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles } from 'lucide-react';
-import { ENTITY_TYPES, LABELS } from '../../services/mockDb';
+import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
 import { Project, Area } from '../../services/types';
 import { parseQuickAdd, QuickAddResult } from '../../utils/quickAddParser';

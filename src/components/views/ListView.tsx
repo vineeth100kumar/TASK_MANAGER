@@ -1,6 +1,14 @@
 import { CheckCircle, Circle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
-import { STATUSES, PRIORITIES } from '../../services/mockDb';
+import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
+import { WorkItem } from '../../services/types';
+
+interface ListViewProps {
+  tasks: WorkItem[];
+  onSelect: (id: string) => void;
+  selectedId: string | null;
+  onTransition: (task: WorkItem, toStatus: string) => void;
+}
 
 export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
   

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
 import { api } from '../../services/api';
-import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/mockDb';
+import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { downloadTaskImage } from '../../utils/imageExport';
 
 import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
@@ -84,6 +85,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
   }, [taskId, onClose, showToast]);
 
   useEffect(() => { loadData(true); }, [loadData]);
+  useDataChanges(() => loadData());
 
   const submitTitle = async () => {
     if (editTitle !== task.title) {

@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { Note } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface NotesViewProps {
   lifeContext: 'work' | 'personal';
@@ -30,6 +31,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   useEffect(() => {
     loadNotes();
   }, []);
+  useDataChanges(loadNotes);
 
   const selectedNote = notes.find(n => n.id === selectedNoteId);
 

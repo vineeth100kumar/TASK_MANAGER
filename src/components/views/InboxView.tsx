@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { SnoozeMenu } from '../common/SnoozeMenu';
+import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface InboxViewProps {
   lifeContext: LifeContext;
@@ -16,7 +17,6 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
 
   // Clarify Form State
   const [targetType, setTargetType] = useState<string>('task');
@@ -28,7 +28,6 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const { showToast } = useToast();
 
   const loadInbox = async () => {
-    setIsLoading(true);
     try {
       const inboxItems = await api.inbox.list(lifeContext);
       setItems(inboxItems);
@@ -40,14 +39,13 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       setAreas(ars);
     } catch (e) {
       console.error(e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadInbox();
   }, [lifeContext]);
+  useDataChanges(loadInbox);
 
   const startClarify = (item: WorkItem) => {
     setClarifyingItem(item);
