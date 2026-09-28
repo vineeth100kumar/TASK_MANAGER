@@ -583,6 +583,21 @@ def daily_briefing(req: DailyBriefingRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail="AI failed to generate briefing")
 
+# --- Canvas thinking partner (see canvas_thinker.py) ---
+import canvas_thinker
+
+@app.get("/api/canvas/think")
+def canvas_think_status():
+    return {"success": True, "engine": "claude" if canvas_thinker.claude_available() else "local"}
+
+@app.post("/api/canvas/think")
+def canvas_think(req: canvas_thinker.CanvasThinkRequest):
+    try:
+        return {"success": True, **canvas_thinker.think(req)}
+    except Exception as e:
+        print(f"Canvas thinker failed: {e}")
+        raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
+
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.
 if (DIST_DIR / "index.html").is_file():

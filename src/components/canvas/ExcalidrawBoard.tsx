@@ -1,12 +1,14 @@
 // The drawing surface for one board. Loaded on demand by CanvasView, since
 // Excalidraw is a large bundle that most visits to the app never need.
 import { useEffect, useRef, useState } from 'react';
-import { Excalidraw, FONT_FAMILY, MainMenu, getSceneVersion } from '@excalidraw/excalidraw';
+import { Excalidraw, FONT_FAMILY, MainMenu, exportToBlob, getSceneVersion } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import '@excalidraw/excalidraw/index.css';
 import { api } from '../../services/api';
 import { Board } from '../../services/types';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { ThinkPanel } from './ThinkPanel';
+import { boardOutline } from './boardOutline';
 
 // Fonts are copied into the build by vite.config.ts; Excalidraw falls back to
 // its CDN for anything missing.
@@ -15,6 +17,8 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 interface ExcalidrawBoardProps {
   board: Board;
   isDarkMode: boolean;
+  thinkOpen: boolean;
+  onCloseThink: () => void;
 }
 
 const parseScene = (json: string): any[] => {
@@ -30,7 +34,7 @@ const parseScene = (json: string): any[] => {
 // waiting to save; drawing it then would erase them.
 const QUIET_MS = 3000;
 
-export default function ExcalidrawBoard({ board, isDarkMode }: ExcalidrawBoardProps) {
+export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseThink }: ExcalidrawBoardProps) {
   const excalidrawRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const lastSceneJson = useRef(api.boards.getScene(board));
   const lastVersion = useRef<number | null>(null);
@@ -83,27 +87,64 @@ export default function ExcalidrawBoard({ board, isDarkMode }: ExcalidrawBoardPr
     canvas.updateScene({ elements: parseScene(json) });
   });
 
+  // What the thinking partner reads: an outline of the board plus a picture of it.
+  const getSnapshot = async () => {
+    const canvas = excalidrawRef.current;
+    const elements = canvas ? canvas.getSceneElements() : parseScene(lastSceneJson.current);
+    if (!elements.length) return { outline: boardOutline(elements), imagePng: null };
+    let imagePng: string | null = null;
+    try {
+      const blob = await exportToBlob({
+        elements,
+        appState: { exportBackground: true, viewBackgroundColor: '#ffffff', exportWithDarkMode: false },
+        files: canvas?.getFiles() || null,
+        mimeType: 'image/png',
+        maxWidthOrHeight: 1568,
+      });
+      const dataUrl: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(blob);
+      });
+      imagePng = dataUrl.split(',')[1] || null;
+    } catch (err) {
+      console.warn('[Canvas] Snapshot failed; sending the outline only:', err);
+    }
+    return { outline: boardOutline(elements), imagePng };
+  };
+
   return (
-    <Excalidraw
-      excalidrawAPI={(a) => { excalidrawRef.current = a; }}
-      initialData={initialData}
-      onChange={handleChange}
-      theme={isDarkMode ? 'dark' : 'light'}
-      // Images would be stored inline and overflow the sync payload, so they're off for now.
-      UIOptions={{
-        tools: { image: false },
-        canvasActions: { loadScene: false, saveToActiveFile: false, export: { saveFileToDisk: true } },
-      }}
-    >
-      <MainMenu>
-        <MainMenu.DefaultItems.SaveAsImage />
-        <MainMenu.DefaultItems.Export />
-        <MainMenu.DefaultItems.SearchMenu />
-        <MainMenu.DefaultItems.ClearCanvas />
-        <MainMenu.Separator />
-        <MainMenu.DefaultItems.ChangeCanvasBackground />
-        <MainMenu.DefaultItems.Help />
-      </MainMenu>
-    </Excalidraw>
+    <div className="relative h-full flex">
+      <div className="flex-1 min-w-0 h-full">
+        <Excalidraw
+          excalidrawAPI={(a) => { excalidrawRef.current = a; }}
+          initialData={initialData}
+          onChange={handleChange}
+          theme={isDarkMode ? 'dark' : 'light'}
+          // Images would be stored inline and overflow the sync payload, so they're off for now.
+          UIOptions={{
+            tools: { image: false },
+            canvasActions: { loadScene: false, saveToActiveFile: false, export: { saveFileToDisk: true } },
+          }}
+        >
+          <MainMenu>
+            <MainMenu.DefaultItems.SaveAsImage />
+            <MainMenu.DefaultItems.Export />
+            <MainMenu.DefaultItems.SearchMenu />
+            <MainMenu.DefaultItems.ClearCanvas />
+            <MainMenu.Separator />
+            <MainMenu.DefaultItems.ChangeCanvasBackground />
+            <MainMenu.DefaultItems.Help />
+          </MainMenu>
+        </Excalidraw>
+      </div>
+      {thinkOpen && (
+        // A side column on wider screens, a sheet over the bottom of the canvas on phones.
+        <div className="absolute inset-x-0 bottom-0 h-[60%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
+          <ThinkPanel boardTitle={board.title} getSnapshot={getSnapshot} onClose={onCloseThink} />
+        </div>
+      )}
+    </div>
   );
 }

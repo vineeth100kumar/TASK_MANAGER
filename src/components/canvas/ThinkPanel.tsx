@@ -1,0 +1,151 @@
+import { useEffect, useRef, useState } from 'react';
+import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw } from 'lucide-react';
+import { aiEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
+import { piBackendUrl } from '../../services/piBackend';
+
+interface ThinkPanelProps {
+  boardTitle: string;
+  // The board as it is right now: a text outline and a PNG (base64, may be null).
+  getSnapshot: () => Promise<{ outline: string; imagePng: string | null }>;
+  onClose: () => void;
+}
+
+interface Turn extends ThinkTurn {
+  label?: string; // what to show for a button press instead of the full prompt
+}
+
+const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck }> = [
+  { mode: 'review', label: 'Check my thinking', icon: SearchCheck },
+  { mode: 'summarize', label: 'Summarize', icon: ListTree },
+];
+
+// A side panel that reads the board and talks it through with you.
+export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps) {
+  const [turns, setTurns] = useState<Turn[]>([]);
+  const [input, setInput] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [engine, setEngine] = useState<'claude' | 'local' | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const hasPi = Boolean(piBackendUrl());
+
+  useEffect(() => {
+    if (hasPi) aiEngine.canvasThinkEngine().then(setEngine).catch(() => setEngine(null));
+  }, [hasPi]);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [turns, busy]);
+
+  const run = async (mode: ThinkMode, label: string, question?: string) => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    const history = turns.map(({ role, text }) => ({ role, text }));
+    setTurns(prev => [...prev, { role: 'user', text: question || label, label }]);
+    try {
+      const { outline, imagePng } = await getSnapshot();
+      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history });
+      setEngine(answer.engine);
+      setTurns(prev => [...prev, { role: 'assistant', text: answer.text }]);
+    } catch (e: any) {
+      setError(e?.message || 'Something went wrong.');
+      setTurns(prev => prev.slice(0, -1));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const ask = () => {
+    const q = input.trim();
+    if (!q) return;
+    setInput('');
+    run('ask', q, q);
+  };
+
+  return (
+    <aside className="flex flex-col h-full bg-white dark:bg-[#161618] text-gray-900 dark:text-gray-100">
+      <div className="flex items-center gap-2 px-4 h-12 border-b border-gray-200/70 dark:border-white/[0.08] shrink-0">
+        <Sparkles size={16} className="text-violet-500" />
+        <span className="text-[14px] font-semibold flex-1">Think with me</span>
+        {turns.length > 0 && (
+          <button onClick={() => { setTurns([]); setError(null); }} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 dark:hover:text-gray-200" aria-label="Start over" title="Start over">
+            <RotateCcw size={15} />
+          </button>
+        )}
+        <button onClick={onClose} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 dark:hover:text-gray-200" aria-label="Close">
+          <X size={16} />
+        </button>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar px-4 py-4 space-y-3">
+        {!hasPi ? (
+          <p className="text-[13px] text-gray-500 leading-relaxed">The thinking partner runs on your Pi server, and this copy of the app isn't connected to one.</p>
+        ) : turns.length === 0 && !busy ? (
+          <div className="text-[13px] text-gray-500 leading-relaxed space-y-2">
+            <p>Draw your idea out, then ask me to look it over. I read the whole board: shapes, labels, arrows and sketches.</p>
+            <p>I'll point out gaps and shaky steps, sum it up, or answer questions about it.</p>
+          </div>
+        ) : null}
+
+        {turns.map((turn, i) => turn.role === 'user' ? (
+          <div key={i} className="flex justify-end">
+            <div className="max-w-[85%] px-3 py-1.5 rounded-2xl rounded-br-md bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-[13px] font-medium">
+              {turn.label || turn.text}
+            </div>
+          </div>
+        ) : (
+          <div key={i} className="group">
+            <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap">{turn.text}</div>
+            <button
+              onClick={() => navigator.clipboard?.writeText(turn.text)}
+              className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+            >
+              <Copy size={11} /> Copy
+            </button>
+          </div>
+        ))}
+
+        {busy && (
+          <div className="flex items-center gap-2 text-[13px] text-gray-400">
+            <Loader2 size={14} className="animate-spin" /> Reading your board…
+          </div>
+        )}
+        {error && <p className="text-[13px] text-red-600 dark:text-red-400 leading-relaxed">{error}</p>}
+      </div>
+
+      {hasPi && (
+        <div className="shrink-0 border-t border-gray-200/70 dark:border-white/[0.08] p-3 space-y-2">
+          <div className="flex gap-2">
+            {ACTIONS.map(({ mode, label, icon: Icon }) => (
+              <button
+                key={mode}
+                disabled={busy}
+                onClick={() => run(mode, label)}
+                className="flex-1 flex items-center justify-center gap-1.5 h-9 rounded-xl text-[13px] font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20 disabled:opacity-50 transition-colors"
+              >
+                <Icon size={14} /> {label}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-end gap-2">
+            <textarea
+              value={input}
+              onChange={e => setInput(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); ask(); } }}
+              rows={1}
+              placeholder="Ask about this board…"
+              className="field flex-1 resize-none max-h-28"
+            />
+            <button onClick={ask} disabled={busy || !input.trim()} aria-label="Ask" className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+              <ArrowUp size={17} />
+            </button>
+          </div>
+          {engine === 'local' && (
+            <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add an Anthropic API key on the Pi for sharper answers.</p>
+          )}
+        </div>
+      )}
+    </aside>
+  );
+}
