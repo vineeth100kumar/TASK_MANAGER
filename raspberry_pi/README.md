@@ -11,7 +11,8 @@ A Raspberry Pi 5 with 4GB RAM is hardware constrained. Qwen 2.5 (1.5B) leaves en
 - Python 3.
 
 ## How to Install and Run
-1. Copy this entire folder (aspberry_pi) to your Raspberry Pi.
+1. Copy this entire folder (
+aspberry_pi) to your Raspberry Pi.
 2. Open a terminal on your Pi and navigate to this folder.
 3. Make the setup script executable:
    \chmod +x setup.sh\
@@ -36,8 +37,9 @@ This Python server (FastAPI) acts as a middleman between your React app and Olla
 | `SAGE_DB_PATH` | `sage_sync.db` | SQLite file. |
 | `SAGE_DIST_DIR` | `../dist` | Built web app, served at `/` when present. |
 | `SAGE_CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. |
-| `SAGE_GAS_URL` | the existing Apps Script URL | Where the 4-hourly backup goes. |
+| `SAGE_GAS_URL` | the Apps Script URL | Where synced changes are backed up. |
+| `SAGE_GAS_BACKUP_INTERVAL` | `300` | Seconds between backups to Apps Script. |
 
 `/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO uses it to update the clock within a second of a change in the app.
 
-In the web app, enter the same key under Settings > System > Raspberry Pi server key.
+In the web app, enter the same key under Settings > Cloud Limits & Reset > Raspberry Pi server key.

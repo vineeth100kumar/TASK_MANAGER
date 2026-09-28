@@ -23,6 +23,8 @@ GOOGLE_SHEETS_URL = os.getenv(
     "SAGE_GAS_URL",
     "https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec",
 )
+# How often queued changes are copied to Apps Script, in seconds.
+GAS_BACKUP_INTERVAL = int(os.getenv("SAGE_GAS_BACKUP_INTERVAL", "300"))
 # The shared key every client sends as "Authorization: Bearer <key>". LUMO
 # reads the same value from the same file. Empty means no key check, which is
 # only safe when the server is not reachable from outside the Pi.
@@ -193,38 +195,43 @@ def increment_server_revision(cursor):
 # --- Periodic Backup Worker: Forward to Google Sheets ---
 async def google_sheets_backup_worker():
     """
-    Runs continuously in the background. Wakes up every 4 hours, reads all 
-    unsynced operations from the queue, and batches them to Google Sheets.
+    Runs in the background. Every GAS_BACKUP_INTERVAL seconds, sends queued
+    sync batches to Apps Script in order, stopping at the first failure so
+    nothing is applied out of order.
     """
     while True:
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC LIMIT 50")
+            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC")
             rows = cursor.fetchall()
-            
+
             if rows:
-                print(f"Found {len(rows)} batches to backup to Google Sheets...")
-                for row_id, payload_str in rows:
-                    payload = json.loads(payload_str)
-                    async with httpx.AsyncClient() as client:
+                print(f"Backing up {len(rows)} batches to Google Sheets...")
+                # Apps Script answers every call with a 302 to
+                # script.googleusercontent.com, where the JSON reply lives.
+                async with httpx.AsyncClient(follow_redirects=True) as client:
+                    for row_id, payload_str in rows:
                         resp = await client.post(
                             GOOGLE_SHEETS_URL,
-                            json=payload,
+                            content=payload_str,
                             headers={"Content-Type": "text/plain;charset=utf-8"},
                             timeout=30.0
                         )
-                        if resp.status_code == 200 and resp.json().get('success'):
-                            cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
-                            conn.commit()
-                        else:
-                            print(f"Google Sheets backup failed. Will retry later.")
-                            break # stop processing this run, try again in 4 hours
+                        try:
+                            ok = resp.status_code == 200 and resp.json().get('success')
+                        except ValueError:
+                            ok = False
+                        if not ok:
+                            print(f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
+                            break
+                        cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
+                        conn.commit()
             conn.close()
         except Exception as e:
             print(f"Backup worker error: {e}")
-            
-        await asyncio.sleep(4 * 3600)  # Sleep for 4 hours
+
+        await asyncio.sleep(GAS_BACKUP_INTERVAL)
 
 @app.on_event("startup")
 async def startup_event():
