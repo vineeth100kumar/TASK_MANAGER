@@ -21,7 +21,7 @@ app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 GOOGLE_SHEETS_URL = os.getenv(
     "SAGE_GAS_URL",
-    "https://script.google.com/macros/s/AKfycbzIuKgou3uO98HBkH3olHt-JDAum6muOfR7v59VTUg72K9IkyTX9ATgK0ntZQrNdrJo/exec",
+    "https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec",
 )
 # The shared key every client sends as "Authorization: Bearer <key>". LUMO
 # reads the same value from the same file. Empty means no key check, which is
