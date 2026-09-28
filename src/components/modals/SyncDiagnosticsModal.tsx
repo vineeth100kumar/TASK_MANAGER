@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, RefreshCw, CheckCircle2, AlertTriangle, WifiOff, Cloud, Database, Download, Upload, ExternalLink, Trash2, ShieldCheck, Layers } from 'lucide-react';
 import { api } from '../../services/api';
-import { SyncEngineStatus } from '../../services/syncEngine';
+import { SyncEngineStatus, syncEndpointLabel } from '../../services/syncEngine';
 import { SyncOpRecord } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
 
@@ -183,6 +183,10 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                   </span>
                 </div>
                 <div className="text-xs font-mono text-gray-600 dark:text-gray-400 truncate">Device ID: {syncStatus.clientId}</div>
+                <div className="text-xs font-mono text-gray-600 dark:text-gray-400 break-all">Syncing to: {syncEndpointLabel()}</div>
+                {syncStatus.lastError && (
+                  <div className="text-xs font-medium text-red-500 break-words">Last error: {syncStatus.lastError}</div>
+                )}
               </div>
 
               {/* Backup & Tools */}
@@ -249,7 +253,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                           <span className="text-gray-400">· {op.entityType} ({op.operation})</span>
                         </div>
                         {op.lastError && (
-                          <div className="text-red-500 text-[11px] font-medium truncate">{op.lastError}</div>
+                          <div className="text-red-500 text-[11px] font-medium break-words">{op.lastError}</div>
                         )}
                         <div className="text-[10px] text-gray-400">
                           Rev {op.revision || 1} · Attempts: {op.attemptCount || 0} · Created: {new Date(op.createdAt).toLocaleTimeString()}

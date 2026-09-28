@@ -31,6 +31,23 @@ export const getGasUrl = (action = '') => {
   return `${GAS_URL}${action ? '?action=' + action : ''}${AUTH_KEY ? (action ? '&' : '?') + 'authKey=' + encodeURIComponent(AUTH_KEY) : ''}`;
 };
 
+// Where sync requests go, for the diagnostics panel. The auth key is left out.
+export const syncEndpointLabel = (): string => (PI_BACKEND_URL ? `Pi server (${PI_BACKEND_URL})` : `Apps Script (${GAS_URL})`);
+
+// Turns a failed request into something a person can act on.
+const describeSyncError = (err: any): string => {
+  const message = err?.message || String(err);
+  if (err instanceof TypeError) {
+    return PI_BACKEND_URL
+      ? `Could not reach the Pi server at ${PI_BACKEND_URL} (${message})`
+      : `Could not reach Apps Script (${message}). Check the deployment is set to "Anyone" access.`;
+  }
+  if (message.includes('HTTP error 401')) {
+    return PI_BACKEND_URL ? 'The Pi server rejected the key. Enter it in Settings > System.' : message;
+  }
+  return message;
+};
+
 export type SyncState = 'synced' | 'syncing' | 'pending' | 'retrying' | 'conflict' | 'offline' | 'error';
 
 export interface SyncEngineStatus {
@@ -269,6 +286,7 @@ class SyncEngine {
     }
 
     this.isProcessing = true;
+    let batch: SyncOpRecord[] = [];
 
     try {
       while (typeof navigator === 'undefined' || navigator.onLine) {
@@ -286,7 +304,7 @@ class SyncEngine {
         this.notifyListeners();
 
         // Process batch immediately without delay
-        const batch = pendingOps.slice(0, 10);
+        batch = pendingOps.slice(0, 10);
         const batchPayload = {
           action: 'processOperations',
           clientId: this.clientId,
@@ -303,7 +321,12 @@ class SyncEngine {
           throw new Error(`HTTP error ${response.status}: ${response.statusText}`);
         }
 
-        const json = await response.json();
+        let json: any;
+        try {
+          json = await response.json();
+        } catch {
+          throw new Error('The sync endpoint did not return JSON. If it is Apps Script, redeploy it with access set to "Anyone".');
+        }
         if (!json.success) {
           throw new Error(json.error || 'Server rejected batch');
         }
@@ -361,7 +384,20 @@ class SyncEngine {
       }
     } catch (err: any) {
       console.warn('[SyncEngine] Batch upload failed, scheduling backoff:', err);
-      this.lastError = err.message || 'Network sync error';
+      this.lastError = describeSyncError(err) || 'Network sync error';
+      // Record the failure on each op so the queue shows why it is stuck. They
+      // stay pending: a whole-batch failure is usually the network or setup,
+      // not the op itself.
+      for (const op of batch) {
+        try {
+          op.attemptCount = (op.attemptCount || 0) + 1;
+          op.lastAttemptAt = new Date().toISOString();
+          op.lastError = this.lastError;
+          await putToStore('syncOperations', op);
+        } catch {
+          // Leave the op as it was if IndexedDB write fails.
+        }
+      }
       this.currentState = 'retrying';
       this.scheduleBackoffRetry();
     } finally {
