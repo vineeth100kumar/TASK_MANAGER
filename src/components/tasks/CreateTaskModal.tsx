@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Loader2, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles } from 'lucide-react';
-import { ENTITY_TYPES, LABELS } from '../../services/mockDb';
+import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
 import { Project, Area } from '../../services/types';
 import { parseQuickAdd, QuickAddResult } from '../../utils/quickAddParser';
@@ -131,6 +131,14 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
   const [areas, setAreas] = useState<Area[]>([]);
 
   useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !isSubmitting) onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isSubmitting, onClose]);
+
+  useEffect(() => {
     Promise.all([
       api.projects.list(),
       api.areas.list()
@@ -152,27 +160,27 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-0 font-sans">
-      <div className="absolute inset-0 bg-black/20 dark:bg-black/60 backdrop-blur-sm" onClick={() => !isSubmitting && onClose()} />
-      <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[90vh] border border-gray-100 dark:border-white/10">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-gray-900/30 dark:bg-black/60 backdrop-blur-sm" onClick={() => !isSubmitting && onClose()} />
+      <motion.div initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl shadow-black/20 overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
         
         <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
-          <h2 className="font-bold text-gray-900 dark:text-white">Create New Item</h2>
-          <button onClick={() => !isSubmitting && onClose()} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200" disabled={isSubmitting}><X size={20}/></button>
+          <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
+          <button onClick={() => !isSubmitting && onClose()} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" disabled={isSubmitting} aria-label="Close"><X size={18}/></button>
         </div>
 
-        <div className="p-6 pb-2 shrink-0">
-          <div className="flex gap-3">
+        <div className="px-6 pt-5 pb-2 shrink-0">
+          <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5">
              {Object.entries(ENTITY_TYPES).map(([k, v]) => (
-                <label key={k} className={`flex-1 flex flex-col items-center justify-center py-2.5 px-3 rounded-2xl border-2 cursor-pointer transition-all ${entityType === v ? 'border-blue-500 bg-blue-50/50 dark:bg-blue-500/10 text-blue-600 dark:text-blue-400 font-bold' : 'border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-400 hover:border-blue-200'}`}>
+                <label key={k} className={`flex-1 flex items-center justify-center py-1.5 px-3 rounded-lg cursor-pointer transition-all has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60 ${entityType === v ? 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                    <input type="radio" name="entityType" value={v} checked={entityType === v} onChange={(e) => setEntityType(e.target.value)} className="sr-only" />
-                   <span className="text-[13px] capitalize font-bold">{v}</span>
+                   <span className="text-[13px] capitalize font-semibold">{v}</span>
                 </label>
              ))}
           </div>
         </div>
 
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-6 pt-2">
+        <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pt-3">
           {entityType === 'task' && <TaskForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
           {entityType === 'event' && <EventForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
           {entityType === 'reminder' && <ReminderForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} />}
@@ -205,11 +213,11 @@ function SmartTitle({ smart, disabled, placeholder = "Title" }: { smart: SmartTi
       <div className="flex flex-wrap items-center gap-1.5 mt-2 min-h-[22px]">
         <button type="button" onClick={() => setEnabled(!enabled)}
           title={enabled ? 'Turn off reading dates, #tags, !priority, @place from the title' : 'Read dates, #tags, !priority, @place from the title'}
-          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold transition-colors ${enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' : 'bg-gray-100 dark:bg-white/10 text-gray-400'}`}>
+          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold transition-colors ${enabled ? 'bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300' : 'bg-gray-100 dark:bg-white/10 text-gray-400'}`}>
           <Sparkles size={10} /> Smart {enabled ? 'on' : 'off'}
         </button>
         {enabled && chips.map(({ icon: Icon, label }) => (
-          <span key={label} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+          <span key={label} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
             <Icon size={10} /> {label}
           </span>
         ))}
@@ -218,7 +226,7 @@ function SmartTitle({ smart, disabled, placeholder = "Title" }: { smart: SmartTi
         )}
         {suggestedType && (
           <button type="button" onClick={() => setEntityType(suggestedType)}
-            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200">
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300 hover:bg-amber-200">
             Make it {suggestedType === 'event' ? 'an event' : 'a reminder'}
           </button>
         )}
@@ -245,10 +253,10 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
   };
   return (
     <div className="space-y-1 col-span-2">
-      <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase flex items-center gap-1"><Tag size={11} /> Tags</label>
+      <label className="field-label"><Tag size={11} /> Tags</label>
       <div className="flex flex-wrap items-center gap-2 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2">
         {tags.map(t => (
-          <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+          <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
             #{t}
             <button type="button" onClick={() => setTags(tags.filter(x => x !== t))}><X size={10} /></button>
           </span>
@@ -271,7 +279,7 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
       {LABELS.filter(l => !tags.includes(l.name)).length > 0 && (
         <div className="flex flex-wrap gap-1.5 pt-1">
           {LABELS.filter(l => !tags.includes(l.name)).map(l => (
-            <button key={l.id} type="button" onClick={() => addTag(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
+            <button key={l.id} type="button" onClick={() => addTag(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
               + {l.name}
             </button>
           ))}
@@ -283,8 +291,8 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
 
 const SharedReminderLead = ({ value, setValue }: { value: number | ''; setValue: (v: number | '') => void }) => (
   <div className="space-y-1">
-    <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Remind Me</label>
-    <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500"
+    <label className="field-label">Remind Me</label>
+    <select className="field"
       value={value} onChange={e => setValue(e.target.value === '' ? '' : parseInt(e.target.value, 10))}>
       {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value}>{opt.label}</option>)}
     </select>
@@ -292,10 +300,11 @@ const SharedReminderLead = ({ value, setValue }: { value: number | ''; setValue:
 );
 
 const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled = false }: any) => (
-  <div className="pt-6 mt-6 border-t border-gray-100 dark:border-white/5 flex justify-end gap-3 shrink-0">
-    <button type="button" onClick={onCancel} disabled={isSubmitting} className="px-5 py-2.5 rounded-xl font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5">Cancel</button>
-    <button type="submit" disabled={isSubmitting || disabled} className="px-6 py-2.5 rounded-xl font-bold bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-blue-500/20">
-      {isSubmitting ? <Loader2 size={18} className="animate-spin" /> : label}
+  <div className="sticky bottom-0 -mx-6 px-6 py-4 mt-6 border-t border-gray-100 dark:border-white/5 bg-white/90 dark:bg-[#1c1c1e]/90 backdrop-blur flex items-center justify-end gap-2 shrink-0">
+    <span className="mr-auto hidden sm:flex items-center gap-1.5 text-[12px] text-gray-400"><kbd className="kbd">Esc</kbd> to close</span>
+    <button type="button" onClick={onCancel} disabled={isSubmitting} className="px-4 py-2 rounded-xl text-[14px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
+    <button type="submit" disabled={isSubmitting || disabled} className="px-5 py-2 min-w-[7.5rem] justify-center rounded-xl text-[14px] font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 shadow-sm shadow-blue-600/25 transition-all">
+      {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : label}
     </button>
   </div>
 );
@@ -354,15 +363,15 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         {lifeContext === 'work' ? (
           <>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Project</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+              <label className="field-label">Project</label>
+              <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
                 {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
                 {projects.length === 0 && <option value="">No Projects Yet</option>}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Priority</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
+              <label className="field-label">Priority</label>
+              <select className="field" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
                 <option value="low">Low</option>
                 <option value="medium">Medium</option>
                 <option value="high">High</option>
@@ -370,30 +379,30 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Start Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
+              <label className="field-label">Start Date</label>
+              <input type="date" className="field" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Due Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
+              <label className="field-label">Due Date</label>
+              <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1 col-span-2">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Estimated Time</label>
-              <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.estimated} onChange={e => set('estimated', e.target.value)} disabled={isSubmitting} placeholder="e.g. 2h, 45m" />
+              <label className="field-label">Estimated Time</label>
+              <input type="text" className="field" value={payload.estimated} onChange={e => set('estimated', e.target.value)} disabled={isSubmitting} placeholder="e.g. 2h, 45m" />
             </div>
           </>
         ) : (
           <>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Life Area</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+              <label className="field-label">Life Area</label>
+              <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
                 {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
                 {areas.length === 0 && <option value="">No Life Areas Yet</option>}
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Priority</label>
-              <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
+              <label className="field-label">Priority</label>
+              <select className="field field-personal" value={payload.priority} onChange={e => set('priority', e.target.value)} disabled={isSubmitting}>
                 <option value="low">Low</option>
                 <option value="medium">Normal</option>
                 <option value="high">High</option>
@@ -401,24 +410,24 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
               </select>
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Start Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
+              <label className="field-label">Start Date</label>
+              <input type="date" className="field field-personal" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
             </div>
             <div className="space-y-1">
-              <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Due Date</label>
-              <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
+              <label className="field-label">Due Date</label>
+              <input type="date" className="field field-personal" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
             </div>
           </>
         )}
 
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Location</label>
-          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="Optional" />
+          <label className="field-label">Location</label>
+          <input type="text" className="field" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="Optional" />
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Recurrence</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
+          <label className="field-label">Recurrence</label>
+          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -486,30 +495,30 @@ function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeC
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
+          <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           )}
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Starts</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.startAt} onChange={e => set('startAt', e.target.value)} disabled={isSubmitting} />
+          <label className="field-label">Starts</label>
+          <input type="datetime-local" className="field" value={payload.startAt} onChange={e => set('startAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Ends</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
+          <label className="field-label">Ends</label>
+          <input type="datetime-local" className="field" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Recurrence</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
+          <label className="field-label">Recurrence</label>
+          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -520,8 +529,8 @@ function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeC
         </div>
 
         <div className="space-y-1 col-span-2">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Location or Meeting Link</label>
-          <input type="text" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="e.g. Zoom link, Cafe, Office" />
+          <label className="field-label">Location or Meeting Link</label>
+          <input type="text" className="field" value={payload.location} onChange={e => set('location', e.target.value)} disabled={isSubmitting} placeholder="e.g. Zoom link, Cafe, Office" />
         </div>
 
         <SharedReminderLead value={reminderLead} setValue={setReminderLead} />
@@ -567,12 +576,12 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Remind At</label>
-          <input type="datetime-local" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.remindAt} onChange={e => set('remindAt', e.target.value)} disabled={isSubmitting} />
+          <label className="field-label">Remind At</label>
+          <input type="datetime-local" className="field" value={payload.remindAt} onChange={e => set('remindAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Repeat</label>
-          <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
+          <label className="field-label">Repeat</label>
+          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
             <option value="">Never</option>
             <option value="daily">Daily</option>
             <option value="weekdays">Every weekday</option>
@@ -583,14 +592,14 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
         </div>
 
         <div className="space-y-1 col-span-2">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
+          <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
@@ -635,19 +644,19 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">Target Checkpoint Date</label>
-          <input type="date" className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} required />
+          <label className="field-label">Target Checkpoint Date</label>
+          <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} required />
         </div>
 
         <div className="space-y-1">
-          <label className="text-[11px] font-bold tracking-wider text-gray-500 uppercase">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
+          <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-orange-500" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas</option>}
             </select>
           ) : (
-            <select className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-[14px] font-semibold outline-none focus:border-blue-500" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No Projects</option>}
             </select>

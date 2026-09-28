@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
 import { api } from '../../services/api';
-import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/mockDb';
+import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { downloadTaskImage } from '../../utils/imageExport';
 
 import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
@@ -84,6 +85,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
   }, [taskId, onClose, showToast]);
 
   useEffect(() => { loadData(true); }, [loadData]);
+  useDataChanges(() => loadData());
 
   const submitTitle = async () => {
     if (editTitle !== task.title) {
@@ -179,7 +181,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
         <div className="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-[13px] font-bold tracking-widest uppercase text-gray-500">{task.key}</span>
-            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-bold ${(WORK_ITEM_TYPES as any)[task.type]?.color || 'bg-gray-100 text-gray-700'}`}>
+            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${(WORK_ITEM_TYPES as any)[task.type]?.color || 'bg-gray-100 text-gray-700'}`}>
               {(() => {
                 const TypeIcon = (WORK_ITEM_TYPES as any)[task.type]?.icon || FileText;
                 return <TypeIcon size={12} strokeWidth={3} />;
@@ -213,7 +215,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
             {activeTab === 'details' ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
                 
-                <div className="bg-[#f5f5f7] dark:bg-white/5 rounded-[24px] border border-black/5 dark:border-white/5 overflow-hidden">
+                <div className="bg-[#f5f5f7] dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden">
                   
                   {task.entityType === 'task' && (
                     <>
@@ -253,10 +255,10 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                       <PropertyRow icon={CalendarIcon} label="Dates">
                         <div className="flex items-center gap-2 justify-end">
-                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark w-[120px]"
+                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
                             value={toInputDateValue(task.startDate)} onChange={async (e) => { await onUpdateDetails(task, { startDate: e.target.value || null }); loadData(); }} />
                           <span className="text-gray-400 font-bold">→</span>
-                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark w-[120px]"
+                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
                             value={toInputDateValue(task.dueDate)} onChange={async (e) => { await onUpdateDetails(task, { dueDate: e.target.value || null }); loadData(); }} />
                         </div>
                       </PropertyRow>
@@ -419,10 +421,10 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                 </div>
 
                 <div>
-                  <h4 className="text-[12px] font-bold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5"><Tag size={12} /> Tags</h4>
-                  <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-white/5 rounded-[24px] border border-gray-200 dark:border-white/10 shadow-sm p-4">
+                  <h4 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5"><Tag size={12} /> Tags</h4>
+                  <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-white/5 rounded-3xl border border-gray-200 dark:border-white/10 shadow-sm p-4">
                     {(task.labels || []).map((t: string) => (
-                      <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-bold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
+                      <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
                         #{t}
                         <button onClick={async () => { await onUpdateDetails(task, { labels: (task.labels || []).filter((x: string) => x !== t) }); loadData(); }}><X size={11} /></button>
                       </span>
@@ -436,16 +438,16 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                 <div>
                   <div className="flex items-center justify-between mb-3">
-                     <h4 className="text-[12px] font-bold uppercase tracking-wider text-gray-400">Notes & Description</h4>
+                     <h4 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400">Notes & Description</h4>
                      {isSavingDesc && <span className="text-[12px] font-medium text-gray-400 flex items-center gap-1"><Loader2 size={12} className="animate-spin"/> Saving...</span>}
                   </div>
-                  <textarea className="w-full bg-white dark:bg-white/5 rounded-[24px] border border-gray-200 dark:border-white/10 p-6 shadow-sm min-h-[120px] text-[15px] font-medium outline-none resize-y custom-scrollbar focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  <textarea className="w-full bg-white dark:bg-white/5 rounded-3xl border border-gray-200 dark:border-white/10 p-6 shadow-sm min-h-[120px] text-[15px] font-medium outline-none resize-y custom-scrollbar focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
                     value={editDesc} onChange={(e) => setEditDesc(e.target.value)} onBlur={submitDesc} placeholder="Add personal notes, instructions, links..." />
                 </div>
 
                 <div>
-                  <h4 className="text-[12px] font-bold uppercase tracking-wider text-gray-400 mb-3">Checklist ({subtasks.filter(s=>s.completed).length}/{subtasks.length})</h4>
-                  <div className="bg-white dark:bg-white/5 rounded-[24px] border border-gray-200 dark:border-white/10 shadow-sm overflow-hidden">
+                  <h4 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400 mb-3">Checklist ({subtasks.filter(s=>s.completed).length}/{subtasks.length})</h4>
+                  <div className="bg-white dark:bg-white/5 rounded-3xl border border-gray-200 dark:border-white/10 shadow-sm overflow-hidden">
                     {subtasks.map((st, idx) => (
                       <div key={st.id} className={`flex items-center gap-4 p-4 hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer ${idx !== subtasks.length - 1 ? 'border-b border-gray-100 dark:border-white/5' : ''}`} onClick={() => handleToggleSubtask(st.id, st.completed)}>
                         <button className={`flex-shrink-0 transition-transform ${st.completed ? 'text-blue-500' : 'text-gray-300 dark:text-gray-600'}`}>{st.completed ? <CheckCircle size={22} /> : <Circle size={22} />}</button>
@@ -507,7 +509,7 @@ function TagAdder({ existing, onAdd }: { existing: string[]; onAdd: (tag: string
         className="bg-transparent border-none outline-none text-[13px] font-medium min-w-[100px]"
       />
       {suggestions.map(l => (
-        <button key={l.id} type="button" onClick={() => onAdd(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-bold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
+        <button key={l.id} type="button" onClick={() => onAdd(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
           + {l.name}
         </button>
       ))}

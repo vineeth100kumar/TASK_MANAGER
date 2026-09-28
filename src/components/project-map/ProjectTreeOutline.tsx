@@ -57,12 +57,12 @@ export function ProjectTreeOutline({
                   </div>
 
                   <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
-                    <div className="flex items-center gap-2 text-[10px] font-bold text-gray-400 uppercase">
+                    <div className="flex items-center gap-2 text-[10px] font-semibold text-gray-400 uppercase">
                       <span className="font-mono">{item.key}</span>
                       {item.dueDate && <span>· Due {item.dueDate}</span>}
                     </div>
 
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-white mt-0.5 leading-snug hover:text-blue-500 transition-colors">
+                    <h4 className="font-semibold text-sm text-gray-900 dark:text-white mt-0.5 leading-snug hover:text-blue-500 transition-colors">
                       {item.title}
                     </h4>
                   </div>
@@ -71,7 +71,7 @@ export function ProjectTreeOutline({
                 {/* 1-Tap Link Button */}
                 <button
                   onClick={() => setLinkingTargetItem(item)}
-                  className="px-2.5 py-1.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:bg-gray-200 text-xs font-bold flex items-center gap-1 shrink-0"
+                  className="px-2.5 py-1.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:bg-gray-200 text-xs font-semibold flex items-center gap-1 shrink-0"
                   title="Link prerequisite"
                 >
                   <Link size={12} />
@@ -82,7 +82,7 @@ export function ProjectTreeOutline({
               {/* Prerequisites Chain */}
               {prerequisites.length > 0 && (
                 <div className="pt-2 border-t border-gray-100 dark:border-white/5 space-y-1.5">
-                  <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400">Depends on:</span>
+                  <span className="text-[10px] font-semibold uppercase tracking-wider text-gray-400">Depends on:</span>
                   <div className="flex flex-wrap gap-1.5">
                     {prerequisites.map(prereq => (
                       <div
@@ -116,7 +116,7 @@ export function ProjectTreeOutline({
                   </div>
                   <button
                     onClick={() => onDismissGap(gap.id)}
-                    className="text-gray-400 hover:text-gray-600 text-[10px] font-bold uppercase shrink-0"
+                    className="text-gray-400 hover:text-gray-600 text-[10px] font-semibold uppercase shrink-0"
                   >
                     Dismiss
                   </button>
@@ -136,12 +136,12 @@ export function ProjectTreeOutline({
               initial={{ opacity: 0, scale: 0.95, y: 15 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-[32px] shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-4 max-h-[80vh] flex flex-col"
+              className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-4 max-h-[80vh] flex flex-col"
             >
               <div className="flex items-center justify-between">
                 <div>
-                  <div className="text-[10px] font-bold uppercase tracking-wider text-blue-500">Link Prerequisite</div>
-                  <h3 className="font-extrabold text-sm text-gray-900 dark:text-white truncate mt-0.5">
+                  <div className="text-[10px] font-semibold uppercase tracking-wider text-blue-500">Link Prerequisite</div>
+                  <h3 className="font-bold text-sm text-gray-900 dark:text-white truncate mt-0.5">
                     What must finish before "{linkingTargetItem.title}"?
                   </h3>
                 </div>
@@ -161,8 +161,8 @@ export function ProjectTreeOutline({
                       className="w-full p-3 rounded-xl bg-gray-50 dark:bg-white/5 hover:bg-blue-50 dark:hover:bg-blue-950/30 border border-black/5 dark:border-white/5 text-left flex items-center justify-between gap-2 transition-colors group"
                     >
                       <div className="min-w-0 flex-1">
-                        <span className="font-mono text-[10px] font-bold text-gray-400 block">{candidate.key}</span>
-                        <span className="font-bold text-xs text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate block">
+                        <span className="font-mono text-[10px] font-semibold text-gray-400 block">{candidate.key}</span>
+                        <span className="font-semibold text-[13px] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 truncate block">
                           {candidate.title}
                         </span>
                       </div>

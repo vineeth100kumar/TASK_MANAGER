@@ -4,6 +4,7 @@ import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText,
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -98,20 +99,10 @@ export function Sidebar({
     }
   };
 
-  // Reload on any change, local or synced, so counts and lists stay current.
-  // Changes come in bursts (a sync batch, a bulk edit), so wait for them to settle.
   useEffect(() => {
     loadNavData();
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const unsubscribe = api.sync.onAnyChange(() => {
-      if (timer) clearTimeout(timer);
-      timer = setTimeout(loadNavData, 150);
-    });
-    return () => {
-      if (timer) clearTimeout(timer);
-      unsubscribe();
-    };
   }, [lifeContext]);
+  useDataChanges(loadNavData);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -232,10 +223,10 @@ export function Sidebar({
         className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden bg-[#f5f5f7]/90 dark:bg-[#1c1c1e]/90 backdrop-blur-3xl border-r border-gray-200/50 dark:border-white/5 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-orange-50/90 dark:bg-orange-950/20' : ''}`}
       >
         <div className="w-[280px] h-full flex flex-col">
-          <div className="p-6 pt-6 flex items-center justify-center relative">
+          <div className="px-6 pt-5 pb-3 flex items-center justify-center relative">
             <div className="flex items-center justify-center w-full">
-              <img src="/logo-light.png" alt="Sage Logo" className="w-32 block dark:hidden object-contain mx-auto" />
-              <img src="/logo-dark.png" alt="Sage Logo" className="w-32 hidden dark:block object-contain mx-auto" />
+              <img src="/logo-light.png" alt="Sage Logo" className="h-[112px] w-auto block dark:hidden object-contain mx-auto select-none" draggable={false} />
+              <img src="/logo-dark.png" alt="Sage Logo" className="h-[112px] w-auto hidden dark:block object-contain mx-auto select-none" draggable={false} />
             </div>
             <button onClick={() => setIsSidebarOpen(false)} className="absolute right-4 md:hidden p-2 text-gray-500 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" aria-label="Close sidebar">
               <X size={20} />
@@ -244,12 +235,12 @@ export function Sidebar({
 
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
-            <div className="bg-gray-200/50 dark:bg-white/5 p-1 rounded-2xl flex items-center shadow-inner">
-              <button onClick={() => setLifeContext('work')} className={`flex-1 py-1.5 text-sm font-bold rounded-xl transition-all ${lifeContext === 'work' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Work</button>
-              <button onClick={() => setLifeContext('personal')} className={`flex-1 py-1.5 text-sm font-bold rounded-xl transition-all ${lifeContext === 'personal' ? 'bg-white dark:bg-[#2c2c2e] text-orange-600 dark:text-orange-400 shadow-sm' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Personal</button>
+            <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
+              <button onClick={() => setLifeContext('work')} className={`flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-all ${lifeContext === 'work' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Work</button>
+              <button onClick={() => setLifeContext('personal')} className={`flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-all ${lifeContext === 'personal' ? 'bg-white dark:bg-[#2c2c2e] text-orange-600 dark:text-orange-400 shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Personal</button>
             </div>
 
-            <div className="space-y-1">
+            <div className="space-y-0.5">
               {[ 
                 { id: 'dashboard', name: 'Today', icon: LayoutDashboard },
                 { id: 'inbox', name: 'Inbox', icon: Inbox, count: inboxCount, highlight: inboxCount > 0 },
@@ -284,13 +275,13 @@ export function Sidebar({
                     }
                     if(window.innerWidth < 768) setIsSidebarOpen(false); 
                   }}
-                    className={`w-full flex items-center justify-between px-3.5 py-2.5 rounded-2xl transition-all group ${isActive ? 'bg-black/5 dark:bg-white/10 text-gray-900 dark:text-white font-bold' : 'hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-400'}`}>
+                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                     <div className="flex items-center gap-3">
-                      <item.icon size={18} className={isActive ? 'text-gray-900 dark:text-white' : item.color || 'text-gray-400 group-hover:text-gray-600'} />
+                      <item.icon size={17} className={item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
                       <span className="text-[14px]">{item.name}</span>
                     </div>
                     {item.count !== undefined && item.count > 0 && (
-                      <span className={`px-2 py-0.5 rounded-full text-[11px] font-bold ${
+                      <span className={`min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums text-center ${
                         item.highlight 
                           ? 'bg-blue-600 text-white' 
                           : 'bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-gray-300'
@@ -307,7 +298,7 @@ export function Sidebar({
               {lifeContext === 'work' && (
                 <div className="space-y-1">
                   <div className="px-3 flex items-center justify-between mb-2">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Projects</h4>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Projects</h4>
                     <button onClick={() => setIsAddProjectOpen(true)} className="text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md p-1 transition-colors" title="Add Project" aria-label="Add Project"><Plus size={16}/></button>
                   </div>
                   {projects.map((project) => {
@@ -315,10 +306,10 @@ export function Sidebar({
                     return (
                       <div key={project.id} className="relative group/proj">
                         <button onClick={() => { setActiveView('tasks'); setActiveWorkspace(project.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-                          className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl transition-all ${isActive ? 'bg-black/5 dark:bg-white/10 text-gray-900 dark:text-white font-bold' : 'hover:bg-black/5 text-gray-600 dark:text-gray-400'}`}>
+                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                           <div className={`w-2.5 h-2.5 rounded-full ${project.color || 'bg-indigo-500'}`} />
                           <span className="text-[14px] truncate flex-1 text-left font-medium">{project.name}</span>
-                          <span className="text-[10px] font-bold text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
+                          <span className="text-[10px] font-semibold text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
                         </button>
                         <button onClick={(e) => handleDeleteProject(project.id, project.name, e)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover/proj:opacity-100 transition-opacity" title="Delete Project">
                           <Trash2 size={13} />
@@ -336,7 +327,7 @@ export function Sidebar({
                 <div className="space-y-6">
                   <div className="space-y-1">
                     <div className="px-3 flex items-center justify-between mb-2">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-orange-400">Life Areas</h4>
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-orange-400">Life Areas</h4>
                       <button onClick={() => setIsAddAreaOpen(true)} className="text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 rounded-md p-1 transition-colors" title="Add Area" aria-label="Add Area"><Plus size={16}/></button>
                     </div>
                     {areas.map((area) => {
@@ -344,7 +335,7 @@ export function Sidebar({
                       return (
                         <div key={area.id} className="relative group/area">
                           <button onClick={() => { setActiveView('tasks'); setActiveWorkspace(area.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-                            className={`w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl transition-all ${isActive ? 'bg-black/5 dark:bg-white/10 text-gray-900 dark:text-white font-bold' : 'hover:bg-black/5 text-gray-600 dark:text-gray-400'}`}>
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                             <div className={`w-2.5 h-2.5 rounded-full ${area.color || 'bg-purple-500'}`} />
                             <span className="text-[14px] truncate flex-1 text-left font-medium">{area.name}</span>
                           </button>
@@ -361,22 +352,22 @@ export function Sidebar({
 
                   <div className="space-y-1">
                     <div className="px-3 flex items-center justify-between mb-2">
-                      <h4 className="text-xs font-bold uppercase tracking-wider text-orange-400">Growth & Routine</h4>
+                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-orange-400">Growth & Routine</h4>
                     </div>
-                    <button onClick={() => setActiveGrowthTab('goals')} className="w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl transition-all group hover:bg-black/5 text-gray-600 dark:text-gray-400">
+                    <button onClick={() => setActiveGrowthTab('goals')} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors group hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
                       <Target size={16} className="text-blue-500" />
                       <span className="text-[14px] truncate flex-1 text-left font-medium">Goals</span>
-                      <span className="text-[11px] font-bold text-gray-400">{goals.length}</span>
+                      <span className="text-[11px] font-semibold text-gray-400">{goals.length}</span>
                     </button>
-                    <button onClick={() => setActiveGrowthTab('habits')} className="w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl transition-all group hover:bg-black/5 text-gray-600 dark:text-gray-400">
+                    <button onClick={() => setActiveGrowthTab('habits')} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors group hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
                       <Activity size={16} className="text-emerald-500" />
                       <span className="text-[14px] truncate flex-1 text-left font-medium">Habits</span>
-                      <span className="text-[11px] font-bold text-gray-400">{habits.length}</span>
+                      <span className="text-[11px] font-semibold text-gray-400">{habits.length}</span>
                     </button>
-                    <button onClick={() => setActiveGrowthTab('notes')} className="w-full flex items-center gap-3 px-3.5 py-2 rounded-2xl transition-all group hover:bg-black/5 text-gray-600 dark:text-gray-400">
+                    <button onClick={() => setActiveGrowthTab('notes')} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors group hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
                       <FileText size={16} className="text-amber-500" />
                       <span className="text-[14px] truncate flex-1 text-left font-medium">Notes</span>
-                      <span className="text-[11px] font-bold text-gray-400">{notes.length}</span>
+                      <span className="text-[11px] font-semibold text-gray-400">{notes.length}</span>
                     </button>
                   </div>
                 </div>
@@ -385,33 +376,33 @@ export function Sidebar({
           </div>
 
           <div className="p-4 mt-auto border-t border-gray-200/50 dark:border-white/5 space-y-1">
-            <button onClick={() => setIsSettingsOpen && setIsSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-xs font-semibold transition-colors">
+            <button onClick={() => setIsSettingsOpen && setIsSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
               <Settings size={15} /> <span>Settings & Migration</span>
             </button>
 
-            <button onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 text-xs font-semibold transition-colors">
+            <button onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 text-[12.5px] font-medium transition-colors">
               <Database size={15} /> <span>Data & Sync</span>
             </button>
 
-            <button onClick={() => setIsTrashOpen && setIsTrashOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-xs font-semibold transition-colors">
+            <button onClick={() => setIsTrashOpen && setIsTrashOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-[12.5px] font-medium transition-colors">
               <Trash2 size={15} /> <span>Trash & Archive</span>
             </button>
 
-            <button onClick={() => { api.exportBackup(); showToast('Backup downloaded'); }} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-xs font-semibold transition-colors">
+            <button onClick={() => { api.exportBackup(); showToast('Backup downloaded'); }} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
               <Download size={15} /> <span>Export Backup (JSON)</span>
             </button>
 
-            <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-xs font-semibold transition-colors">
+            <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
               <span className="flex items-center gap-3"><ExternalLink size={15} /> <span>Google Sheet</span></span>
               <span className="text-[10px] text-emerald-500 font-bold">Live</span>
             </a>
 
             <div className="pt-2 border-t border-gray-200/30 dark:border-white/5 flex items-center justify-between px-1">
-              <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 text-xs font-semibold transition-colors">
+              <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 text-[12.5px] font-medium transition-colors">
                 {isDarkMode ? <Sun size={15} /> : <Moon size={15} />}
                 <span>{isDarkMode ? 'Light' : 'Dark'}</span>
               </button>
-              <span className="text-[10px] font-bold text-gray-400 tracking-wider">v6.0 Local-First</span>
+              <span className="text-[10px] font-medium text-gray-400 tracking-wide">v6.0 · Local-first</span>
             </div>
           </div>
         </div>
@@ -430,19 +421,19 @@ export function Sidebar({
               </div>
               <form onSubmit={handleCreateProject} className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-500 block mb-1">Project Name</label>
+                  <label className="field-label mb-1.5">Project Name</label>
                   <input autoFocus type="text" placeholder="e.g. Website Redesign, Mobile App" value={newProjName} onChange={e => {
                     setNewProjName(e.target.value);
                     if (!newProjKey) setNewProjKey(e.target.value.substring(0, 4).toUpperCase());
-                  }} className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-blue-500" required />
+                  }} className="field" required />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-500 block mb-1">Key Prefix</label>
-                    <input type="text" placeholder="e.g. WEB" value={newProjKey} onChange={e => setNewProjKey(e.target.value.toUpperCase())} className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-blue-500 uppercase" required maxLength={6} />
+                    <label className="field-label mb-1.5">Key Prefix</label>
+                    <input type="text" placeholder="e.g. WEB" value={newProjKey} onChange={e => setNewProjKey(e.target.value.toUpperCase())} className="field uppercase" required maxLength={6} />
                   </div>
                   <div>
-                    <label className="text-xs font-bold uppercase text-gray-500 block mb-1">Color</label>
+                    <label className="field-label mb-1.5">Color</label>
                     <div className="flex gap-1.5 pt-1.5 flex-wrap">
                       {COLOR_OPTIONS.slice(0, 5).map(c => (
                         <div key={c} onClick={() => setNewProjColor(c)} className={`w-6 h-6 rounded-full cursor-pointer transition-transform ${c} ${newProjColor === c ? 'ring-2 ring-blue-500 scale-110' : 'opacity-70 hover:opacity-100'}`} />
@@ -451,8 +442,8 @@ export function Sidebar({
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setIsAddProjectOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400">Cancel</button>
-                  <button type="submit" disabled={isCreatingProj || !newProjName.trim()} className="px-5 py-2 rounded-xl text-sm font-bold bg-blue-600 text-white flex items-center gap-2">
+                  <button type="button" onClick={() => setIsAddProjectOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
+                  <button type="submit" disabled={isCreatingProj || !newProjName.trim()} className="px-5 py-2 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-sm shadow-blue-600/20 transition-colors disabled:opacity-50">
                     {isCreatingProj ? <Loader2 size={16} className="animate-spin" /> : 'Create Project'}
                   </button>
                 </div>
@@ -475,11 +466,11 @@ export function Sidebar({
               </div>
               <form onSubmit={handleCreateArea} className="space-y-4">
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-500 block mb-1">Area Name</label>
-                  <input autoFocus type="text" placeholder="e.g. Health & Fitness, Finance, Studies" value={newAreaName} onChange={e => setNewAreaName(e.target.value)} className="w-full bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2.5 text-sm font-semibold outline-none focus:border-orange-500" required />
+                  <label className="field-label mb-1.5">Area Name</label>
+                  <input autoFocus type="text" placeholder="e.g. Health & Fitness, Finance, Studies" value={newAreaName} onChange={e => setNewAreaName(e.target.value)} className="field field-personal" required />
                 </div>
                 <div>
-                  <label className="text-xs font-bold uppercase text-gray-500 block mb-1">Color Tag</label>
+                  <label className="field-label mb-1.5">Color Tag</label>
                   <div className="flex gap-2 pt-1 flex-wrap">
                     {COLOR_OPTIONS.map(c => (
                       <div key={c} onClick={() => setNewAreaColor(c)} className={`w-7 h-7 rounded-full cursor-pointer transition-transform ${c} ${newAreaColor === c ? 'ring-2 ring-orange-500 scale-110' : 'opacity-70 hover:opacity-100'}`} />
@@ -487,7 +478,7 @@ export function Sidebar({
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
-                  <button type="button" onClick={() => setIsAddAreaOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400">Cancel</button>
+                  <button type="button" onClick={() => setIsAddAreaOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
                   <button type="submit" disabled={isCreatingArea || !newAreaName.trim()} className="px-5 py-2 rounded-xl text-sm font-bold bg-orange-600 text-white flex items-center gap-2">
                     {isCreatingArea ? <Loader2 size={16} className="animate-spin" /> : 'Create Area'}
                   </button>
@@ -532,7 +523,7 @@ export function Sidebar({
                   goals.map(g => (
                     <div key={g.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/gitem">
                       <div>
-                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">{g.title}</h4>
+                        <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{g.title}</h4>
                         <span className="text-xs text-gray-400">Target: {g.targetDate ? new Date(g.targetDate).toLocaleDateString() : 'Ongoing'}</span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -554,7 +545,7 @@ export function Sidebar({
                   habits.map(h => (
                     <div key={h.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/hitem">
                       <div>
-                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">{h.name}</h4>
+                        <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{h.name}</h4>
                         <span className="text-xs text-gray-400">{h.history?.length || 0} / {h.targetCount || 5} days this week</span>
                       </div>
                       <div className="flex items-center gap-3">
@@ -563,7 +554,7 @@ export function Sidebar({
                             <button key={day} onClick={async () => {
                               await api.habits.toggleDay(h.id, day);
                               loadNavData();
-                            }} className={`w-7 h-7 rounded-lg text-[10px] font-bold uppercase transition-colors ${h.history?.includes(day) ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-white/10 text-gray-400'}`}>
+                            }} className={`w-7 h-7 rounded-lg text-[10px] font-semibold uppercase transition-colors ${h.history?.includes(day) ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-white/10 text-gray-400'}`}>
                               {day[0]}
                             </button>
                           ))}
@@ -580,7 +571,7 @@ export function Sidebar({
                   notes.map(n => (
                     <div key={n.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-start border border-gray-100 dark:border-white/5 group/nitem">
                       <div>
-                        <h4 className="font-bold text-sm text-gray-900 dark:text-white">{n.title}</h4>
+                        <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{n.title}</h4>
                         <p className="text-xs text-gray-500 mt-1">{n.content || 'No content yet'}</p>
                       </div>
                       <button onClick={(e) => handleDeleteGrowth('notes', n.id, e)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="Delete Note">

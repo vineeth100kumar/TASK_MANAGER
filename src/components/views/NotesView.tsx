@@ -4,6 +4,7 @@ import { api } from '../../services/api';
 import { Note } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface NotesViewProps {
   lifeContext: 'work' | 'personal';
@@ -30,6 +31,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   useEffect(() => {
     loadNotes();
   }, []);
+  useDataChanges(loadNotes);
 
   const selectedNote = notes.find(n => n.id === selectedNoteId);
 
@@ -95,7 +97,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   );
 
   return (
-    <div className="h-[calc(100vh-8.5rem)] flex bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 overflow-hidden shadow-sm">
+    <div className="h-[calc(100vh-8.5rem)] flex bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden shadow-sm">
       {/* Notes Sidebar */}
       <div className="w-80 border-r border-gray-100 dark:border-white/5 flex flex-col bg-[#f5f5f7]/60 dark:bg-black/20 shrink-0">
         
@@ -157,7 +159,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
           <>
             <div className="p-6 md:p-8 pb-4 border-b border-gray-100 dark:border-white/5 flex items-center justify-between">
               <input type="text" value={activeTitle} onChange={e => handleTitleChange(e.target.value)} placeholder="Note Title"
-                className="text-2xl md:text-3xl font-extrabold bg-transparent outline-none text-gray-900 dark:text-white w-full tracking-tight" />
+                className="text-2xl md:text-3xl font-bold tracking-tight bg-transparent outline-none text-gray-900 dark:text-white w-full tracking-tight" />
             </div>
 
             <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar">

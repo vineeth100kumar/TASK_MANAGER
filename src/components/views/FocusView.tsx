@@ -4,7 +4,9 @@ import { Target, Circle, ArrowUp, ArrowDown, Sparkles, X, Plus } from 'lucide-re
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
+import { formatDateRange } from '../../utils/dateUtils';
 
 interface FocusViewProps {
   lifeContext: LifeContext;
@@ -13,24 +15,21 @@ interface FocusViewProps {
 
 export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
   const [focusItems, setFocusItems] = useState<WorkItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const { showToast } = useToast();
 
   const loadFocus = async () => {
-    setIsLoading(true);
     try {
       const items = await api.focus.list(lifeContext);
       setFocusItems(items);
     } catch (e) {
       console.error(e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadFocus();
   }, [lifeContext]);
+  useDataChanges(loadFocus);
 
   const handleComplete = async (item: WorkItem, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -70,13 +69,13 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Focus Header */}
-      <div className="p-6 md:p-8 rounded-[32px] bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-1">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-1">
             <Target size={18} />
             <span>Active Focus Queue</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {focusItems.length} of 5 focus slots active
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -89,7 +88,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> Add Item (N)
         </button>
@@ -97,7 +96,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
 
       {/* Focus Items */}
       {focusItems.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 space-y-3">
+        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-500 mx-auto flex items-center justify-center">
             <Sparkles size={24} />
           </div>
@@ -115,7 +114,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
               className="p-5 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-amber-500/20 shadow-sm hover:shadow-md transition-all flex items-center justify-between gap-4 group"
             >
               <div className="flex items-center gap-4 flex-1 min-w-0">
-                <span className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-extrabold text-xs flex items-center justify-center shrink-0">
+                <span className="w-7 h-7 rounded-full bg-amber-100 dark:bg-amber-950/50 text-amber-700 dark:text-amber-300 font-semibold text-xs flex items-center justify-center shrink-0">
                   {index + 1}
                 </span>
 
@@ -131,8 +130,8 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                     {item.title}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
-                    <span className="uppercase font-bold text-[10px] text-gray-400">{item.key}</span>
-                    {item.dueDate && <span className="text-blue-500 font-semibold">· Due {item.dueDate}</span>}
+                    <span className="uppercase font-semibold text-[10px] text-gray-400">{item.key}</span>
+                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
                     {item.project && <span>· {item.project.name}</span>}
                   </div>
                 </div>

@@ -4,6 +4,7 @@ import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
 interface WaitingForViewProps {
@@ -13,7 +14,6 @@ interface WaitingForViewProps {
 
 export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [who, setWho] = useState('');
   const [about, setAbout] = useState('');
@@ -21,20 +21,18 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
   const { showToast } = useToast();
 
   const loadWaiting = async () => {
-    setIsLoading(true);
     try {
       const waitingItems = await api.waitingFor.list(lifeContext);
       setItems(waitingItems);
     } catch (e) {
       console.error(e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadWaiting();
   }, [lifeContext]);
+  useDataChanges(loadWaiting);
 
   const handleCreateWaiting = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,13 +95,13 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-6 md:p-8 rounded-[32px] bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-6 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
             <Hourglass size={18} />
             <span>Waiting For & Delegations</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-extrabold text-gray-900 dark:text-white">
+          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
           </h2>
           <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
@@ -113,7 +111,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
         <button 
           onClick={() => setIsAddOpen(true)}
-          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> New Follow-Up
         </button>
@@ -121,7 +119,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
       {/* Waiting Items List */}
       {items.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-[32px] border border-black/5 dark:border-white/5 space-y-3">
+        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
             <UserCheck size={24} />
           </div>
@@ -143,13 +141,13 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                 className="p-5 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-purple-500/20 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4 group"
               >
                 <div className="flex items-start gap-4 flex-1 min-w-0">
-                  <div className="w-9 h-9 rounded-full bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 font-bold text-xs flex items-center justify-center shrink-0 mt-0.5">
+                  <div className="w-9 h-9 rounded-full bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
                     {wf?.who ? wf.who[0].toUpperCase() : 'W'}
                   </div>
 
                   <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
                     <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs font-extrabold text-purple-600 dark:text-purple-400 uppercase tracking-wide">
+                      <span className="text-xs font-semibold text-purple-600 dark:text-purple-400 uppercase tracking-wide">
                         Waiting on {wf?.who || 'Someone'}
                       </span>
                       <span className="text-[11px] text-gray-400 font-medium">
@@ -157,7 +155,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                       </span>
                     </div>
 
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors leading-snug">
+                    <h4 className="font-semibold text-sm text-gray-900 dark:text-white group-hover:text-purple-600 dark:group-hover:text-purple-400 transition-colors leading-snug">
                       {wf?.about || item.title}
                     </h4>
 
@@ -174,7 +172,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                 <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
                   <button
                     onClick={() => handleResolve(item)}
-                    className="px-3.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
+                    className="px-3.5 py-1.5 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-100 font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-colors"
                     title="Response received; clear waiting status"
                   >
                     <Check size={13} />
@@ -183,7 +181,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
                   <button
                     onClick={() => handleComplete(item)}
-                    className="px-3.5 py-1.5 bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:bg-gray-200 font-bold text-xs rounded-xl transition-colors"
+                    className="px-3.5 py-1.5 bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:bg-gray-200 font-semibold text-xs rounded-xl transition-colors"
                   >
                     Mark Done
                   </button>
@@ -205,10 +203,10 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.95, y: 20 }}
-              className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-[32px] shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-4"
+              className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 border border-gray-100 dark:border-white/10 space-y-4"
             >
               <div className="flex justify-between items-center">
-                <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400">
                   <Hourglass size={16} />
                   <span>Track Delegated Item</span>
                 </div>
@@ -217,7 +215,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
               <form onSubmit={handleCreateWaiting} className="space-y-4">
                 <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1">Who are you waiting on?</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1">Who are you waiting on?</label>
                   <input 
                     type="text" 
                     placeholder="e.g. Professor Smith, PCB Supplier, Sarah" 
@@ -229,7 +227,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1">What did you ask for / delegate?</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1">What did you ask for / delegate?</label>
                   <input 
                     type="text" 
                     placeholder="e.g. Attendance confirmation letter, Quotation" 
@@ -240,7 +238,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                 </div>
 
                 <div>
-                  <label className="text-[11px] font-bold uppercase tracking-wider text-gray-400 block mb-1">When should you follow up if no reply?</label>
+                  <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1">When should you follow up if no reply?</label>
                   <input 
                     type="date" 
                     value={followUpDate} 
@@ -251,7 +249,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setIsAddOpen(false)} className="px-4 py-2 text-xs font-semibold text-gray-500">Cancel</button>
-                  <button type="submit" disabled={!who.trim() || !about.trim()} className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-md">
+                  <button type="submit" disabled={!who.trim() || !about.trim()} className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-md">
                     Track Item
                   </button>
                 </div>

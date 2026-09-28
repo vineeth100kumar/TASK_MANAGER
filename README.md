@@ -42,6 +42,12 @@ Settings > Cloud Limits & Reset.
 whose folder changed, so merge through pull requests rather than pushing
 straight to `main`.
 
+### Reach it from anywhere
+
+`sudo deploy/setup_tunnel.sh tasks.example.com` puts Sage behind a Cloudflare
+Tunnel at that hostname, locked with a password. See
+[raspberry_pi/README.md](raspberry_pi/README.md#reach-sage-from-anywhere).
+
 ## Develop the web app
 
 ```bash
