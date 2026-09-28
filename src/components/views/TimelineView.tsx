@@ -1,5 +1,5 @@
 import { Flag, Calendar as CalendarIcon, CheckCircle2, Circle, Clock, MapPin, Bell, ChevronRight, Target } from 'lucide-react';
-import { PRIORITIES } from '../../services/mockDb';
+import { PRIORITIES } from '../../services/constants';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
 
 interface TimelineViewProps {

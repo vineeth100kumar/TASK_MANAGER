@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { Loader2, Sun, CheckCircle2, Circle, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
 interface DashboardViewProps {
@@ -18,6 +19,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
+  // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
+  const briefingRequested = useRef(false);
   const { showToast } = useToast();
 
   const loadAttentionData = useCallback(async () => {
@@ -27,7 +30,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       const goals = await api.goals.list();
       setData({ ...summary, habits, goals });
 
-      if (!aiBriefing && !isAiLoading && summary.todayFocus && summary.todayFocus.length > 0) {
+      if (!briefingRequested.current && summary.todayFocus && summary.todayFocus.length > 0) {
+        briefingRequested.current = true;
         setIsAiLoading(true);
         try {
            const tasksString = JSON.stringify(summary.todayFocus.map((t: any) => ({ id: t.id, title: t.title, priority: t.priority })));
@@ -54,13 +58,14 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         goals: []
       });
     }
-  }, [lifeContext, aiBriefing, isAiLoading]);
+  }, [lifeContext]);
 
   useEffect(() => {
     const timer = setInterval(() => setTime(new Date()), 1000);
     loadAttentionData();
     return () => clearInterval(timer);
   }, [loadAttentionData]);
+  useDataChanges(loadAttentionData);
 
   const handleComplete = async (item: WorkItem) => {
     try {

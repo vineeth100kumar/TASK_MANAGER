@@ -3,7 +3,7 @@ import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
 import { Loader2, ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
-import { STATUSES } from './services/mockDb';
+import { STATUSES } from './services/constants';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 

@@ -91,7 +91,6 @@ class SyncEngine {
   private batchDebounceTimer: any = null;
   private retryTimer: any = null;
   private consecutiveFailures = 0;
-  private incrementalPullTimer: any = null;
 
   async init(): Promise<void> {
     if (this.isInitialized) return;
@@ -123,7 +122,7 @@ class SyncEngine {
     this.isInitialized = true;
 
     // Start background incremental pull timer if leader
-    this.incrementalPullTimer = setInterval(() => {
+    setInterval(() => {
       if (tabCoordinator.isSyncLeader() && navigator.onLine) {
         this.pullIncrementalChanges();
       }

@@ -4,6 +4,7 @@ import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
 interface WaitingForViewProps {
@@ -13,7 +14,6 @@ interface WaitingForViewProps {
 
 export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [who, setWho] = useState('');
   const [about, setAbout] = useState('');
@@ -21,20 +21,18 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
   const { showToast } = useToast();
 
   const loadWaiting = async () => {
-    setIsLoading(true);
     try {
       const waitingItems = await api.waitingFor.list(lifeContext);
       setItems(waitingItems);
     } catch (e) {
       console.error(e);
-    } finally {
-      setIsLoading(false);
     }
   };
 
   useEffect(() => {
     loadWaiting();
   }, [lifeContext]);
+  useDataChanges(loadWaiting);
 
   const handleCreateWaiting = async (e: React.FormEvent) => {
     e.preventDefault();

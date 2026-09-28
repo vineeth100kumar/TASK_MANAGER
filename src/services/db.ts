@@ -185,7 +185,9 @@ export async function clearStore(storeName: string): Promise<void> {
 }
 
 /** Metadata Helpers **/
-export async function getMeta<T>(key: string, defaultValue: T): Promise<T> {
+export function getMeta<T>(key: string): Promise<T | undefined>;
+export function getMeta<T>(key: string, defaultValue: T): Promise<T>;
+export async function getMeta<T>(key: string, defaultValue?: T): Promise<T | undefined> {
   const rec = await getFromStore<MetaRecord>('meta', key);
   return rec ? (rec.value as T) : defaultValue;
 }

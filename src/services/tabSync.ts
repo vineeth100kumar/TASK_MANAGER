@@ -16,10 +16,8 @@ class TabCoordinator {
   private channel: BroadcastChannel | null = null;
   private tabId: string = 'tab_' + Math.random().toString(36).substring(2, 9);
   private isLeader: boolean = false;
-  private leaderId: string | null = null;
   private lastLeaderHeartbeat: number = 0;
   private heartbeatTimer: any = null;
-  private electionTimer: any = null;
   private listeners: Set<TabEventListener> = new Set();
 
   constructor() {
@@ -64,7 +62,6 @@ class TabCoordinator {
     if (!msg || !msg.type) return;
 
     if (msg.type === 'LEADER_HEARTBEAT') {
-      this.leaderId = msg.tabId;
       this.lastLeaderHeartbeat = Date.now();
       if (this.isLeader && msg.tabId !== this.tabId) {
         // Tie-breaker: lexicographically lower tabId wins leadership
@@ -75,7 +72,6 @@ class TabCoordinator {
       }
     } else if (msg.type === 'LEADER_CLAIM') {
       if (msg.tabId < this.tabId || Date.now() - this.lastLeaderHeartbeat > 4000) {
-        this.leaderId = msg.tabId;
         this.isLeader = (msg.tabId === this.tabId);
         this.lastLeaderHeartbeat = Date.now();
       }
@@ -91,11 +87,10 @@ class TabCoordinator {
     this.isLeader = true;
     this.startHeartbeat();
 
-    this.electionTimer = setInterval(() => {
+    setInterval(() => {
       if (!this.isLeader && Date.now() - this.lastLeaderHeartbeat > 5000) {
         // Leader missed heartbeats; claim leadership
         this.isLeader = true;
-        this.leaderId = this.tabId;
         this.broadcast({ type: 'LEADER_CLAIM', tabId: this.tabId });
         this.startHeartbeat();
       }
