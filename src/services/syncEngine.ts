@@ -278,17 +278,19 @@ class SyncEngine {
     return operationId;
   }
 
-  enqueueNoteDebounced(noteId: string, payload: any): void {
-    if (this.noteDebounceTimers.has(noteId)) {
-      clearTimeout(this.noteDebounceTimers.get(noteId));
+  // Queues a save once edits pause, so typing or drawing isn't one upload per change.
+  // `key` groups the edits; `payload.id` is the record that gets saved.
+  enqueueNoteDebounced(key: string, payload: any, entityType = 'notes'): void {
+    if (this.noteDebounceTimers.has(key)) {
+      clearTimeout(this.noteDebounceTimers.get(key));
     }
 
     const timer = setTimeout(() => {
-      this.enqueueOperation('notes', noteId, 'save', payload, payload.revision || 1);
-      this.noteDebounceTimers.delete(noteId);
+      this.enqueueOperation(entityType, payload.id, 'save', payload, payload.revision || 1);
+      this.noteDebounceTimers.delete(key);
     }, 600);
 
-    this.noteDebounceTimers.set(noteId, timer);
+    this.noteDebounceTimers.set(key, timer);
   }
 
   async discardOperation(operationId: string): Promise<void> {

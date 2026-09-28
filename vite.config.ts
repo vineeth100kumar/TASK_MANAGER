@@ -1,5 +1,34 @@
-import { defineConfig, loadEnv } from 'vite'
+import { defineConfig, loadEnv, type Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
+import fs from 'node:fs'
+import path from 'node:path'
+
+// Serves Excalidraw's fonts (used by the Canvas view) from the app itself, so
+// drawings look right on a Pi with no internet. The Chinese/Japanese font is
+// 13 MB and left out; Excalidraw fetches it from its CDN when it's needed.
+function excalidrawFonts(): Plugin {
+  const src = path.resolve('node_modules/@excalidraw/excalidraw/dist/prod/fonts')
+  const skip = (name: string) => name === 'Xiaolai'
+  let outDir = 'dist'
+  return {
+    name: 'excalidraw-fonts',
+    configResolved(config) { outDir = config.build.outDir },
+    configureServer(server) {
+      server.middlewares.use('/excalidraw-assets/fonts', (req, res, next) => {
+        const file = path.join(src, decodeURIComponent((req.url || '').split('?')[0]))
+        if (!file.startsWith(src) || !fs.existsSync(file) || !fs.statSync(file).isFile()) return next()
+        res.setHeader('Content-Type', 'font/woff2')
+        fs.createReadStream(file).pipe(res)
+      })
+    },
+    closeBundle() {
+      const dest = path.resolve(outDir, 'excalidraw-assets/fonts')
+      for (const name of fs.readdirSync(src)) {
+        if (!skip(name)) fs.cpSync(path.join(src, name), path.join(dest, name), { recursive: true })
+      }
+    },
+  }
+}
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -18,7 +47,7 @@ export default defineConfig(({ mode }) => {
   }
 
   return {
-    plugins: [react()],
+    plugins: [react(), excalidrawFonts()],
     define,
   }
 })

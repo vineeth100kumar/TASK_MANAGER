@@ -40,6 +40,11 @@ const DEFAULT_SHEETS = {
   notes: [
     'id', 'title', 'content', 'areaId', 'projectId', 'revision', 'createdAt', 'updatedAt'
   ],
+  // Canvas whiteboards. The drawing is split across scene0, scene1, ... (added as
+  // needed) so each part fits in a cell; sceneParts says how many are current.
+  boards: [
+    'id', 'title', 'lifeContext', 'sceneParts', 'scene0', 'revision', 'createdAt', 'updatedAt'
+  ],
   comments: [
     'id', 'workItemId', 'body', 'createdAt', 'deletedAt'
   ],

@@ -20,6 +20,7 @@ import { TableView } from './components/views/TableView';
 import { CalendarView } from './components/views/CalendarView';
 import { TimelineView } from './components/views/TimelineView';
 import { NotesView } from './components/views/NotesView';
+import { CanvasView } from './components/views/CanvasView';
 import { ProjectMapView } from './components/project-map/ProjectMapView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
@@ -240,6 +241,12 @@ function MainApp() {
           lifeContext={lifeContext}
         />
 
+        {activeView === 'canvas' ? (
+          // The canvas pans and zooms itself, so it fills the space instead of scrolling.
+          <div className="flex-1 min-h-0 p-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:p-6">
+            <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
+          </div>
+        ) : (
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
           <div className="p-4 pb-28 md:p-8 min-h-full">
             {isLoading ? (
@@ -302,6 +309,7 @@ function MainApp() {
             )}
           </div>
         </div>
+        )}
 
         <MobileTabBar
           activeView={activeView} activeWorkspace={activeWorkspace} lifeContext={lifeContext}

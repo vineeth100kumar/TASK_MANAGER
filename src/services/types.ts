@@ -161,3 +161,16 @@ export interface Activity {
   newValue: any;
   createdAt: string;
 }
+
+// A whiteboard on the Canvas view. The drawing is Excalidraw's element list as
+// JSON, split across scene0..sceneN so each piece fits in one Google Sheets
+// cell (50,000 characters) when Apps Script is the backend.
+export interface Board {
+  id: string;
+  title: string;
+  lifeContext?: LifeContext;
+  sceneParts: number;
+  [scenePart: `scene${number}`]: string;
+  createdAt: string;
+  updatedAt: string;
+}

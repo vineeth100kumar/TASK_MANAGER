@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -270,10 +270,12 @@ export function Sidebar({
                 { id: 'focus', name: 'Focus', icon: Target, count: focusCount, color: 'text-amber-500' },
                 { id: 'waiting_for', name: 'Waiting For', icon: Hourglass, count: waitingCount, color: 'text-purple-500' },
                 { id: 'all', name: 'All Items', icon: Layers },
-                { id: 'notes', name: 'Notes & Docs', icon: FileText }
+                { id: 'notes', name: 'Notes & Docs', icon: FileText },
+                { id: 'canvas', name: 'Canvas', icon: PenLine }
               ].map((item) => {
                 const isActive = 
                   item.id === 'notes' ? activeView === 'notes' : 
+                  item.id === 'canvas' ? activeView === 'canvas' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
                   item.id === 'focus' ? activeView === 'focus' :
                   item.id === 'waiting_for' ? activeView === 'waiting_for' :
@@ -284,6 +286,8 @@ export function Sidebar({
                   <button key={item.id} onClick={() => { 
                     if (item.id === 'notes') {
                       setActiveView('notes');
+                    } else if (item.id === 'canvas') {
+                      setActiveView('canvas');
                     } else if (item.id === 'inbox') {
                       setActiveView('inbox');
                     } else if (item.id === 'focus') {

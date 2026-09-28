@@ -99,6 +99,8 @@ export function Header({
       setActiveTitle('Waiting For & Delegations');
     } else if (activeView === 'notes') {
       setActiveTitle('Notes & Docs');
+    } else if (activeView === 'canvas') {
+      setActiveTitle('Canvas');
     } else if (activeWorkspace === 'all') {
       setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : 'All Work Items');
     } else {
