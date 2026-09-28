@@ -4,7 +4,7 @@
  * All rules are advisory, dismissible, and never blocking.
  */
 
-import { WorkItem, Project } from '../services/types';
+import { WorkItem } from '../services/types';
 
 export interface ProjectGap {
   id: string;              // unique gap id: `${type}_${targetId}`

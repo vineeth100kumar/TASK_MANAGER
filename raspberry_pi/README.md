@@ -1,31 +1,9 @@
-﻿# Sage Task Manager - Raspberry Pi AI Backend
+# Sage server (Raspberry Pi)
 
-This folder contains the Python server required to run **Qwen 2.5 (1.5B)** locally on your Raspberry Pi 5 (4GB) and expose it to your Sage Task Manager via a secure, hallucination-proof JSON API.
-
-## Why Qwen 2.5 1.5B?
-A Raspberry Pi 5 with 4GB RAM is hardware constrained. Qwen 2.5 (1.5B) leaves enough RAM (~2.5GB) for your operating system and Context Windows, completely avoiding the catastrophic slowdowns that happen when the Pi runs out of RAM and starts swapping. Furthermore, it is incredibly fast and has near-perfect JSON formatting adherence for its size.
-
-## Requirements
-- A Raspberry Pi 5 (4GB RAM is sufficient).
-- Linux / Raspberry Pi OS.
-- Python 3.
-
-## How to Install and Run
-1. Copy this entire folder (
-aspberry_pi) to your Raspberry Pi.
-2. Open a terminal on your Pi and navigate to this folder.
-3. Make the setup script executable:
-   \chmod +x setup.sh\
-4. Run the setup script:
-   \./setup.sh\
-
-The setup script will automatically install Ollama, download the Qwen 2.5 1.5B model, install the Python dependencies, and start the API server on port 8000.
-
-## How it works (Hallucination-Proofing)
-This Python server (FastAPI) acts as a middleman between your React app and Ollama. It relies on three layers of security to prevent hallucinations:
-1. **Ollama's \ormat="json"\:** Forces the generation sequence to strictly abide by JSON grammar rules.
-2. **Zero-Temperature constraints:** Disables model creativity to ensure maximum predictability.
-3. **Safe Parse Fallback Regex:** A Python safe_parse_json utility that detects and automatically strips away any rogue Markdown formatting (json ...) that small 1.5B models occasionally accidentally output before returning the pure payload to the React app.
+`db_server.py` is Sage's server on the Pi. It keeps the task data in SQLite,
+serves the built web app, streams changes to LUMO over `/ws`, and backs the
+data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
+(see the root README); systemd runs it as the `sage` service on port 8000.
 
 ## Sync server settings
 
@@ -43,3 +21,22 @@ This Python server (FastAPI) acts as a middleman between your React app and Olla
 `/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO uses it to update the clock within a second of a change in the app.
 
 In the web app, enter the same key under Settings > Cloud Limits & Reset > Raspberry Pi server key.
+
+## Optional: AI endpoints
+
+Two endpoints use a local model through [Ollama](https://ollama.com):
+
+- `POST /api/parse-task` turns text like "call mum at 6" into tasks (LUMO's voice assistant uses it).
+- `POST /api/daily-briefing` writes the Dashboard's morning briefing.
+
+Everything else works without them. The installer does not set up Ollama; to
+enable these endpoints, install it and pull the model once:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull qwen2.5:1.5b
+```
+
+The model is small enough to leave room on a 4 GB Pi 5. Requests use JSON mode
+at low temperature, and `safe_parse_json` strips stray Markdown fences before
+the reply is parsed.

@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, Check, CloudOff, AlertTriangle, WifiOff, Network } from 'lucide-react';
+import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, AlertTriangle, WifiOff, Network } from 'lucide-react';
 import { api } from '../../services/api';
 import { SyncEngineStatus } from '../../services/syncEngine';
-import { Project, Area } from '../../services/types';
 
 const VIEWS = [
   { id: 'list', icon: LayoutList, label: 'List' },

@@ -7,7 +7,7 @@ import tempfile
 import numpy as np
 from PIL import Image
 
-sys.path.insert(0, os.path.abspath('rpi_server'))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'))
 
 from services.vision_curator import VisionCurator
 from services.memories import MemoriesService
@@ -94,8 +94,9 @@ class TestVisionCurator(unittest.TestCase):
         print("  [OK] Dark indoor photo -> Filtered (other)")
 
     def test_real_photos_from_library(self):
-        real_photos_dir = "scratch/all_photos"
-        if os.path.exists(real_photos_dir):
+        # Optional: point LUMO_TEST_PHOTOS at a folder of real photos to classify them too.
+        real_photos_dir = os.environ.get("LUMO_TEST_PHOTOS", "")
+        if real_photos_dir and os.path.exists(real_photos_dir):
             files = [f for f in os.listdir(real_photos_dir) if f.endswith(('.jpg', '.gif'))]
             portraits = 0
             nature = 0

@@ -4,7 +4,7 @@
  */
 
 import { api } from '../services/api';
-import { WorkItem, LifeContext } from '../services/types';
+import { LifeContext } from '../services/types';
 
 export interface ImportResult {
   total: number;

@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Trash2, Search, FileText, Calendar, Sparkles, Folder } from 'lucide-react';
+import { Plus, Trash2, Search, FileText } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';

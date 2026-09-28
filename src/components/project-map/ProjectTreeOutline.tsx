@@ -1,9 +1,6 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  CheckCircle2, Circle, AlertTriangle, ArrowRight, Plus, 
-  Link, Unlink, Flag, Clock, ChevronRight, X, Sparkles 
-} from 'lucide-react';
+import { CheckCircle2, Circle, AlertTriangle, ArrowRight, Link, Flag, X } from 'lucide-react';
 import { WorkItem } from '../../services/types';
 import { ProjectGap } from '../../utils/projectGapAnalyzer';
 

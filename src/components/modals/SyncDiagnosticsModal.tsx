@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { X, RefreshCw, CheckCircle2, AlertTriangle, WifiOff, Cloud, Database, Download, Upload, ExternalLink, Trash2, ShieldCheck, Layers } from 'lucide-react';
+import { motion } from 'framer-motion';
+import { X, RefreshCw, CheckCircle2, AlertTriangle, WifiOff, Database, Download, Upload, ExternalLink, Trash2, ShieldCheck } from 'lucide-react';
 import { api } from '../../services/api';
 import { SyncEngineStatus, syncEndpointLabel } from '../../services/syncEngine';
 import { SyncOpRecord } from '../../services/db';

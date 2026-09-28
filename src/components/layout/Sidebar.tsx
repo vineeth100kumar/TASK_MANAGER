@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Sparkles, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Zap, Settings } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -75,26 +75,43 @@ export function Sidebar({
 
   const loadNavData = async () => {
     try {
-      const [pList, aList, gList, hList, nList] = await Promise.all([
+      const [pList, aList, gList, hList, nList, inbox, focus, waiting] = await Promise.all([
         api.projects.list(),
         api.areas.list(),
         api.goals.list(),
         api.habits.list(),
-        api.notes.list()
+        api.notes.list(),
+        api.inbox.list(lifeContext),
+        api.focus.list(lifeContext),
+        api.waitingFor.list(lifeContext)
       ]);
       setProjects(pList);
       setAreas(aList);
       setGoals(gList);
       setHabits(hList);
       setNotes(nList);
+      setInboxCount(inbox.length);
+      setFocusCount(focus.length);
+      setWaitingCount(waiting.length);
     } catch (e) {
       console.warn('Failed to load navigation data:', e);
     }
   };
 
+  // Reload on any change, local or synced, so counts and lists stay current.
+  // Changes come in bursts (a sync batch, a bulk edit), so wait for them to settle.
   useEffect(() => {
     loadNavData();
-  }, []);
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = api.sync.onAnyChange(() => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(loadNavData, 150);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsubscribe();
+    };
+  }, [lifeContext]);
 
   const handleCreateProject = async (e: React.FormEvent) => {
     e.preventDefault();

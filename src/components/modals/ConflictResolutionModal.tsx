@@ -1,6 +1,5 @@
-import React from 'react';
 import { motion } from 'framer-motion';
-import { AlertTriangle, Check, ArrowRight, X, ShieldAlert, Cloud, Laptop } from 'lucide-react';
+import { AlertTriangle, Check, X, Cloud, Laptop } from 'lucide-react';
 import { api } from '../../services/api';
 import { ConflictEvent } from '../../services/syncEngine';
 import { useToast } from '../../context/ToastContext';

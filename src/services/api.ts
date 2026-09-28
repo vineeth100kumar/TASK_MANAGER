@@ -10,11 +10,8 @@
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, LifeContext } from './types';
 import { LABELS, uuid, INITIAL_WORK_ITEMS, INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './mockDb';
 import { toInputDateValue, toInputDateTimeValue, parseDateString } from '../utils/dateUtils';
-import { 
-  getDB, getAllFromStore, getFromStore, putToStore, putBatchToStore, 
-  deleteFromStore, clearStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId 
-} from './db';
-import { syncEngine, SyncEngineStatus, SyncState, getGasUrl, syncHeaders } from './syncEngine';
+import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
+import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 
 export interface LocalState {
   workItems: WorkItem[];
@@ -66,8 +63,9 @@ async function initializeStore(): Promise<void> {
       getAllFromStore<Activity>('activities')
     ]);
 
-    // If completely fresh install with zero local data, seed initial defaults
-    if (projects.length === 0 && areas.length === 0 && workItems.length === 0) {
+    // Sample data for local testing only (`npm run dev`). A real install starts
+    // empty; the sample records are never queued for upload.
+    if (import.meta.env.DEV && projects.length === 0 && areas.length === 0 && workItems.length === 0) {
       state.workItems = [...INITIAL_WORK_ITEMS];
       state.projects = [...INITIAL_PROJECTS];
       state.areas = [...INITIAL_AREAS];
@@ -162,6 +160,16 @@ export const api = {
         externalEntityListeners = externalEntityListeners.filter(l => l !== listener);
       };
     },
+    // Any change to the local data, whether made here or pulled in by sync.
+    onAnyChange: (listener: (entityType: string) => void) => {
+      const onRemote = (entityType: string) => listener(entityType);
+      externalEntityListeners.push(onRemote);
+      const unsubLocal = syncEngine.onLocalChange((entityType) => listener(entityType));
+      return () => {
+        externalEntityListeners = externalEntityListeners.filter(l => l !== onRemote);
+        unsubLocal();
+      };
+    },
     onConflict: (listener: any) => syncEngine.onConflict(listener),
     forceSync: () => syncEngine.forceSyncNow(),
     getStatus: () => syncEngine.getStatus(),
@@ -179,41 +187,17 @@ export const api = {
           const json = await response.json();
           if (json.success && json.data) {
             const data = json.data;
-            if (Array.isArray(data.workItems) && data.workItems.length > 0) {
-              state.workItems = data.workItems;
-              await putBatchToStore('workItems', state.workItems);
-            }
-            if (Array.isArray(data.projects) && data.projects.length > 0) {
-              state.projects = data.projects;
-              await putBatchToStore('projects', state.projects);
-            }
-            if (Array.isArray(data.areas) && data.areas.length > 0) {
-              state.areas = data.areas;
-              await putBatchToStore('areas', state.areas);
-            }
-            if (Array.isArray(data.goals) && data.goals.length > 0) {
-              state.goals = data.goals;
-              await putBatchToStore('goals', state.goals);
-            }
-            if (Array.isArray(data.habits) && data.habits.length > 0) {
-              state.habits = data.habits;
-              await putBatchToStore('habits', state.habits);
-            }
-            if (Array.isArray(data.notes) && data.notes.length > 0) {
-              state.notes = data.notes;
-              await putBatchToStore('notes', state.notes);
-            }
-            if (Array.isArray(data.comments) && data.comments.length > 0) {
-              state.comments = data.comments;
-              await putBatchToStore('comments', state.comments);
-            }
-            if (Array.isArray(data.subtasks) && data.subtasks.length > 0) {
-              state.subtasks = data.subtasks;
-              await putBatchToStore('subtasks', state.subtasks);
-            }
-            if (Array.isArray(data.activities) && data.activities.length > 0) {
-              state.activities = data.activities;
-              await putBatchToStore('activities', state.activities);
+            const unsynced = await syncEngine.getUnsyncedKeys();
+            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities'] as const;
+            for (const table of tables) {
+              const rows = data[table];
+              if (!Array.isArray(rows) || rows.length === 0) continue;
+              // Keep this device's version of anything it changed that hasn't uploaded yet.
+              const localPending = (state[table] as any[]).filter(r => r && unsynced.has(`${table}:${r.id}`));
+              const pendingIds = new Set(localPending.map(r => r.id));
+              const merged = [...rows.filter((r: any) => r && !pendingIds.has(r.id)), ...localPending];
+              (state as any)[table] = merged;
+              await putBatchToStore(table, merged);
             }
 
             if (json.serverRevision) {
@@ -786,76 +770,6 @@ export const api = {
     }
   },
 
-  dashboard: {
-    getSummary: async (workspaceId: string, lifeContext: LifeContext = 'work'): Promise<any> => {
-      await initializeStore();
-      const today = new Date().toISOString().split('T')[0];
-      let items = state.workItems.filter(i => i && !i.deletedAt && (i.lifeContext || 'work') === lifeContext);
-
-      if (workspaceId && workspaceId !== 'all') {
-        items = items.filter(i => i.projectId === workspaceId || i.areaId === workspaceId);
-      }
-
-      const urgentCount = items.filter(i => i.priority === 'urgent' && i.status !== 'done').length;
-      const dueTodayCount = items.filter(i => (i.dueDate === today || (i.startDate && i.startDate <= today && i.dueDate && i.dueDate >= today)) && i.status !== 'done').length;
-      const blockedCount = items.filter(i => i.status === 'blocked').length;
-      const completedCount = items.filter(i => i.status === 'done').length;
-      const openCount = items.filter(i => i.status !== 'done').length;
-
-      // 7-day velocity calculation from completedAt
-      const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const velocityByDay = [];
-      for (let offset = 6; offset >= 0; offset--) {
-        const d = new Date();
-        d.setDate(d.getDate() - offset);
-        const dayStr = d.toISOString().split('T')[0];
-        const dayName = offset === 0 ? 'Today' : days[d.getDay()];
-
-        const completedOnDay = items.filter(i => i.status === 'done' && i.completedAt && i.completedAt.startsWith(dayStr)).length;
-        velocityByDay.push({
-          name: dayName,
-          velocity: completedOnDay,
-          target: 5
-        });
-      }
-
-      const focusQueue = items
-        .filter(i => i.status !== 'done')
-        .sort((a, b) => {
-          const pOrder: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
-          return (pOrder[a.priority] || 2) - (pOrder[b.priority] || 2);
-        })
-        .slice(0, 8)
-        .map(hydrateWorkItem);
-
-      const todayItems = items
-        .filter(i => i.status !== 'done' && (
-          i.dueDate === today || 
-          (i.startDate && i.startDate <= today && i.dueDate && i.dueDate >= today) ||
-          (i.startAt && i.startAt.startsWith(today)) ||
-          (i.remindAt && i.remindAt.startsWith(today))
-        ))
-        .map(hydrateWorkItem);
-
-      const habits = state.habits.filter(h => h && (!workspaceId || workspaceId === 'all' || h.areaId === workspaceId));
-      const goals = state.goals.filter(g => g && (!workspaceId || workspaceId === 'all' || g.areaId === workspaceId || g.projectId === workspaceId));
-
-      return {
-        urgentCount,
-        dueTodayCount,
-        blockedCount,
-        completedCount,
-        openCount,
-        velocityByDay,
-        focusQueue,
-        todayItems,
-        recentItems: items.slice(0, 5).map(hydrateWorkItem),
-        habits,
-        goals
-      };
-    }
-  },
-
   inbox: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
@@ -864,22 +778,6 @@ export const api = {
         items = items.filter(i => i && (i.lifeContext || 'work') === lifeContext);
       }
       return items.map(hydrateWorkItem);
-    },
-
-    quickCapture: async (text: string, lifeContext: LifeContext = 'work'): Promise<WorkItem> => {
-      await initializeStore();
-      const trimmed = text.trim();
-      if (!trimmed) throw new Error('Capture text cannot be empty');
-
-      return api.workItems.create({
-        title: trimmed,
-        lifeContext,
-        isInbox: true,
-        entityType: 'task',
-        type: 'task',
-        priority: 'medium',
-        status: 'todo'
-      });
     },
 
     clarify: async (id: string, updates: Partial<WorkItem>): Promise<WorkItem> => {
@@ -936,14 +834,6 @@ export const api = {
       return api.workItems.updateDetails(id, {
         snoozedUntil: untilIso,
         snoozeCount: (item.snoozeCount || 0) + 1,
-        lastTouchedAt: new Date().toISOString()
-      });
-    },
-
-    unsnoozeItem: async (id: string): Promise<WorkItem> => {
-      await initializeStore();
-      return api.workItems.updateDetails(id, {
-        snoozedUntil: null,
         lastTouchedAt: new Date().toISOString()
       });
     }

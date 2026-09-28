@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Hourglass, CheckCircle2, UserCheck, Clock, Trash2, Calendar, Plus, X, Check, MessageSquare } from 'lucide-react';
+import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -41,7 +41,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
     if (!who.trim() || !about.trim()) return;
 
     try {
-      const created = await api.workItems.create({
+      await api.workItems.create({
         title: `Waiting for ${who.trim()}: ${about.trim()}`,
         lifeContext,
         entityType: 'task',

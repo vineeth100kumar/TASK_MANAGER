@@ -1,9 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { 
-  CheckCircle2, Circle, AlertTriangle, ArrowRight, Plus, 
-  Link, Unlink, Sparkles, Flag, Clock, Move, Eye, Edit3, Camera, Download 
-} from 'lucide-react';
+import { CheckCircle2, Circle, AlertTriangle, Plus, Flag, Clock, Move, Eye, Camera } from 'lucide-react';
 import { WorkItem, Project } from '../../services/types';
 import { ProjectGap } from '../../utils/projectGapAnalyzer';
 import { downloadFlowCanvasImage } from '../../utils/imageExport';
