@@ -13,6 +13,7 @@
 import { getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, SyncOpRecord } from './db';
 import { tabCoordinator } from './tabSync';
 import { piBackendUrl, piHeaders } from './piBackend';
+import { LiveStream } from './liveStream';
 
 const GAS_URL = import.meta.env.VITE_GAS_URL || 'https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec';
 const PI_BACKEND_URL = piBackendUrl();
@@ -91,6 +92,9 @@ class SyncEngine {
   private batchDebounceTimer: any = null;
   private retryTimer: any = null;
   private consecutiveFailures = 0;
+  private liveStream: LiveStream | null = null;
+  private pullInFlight: Promise<void> | null = null;
+  private pullAgain = false;
 
   async init(): Promise<void> {
     if (this.isInitialized) return;
@@ -121,9 +125,32 @@ class SyncEngine {
 
     this.isInitialized = true;
 
-    // Start background incremental pull timer if leader
+    // With the Pi, its live stream says when there is something to pull. Polling
+    // stays as the fallback while the stream is down, and as a slow safety net.
+    if (PI_BACKEND_URL) {
+      this.liveStream = new LiveStream(
+        PI_BACKEND_URL,
+        (event) => {
+          if (event.type === 'SYNC_CLEARED') {
+            this.serverRevision = 0;
+            setMeta('serverRevision', 0);
+          }
+          if (event.serverRevision !== this.serverRevision) this.pullIncrementalChanges();
+        },
+        (connected) => {
+          // Catch up on anything missed while disconnected.
+          if (connected) this.pullIncrementalChanges();
+        }
+      );
+      this.liveStream.start();
+    }
+
+    let lastPull = Date.now();
     setInterval(() => {
+      const interval = this.liveStream?.isConnected() ? 5 * 60000 : 30000;
+      if (Date.now() - lastPull < interval) return;
       if (tabCoordinator.isSyncLeader() && navigator.onLine) {
+        lastPull = Date.now();
         this.pullIncrementalChanges();
       }
     }, 30000);
@@ -172,6 +199,12 @@ class SyncEngine {
       isLeader: tabCoordinator.isSyncLeader(),
       lastError: this.lastError
     };
+  }
+
+  // For the diagnostics panel: whether the Pi's live stream is up.
+  liveStreamLabel(): string {
+    if (!this.liveStream) return 'Not used (Apps Script has no live stream; checking every 30s)';
+    return this.liveStream.isConnected() ? 'Connected (changes arrive instantly)' : 'Reconnecting (checking every 30s meanwhile)';
   }
 
   async getDetailedStatus(): Promise<SyncEngineStatus> {
@@ -422,7 +455,25 @@ class SyncEngine {
     }
   }
 
+  // One pull at a time; a request that arrives mid-pull runs once more after it,
+  // so a burst of live events costs at most two requests.
   async pullIncrementalChanges(): Promise<void> {
+    if (this.pullInFlight) {
+      this.pullAgain = true;
+      return this.pullInFlight;
+    }
+    this.pullInFlight = (async () => {
+      do {
+        this.pullAgain = false;
+        await this.pullOnce();
+      } while (this.pullAgain);
+    })().finally(() => {
+      this.pullInFlight = null;
+    });
+    return this.pullInFlight;
+  }
+
+  private async pullOnce(): Promise<void> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
     try {
       const baseUrl = getGasUrl('getChangesSince');

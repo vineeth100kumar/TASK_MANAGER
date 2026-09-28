@@ -17,7 +17,7 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `SAGE_CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. |
 | `SAGE_GAS_URL` | the existing Apps Script URL | Where the 4-hourly backup goes. |
 
-`/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO uses it to update the clock within a second of a change in the app.
+`/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO and the web app use it to pick up a change from another device within a second.
 
 In the web app, enter the same key under Settings > System > Raspberry Pi server key.
 
