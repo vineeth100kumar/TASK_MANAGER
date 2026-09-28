@@ -2,6 +2,9 @@ import { CheckCircle, Circle, Calendar as CalendarIcon, Flag, Bell, CalendarDays
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
+import { api } from '../../services/api';
+import { useToast } from '../../context/ToastContext';
+import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 
 interface ListViewProps {
   tasks: WorkItem[];
@@ -11,7 +14,17 @@ interface ListViewProps {
 }
 
 export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
-  
+  const { showToast } = useToast();
+
+  const snoozeToTomorrow = async (task: WorkItem) => {
+    try {
+      await api.snooze.snoozeItem(task.id, tomorrowMorning().toISOString());
+      showToast('Snoozed until tomorrow');
+    } catch (e: any) {
+      showToast('Snooze failed: ' + e.message, 'error');
+    }
+  };
+
   const renderGroup = (title: string, groupTasks: any[], colorDot?: string) => {
     if (groupTasks.length === 0) return null;
     return (
@@ -25,8 +38,12 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
         <div className="flex flex-col gap-1.5">
           {groupTasks.map(task => {
             const dateStr = formatDateRange(task.startDate, task.dueDate);
+            const swipeable = task.entityType === 'task' && task.status !== 'done';
             return (
-              <div key={task.id} 
+              <SwipeRow key={task.id}
+                onSwipeRight={swipeable ? () => onTransition(task, 'done') : undefined}
+                onSwipeLeft={swipeable ? () => snoozeToTomorrow(task) : undefined}>
+              <div
                 onClick={() => onSelect(task.id)}
                 className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer transition-all border ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'bg-white dark:bg-[#1c1c1e] border-gray-100 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/20 shadow-sm hover:shadow-md'}`}>
                 
@@ -98,6 +115,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   </div>
                 )}
               </div>
+              </SwipeRow>
             );
           })}
         </div>

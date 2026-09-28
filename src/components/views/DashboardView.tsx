@@ -99,10 +99,10 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
   return (
-    <div className="max-w-6xl mx-auto space-y-6 pb-20 font-sans">
+    <div className="max-w-6xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans">
       
       {/* 1. Greeting & Hero Atmosphere */}
-      <div className={`p-8 rounded-3xl border border-black/5 dark:border-white/5 relative overflow-hidden flex flex-col md:flex-row items-start md:items-end justify-between gap-6 ${
+      <div className={`p-5 md:p-8 rounded-3xl border border-black/5 dark:border-white/5 relative overflow-hidden flex flex-col md:flex-row items-start md:items-end justify-between gap-6 ${
         lifeContext === 'personal' 
           ? 'bg-gradient-to-br from-orange-100/70 via-amber-50 to-white dark:from-orange-950/30 dark:via-amber-900/10 dark:to-black' 
           : 'bg-gradient-to-br from-blue-50 via-[#f5f5f7] to-white dark:from-blue-950/20 dark:via-[#1c1c1e] dark:to-black'
@@ -112,7 +112,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
             {lifeContext === 'personal' ? <Sun size={15} className="text-orange-500"/> : <Sparkles size={15} className="text-blue-500"/>}
             <span>{lifeContext === 'personal' ? 'Personal Life Space' : 'Work Command Center'}</span>
           </div>
-          <h1 className="text-3xl md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight leading-tight mb-4">
+          <h1 className="text-[28px] md:text-5xl font-extrabold text-gray-900 dark:text-white tracking-tight leading-tight mb-4">
             {greeting}.
           </h1>
           
@@ -136,7 +136,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         </div>
 
         <div className="text-left md:text-right shrink-0">
-          <div className="text-4xl md:text-6xl font-bold tracking-tight tabular-nums text-gray-900 dark:text-white">
+          <div className="hidden md:block text-6xl font-bold tracking-tight tabular-nums text-gray-900 dark:text-white">
             {time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
           </div>
           <div className="text-xs font-semibold uppercase tracking-wider text-gray-400 mt-1">
@@ -178,10 +178,10 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       )}
 
       {/* 3. Main Grid: Today's Focus & Scheduled Checkpoints */}
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-4 md:gap-6">
         
         {/* Active Focus (Left: 7 cols) */}
-        <div className="md:col-span-7 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
+        <div className="md:col-span-7 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-amber-500" />
@@ -229,7 +229,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         </div>
 
         {/* Due Today & Reminders (Right: 5 cols) */}
-        <div className="md:col-span-5 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
+        <div className="md:col-span-5 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} className="text-blue-500" />
             <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
@@ -260,10 +260,10 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       </div>
 
       {/* 4. Quick Wins & Delegations (Waiting For) */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 md:gap-6">
         
         {/* Quick Wins (<=15 min tasks) */}
-        <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
+        <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-amber-500" />
             <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Quick Wins (≤ 15 min)</h3>
@@ -289,7 +289,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         </div>
 
         {/* Delegated Waiting For Summary */}
-        <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
+        <div className="bg-[#f5f5f7] dark:bg-[#1c1c1e] p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Hourglass size={18} className="text-purple-500" />
@@ -356,7 +356,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       {lifeContext === 'personal' && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
           {/* Habits */}
-          <div className="p-6 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 space-y-4">
+          <div className="p-4 md:p-6 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 space-y-4">
             <div className="flex items-center gap-2">
               <Activity size={18} className="text-emerald-500" />
               <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Daily Habit Streaks</h3>
@@ -390,7 +390,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           </div>
 
           {/* Goals */}
-          <div className="p-6 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 space-y-4">
+          <div className="p-4 md:p-6 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 space-y-4">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-blue-500" />
               <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Goals</h3>

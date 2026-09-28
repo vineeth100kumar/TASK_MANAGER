@@ -216,11 +216,18 @@ export function Sidebar({
 
   return (
     <>
+      <AnimatePresence>
+        {isSidebarOpen && (
+          <motion.div key="sidebar-backdrop" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="md:hidden fixed inset-0 z-[35] bg-gray-900/30 dark:bg-black/60 backdrop-blur-[2px]"
+            onClick={() => setIsSidebarOpen(false)} aria-hidden />
+        )}
+      </AnimatePresence>
       <motion.aside
         initial={false} 
         animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-        className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden bg-[#f5f5f7]/90 dark:bg-[#1c1c1e]/90 backdrop-blur-3xl border-r border-gray-200/50 dark:border-white/5 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-orange-50/90 dark:bg-orange-950/20' : ''}`}
+        className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden bg-[#f5f5f7]/95 dark:bg-[#1c1c1e]/95 backdrop-blur-3xl border-r border-gray-200/50 dark:border-white/5 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-orange-50/90 dark:bg-orange-950/20' : ''}`}
       >
         <div className="w-[280px] h-full flex flex-col">
           <div className="px-6 pt-5 pb-3 flex items-center justify-center relative">

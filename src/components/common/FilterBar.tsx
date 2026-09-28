@@ -36,10 +36,10 @@ export function FilterBar({ filters, setFilters, entityTypeCounts = {} }: Filter
     <div className="flex flex-wrap items-center gap-2 mb-6 text-xs font-semibold">
       
       {/* Type Selector Pills */}
-      <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl">
+      <div className="flex items-center gap-1 bg-gray-100 dark:bg-white/5 p-1 rounded-xl max-w-full overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         {types.map(t => (
           <button key={t.id} onClick={() => setFilters({ ...filters, entityType: t.id })}
-            className={`px-3 py-1.5 rounded-lg transition-all ${currentType === t.id ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm font-bold' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
+            className={`px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0 transition-all ${currentType === t.id ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm font-bold' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
             {t.label}
           </button>
         ))}

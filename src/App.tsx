@@ -9,6 +9,7 @@ import { notificationService } from './services/notificationService';
 
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
+import { MobileTabBar } from './components/layout/MobileTabBar';
 import { DashboardView } from './components/views/DashboardView';
 import { InboxView } from './components/views/InboxView';
 import { FocusView } from './components/views/FocusView';
@@ -39,7 +40,8 @@ function MainApp() {
   // Navigation State
   const [activeView, setActiveView] = useState('dashboard');
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
-  const [presentationMode, setPresentationMode] = useState('board');
+  // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
+  const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
   const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all' });
   const [lifeContext, setLifeContext] = useState<'work'|'personal'>('work');
   
@@ -239,7 +241,7 @@ function MainApp() {
         />
 
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <div className="p-4 md:p-8 min-h-full">
+          <div className="p-4 pb-28 md:p-8 min-h-full">
             {isLoading ? (
               <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-400 py-32"><Loader2 className="animate-spin" size={28}/><span className="text-[13px] font-medium">Loading your items…</span></div>
             ) : activeView === 'notes' ? (
@@ -301,14 +303,14 @@ function MainApp() {
           </div>
         </div>
 
-        {/* Mobile Add Item Floating Action Button */}
-        <button 
-          onClick={() => setIsCreateModalOpen(true)} 
-          className="md:hidden fixed bottom-6 right-6 z-30 w-14 h-14 rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30 hover:bg-blue-700 flex items-center justify-center active:scale-95 transition-transform" 
-          aria-label="Add Item"
-        >
-          <Plus size={24} />
-        </button>
+        <MobileTabBar
+          activeView={activeView} activeWorkspace={activeWorkspace} lifeContext={lifeContext}
+          onCreate={() => setIsCreateModalOpen(true)}
+          onNavigate={(view) => {
+            if (view === 'all') { setActiveView('tasks'); setActiveWorkspace('all'); }
+            else setActiveView(view);
+          }}
+        />
       </main>
 
       <AnimatePresence>
@@ -369,7 +371,7 @@ function MainApp() {
       </AnimatePresence>
 
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none">
+      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast: any) => (
              <motion.div key={toast.id} initial={{ opacity: 0, y: 20, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
