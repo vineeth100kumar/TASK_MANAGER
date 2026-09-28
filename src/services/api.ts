@@ -1125,7 +1125,9 @@ export const api = {
       const fetchUrl = getGasUrl('clearAll');
       await fetch(fetchUrl, {
         method: 'POST',
-        headers: syncHeaders({ 'Content-Type': 'application/json;charset=utf-8' }),
+        // text/plain keeps this a simple request; application/json makes the browser
+        // send a CORS preflight, which Apps Script rejects.
+        headers: syncHeaders({ 'Content-Type': 'text/plain;charset=utf-8' }),
         body: JSON.stringify({ action: 'clearAll' })
       });
     } catch (e) {

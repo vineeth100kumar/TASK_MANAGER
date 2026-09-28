@@ -14,7 +14,7 @@ import { getDB, getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, 
 import { tabCoordinator } from './tabSync';
 import { piBackendUrl, piHeaders } from './piBackend';
 
-const GAS_URL = import.meta.env.VITE_GAS_URL || 'https://script.google.com/macros/s/AKfycbzIuKgou3uO98HBkH3olHt-JDAum6muOfR7v59VTUg72K9IkyTX9ATgK0ntZQrNdrJo/exec';
+const GAS_URL = import.meta.env.VITE_GAS_URL || 'https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec';
 const PI_BACKEND_URL = piBackendUrl();
 
 // Headers for a sync request: the Pi server wants its key, Apps Script must get none.
