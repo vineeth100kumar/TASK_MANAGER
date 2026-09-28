@@ -15,13 +15,14 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `SAGE_DB_PATH` | `sage_sync.db` | SQLite file. |
 | `SAGE_DIST_DIR` | `../dist` | Built web app, served at `/` when present. |
 | `SAGE_CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. |
-| `SAGE_GAS_URL` | the existing Apps Script URL | Where the 4-hourly backup goes. |
+| `SAGE_GAS_URL` | the Apps Script URL | Where synced changes are backed up. |
+| `SAGE_GAS_BACKUP_INTERVAL` | `300` | Seconds between backups to Apps Script. |
 | `SAGE_ACCESS_PASSWORD_HASH` | empty | Turns on the password page (below). Set it with `deploy/set_access_password.sh`. |
 | `SAGE_SESSION_DAYS` | `30` | How long a browser stays logged in after typing the password. |
 
 `/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO and the web app use it to pick up a change from another device within a second.
 
-In the web app, enter the same key under Settings > System > Raspberry Pi server key.
+In the web app, enter the same key under Settings > Cloud Limits & Reset > Raspberry Pi server key.
 
 ## Reach Sage from anywhere
 

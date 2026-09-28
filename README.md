@@ -36,7 +36,7 @@ The installer writes `/etc/sage/sage.env` (with a new `API_SECRET` if there
 isn't one), creates both venvs, builds the web app, and installs the `sage`,
 `lumo`, `lumo-obex` and `sage-autosync` units. Open `http://<pi>:8000`, then
 enter the key from `sudo grep API_SECRET /etc/sage/sage.env` under
-Settings > System.
+Settings > Cloud Limits & Reset.
 
 `sage-autosync` pulls `main` every 30 seconds and restarts only the service
 whose folder changed, so merge through pull requests rather than pushing

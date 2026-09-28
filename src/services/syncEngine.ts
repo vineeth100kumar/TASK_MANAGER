@@ -44,7 +44,7 @@ const describeSyncError = (err: any): string => {
       : `Could not reach Apps Script (${message}). Check the deployment is set to "Anyone" access.`;
   }
   if (message.includes('HTTP error 401')) {
-    return PI_BACKEND_URL ? 'The Pi server rejected the key. Enter it in Settings > System.' : message;
+    return PI_BACKEND_URL ? 'The Pi server rejected the key. Enter it in Settings > Cloud Limits & Reset.' : message;
   }
   return message;
 };
