@@ -151,7 +151,9 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
   const handleSubmit = async (payload: any) => {
     setIsSubmitting(true);
     try {
-      await onCreate({ ...payload, title: parsed?.title || title.trim(), entityType, lifeContext });
+      // The forms prefill both a project and a life area; keep only the one this context shows.
+      const scope = lifeContext === 'personal' ? { projectId: null } : { areaId: null };
+      await onCreate({ ...payload, ...scope, title: parsed?.title || title.trim(), entityType, lifeContext });
       onClose();
     } catch (e) {
       setIsSubmitting(false);

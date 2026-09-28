@@ -7,6 +7,7 @@ import { useToast } from '../../context/ToastContext';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { formatDateRange } from '../../utils/dateUtils';
+import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 
 interface InboxViewProps {
   lifeContext: LifeContext;
@@ -78,8 +79,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
-  const handleComplete = async (item: WorkItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleComplete = async (item: WorkItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.workItems.transitionStatus(item.id, 'done', item.version);
       showToast('Completed');
@@ -89,8 +90,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
-  const handleToggleFocus = async (item: WorkItem, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggleFocus = async (item: WorkItem, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.focus.toggle(item.id);
       showToast(item.isFocus ? 'Removed from Focus' : 'Added to Focus');
@@ -100,8 +101,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
-  const handleDelete = async (itemId: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleDelete = async (itemId: string, e?: React.MouseEvent) => {
+    e?.stopPropagation();
     try {
       await api.workItems.softDelete(itemId);
       showToast('Item deleted');
@@ -111,10 +112,20 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
+  const handleSnoozeTomorrow = async (item: WorkItem) => {
+    try {
+      await api.snooze.snoozeItem(item.id, tomorrowMorning().toISOString());
+      showToast('Snoozed until tomorrow');
+      loadInbox();
+    } catch (err: any) {
+      showToast('Snooze failed: ' + err.message, 'error');
+    }
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-6 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-5 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2.5 text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
             <Inbox size={18} />
@@ -133,7 +144,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md hidden md:flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> Add Item (N)
         </button>
@@ -153,9 +164,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       ) : (
         <div className="space-y-3">
           {items.map((item) => (
-            <motion.div
-              key={item.id}
-              layout
+            <motion.div key={item.id} layout>
+            <SwipeRow onSwipeRight={() => handleComplete(item)} onSwipeLeft={() => handleSnoozeTomorrow(item)}>
+            <div
               className="p-4 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 shadow-sm hover:border-blue-200 dark:hover:border-blue-800 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group"
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
@@ -210,6 +221,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <Trash2 size={15} />
                 </button>
               </div>
+            </div>
+            </SwipeRow>
             </motion.div>
           ))}
         </div>

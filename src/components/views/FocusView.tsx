@@ -69,7 +69,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Focus Header */}
-      <div className="p-6 md:p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="p-5 md:p-8 rounded-3xl bg-gradient-to-br from-amber-500/10 via-amber-500/5 to-transparent border border-amber-500/20 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-1">
             <Target size={18} />
@@ -88,7 +88,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-5 py-2.5 bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs rounded-xl shadow-md hidden md:flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> Add Item (N)
         </button>

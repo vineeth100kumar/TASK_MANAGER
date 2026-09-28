@@ -120,9 +120,10 @@ export function Header({
   const CurrentViewIcon = currentViewObj?.icon || LayoutList;
 
   return (
-    <header className="h-16 flex items-center justify-between px-4 md:px-8 border-b border-gray-200/60 dark:border-white/[0.06] sticky top-0 bg-white/80 dark:bg-[#0a0a0b]/80 backdrop-blur-xl backdrop-saturate-150 z-20">
-      <div className="flex items-center gap-4 flex-1">
-        {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="p-2 text-gray-500 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5" aria-label="Open sidebar"><Menu size={20} /></button>}
+    <header className="h-14 md:h-16 flex items-center justify-between px-4 md:px-8 border-b border-gray-200/60 dark:border-white/[0.06] sticky top-0 bg-white/80 dark:bg-[#0a0a0b]/80 backdrop-blur-xl backdrop-saturate-150 z-20">
+      <div className="flex items-center gap-2 md:gap-4 flex-1 min-w-0">
+        {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 md:ml-0 text-gray-500 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 shrink-0" aria-label="Open sidebar"><Menu size={20} /></button>}
+        <h1 className="sm:hidden text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white truncate">{activeTitle}</h1>
         <div className="hidden sm:flex items-center gap-1.5 text-[14px] font-medium text-gray-400 min-w-0">
            <span>{lifeContext === 'personal' ? 'Life Space' : 'Workspace'}</span> <ChevronDown size={14} className="opacity-60 -rotate-90 shrink-0" />
            <span className="text-gray-900 dark:text-white font-semibold tracking-tight truncate">
@@ -178,7 +179,7 @@ export function Header({
           </>
         )}
 
-        <button onClick={() => setIsCreateModalOpen(true)} title="New item (N)" className="flex items-center gap-1.5 h-9 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black px-3 md:px-3.5 rounded-xl text-[13.5px] font-semibold transition-all active:scale-[0.97] shadow-sm">
+        <button onClick={() => setIsCreateModalOpen(true)} title="New item (N)" className="hidden md:flex items-center gap-1.5 h-9 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black px-3 md:px-3.5 rounded-xl text-[13.5px] font-semibold transition-all active:scale-[0.97] shadow-sm">
           <Plus size={16} /> <span className="hidden sm:inline">New Item</span>
         </button>
       </div>
