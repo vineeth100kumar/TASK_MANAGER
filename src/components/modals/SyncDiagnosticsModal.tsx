@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
 import { X, RefreshCw, CheckCircle2, AlertTriangle, WifiOff, Database, Download, Upload, ExternalLink, Trash2, ShieldCheck } from 'lucide-react';
 import { api } from '../../services/api';
-import { SyncEngineStatus, syncEndpointLabel } from '../../services/syncEngine';
+import { SyncEngineStatus, syncEndpointLabel, syncEngine } from '../../services/syncEngine';
 import { SyncOpRecord } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
 
@@ -184,6 +184,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                 </div>
                 <div className="text-xs font-mono text-gray-600 dark:text-gray-400 truncate">Device ID: {syncStatus.clientId}</div>
                 <div className="text-xs font-mono text-gray-600 dark:text-gray-400 break-all">Syncing to: {syncEndpointLabel()}</div>
+                <div className="text-xs font-mono text-gray-600 dark:text-gray-400 break-all">Live updates: {syncEngine.liveStreamLabel()}</div>
                 {syncStatus.lastError && (
                   <div className="text-xs font-medium text-red-500 break-words">Last error: {syncStatus.lastError}</div>
                 )}
