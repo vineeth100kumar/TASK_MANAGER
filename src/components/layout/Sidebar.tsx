@@ -39,7 +39,8 @@ export function Sidebar({
   isDarkMode, setIsDarkMode, 
   lifeContext, setLifeContext,
   setIsTrashOpen,
-  setIsDiagnosticsOpen
+  setIsDiagnosticsOpen,
+  setIsSettingsOpen
 }: SidebarProps) {
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
