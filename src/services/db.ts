@@ -6,7 +6,7 @@
 
 
 const DB_NAME = 'sage_local_db';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 export interface SyncOpRecord {
   operationId: string;       // Unique UUID/ULID
@@ -102,6 +102,11 @@ export async function getDB(): Promise<IDBDatabase> {
       // 11. meta Store (Client metadata, server revisions, schema version)
       if (!db.objectStoreNames.contains('meta')) {
         db.createObjectStore('meta', { keyPath: 'key' });
+      }
+
+      // 12. boards Store (Canvas whiteboards)
+      if (!db.objectStoreNames.contains('boards')) {
+        db.createObjectStore('boards', { keyPath: 'id' });
       }
     };
 
@@ -283,7 +288,7 @@ export async function migrateFromLocalStorage(): Promise<boolean> {
 export async function clearAllStores(): Promise<void> {
   const stores = [
     'workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 
-    'comments', 'subtasks', 'activities', 'syncOperations', 'meta'
+    'comments', 'subtasks', 'activities', 'boards', 'syncOperations', 'meta'
   ];
   for (const s of stores) {
     try {

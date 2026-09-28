@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, LifeContext } from './types';
+import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseDateString } from '../utils/dateUtils';
@@ -24,6 +24,7 @@ export interface LocalState {
   comments: Comment[];
   subtasks: Subtask[];
   activities: Activity[];
+  boards: Board[];
 }
 
 let state: LocalState = {
@@ -35,7 +36,8 @@ let state: LocalState = {
   notes: [],
   comments: [],
   subtasks: [],
-  activities: []
+  activities: [],
+  boards: []
 };
 
 let isInitialized = false;
@@ -51,7 +53,7 @@ async function initializeStore(): Promise<void> {
 
     // 2. Load all entities instantly from IndexedDB
     const [
-      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities
+      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards
     ] = await Promise.all([
       getAllFromStore<WorkItem>('workItems'),
       getAllFromStore<Project>('projects'),
@@ -61,7 +63,8 @@ async function initializeStore(): Promise<void> {
       getAllFromStore<Note>('notes'),
       getAllFromStore<Comment>('comments'),
       getAllFromStore<Subtask>('subtasks'),
-      getAllFromStore<Activity>('activities')
+      getAllFromStore<Activity>('activities'),
+      getAllFromStore<Board>('boards')
     ]);
 
     // Sample data for local testing only (`npm run dev`). A real install starts
@@ -90,7 +93,8 @@ async function initializeStore(): Promise<void> {
         notes,
         comments,
         subtasks,
-        activities
+        activities,
+        boards
       };
     }
 
@@ -202,7 +206,7 @@ export const api = {
           if (json.success && json.data) {
             const data = json.data;
             const unsynced = await syncEngine.getUnsyncedKeys();
-            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities'] as const;
+            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards'] as const;
             for (const table of tables) {
               const rows = data[table];
               if (!Array.isArray(rows) || rows.length === 0) continue;
@@ -701,6 +705,68 @@ export const api = {
     }
   },
 
+  boards: {
+    list: async (lifeContext?: LifeContext): Promise<Board[]> => {
+      await initializeStore();
+      return state.boards
+        .filter(b => b && (!lifeContext || (b.lifeContext || 'work') === lifeContext))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    },
+    create: async (payload: { title?: string; lifeContext?: LifeContext }): Promise<Board> => {
+      await initializeStore();
+      const now = new Date().toISOString();
+      const board: Board = {
+        id: uuid(),
+        title: payload.title || 'Untitled board',
+        lifeContext: payload.lifeContext || 'work',
+        sceneParts: 1,
+        scene0: '~[]',
+        createdAt: now,
+        updatedAt: now
+      };
+      state.boards.push(board);
+      await persist('boards', board);
+      return board;
+    },
+    rename: async (id: string, title: string): Promise<Board> => {
+      await initializeStore();
+      const b = state.boards.find(b => b && b.id === id);
+      if (!b) throw new Error('Board not found');
+      b.title = title;
+      b.updatedAt = new Date().toISOString();
+      await persist('boards', b);
+      return b;
+    },
+    // The drawing as a JSON string of Excalidraw elements.
+    getScene: (board: Board): string => {
+      const parts = Number(board.sceneParts) || 0;
+      let json = '';
+      for (let i = 0; i < parts; i++) json += String(board[`scene${i}`] ?? '').replace(/^~/, '');
+      return json || '[]';
+    },
+    saveScene: async (id: string, sceneJson: string): Promise<Board> => {
+      await initializeStore();
+      const b = state.boards.find(b => b && b.id === id);
+      if (!b) throw new Error('Board not found');
+      const size = 45000;
+      const parts = Math.max(1, Math.ceil(sceneJson.length / size));
+      // Each part starts with "~" so Google Sheets keeps it as plain text (it would
+      // otherwise read some parts as numbers, formulas or JSON). Parts past the new
+      // count stay on the record but are ignored, since the server merges fields
+      // rather than replacing the row.
+      for (let i = 0; i < parts; i++) b[`scene${i}`] = '~' + sceneJson.slice(i * size, (i + 1) * size);
+      b.sceneParts = parts;
+      b.updatedAt = new Date().toISOString();
+      await putToStore('boards', b);
+      syncEngine.enqueueNoteDebounced(`board:${b.id}`, b, 'boards');
+      return b;
+    },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      await removeRecord('boards', id);
+    }
+  },
+
   comments: {
     list: async (workItemId: string): Promise<Comment[]> => {
       await initializeStore();
@@ -961,7 +1027,8 @@ export const api = {
         notes: Array.isArray(parsed.data.notes) ? parsed.data.notes : [],
         comments: Array.isArray(parsed.data.comments) ? parsed.data.comments : [],
         subtasks: Array.isArray(parsed.data.subtasks) ? parsed.data.subtasks : [],
-        activities: Array.isArray(parsed.data.activities) ? parsed.data.activities : []
+        activities: Array.isArray(parsed.data.activities) ? parsed.data.activities : [],
+        boards: Array.isArray(parsed.data.boards) ? parsed.data.boards : []
       };
 
       await Promise.all([
@@ -973,7 +1040,8 @@ export const api = {
         putBatchToStore('notes', state.notes),
         putBatchToStore('comments', state.comments),
         putBatchToStore('subtasks', state.subtasks),
-        putBatchToStore('activities', state.activities)
+        putBatchToStore('activities', state.activities),
+        putBatchToStore('boards', state.boards)
       ]);
 
       // Enqueue sync for restored items
@@ -1011,7 +1079,7 @@ export const api = {
     
     await clearAllStores();
     state = {
-      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: []
+      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: []
     };
     try {
       localStorage.removeItem('sage_solo_v5');
