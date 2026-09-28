@@ -19,7 +19,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
         <div className="flex items-center gap-2 mb-3 px-2">
           {colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
           <h4 className="font-bold text-[14px] text-gray-900 dark:text-white capitalize">{title}</h4>
-          <span className="text-[12px] font-bold text-gray-400 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">{groupTasks.length}</span>
+          <span className="text-[12px] font-semibold text-gray-400 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">{groupTasks.length}</span>
         </div>
         
         <div className="flex flex-col gap-1.5">
@@ -49,10 +49,10 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-bold text-gray-400 w-14">{task.key}</span>
+                      <span className="text-[11px] font-semibold text-gray-400 w-14">{task.key}</span>
                       <span className={`text-[15px] sm:text-[16px] font-bold tracking-tight ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
-                        <div className="hidden sm:flex items-center gap-1 text-[11px] font-bold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
+                        <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}
                         </div>
                       )}
@@ -63,17 +63,17 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                 {task.entityType === 'task' && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
                     {task.project?.name && (
-                      <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/5 text-gray-500">
+                      <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/5 text-gray-500">
                         {task.project.name}
                       </span>
                     )}
                     {task.area?.name && (
-                      <span className="hidden sm:inline-block text-[11px] font-bold px-2 py-0.5 rounded-md bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400">
+                      <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400">
                         {task.area.name}
                       </span>
                     )}
                     {task.estimated && (
-                      <span className="hidden lg:inline-flex text-[12px] font-bold text-gray-400">
+                      <span className="hidden lg:inline-flex text-[12px] font-semibold text-gray-400">
                         {task.estimated}
                       </span>
                     )}

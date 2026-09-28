@@ -89,10 +89,10 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         initial={{ opacity: 0, scale: 0.95, y: 15 }} 
         animate={{ opacity: 1, scale: 1, y: 0 }} 
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-[32px] shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-gray-500">
+          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
             <Settings size={16} />
             <span>Sage System Settings</span>
           </div>
@@ -103,7 +103,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         <div className="flex bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
           <button
             onClick={() => setActiveTab('attention')}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -111,7 +111,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </button>
           <button
             onClick={() => setActiveTab('data')}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -119,7 +119,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </button>
           <button
             onClick={() => setActiveTab('system')}
-            className={`flex-1 py-2 text-xs font-bold rounded-xl transition-all ${
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -138,19 +138,19 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                     <Bell size={18} />
                   </div>
                   <div>
-                    <h4 className="font-bold text-sm text-gray-900 dark:text-white">Desktop Reminders</h4>
+                    <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Desktop Reminders</h4>
                     <p className="text-xs text-gray-400">Receive native desktop popups when scheduled reminders are due.</p>
                   </div>
                 </div>
 
                 {notificationStatus === 'granted' ? (
-                  <span className="px-3 py-1 bg-emerald-50 text-emerald-600 font-bold text-xs rounded-full flex items-center gap-1">
+                  <span className="px-3 py-1 bg-emerald-50 text-emerald-600 font-semibold text-xs rounded-full flex items-center gap-1">
                     <Check size={13} /> Enabled
                   </span>
                 ) : (
                   <button
                     onClick={handleRequestNotifications}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm"
+                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm"
                   >
                     Enable
                   </button>
@@ -162,7 +162,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
               <div className="flex items-center gap-2">
                 <Sparkles size={16} className="text-amber-500" />
-                <h4 className="font-bold text-sm text-gray-900 dark:text-white">Smart Resurfacing Threshold</h4>
+                <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Smart Resurfacing Threshold</h4>
               </div>
               <p className="text-xs text-gray-400">
                 Gently suggest uncompleted items in your Today surface if you haven't opened or touched them in:
@@ -173,7 +173,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                   <button
                     key={days}
                     onClick={() => handleSetResurfacingDays(days)}
-                    className={`py-2 text-xs font-bold rounded-xl transition-all ${
+                    className={`py-2 text-xs font-semibold rounded-xl transition-all ${
                       resurfacingDays === days 
                         ? 'bg-amber-500 text-white shadow-sm' 
                         : 'bg-white dark:bg-white/5 border border-black/5 dark:border-white/5 text-gray-600 dark:text-gray-300'
@@ -197,14 +197,14 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                   <Calendar size={18} />
                 </div>
                 <div>
-                  <h4 className="font-bold text-sm text-gray-900 dark:text-white">iCalendar (.ics) Export</h4>
+                  <h4 className="font-semibold text-sm text-gray-900 dark:text-white">iCalendar (.ics) Export</h4>
                   <p className="text-xs text-gray-400">Export all time-bound tasks and events to Google/Apple Calendar.</p>
                 </div>
               </div>
 
               <button
                 onClick={handleExportICS}
-                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0"
+                className="px-4 py-2 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5 shrink-0"
               >
                 <Download size={14} /> Export .ics
               </button>
@@ -214,7 +214,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
               <div className="flex items-center gap-2">
                 <Upload size={16} className="text-blue-500" />
-                <h4 className="font-bold text-sm text-gray-900 dark:text-white">Import from CSV / Todoist</h4>
+                <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Import from CSV / Todoist</h4>
               </div>
               <p className="text-xs text-gray-400">
                 Paste raw CSV text or upload an export file from Todoist, Notion, or Google Tasks:
@@ -233,7 +233,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                   <button
                     type="submit"
                     disabled={!csvInput.trim() || isImporting}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-40 text-white font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5"
                   >
                     <Upload size={13} /> {isImporting ? 'Importing...' : 'Run Import'}
                   </button>
@@ -247,7 +247,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         {activeTab === 'system' && (
           <div className="space-y-6">
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
-              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs uppercase tracking-wider">
+              <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-semibold text-xs uppercase tracking-wider">
                 <Info size={16} />
                 <span>Google Sheets Backend Constraints</span>
               </div>
@@ -272,7 +272,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               }}
               className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3"
             >
-              <label htmlFor="pi-api-key" className="block text-xs font-bold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+              <label htmlFor="pi-api-key" className="block text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
                 Raspberry Pi server key
               </label>
               <p className="text-xs text-gray-600 dark:text-gray-400">
@@ -287,7 +287,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                   onChange={e => setPiKey(e.target.value)}
                   className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
                 />
-                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs rounded-xl shadow-sm">
+                <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm">
                   Save
                 </button>
               </div>
@@ -295,7 +295,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
 
             {/* DANGER ZONE: Clear Database */}
             <div className="p-5 rounded-2xl bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 space-y-3">
-              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-bold text-xs uppercase tracking-wider">
+              <div className="flex items-center gap-2 text-red-600 dark:text-red-400 font-semibold text-xs uppercase tracking-wider">
                 <AlertTriangle size={16} />
                 <span>Danger Zone · Clear Database</span>
               </div>
@@ -307,13 +307,13 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 <button
                   type="button"
                   onClick={() => setIsConfirmingClear(true)}
-                  className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-bold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-transform active:scale-95"
+                  className="px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white font-semibold text-xs rounded-xl shadow-sm flex items-center gap-1.5 transition-transform active:scale-95"
                 >
                   <Trash2 size={14} /> Clear Local Database
                 </button>
               ) : (
                 <div className="p-4 rounded-xl bg-white dark:bg-[#2c2c2e] border border-red-200 dark:border-red-900/40 space-y-3">
-                  <p className="text-xs font-bold text-red-600 dark:text-red-400">
+                  <p className="text-xs font-semibold text-red-600 dark:text-red-400">
                     Type <span className="font-mono bg-red-100 dark:bg-red-900/40 px-1.5 py-0.5 rounded">CLEAR</span> to confirm wiping all local records:
                   </p>
                   <div className="flex items-center gap-2">
@@ -329,7 +329,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                       type="button"
                       disabled={confirmText !== 'CLEAR'}
                       onClick={handleClearDatabase}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-30 text-white font-bold text-xs rounded-xl shadow-sm"
+                      className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-30 text-white font-semibold text-xs rounded-xl shadow-sm"
                     >
                       Confirm Wipe
                     </button>

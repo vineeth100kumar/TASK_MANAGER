@@ -87,7 +87,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans">
       <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-[32px] shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[88vh] border border-gray-100 dark:border-white/10">
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[88vh] border border-gray-100 dark:border-white/10">
         
         {/* Header */}
         <div className="h-16 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
@@ -100,10 +100,10 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
 
         {/* Tab Navigator */}
         <div className="flex px-6 pt-3 border-b border-gray-100 dark:border-white/5 gap-4 shrink-0">
-          <button onClick={() => setActiveTab('overview')} className={`pb-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors ${activeTab === 'overview' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
+          <button onClick={() => setActiveTab('overview')} className={`pb-3 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors ${activeTab === 'overview' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
             Overview & Metrics
           </button>
-          <button onClick={() => setActiveTab('queue')} className={`pb-3 text-xs font-bold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'queue' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
+          <button onClick={() => setActiveTab('queue')} className={`pb-3 text-xs font-semibold uppercase tracking-wider border-b-2 transition-colors flex items-center gap-1.5 ${activeTab === 'queue' ? 'border-blue-500 text-blue-600 dark:text-blue-400' : 'border-transparent text-gray-400 hover:text-gray-600 dark:hover:text-gray-200'}`}>
             Operations Queue ({operations.length})
           </button>
         </div>
@@ -142,7 +142,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                 </div>
 
                 <button onClick={handleForceSync} disabled={isForcing || !navigator.onLine}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl flex items-center gap-1.5 transition-transform active:scale-95 shadow-sm">
+                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl flex items-center gap-1.5 transition-transform active:scale-95 shadow-sm">
                   <RefreshCw size={13} className={isForcing ? 'animate-spin' : ''} /> Force Sync
                 </button>
               </div>
@@ -150,25 +150,25 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
               {/* Diagnostic Metrics Grid */}
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
                 <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-1">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Pending Queue</div>
-                  <div className="text-2xl font-extrabold text-gray-900 dark:text-white">{syncStatus.pendingCount}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Pending Queue</div>
+                  <div className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{syncStatus.pendingCount}</div>
                   <div className="text-[10px] text-gray-400">Durable ops</div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-1">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Failed / Retry</div>
-                  <div className="text-2xl font-extrabold text-gray-900 dark:text-white">{syncStatus.failedCount}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Failed / Retry</div>
+                  <div className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">{syncStatus.failedCount}</div>
                   <div className="text-[10px] text-gray-400">In backoff cycle</div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-1">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Server Rev</div>
-                  <div className="text-2xl font-extrabold text-gray-900 dark:text-white">v{syncStatus.serverRevision || 1}</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Server Rev</div>
+                  <div className="text-2xl font-bold tracking-tight text-gray-900 dark:text-white">v{syncStatus.serverRevision || 1}</div>
                   <div className="text-[10px] text-gray-400">Cloud sequence</div>
                 </div>
 
                 <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-1">
-                  <div className="text-xs font-bold uppercase tracking-wider text-gray-400">Tab Role</div>
+                  <div className="text-xs font-semibold uppercase tracking-wider text-gray-400">Tab Role</div>
                   <div className="text-sm font-bold text-gray-900 dark:text-white mt-1">{syncStatus.isLeader ? 'Leader Worker' : 'Observer Tab'}</div>
                   <div className="text-[10px] text-gray-400">BroadcastChannel</div>
                 </div>
@@ -177,7 +177,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
               {/* Persistence Details */}
               <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
                 <div className="flex items-center justify-between">
-                  <span className="text-xs font-bold uppercase tracking-wider text-gray-400">Local Persistence Layer</span>
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Local Persistence Layer</span>
                   <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400 flex items-center gap-1">
                     <ShieldCheck size={14}/> IndexedDB Transactional
                   </span>
@@ -192,7 +192,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
 
               {/* Backup & Tools */}
               <div className="pt-2 space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Backup & Storage Management</h4>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Backup & Storage Management</h4>
                 
                 <div className="flex flex-wrap gap-2">
                   <button onClick={handleExportBackup} className="flex-1 px-4 py-2.5 rounded-xl font-bold bg-gray-100 dark:bg-white/10 text-gray-800 dark:text-gray-200 hover:bg-gray-200 text-xs flex items-center justify-center gap-2">
@@ -227,7 +227,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
             /* Queue Inspector Tab */
             <div className="space-y-4">
               <div className="flex justify-between items-center">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-gray-400">Durable Operations in IndexedDB</h4>
+                <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-400">Durable Operations in IndexedDB</h4>
                 <button onClick={reloadData} className="text-xs text-blue-500 font-bold flex items-center gap-1 hover:underline">
                   <RefreshCw size={12} /> Refresh
                 </button>
@@ -263,7 +263,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
 
                       <div className="flex items-center gap-1.5 shrink-0">
                         {op.status === 'failed' && (
-                          <button onClick={() => handleRetryOp(op.operationId)} className="px-2.5 py-1.5 bg-blue-600 text-white rounded-lg font-bold text-[11px] hover:bg-blue-700">
+                          <button onClick={() => handleRetryOp(op.operationId)} className="px-2.5 py-1.5 bg-blue-600 text-white rounded-lg font-semibold text-[11px] hover:bg-blue-700">
                             Retry
                           </button>
                         )}

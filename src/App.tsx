@@ -214,7 +214,7 @@ function MainApp() {
   };
 
   return (
-    <div className={`h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-[#ffffff] text-gray-900 dark:bg-[#000000] dark:text-gray-100`}>
+    <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
       <Sidebar 
         isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
         activeView={activeView} setActiveView={setActiveView}
@@ -226,7 +226,7 @@ function MainApp() {
         setIsSettingsOpen={setIsSettingsOpen}
       />
 
-      <main className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0a0500]' : 'bg-[#ffffff] dark:bg-[#000000]'}`}>
+      <main className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0a0500]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
           activeView={activeView} activeWorkspace={activeWorkspace}
@@ -241,7 +241,7 @@ function MainApp() {
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
           <div className="p-4 md:p-8 min-h-full">
             {isLoading ? (
-              <div className="h-full flex items-center justify-center text-gray-400 py-32"><Loader2 className="animate-spin" size={32}/></div>
+              <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-400 py-32"><Loader2 className="animate-spin" size={28}/><span className="text-[13px] font-medium">Loading your items…</span></div>
             ) : activeView === 'notes' ? (
               <NotesView lifeContext={lifeContext} />
             ) : activeView === 'inbox' ? (
@@ -264,15 +264,15 @@ function MainApp() {
 
                 {workItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-20">
-                    <div className="bg-gray-100 dark:bg-white/5 p-4 rounded-full mb-4">
-                      <LayoutList size={32} />
+                    <div className="bg-gray-100 dark:bg-white/5 ring-8 ring-gray-50 dark:ring-white/[0.02] p-4 rounded-2xl mb-5 text-gray-500">
+                      <LayoutList size={28} />
                     </div>
-                    <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">No items found</h3>
-                    <p className="text-[15px] font-medium max-w-sm text-center">
+                    <h3 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white mb-1.5">No items found</h3>
+                    <p className="text-[14px] text-gray-500 max-w-sm text-center leading-relaxed">
                       {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all') ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
-                    <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-6 py-2.5 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-md flex items-center gap-2">
-                      <Plus size={16} /> Add Item (N)
+                    <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/20 transition-colors active:scale-[0.98] flex items-center gap-2">
+                      <Plus size={16} /> Add Item <span className="ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white/20">N</span>
                     </button>
                   </div>
                 ) : (
@@ -304,7 +304,7 @@ function MainApp() {
         {/* Mobile Add Item Floating Action Button */}
         <button 
           onClick={() => setIsCreateModalOpen(true)} 
-          className="md:hidden fixed bottom-6 right-6 z-30 w-14 h-14 rounded-full bg-blue-600 text-white shadow-2xl flex items-center justify-center active:scale-95 transition-transform" 
+          className="md:hidden fixed bottom-6 right-6 z-30 w-14 h-14 rounded-2xl bg-blue-600 text-white shadow-lg shadow-blue-600/30 hover:bg-blue-700 flex items-center justify-center active:scale-95 transition-transform" 
           aria-label="Add Item"
         >
           <Plus size={24} />
@@ -373,13 +373,13 @@ function MainApp() {
         <AnimatePresence>
           {toasts.map((toast: any) => (
              <motion.div key={toast.id} initial={{ opacity: 0, y: 20, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                className={`px-4 py-3 rounded-2xl shadow-2xl flex items-center gap-3.5 pointer-events-auto border border-white/10 ${toast.type==='error'?'bg-red-600 text-white':'bg-gray-900/95 dark:bg-white/95 text-white dark:text-black backdrop-blur-xl'}`}>
-               {toast.type === 'error' ? <ShieldAlert size={18} /> : <CheckCircle size={18} className="text-emerald-400 dark:text-emerald-600" />}
-               <span className="text-xs font-bold">{toast.message}</span>
+                className={`pl-3.5 pr-2 py-2 min-h-11 rounded-xl shadow-lg shadow-black/10 flex items-center gap-3 pointer-events-auto ring-1 ${toast.type==='error'?'bg-red-600 text-white ring-red-700/40':'bg-gray-900/95 dark:bg-[#2c2c2e]/95 text-white ring-white/10 backdrop-blur-xl'}`}>
+               {toast.type === 'error' ? <ShieldAlert size={17} className="shrink-0" /> : <CheckCircle size={18} className="text-emerald-400 dark:text-emerald-600" />}
+               <span className="text-xs font-semibold">{toast.message}</span>
                {toast.action && (
                  <button 
                    onClick={() => { toast.action?.onAction(); dismissToast(toast.id); }}
-                   className="px-2.5 py-1 bg-white/20 hover:bg-white/30 dark:bg-black/10 dark:hover:bg-black/20 font-extrabold text-[11px] rounded-lg transition-colors flex items-center gap-1 active:scale-95"
+                   className="px-2.5 py-1 bg-white/15 hover:bg-white/25 font-semibold text-[12px] rounded-lg transition-colors flex items-center gap-1 active:scale-95"
                  >
                    <RotateCcw size={11} />
                    <span>{toast.action.label}</span>
@@ -390,12 +390,6 @@ function MainApp() {
         </AnimatePresence>
       </div>
 
-      <style dangerouslySetInnerHTML={{__html: `
-        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
-        .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
-        .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(156, 163, 175, 0.4); border-radius: 10px; }
-        .dark .custom-scrollbar::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); }
-      `}} />
     </div>
   );
 }

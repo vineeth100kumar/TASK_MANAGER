@@ -52,7 +52,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
       
       {/* Key Milestones Ribbon */}
       {milestones.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 dark:from-blue-500/5 dark:via-indigo-500/5 dark:to-purple-500/5 p-6 rounded-[28px] border border-blue-200/40 dark:border-blue-500/20">
+        <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 dark:from-blue-500/5 dark:via-indigo-500/5 dark:to-purple-500/5 p-6 rounded-3xl border border-blue-200/40 dark:border-blue-500/20">
           <div className="flex items-center gap-2 mb-4">
             <Target size={18} className="text-blue-600 dark:text-blue-400" />
             <h3 className="font-bold text-[15px] text-gray-900 dark:text-white">Milestones & Key Checkpoints</h3>
@@ -69,8 +69,8 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
                 <div key={m.id} onClick={() => onSelect(m.id)}
                   className={`p-4 rounded-2xl border transition-all cursor-pointer ${isReached ? 'bg-emerald-50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-800/40' : 'bg-white dark:bg-[#2c2c2e] border-black/5 dark:border-white/5 hover:border-blue-300 dark:hover:border-blue-500/40 shadow-sm'}`}>
                   <div className="flex items-start justify-between gap-2 mb-1.5">
-                    <span className="text-[11px] font-bold text-gray-400 uppercase">{m.key}</span>
-                    <span className={`text-[11px] font-bold px-2 py-0.5 rounded-md ${isReached ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'}`}>
+                    <span className="text-[11px] font-semibold text-gray-400 uppercase">{m.key}</span>
+                    <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-md ${isReached ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300' : 'bg-blue-100 text-blue-700 dark:bg-blue-900/40 dark:text-blue-300'}`}>
                       {isReached ? 'Achieved ✓' : targetDate ? new Date(targetDate + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) : 'Upcoming'}
                     </span>
                   </div>
@@ -99,7 +99,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
             return (
               <div key={dateStr} className="relative group">
                 {/* Date Node */}
-                <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#000000] flex items-center justify-center ${isToday ? 'bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
+                <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#0a0a0b] flex items-center justify-center ${isToday ? 'bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
 
                 <div className="flex items-baseline gap-3 mb-3">
                   <span className={`text-[15px] font-bold ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-white'}`}>
@@ -109,7 +109,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
                     {fullDate}
                   </span>
                   {isToday && (
-                    <span className="bg-blue-600 text-white text-[10px] font-bold px-2 py-0.5 rounded-full uppercase tracking-wider">
+                    <span className="bg-blue-600 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">
                       Today
                     </span>
                   )}
@@ -145,7 +145,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
 
                           <div className="min-w-0">
                             <div className="flex items-center gap-2 mb-0.5">
-                              <span className="text-[11px] font-bold text-gray-400 uppercase">{item.key}</span>
+                              <span className="text-[11px] font-semibold text-gray-400 uppercase">{item.key}</span>
                               {item.project?.name && <span className="text-[11px] font-semibold text-gray-400 bg-gray-100 dark:bg-white/5 px-2 py-0.2 rounded">{item.project.name}</span>}
                               {item.area?.name && <span className="text-[11px] font-semibold text-orange-600 dark:text-orange-400 bg-orange-50 dark:bg-orange-950/30 px-2 py-0.2 rounded">{item.area.name}</span>}
                             </div>
@@ -162,12 +162,12 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
                             </span>
                           )}
                           {item.startAt && (
-                            <span className="text-xs font-bold text-purple-600 dark:text-purple-400">
+                            <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
                               {new Date(item.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           )}
                           {item.remindAt && (
-                            <span className="text-xs font-bold text-emerald-600 dark:text-emerald-400">
+                            <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                               {new Date(item.remindAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                             </span>
                           )}
