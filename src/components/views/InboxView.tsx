@@ -1,8 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Circle, ArrowRight, Plus, Clock, Trash2, Calendar, Target, Sparkles, ChevronRight, Check, X, BrainCircuit, Loader2 } from 'lucide-react';
+import { Inbox, CheckCircle2, Circle, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X } from 'lucide-react';
 import { api } from '../../services/api';
-import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { SnoozeMenu } from '../common/SnoozeMenu';
@@ -19,10 +18,6 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const [areas, setAreas] = useState<Area[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
-  // AI Brain Dump State
-  const [brainDumpText, setBrainDumpText] = useState('');
-  const [isAiParsing, setIsAiParsing] = useState(false);
-
   // Clarify Form State
   const [targetType, setTargetType] = useState<string>('task');
   const [targetProjectId, setTargetProjectId] = useState<string>('');
@@ -31,50 +26,6 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const [targetPriority, setTargetPriority] = useState<string>('medium');
 
   const { showToast } = useToast();
-
-  const handleBrainDumpSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!brainDumpText.trim()) return;
-
-    setIsAiParsing(true);
-    try {
-      let parsedTasks = await aiEngine.parseBrainDump(brainDumpText);
-      
-      // AI robustness: If it returned a single object, wrap it in an array
-      if (parsedTasks && typeof parsedTasks === 'object' && !Array.isArray(parsedTasks)) {
-        if (parsedTasks.tasks && Array.isArray(parsedTasks.tasks)) {
-           parsedTasks = parsedTasks.tasks;
-        } else {
-           parsedTasks = [parsedTasks];
-        }
-      }
-      
-      // If still not an array (or null), throw an error
-      if (!Array.isArray(parsedTasks)) {
-          throw new Error("AI returned invalid data format");
-      }
-      
-      for (const t of parsedTasks) {
-         await api.workItems.save({
-            title: t.title,
-            isInbox: true,
-            lifeContext: lifeContext,
-            dueDate: t.dueDate || null,
-            priority: t.priority || 'medium',
-            estimatedMinutes: t.estimatedMinutes || null,
-            status: 'todo'
-         } as any);
-      }
-      
-      showToast(`Sage extracted ${parsedTasks.length} task${parsedTasks.length > 1 ? 's' : ''}!`);
-      setBrainDumpText('');
-      loadInbox();
-    } catch (err: any) {
-      showToast('AI Parsing failed: ' + err.message, 'error');
-    } finally {
-      setIsAiParsing(false);
-    }
-  };
 
   const loadInbox = async () => {
     setIsLoading(true);
@@ -188,31 +139,6 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           <Plus size={14} /> Add Item (N)
         </button>
       </div>
-
-      {/* AI Magic Brain Dump */}
-      <form onSubmit={handleBrainDumpSubmit} className="p-1 rounded-[32px] bg-gradient-to-r from-blue-500 via-purple-500 to-pink-500 p-[2px]">
-        <div className="bg-white dark:bg-[#1c1c1e] rounded-[30px] p-2 flex items-center gap-2">
-           <div className="pl-4 text-blue-500">
-             <BrainCircuit size={20} />
-           </div>
-           <input
-             type="text"
-             value={brainDumpText}
-             onChange={(e) => setBrainDumpText(e.target.value)}
-             placeholder="Type a brain dump (e.g. 'i am going to dinner at 10pm and buy milk tomorrow')..."
-             className="flex-1 bg-transparent border-none focus:ring-0 text-sm font-medium text-gray-900 dark:text-white placeholder-gray-400 py-3"
-             disabled={isAiParsing}
-           />
-           <button 
-             type="submit"
-             disabled={!brainDumpText.trim() || isAiParsing}
-             className="px-6 py-3 bg-gray-900 dark:bg-white text-white dark:text-black rounded-3xl font-bold text-xs disabled:opacity-50 flex items-center gap-2"
-           >
-             {isAiParsing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
-             {isAiParsing ? 'Parsing...' : 'Extract'}
-           </button>
-        </div>
-      </form>
 
       {/* Inbox Items List */}
       {items.length === 0 ? (

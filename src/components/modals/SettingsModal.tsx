@@ -1,9 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { 
-  Settings, Bell, Calendar, Download, Upload, ShieldAlert, 
-  Database, Check, X, FileText, Info, Sparkles, Trash2, AlertTriangle 
-} from 'lucide-react';
+import { motion } from 'framer-motion';
+import { Settings, Bell, Calendar, Download, Upload, Check, X, Info, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
 import { api } from '../../services/api';
 import { notificationService } from '../../services/notificationService';
 import { downloadICSFile } from '../../utils/calendarExport';

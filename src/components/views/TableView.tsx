@@ -1,4 +1,3 @@
-import React from 'react';
 import { STATUSES, PRIORITIES } from '../../services/mockDb';
 import { Flag, Check } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/dateUtils';

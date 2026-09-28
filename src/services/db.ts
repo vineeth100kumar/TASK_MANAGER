@@ -4,7 +4,6 @@
  * Handles schema versioning, entity stores, durable sync operations, and seamless auto-migration.
  */
 
-import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity } from './types';
 
 const DB_NAME = 'sage_local_db';
 const DB_VERSION = 5;

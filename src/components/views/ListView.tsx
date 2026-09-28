@@ -1,4 +1,3 @@
-import React from 'react';
 import { CheckCircle, Circle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/mockDb';
 import { formatDateRange } from '../../utils/dateUtils';

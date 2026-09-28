@@ -10,7 +10,7 @@
  * - Debounced Note Autosave
  */
 
-import { getDB, getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, SyncOpRecord } from './db';
+import { getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, SyncOpRecord } from './db';
 import { tabCoordinator } from './tabSync';
 import { piBackendUrl, piHeaders } from './piBackend';
 
@@ -86,9 +86,11 @@ class SyncEngine {
   private listeners: Set<SyncStatusListener> = new Set();
   private entityListeners: Set<EntityChangeListener> = new Set();
   private conflictListeners: Set<ConflictListener> = new Set();
+  private localChangeListeners: Set<EntityChangeListener> = new Set();
   private noteDebounceTimers: Map<string, any> = new Map();
   private batchDebounceTimer: any = null;
   private retryTimer: any = null;
+  private consecutiveFailures = 0;
   private incrementalPullTimer: any = null;
 
   async init(): Promise<void> {
@@ -143,6 +145,12 @@ class SyncEngine {
     return () => this.entityListeners.delete(listener);
   }
 
+  // Fires when this tab changes something locally (the change is queued for upload).
+  onLocalChange(listener: EntityChangeListener): () => void {
+    this.localChangeListeners.add(listener);
+    return () => this.localChangeListeners.delete(listener);
+  }
+
   onConflict(listener: ConflictListener): () => void {
     this.conflictListeners.add(listener);
     return () => this.conflictListeners.delete(listener);
@@ -180,6 +188,13 @@ class SyncEngine {
       failedCount: failed.length,
       conflictCount: conflict.length
     };
+  }
+
+  // "entityType:id" for every record with a local change not yet accepted by the
+  // server. Pulled data must not overwrite these, or the edit vanishes from view.
+  async getUnsyncedKeys(): Promise<Set<string>> {
+    const ops = await getAllFromStore<SyncOpRecord>('syncOperations');
+    return new Set(ops.map(o => `${o.entityType}:${o.entityId}`));
   }
 
   async getPendingOperations(): Promise<SyncOpRecord[]> {
@@ -220,6 +235,7 @@ class SyncEngine {
     });
 
     this.notifyListeners();
+    this.localChangeListeners.forEach(l => l(entityType, [{ id: entityId, revision }]));
 
     // 1500ms batch collector window to save mobile battery & Apps Script execution quota
     if (this.batchDebounceTimer) clearTimeout(this.batchDebounceTimer);
@@ -372,6 +388,7 @@ class SyncEngine {
         await setMeta('lastSuccessfulSync', this.lastSuccessfulSync);
         this.currentState = hadConflict ? 'conflict' : 'syncing';
         this.lastError = null;
+        this.consecutiveFailures = 0;
         this.notifyListeners();
 
         // Check if there are still pending ops to continue draining without waiting
@@ -417,13 +434,15 @@ class SyncEngine {
       const json = await response.json();
       if (json.success && json.changes) {
         const changes = json.changes;
+        const unsynced = await this.getUnsyncedKeys();
         for (const table in changes) {
           const rows = changes[table];
           if (Array.isArray(rows) && rows.length > 0) {
-            for (const row of rows) {
+            const incoming = rows.filter((row: any) => !unsynced.has(`${table}:${row?.id}`));
+            for (const row of incoming) {
               await putToStore(table, row);
             }
-            this.notifyEntityListeners(table, rows);
+            if (incoming.length > 0) this.notifyEntityListeners(table, incoming);
           }
         }
 
@@ -442,7 +461,9 @@ class SyncEngine {
 
   private scheduleBackoffRetry(): void {
     if (this.retryTimer) clearTimeout(this.retryTimer);
-    const delay = Math.min(60000, Math.pow(2, 2) * 1000 + Math.random() * 1000);
+    // 2s, 4s, 8s ... capped at a minute, so a down server isn't hit every few seconds.
+    this.consecutiveFailures += 1;
+    const delay = Math.min(60000, Math.pow(2, this.consecutiveFailures) * 1000) + Math.random() * 1000;
     this.retryTimer = setTimeout(() => {
       this.processQueue();
     }, delay);
