@@ -340,6 +340,7 @@ export const api = {
         startAt: toInputDateTimeValue(payload.startAt) || null,
         endAt: toInputDateTimeValue(payload.endAt) || null,
         remindAt: toInputDateTimeValue(payload.remindAt) || null,
+        reminderLeadMinutes: payload.reminderLeadMinutes ?? null,
         repeatRule: payload.repeatRule || null,
         location: payload.location || null,
         labels: payload.labels || [],
