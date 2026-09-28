@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Circle, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X } from 'lucide-react';
+import { Inbox, CheckCircle2, Circle, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -8,6 +8,7 @@ import { SnoozeMenu } from '../common/SnoozeMenu';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { formatDateRange } from '../../utils/dateUtils';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
+import { InboxTriage } from './InboxTriage';
 
 interface InboxViewProps {
   lifeContext: LifeContext;
@@ -17,6 +18,7 @@ interface InboxViewProps {
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
+  const [isTriaging, setIsTriaging] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
 
@@ -139,6 +141,15 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           </p>
         </div>
 
+        <div className="flex items-center gap-2">
+        {items.length > 0 && (
+          <button
+            onClick={() => setIsTriaging(true)}
+            className="px-4 py-2.5 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black font-semibold text-xs rounded-xl shadow-sm flex items-center gap-2 active:scale-95 transition-all"
+          >
+            <Play size={13} className="fill-current" /> Process inbox
+          </button>
+        )}
         <button 
           onClick={() => {
             const event = new KeyboardEvent('keydown', { key: 'n' });
@@ -148,6 +159,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
         >
           <Plus size={14} /> Add Item (N)
         </button>
+        </div>
       </div>
 
       {/* Inbox Items List */}
@@ -227,6 +239,12 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           ))}
         </div>
       )}
+
+      <AnimatePresence>
+        {isTriaging && (
+          <InboxTriage items={items} onChanged={loadInbox} onClose={() => { setIsTriaging(false); loadInbox(); }} />
+        )}
+      </AnimatePresence>
 
       {/* Quick Clarify Modal Drawer */}
       <AnimatePresence>

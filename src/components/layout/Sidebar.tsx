@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -45,6 +45,22 @@ export function Sidebar({
 }: SidebarProps) {
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
+  const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const settingsMenuRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!isSettingsMenuOpen) return;
+    const onPointer = (e: PointerEvent) => {
+      if (settingsMenuRef.current && !settingsMenuRef.current.contains(e.target as Node)) setIsSettingsMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setIsSettingsMenuOpen(false); };
+    document.addEventListener('pointerdown', onPointer);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('pointerdown', onPointer);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [isSettingsMenuOpen]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [goals, setGoals] = useState<Goal[]>([]);
   const [habits, setHabits] = useState<Habit[]>([]);
@@ -382,34 +398,44 @@ export function Sidebar({
             </div>
           </div>
 
-          <div className="p-4 mt-auto border-t border-gray-200/50 dark:border-white/5 space-y-1">
-            <button onClick={() => setIsSettingsOpen && setIsSettingsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
-              <Settings size={15} /> <span>Settings & Migration</span>
-            </button>
-
-            <button onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-blue-500 dark:hover:text-blue-400 text-[12.5px] font-medium transition-colors">
-              <Database size={15} /> <span>Data & Sync</span>
-            </button>
-
-            <button onClick={() => setIsTrashOpen && setIsTrashOpen(true)} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-red-500 dark:hover:text-red-400 text-[12.5px] font-medium transition-colors">
-              <Trash2 size={15} /> <span>Trash & Archive</span>
-            </button>
-
-            <button onClick={() => { api.exportBackup(); showToast('Backup downloaded'); }} className="w-full flex items-center gap-3 px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
-              <Download size={15} /> <span>Export Backup (JSON)</span>
-            </button>
-
-            <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener noreferrer" className="w-full flex items-center justify-between px-3 py-1.5 rounded-lg hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white text-[12.5px] font-medium transition-colors">
-              <span className="flex items-center gap-3"><ExternalLink size={15} /> <span>Google Sheet</span></span>
-              <span className="text-[10px] text-emerald-500 font-bold">Live</span>
-            </a>
-
-            <div className="pt-2 border-t border-gray-200/30 dark:border-white/5 flex items-center justify-between px-1">
-              <button onClick={() => setIsDarkMode(!isDarkMode)} className="flex items-center gap-2 p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 text-[12.5px] font-medium transition-colors">
-                {isDarkMode ? <Sun size={15} /> : <Moon size={15} />}
-                <span>{isDarkMode ? 'Light' : 'Dark'}</span>
+          <div className="p-3 mt-auto border-t border-gray-200/50 dark:border-white/5">
+            <div ref={settingsMenuRef} className="relative flex items-center gap-1">
+              <AnimatePresence>
+                {isSettingsMenuOpen && (
+                  <motion.div
+                    initial={{ opacity: 0, y: 6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.98 }}
+                    transition={{ duration: 0.14 }}
+                    role="menu"
+                    className="absolute bottom-full left-0 right-0 mb-2 p-1 rounded-xl bg-white dark:bg-[#2c2c2e] shadow-xl ring-1 ring-black/5 dark:ring-white/10 origin-bottom z-10">
+                    {[
+                      { label: 'Settings & Migration', icon: Settings, onClick: () => setIsSettingsOpen?.(true) },
+                      { label: 'Data & Sync', icon: Database, onClick: () => setIsDiagnosticsOpen?.(true) },
+                      { label: 'Trash & Archive', icon: Trash2, onClick: () => setIsTrashOpen?.(true) },
+                      { label: 'Export Backup (JSON)', icon: Download, onClick: () => { api.exportBackup(); showToast('Backup downloaded'); } },
+                    ].map(entry => (
+                      <button key={entry.label} role="menuitem" onClick={() => { setIsSettingsMenuOpen(false); entry.onClick(); }}
+                        className="w-full flex items-center gap-3 px-3 py-2 rounded-lg text-[13px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
+                        <entry.icon size={15} className="text-gray-400" /> {entry.label}
+                      </button>
+                    ))}
+                    <a href="https://docs.google.com/spreadsheets" target="_blank" rel="noopener noreferrer" role="menuitem" onClick={() => setIsSettingsMenuOpen(false)}
+                      className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-[13px] font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors">
+                      <span className="flex items-center gap-3"><ExternalLink size={15} className="text-gray-400" /> Google Sheet</span>
+                      <span className="text-[10px] text-emerald-500 font-semibold">Live</span>
+                    </a>
+                    <div className="px-3 pt-2 pb-1 mt-1 border-t border-gray-100 dark:border-white/5 text-[10px] font-medium text-gray-400 tracking-wide">v6.0 · Local-first</div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              <button onClick={() => setIsSettingsMenuOpen(o => !o)} aria-haspopup="menu" aria-expanded={isSettingsMenuOpen}
+                className={`flex-1 flex items-center gap-2.5 px-3 py-2 rounded-lg text-[13px] font-medium transition-colors ${isSettingsMenuOpen ? 'bg-black/[0.05] dark:bg-white/10 text-gray-900 dark:text-white' : 'text-gray-600 dark:text-gray-400 hover:bg-black/[0.04] dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'}`}>
+                <Settings size={16} /> <span className="flex-1 text-left">Settings</span>
+                <ChevronUp size={14} className={`text-gray-400 transition-transform ${isSettingsMenuOpen ? '' : 'rotate-180'}`} />
               </button>
-              <span className="text-[10px] font-medium text-gray-400 tracking-wide">v6.0 · Local-first</span>
+              <button onClick={() => setIsDarkMode(!isDarkMode)} title={isDarkMode ? 'Light mode' : 'Dark mode'} aria-label={isDarkMode ? 'Switch to light mode' : 'Switch to dark mode'}
+                className="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-black/[0.04] dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white transition-colors">
+                {isDarkMode ? <Sun size={16} /> : <Moon size={16} />}
+              </button>
             </div>
           </div>
         </div>
