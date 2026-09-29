@@ -590,6 +590,27 @@ import canvas_thinker
 def canvas_think_status():
     return {"success": True, "engine": canvas_thinker.engine()}
 
+class GroqKeyRequest(BaseModel):
+    key: str = ""
+
+@app.get("/api/settings/groq-key")
+def groq_key_status():
+    return {"success": True, **canvas_thinker.groq_key_status()}
+
+@app.post("/api/settings/groq-key")
+def save_groq_key(req: GroqKeyRequest):
+    key = req.key.strip()
+    if key:
+        # Check it with Groq first, so a typo shows up here, not on the canvas.
+        try:
+            res = httpx.get("https://api.groq.com/openai/v1/models", headers={"Authorization": f"Bearer {key}"}, timeout=15)
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Couldn't reach Groq to check the key: {e}")
+        if res.status_code == 401:
+            raise HTTPException(status_code=400, detail="Groq says this key isn't valid.")
+    canvas_thinker.save_groq_key(key)
+    return {"success": True, **canvas_thinker.groq_key_status()}
+
 @app.post("/api/canvas/think")
 def canvas_think(req: canvas_thinker.CanvasThinkRequest):
     try:

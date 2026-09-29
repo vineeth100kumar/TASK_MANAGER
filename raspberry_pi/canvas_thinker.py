@@ -9,12 +9,14 @@ joins what) plus a PNG snapshot, and asks for one of:
   ask        - answer a free-form question about the board
 
 Which AI answers, first match wins:
-  1. Groq, when GROQ_API_KEY is set in /etc/sage/sage.env or in LUMO's
-     lumo/rpi_server/.env (the same key the voice assistant uses). Fast, text only.
+  1. Groq, with a key saved from the app's Settings, or GROQ_API_KEY in
+     /etc/sage/sage.env or LUMO's lumo/rpi_server/.env (the same key the voice
+     assistant uses). Fast, text only.
   2. Claude, when ANTHROPIC_API_KEY is set. Reads the outline and the picture.
   3. The Pi's local Ollama model. Free, but slow and much weaker.
 """
 
+import json
 import os
 import re
 from pathlib import Path
@@ -30,6 +32,8 @@ GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b"
 GROQ_FALLBACK_MODEL = "openai/gpt-oss-20b"
 LUMO_ENV = Path(__file__).resolve().parent.parent / "lumo" / "rpi_server" / ".env"
+# Keys entered in Settings, kept next to the database (outside git).
+SECRETS_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "sage_secrets.json"
 # Keeps a runaway board from turning into a large bill.
 MAX_OUTLINE_CHARS = 60_000
 
@@ -39,25 +43,37 @@ loose notes or a sketch. You get a text outline of it (shapes, their labels, and
 which arrows connect what) and, when available, a picture of it.
 
 Be direct and specific, like a sharp colleague looking over their shoulder. Refer \
-to things on the board by their labels. Say plainly when something is fine; do not \
-invent problems to seem useful. Keep answers short: a few bullets or a short \
-paragraph, in plain text with simple "- " bullets. No headings, no preamble."""
+to things on the board by their labels. Only talk about what is actually on the \
+board. Say plainly when something is fine; never invent problems to seem useful, \
+and never list a kind of problem you can't point to on the board. Match the length \
+of your answer to the board: a board with two or three shapes gets two or three \
+sentences. Plain text only, with simple "- " bullets if you need a list. No \
+headings, no bold, no numbered checklists, no preamble."""
 
 MODE_PROMPTS = {
     "review": (
-        "Check my thinking on this board. Point out the most important problems, if any: "
-        "steps that don't follow, missing branches (e.g. a decision with only one outcome), "
-        "loops with no exit, contradictions, assumptions I haven't stated, or things that "
-        "are left dangling. The Arrows list is accurate: never say a connection is missing "
-        "if it is listed there. Put the biggest issue first and suggest a fix for each. If it "
-        "holds together, say so and name the one thing most worth thinking about next."
+        "Check my thinking on this board. Read it as the start of an idea that may still be "
+        "growing, not as a finished document. If a step doesn't follow from the one before, "
+        "a decision is missing an outcome, or something contradicts something else, say so and "
+        "suggest a fix; name at most three problems, biggest first. The Arrows list is accurate: "
+        "never say a connection is missing if it is listed there. If nothing is actually wrong, "
+        "say so in one line, then give the one question most worth answering next to take the "
+        "idea further."
     ),
     "summarize": (
         "Summarize what this board says, as if writing it up for someone who hasn't seen it: "
         "the goal, the main flow or structure, the key decisions, and any open questions "
-        "left on the board. Finish with a line of next steps if the board implies any."
+        "left on the board. Keep it as short as the board is. Finish with a line of next "
+        "steps if the board implies any."
     ),
 }
+
+# Small models copy markdown into the reply; the panel shows plain text.
+def _plain(text: str) -> str:
+    text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
+    text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)
+    return text.strip()
 
 
 class ThinkTurn(BaseModel):
@@ -106,13 +122,39 @@ def _lumo_setting(name: str) -> str:
     return ""
 
 
+def _saved_secrets() -> dict:
+    try:
+        return json.loads(SECRETS_FILE.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
 def _setting(name: str) -> str:
     return os.getenv(name, "").strip() or _lumo_setting(name)
 
 
 def groq_key() -> str:
-    key = _setting("GROQ_API_KEY")
+    key = str(_saved_secrets().get("GROQ_API_KEY", "")).strip() or _setting("GROQ_API_KEY")
     return "" if key.startswith("your_") else key  # .env.example placeholder
+
+
+def save_groq_key(key: str) -> None:
+    """Store (or, with an empty key, forget) the Groq key entered in Settings."""
+    secrets = _saved_secrets()
+    if key.strip():
+        secrets["GROQ_API_KEY"] = key.strip()
+    else:
+        secrets.pop("GROQ_API_KEY", None)
+    SECRETS_FILE.touch(mode=0o600, exist_ok=True)
+    SECRETS_FILE.write_text(json.dumps(secrets))
+
+
+def groq_key_status() -> dict:
+    """Whether a Groq key is in use and where it came from, without revealing it."""
+    saved = str(_saved_secrets().get("GROQ_API_KEY", "")).strip()
+    key = groq_key()
+    source = "settings" if saved else ("pi" if key else None)
+    return {"set": bool(key), "source": source, "last4": key[-4:] if key else None}
 
 
 def claude_available() -> bool:
@@ -180,9 +222,7 @@ def think_with_groq(req: CanvasThinkRequest) -> str:
         if res.status_code != 200:
             last_error = f"Groq said {res.status_code}: {res.text[:200]}"
             continue  # busy (429) or model gone: try the fallback
-        text = res.json()["choices"][0]["message"].get("content") or ""
-        # Reasoning models can include their scratch work.
-        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        text = _plain(res.json()["choices"][0]["message"].get("content") or "")
         return text or "No answer came back. Try again."
     raise RuntimeError(last_error)
 
@@ -192,7 +232,7 @@ def think_locally(req: CanvasThinkRequest) -> str:
 
     prompt = "\n\n".join(filter(None, [SYSTEM_PROMPT, _transcript(req), _board_text(req), _ask_text(req)]))
     response = ollama.generate(model=LOCAL_MODEL, prompt=prompt, options={"temperature": 0.3})
-    return response["response"].strip()
+    return _plain(response["response"])
 
 
 def think(req: CanvasThinkRequest) -> dict:
