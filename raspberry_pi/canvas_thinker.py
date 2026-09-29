@@ -38,7 +38,8 @@ MODE_PROMPTS = {
         "Check my thinking on this board. Point out the most important problems, if any: "
         "steps that don't follow, missing branches (e.g. a decision with only one outcome), "
         "loops with no exit, contradictions, assumptions I haven't stated, or things that "
-        "are left dangling. Put the biggest issue first and suggest a fix for each. If it "
+        "are left dangling. The Arrows list is accurate: never say a connection is missing "
+        "if it is listed there. Put the biggest issue first and suggest a fix for each. If it "
         "holds together, say so and name the one thing most worth thinking about next."
     ),
     "summarize": (

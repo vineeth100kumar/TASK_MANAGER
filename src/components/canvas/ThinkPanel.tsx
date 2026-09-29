@@ -14,6 +14,10 @@ interface Turn extends ThinkTurn {
   label?: string; // what to show for a button press instead of the full prompt
 }
 
+// The Pi's local model can take a while; past this the request is dropped
+// rather than leaving the panel waiting forever.
+const TIMEOUT_MS = 150_000;
+
 const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck }> = [
   { mode: 'review', label: 'Check my thinking', icon: SearchCheck },
   { mode: 'summarize', label: 'Summarize', icon: ListTree },
@@ -26,7 +30,21 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engine, setEngine] = useState<'claude' | 'local' | null>(null);
+  const [elapsed, setElapsed] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const abortRef = useRef<{ controller: AbortController; timedOut: boolean } | null>(null);
+
+  // Seconds spent waiting, so a slow answer doesn't look frozen.
+  useEffect(() => {
+    if (!busy) return;
+    setElapsed(0);
+    const started = Date.now();
+    const timer = setInterval(() => setElapsed(Math.floor((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(timer);
+  }, [busy]);
+
+  // Drop an in-flight request when the panel closes.
+  useEffect(() => () => abortRef.current?.controller.abort(), []);
   const hasPi = Boolean(piBackendUrl());
 
   useEffect(() => {
@@ -43,15 +61,24 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
     setError(null);
     const history = turns.map(({ role, text }) => ({ role, text }));
     setTurns(prev => [...prev, { role: 'user', text: question || label, label }]);
+    const request = { controller: new AbortController(), timedOut: false };
+    abortRef.current = request;
+    const timer = setTimeout(() => { request.timedOut = true; request.controller.abort(); }, TIMEOUT_MS);
     try {
       const { outline, imagePng } = await getSnapshot();
-      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history });
+      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history }, request.controller.signal);
       setEngine(answer.engine);
       setTurns(prev => [...prev, { role: 'assistant', text: answer.text }]);
     } catch (e: any) {
-      setError(e?.message || 'Something went wrong.');
+      if (e?.name === 'AbortError') {
+        if (request.timedOut) setError("No answer after 2½ minutes, so I stopped waiting. The Pi may be busy; try again in a moment.");
+      } else {
+        setError(e?.message || 'Something went wrong.');
+      }
       setTurns(prev => prev.slice(0, -1));
     } finally {
+      clearTimeout(timer);
+      if (abortRef.current === request) abortRef.current = null;
       setBusy(false);
     }
   };
@@ -108,7 +135,9 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
 
         {busy && (
           <div className="flex items-center gap-2 text-[13px] text-gray-400">
-            <Loader2 size={14} className="animate-spin" /> Reading your board…
+            <Loader2 size={14} className="animate-spin" />
+            <span className="flex-1">Reading your board…{elapsed >= 5 ? ` ${elapsed}s` : ''}</span>
+            <button onClick={() => abortRef.current?.controller.abort()} className="text-[12px] font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Cancel</button>
           </div>
         )}
         {error && <p className="text-[13px] text-red-600 dark:text-red-400 leading-relaxed">{error}</p>}

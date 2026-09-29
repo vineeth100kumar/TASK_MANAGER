@@ -9,6 +9,33 @@ const SHAPE_NAMES: Record<string, string> = {
 
 const oneLine = (text: string) => text.replace(/\s+/g, ' ').trim();
 
+// How far outside a shape an arrow end can stop and still count as touching it.
+const SNAP_PX = 30;
+
+// The shape an arrow end sits on, for arrows drawn without snapping to it.
+function shapeAt(shapes: any[], px: number, py: number) {
+  let best: any = null;
+  let bestDist = Infinity;
+  for (const el of shapes) {
+    const inside = px >= el.x - SNAP_PX && px <= el.x + el.width + SNAP_PX && py >= el.y - SNAP_PX && py <= el.y + el.height + SNAP_PX;
+    if (!inside) continue;
+    const dist = Math.hypot(px - (el.x + el.width / 2), py - (el.y + el.height / 2));
+    if (dist < bestDist) { best = el; bestDist = dist; }
+  }
+  return best;
+}
+
+// Where an arrow starts and ends: the shape it's attached to, or failing that
+// the shape its end is drawn on or next to.
+function arrowEnds(el: any, byId: Map<string, any>, shapes: any[]) {
+  const pts = Array.isArray(el.points) && el.points.length ? el.points : [[0, 0]];
+  const [sx, sy] = pts[0];
+  const [ex, ey] = pts[pts.length - 1];
+  const from = byId.get(el.startBinding?.elementId) || shapeAt(shapes, el.x + sx, el.y + sy);
+  const to = byId.get(el.endBinding?.elementId) || shapeAt(shapes, el.x + ex, el.y + ey);
+  return { from, to };
+}
+
 export function boardOutline(elements: readonly any[]): string {
   const live = elements.filter(el => !el.isDeleted);
   const byId = new Map(live.map(el => [el.id, el]));
@@ -25,42 +52,57 @@ export function boardOutline(elements: readonly any[]): string {
   const lines: string[] = [];
 
   const shapes = ordered.filter(el => SHAPES.has(el.type));
+  // Shapes are named by their label. Only unlabelled ones get a number, so the
+  // AI talks about "Searched for opportunities", not "S2".
+  let unlabelled = 0;
+  const nameOf = (el: any) => {
+    if (!refs.has(el.id)) {
+      const label = labels.get(el.id) || (el.type.endsWith('frame') ? el.name : '') || (el.type === 'text' ? oneLine(el.text || '') : '');
+      refs.set(el.id, label ? `"${label}"` : `unlabelled ${SHAPE_NAMES[el.type] || el.type} #${++unlabelled}`);
+    }
+    return refs.get(el.id)!;
+  };
   if (shapes.length) {
-    lines.push('Shapes:');
-    shapes.forEach((el, i) => {
-      const ref = `S${i + 1}`;
-      refs.set(el.id, ref);
-      const label = labels.get(el.id) || (el.type.endsWith('frame') ? el.name : '') || '';
-      const filled = el.backgroundColor && el.backgroundColor !== 'transparent' ? ' (filled, like a sticky note)' : '';
-      lines.push(`- ${ref} ${SHAPE_NAMES[el.type] || el.type}${filled}: ${label ? `"${label}"` : '(no label)'}`);
-    });
+    lines.push('Shapes (top to bottom):');
+    for (const el of shapes) {
+      const filled = el.backgroundColor && el.backgroundColor !== 'transparent' ? ', filled like a sticky note' : '';
+      lines.push(`- ${nameOf(el)} (${SHAPE_NAMES[el.type] || el.type}${filled})`);
+    }
   }
 
-  const describe = (id?: string | null) => {
-    const el = id ? byId.get(id) : null;
-    if (!el) return null;
-    const label = labels.get(el.id) || (el.type === 'text' ? oneLine(el.text || '') : '');
-    return `${refs.get(el.id) || 'text'}${label ? ` "${label}"` : ''}`;
-  };
-
   const connectors = ordered.filter(el => el.type === 'arrow' || el.type === 'line');
-  const joined = connectors.filter(el => el.startBinding || el.endBinding);
-  const loose = connectors.length - joined.length;
-  if (joined.length) {
-    lines.push('', 'Connections:');
-    for (const el of joined) {
-      const from = describe(el.startBinding?.elementId) || '(nothing)';
-      const to = describe(el.endBinding?.elementId) || '(nothing)';
-      const label = labels.get(el.id);
-      const arrow = el.type === 'line' ? '—' : '→';
-      lines.push(`- ${from} ${arrow} ${to}${label ? ` [labelled "${label}"]` : ''}`);
+  const joined: string[] = [];
+  let loose = 0;
+  for (const el of connectors) {
+    const { from, to } = arrowEnds(el, byId, shapes);
+    if (!from && !to) { loose++; continue; }
+    const label = labels.get(el.id);
+    const arrow = el.type === 'line' ? '—' : '→';
+    joined.push(`- ${from ? nameOf(from) : '(empty space)'} ${arrow} ${to ? nameOf(to) : '(empty space)'}${label ? ` [labelled "${label}"]` : ''}`);
+  }
+  if (joined.length) lines.push('', 'Arrows:', ...joined);
+
+  // Spelled out so a small model doesn't claim a link is missing when it isn't.
+  if (shapes.length > 1) {
+    const linked = new Set<string>();
+    for (const el of connectors) {
+      const { from, to } = arrowEnds(el, byId, shapes);
+      if (from) linked.add(from.id);
+      if (to) linked.add(to.id);
     }
+    const alone = shapes.filter(el => !linked.has(el.id));
+    lines.push('', alone.length
+      ? `Shapes with no arrow to or from them: ${alone.map(nameOf).join(', ')}.`
+      : 'Every shape has at least one arrow to or from it.');
   }
 
   const notes = ordered.filter(el => el.type === 'text' && !el.containerId && oneLine(el.text || ''));
   if (notes.length) {
     lines.push('', 'Free text on the board:');
-    for (const el of notes) lines.push(`- "${oneLine(el.text)}"`);
+    for (const el of notes) {
+      const isTitle = el === ordered.find(o => !(o.type === 'text' && o.containerId)) && shapes.length > 0;
+      lines.push(`- "${oneLine(el.text)}"${isTitle ? ' (at the top, probably the title)' : ''}`);
+    }
   }
 
   const extras: string[] = [];
