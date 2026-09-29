@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw } from 'lucide-react';
-import { aiEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
+import { aiEngine, ThinkEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
 import { piBackendUrl } from '../../services/piBackend';
 
 interface ThinkPanelProps {
@@ -14,8 +14,8 @@ interface Turn extends ThinkTurn {
   label?: string; // what to show for a button press instead of the full prompt
 }
 
-// The Pi's local model can take a while; past this the request is dropped
-// rather than leaving the panel waiting forever.
+// Groq and Claude answer in seconds; the Pi's local model can take minutes.
+// Past this the request is dropped rather than leaving the panel waiting forever.
 const TIMEOUT_MS = 150_000;
 
 const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck }> = [
@@ -29,7 +29,7 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [engine, setEngine] = useState<'claude' | 'local' | null>(null);
+  const [engine, setEngine] = useState<ThinkEngine | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const scrollRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<{ controller: AbortController; timedOut: boolean } | null>(null);
@@ -171,7 +171,7 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
             </button>
           </div>
           {engine === 'local' && (
-            <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add an Anthropic API key on the Pi for sharper answers.</p>
+            <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq API key on the Pi for fast, sharper answers.</p>
           )}
         </div>
       )}

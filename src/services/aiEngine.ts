@@ -10,6 +10,8 @@ const getAiUrl = (endpoint: string) => {
 }
 
 export type ThinkMode = 'review' | 'summarize' | 'ask';
+// Which AI answered: Groq, Claude, or the Pi's own small model.
+export type ThinkEngine = 'groq' | 'claude' | 'local';
 export interface ThinkTurn { role: 'user' | 'assistant'; text: string }
 
 // Pulls the server's explanation out of a failed response.
@@ -24,7 +26,7 @@ const errorText = async (res: Response): Promise<string> => {
 
 export const aiEngine = {
     // Canvas thinking partner. `engine` says whether Claude or the Pi's local model answered.
-    canvasThinkEngine: async (): Promise<'claude' | 'local'> => {
+    canvasThinkEngine: async (): Promise<ThinkEngine> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), { headers: piHeaders() });
         if (!res.ok) throw new Error(await errorText(res));
         return (await res.json()).engine;
@@ -37,7 +39,7 @@ export const aiEngine = {
         imagePng?: string | null;
         question?: string;
         history: ThinkTurn[];
-    }, signal?: AbortSignal): Promise<{ text: string; engine: 'claude' | 'local' }> => {
+    }, signal?: AbortSignal): Promise<{ text: string; engine: ThinkEngine }> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), {
             method: 'POST',
             signal,

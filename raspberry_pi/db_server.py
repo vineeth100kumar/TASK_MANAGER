@@ -588,7 +588,7 @@ import canvas_thinker
 
 @app.get("/api/canvas/think")
 def canvas_think_status():
-    return {"success": True, "engine": "claude" if canvas_thinker.claude_available() else "local"}
+    return {"success": True, "engine": canvas_thinker.engine()}
 
 @app.post("/api/canvas/think")
 def canvas_think(req: canvas_thinker.CanvasThinkRequest):
@@ -597,6 +597,23 @@ def canvas_think(req: canvas_thinker.CanvasThinkRequest):
     except Exception as e:
         print(f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
+
+# --- Public link (Cloudflare Tunnel, see deploy/setup_tunnel.sh) ---
+TUNNEL_CONFIG = Path("/etc/cloudflared/sage.yml")
+
+@app.get("/api/public-url")
+def public_url():
+    url = os.getenv("SAGE_PUBLIC_URL", "").strip()
+    if not url:
+        try:
+            for line in TUNNEL_CONFIG.read_text().splitlines():
+                key, _, value = line.strip().lstrip("- ").partition(":")
+                if key.strip() == "hostname" and value.strip():
+                    url = f"https://{value.strip()}"
+                    break
+        except OSError:
+            pass
+    return {"success": True, "url": url or None}
 
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.
