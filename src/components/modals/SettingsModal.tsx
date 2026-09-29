@@ -26,6 +26,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   const [piKey, setPiKey] = useState<string>(() => getPiApiKey());
   // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
   const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
+  const [publicKind, setPublicKind] = useState<string | null>(null);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -33,7 +34,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
     if (!base) { setPublicUrl(null); return; }
     fetch(`${base}/api/public-url`, { headers: piHeaders() })
       .then(res => (res.ok ? res.json() : { url: null }))
-      .then(json => setPublicUrl(json.url || null))
+      .then(json => { setPublicUrl(json.url || null); setPublicKind(json.kind || null); })
       .catch(() => setPublicUrl(null));
   }, []);
 
@@ -282,7 +283,8 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               {publicUrl ? (
                 <>
                   <p className="text-xs text-gray-600 dark:text-gray-400">
-                    Open Sage from anywhere with this link. It goes through Cloudflare to your Pi and asks for your password.
+                    Open Sage from anywhere with this link. It asks for your password.
+                    {publicKind === 'cloudflare-quick' && ' This free link changes when the Pi restarts, so check back here for the current one.'}
                   </p>
                   <div className="flex items-center gap-2">
                     <a href={publicUrl} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono text-blue-600 dark:text-blue-400 hover:underline">
@@ -305,7 +307,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                   {publicUrl === undefined
                     ? 'Checking…'
                     : piBackendUrl()
-                      ? 'No public link yet. To make one, run sudo deploy/setup_tunnel.sh your.domain.com on the Pi.'
+                      ? 'No public link yet. To make a free one, run sudo deploy/setup_tunnel.sh on the Pi. No domain needed.'
                       : "This copy of the app isn't connected to your Pi."}
                 </p>
               )}

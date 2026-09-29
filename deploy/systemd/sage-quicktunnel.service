@@ -1,0 +1,16 @@
+[Unit]
+Description=Cloudflare quick tunnel to Sage (free trycloudflare.com link, no domain needed)
+After=network-online.target sage.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+# Written by deploy/setup_tunnel.sh when run without a hostname. The link
+# changes each time this restarts; Settings > Server & Reset shows the current
+# one (Sage reads it from the metrics port below).
+ExecStart=/usr/bin/cloudflared --no-autoupdate --metrics 127.0.0.1:20241 tunnel --url http://localhost:8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
