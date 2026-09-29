@@ -10,6 +10,9 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { ThinkPanel } from './ThinkPanel';
 import { boardOutline } from './boardOutline';
 import { EditOp, RefMap, applyOps, boardGraph, describeOps, newIds } from './boardEdits';
+import { TEMPLATES } from './boardTemplates';
+import { useToast } from '../../context/ToastContext';
+import { Inbox } from 'lucide-react';
 
 // Fonts are copied into the build by vite.config.ts; Excalidraw falls back to
 // its CDN for anything missing.
@@ -20,6 +23,26 @@ interface ExcalidrawBoardProps {
   isDarkMode: boolean;
   thinkOpen: boolean;
   onCloseThink: () => void;
+  onSaveState?: (state: 'saving' | 'saved' | 'error') => void;
+}
+
+const SHAPE_TYPES = new Set(['rectangle', 'diamond', 'ellipse']);
+
+// Shapes in the selection that have a label and aren't tasks yet.
+function taskCandidates(elements: readonly any[], selectedIds: Record<string, boolean>) {
+  const live = elements.filter(el => !el.isDeleted);
+  const labelOf = new Map(live.filter(el => el.type === 'text' && el.containerId).map(el => [el.containerId, String(el.text).replace(/\s+/g, ' ').trim()]));
+  const picked = new Set<string>();
+  for (const id of Object.keys(selectedIds || {})) {
+    const el = live.find(e => e.id === id);
+    if (!el) continue;
+    picked.add(el.type === 'text' && el.containerId ? el.containerId : el.id);
+  }
+  const shapes = live.filter(el => picked.has(el.id) && SHAPE_TYPES.has(el.type) && labelOf.get(el.id));
+  // In a bigger selection only boxes count: ovals are usually Start/End and
+  // diamonds are questions, not things to do. One shape on its own always counts.
+  return shapes.filter(el => (shapes.length === 1 || el.type === 'rectangle') && !el.customData?.sageTaskId)
+    .map(el => ({ id: el.id, title: labelOf.get(el.id)! }));
 }
 
 const parseScene = (json: string): any[] => {
@@ -35,7 +58,7 @@ const parseScene = (json: string): any[] => {
 // waiting to save; drawing it then would erase them.
 const QUIET_MS = 3000;
 
-export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseThink }: ExcalidrawBoardProps) {
+export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseThink, onSaveState }: ExcalidrawBoardProps) {
   const excalidrawRef = useRef<ExcalidrawImperativeAPI | null>(null);
   const lastSceneJson = useRef(api.boards.getScene(board));
   const lastVersion = useRef<number | null>(null);
@@ -49,6 +72,9 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     appState: { currentItemFontFamily: FONT_FAMILY.Nunito, currentItemRoughness: 0 },
     scrollToContent: true,
   }));
+  const [isEmpty, setIsEmpty] = useState(() => initialData.elements.length === 0);
+  const [candidates, setCandidates] = useState<Array<{ id: string; title: string }>>([]);
+  const { showToast } = useToast();
 
   const flush = () => {
     if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -56,13 +82,18 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     if (pendingJson.current === null) return;
     const json = pendingJson.current;
     pendingJson.current = null;
-    api.boards.saveScene(board.id, json).catch(err => console.warn('[Canvas] Save failed:', err));
+    api.boards.saveScene(board.id, json)
+      .then(() => { if (pendingJson.current === null) onSaveState?.('saved'); })
+      .catch(err => { console.warn('[Canvas] Save failed:', err); onSaveState?.('error'); });
   };
 
   // Save what's on screen when leaving the board (CanvasView remounts this per board).
   useEffect(() => flush, []);
 
-  const handleChange = (elements: readonly any[]) => {
+  const handleChange = (elements: readonly any[], appState: any) => {
+    // What the "Add to Inbox" button offers follows the selection.
+    const next = taskCandidates(elements, appState?.selectedElementIds);
+    setCandidates(prev => (prev.map(c => c.id).join() === next.map(c => c.id).join() ? prev : next));
     // onChange also fires for selection, scrolling and zoom; only the elements matter.
     const version = getSceneVersion(elements);
     if (version === lastVersion.current) return;
@@ -72,8 +103,38 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     lastSceneJson.current = json;
     lastLocalEdit.current = Date.now();
     pendingJson.current = json;
+    setIsEmpty(json === '[]');
+    onSaveState?.('saving');
     if (saveTimer.current) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(flush, 800);
+  };
+
+  // Turns the selected boxes into Inbox tasks, and marks them so they aren't
+  // added twice.
+  const addToInbox = async () => {
+    const canvas = excalidrawRef.current;
+    if (!canvas || !candidates.length) return;
+    const made = new Map<string, string>();
+    for (const c of candidates) {
+      const item = await api.workItems.create({ title: c.title, description: `From the "${board.title}" board`, lifeContext: board.lifeContext, isInbox: true });
+      made.set(c.id, item.id);
+    }
+    canvas.updateScene({
+      elements: canvas.getSceneElementsIncludingDeleted().map(el => made.has(el.id)
+        ? { ...el, customData: { ...(el.customData || {}), sageTaskId: made.get(el.id) }, version: el.version + 1, versionNonce: Math.floor(Math.random() * 2 ** 31) }
+        : el),
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    setCandidates([]);
+    showToast(made.size === 1 ? 'Added to your Inbox' : `${made.size} tasks added to your Inbox`);
+  };
+
+  const startFromTemplate = (ops: EditOp[]) => {
+    const canvas = excalidrawRef.current;
+    if (!canvas) return;
+    const after = applyOps(canvas.getSceneElementsIncludingDeleted(), ops, {});
+    canvas.updateScene({ elements: after, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
+    canvas.scrollToContent(after.filter(el => !el.isDeleted), { fitToViewport: true, viewportZoomFactor: 0.8, animate: true } as any);
   };
 
   // Show edits made on another device.
@@ -142,7 +203,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
 
   return (
     <div className="relative h-full flex">
-      <div className="flex-1 min-w-0 h-full">
+      <div className="relative flex-1 min-w-0 h-full">
         <Excalidraw
           excalidrawAPI={(a) => { excalidrawRef.current = a; }}
           initialData={initialData}
@@ -164,11 +225,36 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
             <MainMenu.DefaultItems.Help />
           </MainMenu>
         </Excalidraw>
+        {isEmpty && (
+          // Clicks pass through to the canvas except on the buttons.
+          <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center p-6">
+            <div className="pointer-events-auto max-w-md text-center space-y-3">
+              <p className="text-[13px] font-semibold text-gray-500 dark:text-gray-400">Start from a template, or just start drawing</p>
+              <div className="grid grid-cols-2 gap-2">
+                {TEMPLATES.map(t => (
+                  <button key={t.name} onClick={() => startFromTemplate(t.ops)} className="text-left px-3 py-2.5 rounded-xl bg-white/90 dark:bg-white/5 ring-1 ring-gray-200 dark:ring-white/10 hover:ring-violet-400 hover:bg-violet-50/60 dark:hover:bg-violet-500/10 transition-colors">
+                    <span className="block text-[13px] font-semibold text-gray-900 dark:text-gray-100">{t.name}</span>
+                    <span className="block text-[11.5px] text-gray-500">{t.hint}</span>
+                  </button>
+                ))}
+              </div>
+              <p className="text-[12px] text-gray-400">Or open Think with me and describe your plan. It'll draw it for you.</p>
+            </div>
+          </div>
+        )}
+        {candidates.length > 0 && (
+          <button
+            onClick={addToInbox}
+            className="absolute left-1/2 -translate-x-1/2 bottom-20 z-[5] flex items-center gap-1.5 h-9 px-4 rounded-full bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-[13px] font-semibold shadow-lg hover:scale-[1.02] transition-transform"
+          >
+            <Inbox size={14} /> {candidates.length === 1 ? 'Add to Inbox as a task' : `Add ${candidates.length} tasks to Inbox`}
+          </button>
+        )}
       </div>
       {thinkOpen && (
         // A side column on wider screens, a sheet over the bottom of the canvas on phones.
         <div className="absolute inset-x-0 bottom-0 h-[60%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
-          <ThinkPanel boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
+          <ThinkPanel boardId={board.id} boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
         </div>
       )}
     </div>

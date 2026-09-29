@@ -5,6 +5,7 @@ import { piBackendUrl } from '../../services/piBackend';
 import { EditOp, RefMap, cleanOps } from './boardEdits';
 
 interface ThinkPanelProps {
+  boardId: string;
   boardTitle: string;
   // The board as it is right now: a text outline and a PNG (base64, may be null).
   // forEdit gives numbered shapes and the refs behind the numbers instead.
@@ -46,6 +47,15 @@ const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck;
 ];
 
 const AUTO_APPLY_KEY = 'sage.canvasAutoApply';
+// Each board keeps its own conversation in this browser, so closing the panel
+// or switching boards doesn't lose it. Undo only lasts for this visit.
+const chatKey = (boardId: string) => `sage.canvasChat.${boardId}`;
+const loadChat = (boardId: string): Turn[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(chatKey(boardId)) || '[]');
+    return Array.isArray(saved) ? saved : [];
+  } catch { return []; }
+};
 const readAutoApply = () => {
   try { return localStorage.getItem(AUTO_APPLY_KEY) !== 'off'; } catch { return true; }
 };
@@ -59,8 +69,8 @@ const historyText = (t: Turn) => {
 };
 
 // A chat beside the board: ask about it, or tell it what to change.
-export function ThinkPanel({ boardTitle, getSnapshot, describeEdits, applyEdits, onClose }: ThinkPanelProps) {
-  const [turns, setTurns] = useState<Turn[]>([]);
+export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, applyEdits, onClose }: ThinkPanelProps) {
+  const [turns, setTurns] = useState<Turn[]>(() => loadChat(boardId));
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
   const [input, setInput] = useState('');
@@ -72,6 +82,18 @@ export function ThinkPanel({ boardTitle, getSnapshot, describeEdits, applyEdits,
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<{ controller: AbortController; timedOut: boolean } | null>(null);
+
+  useEffect(() => {
+    try {
+      // Keep the last 40 turns; functions (undo) don't survive storage anyway.
+      const keep = turns.slice(-40).map(t => (t.proposal ? { ...t, proposal: { ...t.proposal, undo: undefined } } : t));
+      if (keep.length) localStorage.setItem(chatKey(boardId), JSON.stringify(keep));
+      else localStorage.removeItem(chatKey(boardId));
+    } catch { /* storage full or blocked: the chat just isn't kept */ }
+  }, [turns, boardId]);
+
+  // Ready to type as soon as the panel opens.
+  useEffect(() => { inputRef.current?.focus(); }, []);
 
   // Seconds spent waiting, so a slow answer doesn't look frozen.
   useEffect(() => {
@@ -104,7 +126,8 @@ export function ThinkPanel({ boardTitle, getSnapshot, describeEdits, applyEdits,
   // to just before it, which would also drop anything applied after.
   const lastApplied = () => {
     for (let i = turnsRef.current.length - 1; i >= 0; i--) {
-      if (turnsRef.current[i].proposal?.status === 'applied') return i;
+      const p = turnsRef.current[i].proposal;
+      if (p?.status === 'applied') return p.undo ? i : -1;
     }
     return -1;
   };
@@ -240,7 +263,7 @@ export function ThinkPanel({ boardTitle, getSnapshot, describeEdits, applyEdits,
                 {turn.proposal.status === 'applied' && (
                   <div className="flex items-center gap-3 text-[12px] text-gray-500">
                     <span className="flex items-center gap-1 font-semibold text-violet-700 dark:text-violet-300"><Check size={13} /> Done</span>
-                    {i === newest && (
+                    {i === newest && turn.proposal.undo && (
                       <button onClick={() => undoTurn(i)} className="flex items-center gap-1 font-semibold hover:text-gray-800 dark:hover:text-gray-200">
                         <Undo2 size={12} /> Undo
                       </button>

@@ -52,7 +52,7 @@ export function boardGraph(elements: readonly any[], selectedIds: string[] = [])
   });
   if (shapes.length) {
     lines.push('Shapes (top to bottom):');
-    for (const el of shapes) lines.push(`- ${refOf.get(el.id)}: ${KIND_NAMES[el.type]} "${labels.get(el.id) || ''}"`);
+    for (const el of shapes) lines.push(`- ${refOf.get(el.id)}: ${KIND_NAMES[el.type]} "${labels.get(el.id) || ''}"${el.customData?.sageTaskId ? ' (already a task in my list)' : ''}`);
   }
 
   const arrows = live.filter(el => el.type === 'arrow');
@@ -161,18 +161,30 @@ const sizeFor = (label: string, shape: string) => {
 const overlaps = (a: any, b: any) =>
   a.x < b.x + b.width + 20 && a.x + a.width + 20 > b.x && a.y < b.y + b.height + 20 && a.y + a.height + 20 > b.y;
 
-// Points for an arrow between two boxes: down if the target is below, up if
-// above, sideways otherwise.
+// Points for an arrow between two boxes: down if the target is below,
+// sideways if it's level, and for an arrow looping back up (a retry), out to
+// the right and round, so it doesn't cut through the shapes in between.
 function arrowBetween(a: any, b: any) {
   const acx = a.x + a.width / 2, bcx = b.x + b.width / 2;
   const acy = a.y + a.height / 2, bcy = b.y + b.height / 2;
-  let start: [number, number], end: [number, number];
-  if (b.y >= a.y + a.height) { start = [acx, a.y + a.height + 6]; end = [bcx, b.y - 6]; }
-  else if (b.y + b.height <= a.y) { start = [acx, a.y - 6]; end = [bcx, b.y + b.height + 6]; }
-  else if (bcx >= acx) { start = [a.x + a.width + 6, acy]; end = [b.x - 6, bcy]; }
-  else { start = [a.x - 6, acy]; end = [b.x + b.width + 6, bcy]; }
-  return { x: start[0], y: start[1], points: [[0, 0], [end[0] - start[0], end[1] - start[1]]] };
+  let pts: Array<[number, number]>;
+  if (b.y >= a.y + a.height) pts = [[acx, a.y + a.height + 6], [bcx, b.y - 6]];
+  else if (b.y + b.height <= a.y) {
+    const out = Math.max(a.x + a.width, b.x + b.width) + 50;
+    pts = [[a.x + a.width + 6, acy], [out, acy], [out, bcy], [b.x + b.width + 6, bcy]];
+  }
+  else if (bcx >= acx) pts = [[a.x + a.width + 6, acy], [b.x - 6, bcy]];
+  else pts = [[a.x - 6, acy], [b.x + b.width + 6, bcy]];
+  const [x, y] = pts[0];
+  const points = pts.map(([px, py]) => [px - x, py - y]);
+  const xs = points.map(p => p[0]), ys = points.map(p => p[1]);
+  // Where a label sits: the middle of the middle segment.
+  const m = Math.floor((pts.length - 1) / 2);
+  const mid: [number, number] = [(pts[m][0] + pts[m + 1][0]) / 2, (pts[m][1] + pts[m + 1][1]) / 2];
+  return { x, y, points, width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), mid };
 }
+
+const withoutMid = ({ mid: _mid, ...route }: ReturnType<typeof arrowBetween>) => route;
 
 // Applies edits to the current elements and returns the new element list.
 export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): any[] {
@@ -296,7 +308,7 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       if (!a || !b) continue;
       const id = makeId();
       const made = convertToExcalidrawElements([
-        { type: 'arrow', id, ...arrowBetween(a, b), ...look, ...(o.label ? { label: { text: o.label, ...labelLook, fontSize: Math.min(labelLook.fontSize, 16) } } : {}) } as any,
+        { type: 'arrow', id, ...withoutMid(arrowBetween(a, b)), ...look, ...(o.label ? { label: { text: o.label, ...labelLook, fontSize: Math.min(labelLook.fontSize, 16) } } : {}) } as any,
       ], { regenerateIds: false }) as any[];
       const [arrow, ...rest] = made;
       elements.push(
@@ -316,14 +328,13 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       const from = live.get(arrow.startBinding?.elementId) || shapeNear(shapes, arrow, 0);
       const to = live.get(arrow.endBinding?.elementId) || shapeNear(shapes, arrow, -1);
       if (!from || !to || from.id === to.id || !(touched.has(from.id) || touched.has(to.id))) continue;
-      const route = arrowBetween(from, to);
-      replace(arrow.id, el => bump(el, { ...route, width: Math.abs(route.points[1][0]), height: Math.abs(route.points[1][1]), startBinding: { elementId: from.id, focus: 0, gap: 6 }, endBinding: { elementId: to.id, focus: 0, gap: 6 } }));
+      const { mid, ...route } = arrowBetween(from, to);
+      replace(arrow.id, el => bump(el, { ...route, startBinding: { elementId: from.id, focus: 0, gap: 6 }, endBinding: { elementId: to.id, focus: 0, gap: 6 } }));
       for (const end of [from, to]) {
         if (!(end.boundElements || []).some((b: any) => b.id === arrow.id)) replace(end.id, el => bump(el, { boundElements: [...(el.boundElements || []), { id: arrow.id, type: 'arrow' }] }));
       }
       // Keep an arrow's label on its middle.
-      const mx = route.x + route.points[1][0] / 2, my = route.y + route.points[1][1] / 2;
-      for (const t of elements) if (t.containerId === arrow.id && !t.isDeleted) replace(t.id, el => bump(el, { x: mx - el.width / 2, y: my - el.height / 2 }));
+      for (const t of elements) if (t.containerId === arrow.id && !t.isDeleted) replace(t.id, el => bump(el, { x: mid[0] - el.width / 2, y: mid[1] - el.height / 2 }));
     }
   }
   return elements;
