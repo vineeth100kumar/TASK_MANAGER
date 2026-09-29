@@ -73,6 +73,9 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     scrollToContent: true,
   }));
   const [isEmpty, setIsEmpty] = useState(() => initialData.elements.length === 0);
+  // The template picker steps aside once you pick a drawing tool, so a
+  // stroke that starts over it draws instead of choosing a template.
+  const [drawingTool, setDrawingTool] = useState(false);
   const [candidates, setCandidates] = useState<Array<{ id: string; title: string }>>([]);
   const { showToast } = useToast();
 
@@ -91,6 +94,8 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
   useEffect(() => flush, []);
 
   const handleChange = (elements: readonly any[], appState: any) => {
+    const tool = appState?.activeTool?.type;
+    setDrawingTool(Boolean(tool && tool !== 'selection' && tool !== 'hand'));
     // What the "Add to Inbox" button offers follows the selection.
     const next = taskCandidates(elements, appState?.selectedElementIds);
     setCandidates(prev => (prev.map(c => c.id).join() === next.map(c => c.id).join() ? prev : next));
@@ -225,7 +230,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
             <MainMenu.DefaultItems.Help />
           </MainMenu>
         </Excalidraw>
-        {isEmpty && (
+        {isEmpty && !drawingTool && (
           // Clicks pass through to the canvas except on the buttons.
           <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center p-6">
             <div className="pointer-events-auto max-w-md text-center space-y-3">
