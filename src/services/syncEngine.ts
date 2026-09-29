@@ -89,6 +89,11 @@ class SyncEngine {
   private conflictListeners: Set<ConflictListener> = new Set();
   private localChangeListeners: Set<EntityChangeListener> = new Set();
   private noteDebounceTimers: Map<string, any> = new Map();
+  // Records saved here but still in the debounce window, so not queued yet.
+  private debouncedKeys: Set<string> = new Set();
+  // When each record was last accepted by the server, to spot a pull that set
+  // off before that save and so carries the older copy.
+  private pushedAt: Map<string, number> = new Map();
   private batchDebounceTimer: any = null;
   private retryTimer: any = null;
   private consecutiveFailures = 0;
@@ -226,7 +231,7 @@ class SyncEngine {
   // server. Pulled data must not overwrite these, or the edit vanishes from view.
   async getUnsyncedKeys(): Promise<Set<string>> {
     const ops = await getAllFromStore<SyncOpRecord>('syncOperations');
-    return new Set(ops.map(o => `${o.entityType}:${o.entityId}`));
+    return new Set([...ops.map(o => `${o.entityType}:${o.entityId}`), ...this.debouncedKeys]);
   }
 
   async getPendingOperations(): Promise<SyncOpRecord[]> {
@@ -285,9 +290,15 @@ class SyncEngine {
       clearTimeout(this.noteDebounceTimers.get(key));
     }
 
-    const timer = setTimeout(() => {
-      this.enqueueOperation(entityType, payload.id, 'save', payload, payload.revision || 1);
+    const recordKey = `${entityType}:${payload.id}`;
+    this.debouncedKeys.add(recordKey);
+    const timer = setTimeout(async () => {
       this.noteDebounceTimers.delete(key);
+      try {
+        await this.enqueueOperation(entityType, payload.id, 'save', payload, payload.revision || 1);
+      } finally {
+        if (!this.noteDebounceTimers.has(key)) this.debouncedKeys.delete(recordKey);
+      }
     }, 600);
 
     this.noteDebounceTimers.set(key, timer);
@@ -394,6 +405,7 @@ class SyncEngine {
         for (const op of batch) {
           const res = results.find(r => r.operationId === op.operationId);
           if (res && (res.status === 'applied' || res.status === 'idempotent')) {
+            this.pushedAt.set(`${op.entityType}:${op.entityId}`, Date.now());
             await deleteFromStore('syncOperations', op.operationId);
           } else if (res && res.status === 'conflict') {
             hadConflict = true;
@@ -477,6 +489,7 @@ class SyncEngine {
 
   private async pullOnce(): Promise<void> {
     if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+    const startedAt = Date.now();
     try {
       const baseUrl = getGasUrl('getChangesSince');
       const url = baseUrl.includes('?') ? `${baseUrl}&sinceRevision=${this.serverRevision}` : `${baseUrl}?sinceRevision=${this.serverRevision}`;
@@ -490,7 +503,11 @@ class SyncEngine {
         for (const table in changes) {
           const rows = changes[table];
           if (Array.isArray(rows) && rows.length > 0) {
-            const incoming = rows.filter((row: any) => !unsynced.has(`${table}:${row?.id}`));
+            // A row saved here after this pull set off may come back as its older copy.
+            const incoming = rows.filter((row: any) => {
+              const key = `${table}:${row?.id}`;
+              return !unsynced.has(key) && (this.pushedAt.get(key) ?? 0) < startedAt;
+            });
             for (const row of incoming) {
               await putToStore(table, row);
             }

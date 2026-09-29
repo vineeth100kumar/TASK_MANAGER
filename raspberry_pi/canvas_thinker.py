@@ -96,7 +96,8 @@ Leave ops empty when I'm only asking a question. Each op is one of:
 Refer to existing shapes and arrows by their ids from the board (n1, e1...). Give each \
 new shape a ref (new1, new2...) and use it in later ops. "near" is the shape a new one \
 follows, so it's placed under it. Use a decision shape for yes/no questions and label \
-its outgoing arrows. Use tidy when I ask to rearrange, clean up or reorganise, after \
+its outgoing arrows. Only move, resize, colour or tidy when I ask for that; never \
+shrink shapes. Use tidy when I ask to rearrange, clean up or reorganise, after \
 any other changes. Use undo_last, alone, when I ask to undo or take back your last \
 change. If something can't be done with these ops, say so in reply. In reply, call \
 shapes by their labels, never by ids like n2.
@@ -105,8 +106,12 @@ My message: """
 
 IMPROVE_REQUEST = (
     "Improve this diagram: fill in the steps or outcomes that are clearly missing, "
-    "and tidy wording that's unclear. Keep everything I've drawn."
+    "and tidy wording that's unclear. Keep everything I've drawn where it is, at its size."
 )
+
+# Improve adds and rewords. Moving, resizing or recolouring the shapes I drew
+# isn't what I asked for, so those ops are dropped even if the model sends them.
+IMPROVE_OPS = {"add_node", "add_edge", "edit_label"}
 
 # Small models copy markdown into the reply; the panel shows plain text.
 def _plain(text: str) -> str:
@@ -302,5 +307,8 @@ def _parse_edits(text: str) -> dict:
 def think(req: CanvasThinkRequest) -> dict:
     text, engine = _raw_answer(req)
     if req.mode == "edit":
-        return {**_parse_edits(text), "engine": engine}
+        edits = _parse_edits(text)
+        if not (req.question or "").strip():
+            edits["ops"] = [o for o in edits["ops"] if isinstance(o, dict) and o.get("op") in IMPROVE_OPS]
+        return {**edits, "engine": engine}
     return {"text": text, "engine": engine}

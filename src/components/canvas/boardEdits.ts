@@ -211,7 +211,17 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
   const place = (id: string, x: number, y: number, width?: number, height?: number) => {
     const shape = byId().get(id);
     if (!shape) return;
-    const w = width ?? shape.width, h = height ?? shape.height;
+    let w = width ?? shape.width, h = height ?? shape.height;
+    // Never shrink a shape below what its label needs, or the words wrap a
+    // letter at a time. It grows around its centre instead.
+    const label = elements.find(t => t.containerId === id && !t.isDeleted);
+    if (label) {
+      const need = sizeFor(String(label.text).replace(/\s+/g, ' '), shape.type === 'rectangle' ? 'box' : 'decision');
+      const minW = Math.max(label.width + 30, Math.min(need.width, shape.width));
+      const minH = Math.max(label.height + 20, Math.min(need.height, shape.height));
+      if (w < minW) { x -= (minW - w) / 2; w = minW; }
+      if (h < minH) { y -= (minH - h) / 2; h = minH; }
+    }
     replace(id, el => bump(el, { x, y, width: w, height: h }));
     for (const t of elements) {
       if (t.containerId === id && !t.isDeleted) replace(t.id, el => bump(el, { x: x + w / 2 - el.width / 2, y: y + h / 2 - el.height / 2 }));
