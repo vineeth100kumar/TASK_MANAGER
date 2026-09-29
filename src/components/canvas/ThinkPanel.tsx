@@ -12,7 +12,10 @@ interface ThinkPanelProps {
 
 interface Turn extends ThinkTurn {
   label?: string; // what to show for a button press instead of the full prompt
+  engine?: ThinkEngine; // which AI wrote an answer
 }
+
+const ENGINE_NAMES: Record<ThinkEngine, string> = { groq: 'Groq', claude: 'Claude', local: "the Pi's small model" };
 
 // Groq and Claude answer in seconds; the Pi's local model can take minutes.
 // Past this the request is dropped rather than leaving the panel waiting forever.
@@ -68,7 +71,7 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
       const { outline, imagePng } = await getSnapshot();
       const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history }, request.controller.signal);
       setEngine(answer.engine);
-      setTurns(prev => [...prev, { role: 'assistant', text: answer.text }]);
+      setTurns(prev => [...prev, { role: 'assistant', text: answer.text, engine: answer.engine }]);
     } catch (e: any) {
       if (e?.name === 'AbortError') {
         if (request.timedOut) setError("No answer after 2½ minutes, so I stopped waiting. The Pi may be busy; try again in a moment.");
@@ -124,12 +127,15 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
         ) : (
           <div key={i} className="group">
             <div className="text-[13.5px] leading-relaxed whitespace-pre-wrap">{turn.text}</div>
-            <button
-              onClick={() => navigator.clipboard?.writeText(turn.text)}
-              className="mt-1 flex items-center gap-1 text-[11px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
-            >
-              <Copy size={11} /> Copy
-            </button>
+            <div className="mt-1 flex items-center gap-3 text-[11px] text-gray-400">
+              {turn.engine && <span>Answered by {ENGINE_NAMES[turn.engine]}</span>}
+              <button
+                onClick={() => navigator.clipboard?.writeText(turn.text)}
+                className="flex items-center gap-1 font-semibold hover:text-gray-600 dark:hover:text-gray-300 opacity-0 group-hover:opacity-100 transition-opacity"
+              >
+                <Copy size={11} /> Copy
+              </button>
+            </div>
           </div>
         ))}
 
@@ -171,7 +177,7 @@ export function ThinkPanel({ boardTitle, getSnapshot, onClose }: ThinkPanelProps
             </button>
           </div>
           {engine === 'local' && (
-            <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq API key on the Pi for fast, sharper answers.</p>
+            <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq key in Settings, under Server & Reset, for fast, sharper answers.</p>
           )}
         </div>
       )}

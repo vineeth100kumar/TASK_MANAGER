@@ -31,3 +31,4 @@ __pycache__/
 *.py[cod]
 venv/
 *.db
+raspberry_pi/sage_secrets.json

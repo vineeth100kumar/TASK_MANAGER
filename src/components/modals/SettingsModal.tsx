@@ -27,7 +27,39 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
   const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
   const [publicKind, setPublicKind] = useState<string | null>(null);
+  const [groqStatus, setGroqStatus] = useState<{ set: boolean; source: string | null; last4: string | null } | null>(null);
+  const [groqKey, setGroqKey] = useState('');
+  const [savingGroq, setSavingGroq] = useState(false);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const base = piBackendUrl();
+    if (!base) return;
+    fetch(`${base}/api/settings/groq-key`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => json && setGroqStatus(json))
+      .catch(() => {});
+  }, []);
+
+  const saveGroqKey = async (key: string) => {
+    setSavingGroq(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/settings/groq-key`, {
+        method: 'POST',
+        headers: piHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify({ key }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || `The Pi said ${res.status}`);
+      setGroqStatus(json);
+      setGroqKey('');
+      showToast(key ? 'Groq key saved on the Pi' : 'Groq key removed');
+    } catch (err: any) {
+      showToast(err.message || 'Could not save the key', 'error');
+    } finally {
+      setSavingGroq(false);
+    }
+  };
 
   useEffect(() => {
     const base = piBackendUrl();
@@ -312,6 +344,48 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 </p>
               )}
             </div>
+
+            {/* Groq key for Canvas's Think with me */}
+            {piBackendUrl() && (
+              <form
+                onSubmit={e => { e.preventDefault(); if (groqKey.trim()) saveGroqKey(groqKey); }}
+                className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3"
+              >
+                <label htmlFor="groq-api-key" className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                  <Sparkles size={16} />
+                  <span>Groq API key</span>
+                </label>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Powers "Think with me" on the Canvas. Get a free key at console.groq.com. It's saved on your Pi, not in this browser.
+                </p>
+                <p className="text-xs font-medium text-gray-700 dark:text-gray-300">
+                  {groqStatus === null
+                    ? 'Checking…'
+                    : groqStatus.set
+                      ? `In use: key ending in ${groqStatus.last4}${groqStatus.source === 'pi' ? ' (from the Pi\'s own settings)' : ''}.`
+                      : 'No key yet, so Think with me uses the Pi\'s slow built-in model.'}
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    id="groq-api-key"
+                    type="password"
+                    autoComplete="off"
+                    placeholder={groqStatus?.set ? 'Paste a new key to replace it' : 'gsk_…'}
+                    value={groqKey}
+                    onChange={e => setGroqKey(e.target.value)}
+                    className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
+                  />
+                  <button type="submit" disabled={savingGroq || !groqKey.trim()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-sm">
+                    {savingGroq ? 'Checking…' : 'Save'}
+                  </button>
+                </div>
+                {groqStatus?.source === 'settings' && (
+                  <button type="button" onClick={() => saveGroqKey('')} disabled={savingGroq} className="text-xs font-semibold text-red-600 dark:text-red-400 hover:underline">
+                    Remove saved key
+                  </button>
+                )}
+              </form>
+            )}
 
             {/* Raspberry Pi server key */}
             <form
