@@ -1,5 +1,5 @@
 import React, { Suspense, lazy, useEffect, useState } from 'react';
-import { Plus, Trash2, Loader2, PenLine, Sparkles } from 'lucide-react';
+import { Plus, Trash2, Loader2, PenLine, Sparkles, Maximize2, Minimize2, Check, CloudOff } from 'lucide-react';
 import { api } from '../../services/api';
 import { Board } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -23,6 +23,23 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
   const [thinkOpen, setThinkOpen] = useState(false);
+  // Canvas over the whole window, for when the board needs the room.
+  const [focusMode, setFocusMode] = useState(false);
+  const [saveState, setSaveState] = useState<'saving' | 'saved' | 'error' | null>(null);
+
+  // Ctrl/Cmd+J opens and closes Think with me; Esc leaves focus mode when
+  // nothing on the canvas is being edited.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'j') {
+        e.preventDefault();
+        setThinkOpen(open => !open);
+      }
+      if (e.key === 'Escape' && focusMode && !(e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLInputElement)) setFocusMode(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [focusMode]);
   const { showToast } = useToast();
 
   const loadBoards = async () => {
@@ -36,6 +53,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
 
   useEffect(() => {
     if (!active) return;
+    setSaveState(null);
     try { localStorage.setItem(ACTIVE_KEY, active.id); } catch { /* remembered tab is optional */ }
   }, [active?.id]);
 
@@ -66,7 +84,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
   };
 
   return (
-    <div className="h-full flex flex-col gap-3">
+    <div className={focusMode ? 'fixed inset-0 z-40 flex flex-col gap-3 p-3 bg-gray-50 dark:bg-[#0b0b0c]' : 'h-full flex flex-col gap-3'}>
       <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 -mx-1 px-1">
         {boards?.map(board => {
           const isActive = board.id === active?.id;
@@ -111,11 +129,27 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
         >
           <Plus size={15} /> New board
         </button>
+        {active && saveState && (
+          <span className={`shrink-0 ml-auto flex items-center gap-1 text-[12px] font-medium ${saveState === 'error' ? 'text-red-500' : 'text-gray-400'}`}>
+            {saveState === 'saving' ? <><Loader2 size={12} className="animate-spin" /> Saving</> : saveState === 'saved' ? <><Check size={12} /> Saved</> : <><CloudOff size={12} /> Not saved</>}
+          </span>
+        )}
+        {active && (
+          <button
+            onClick={() => setFocusMode(f => !f)}
+            aria-label={focusMode ? 'Exit full screen' : 'Full screen'}
+            title={focusMode ? 'Exit full screen (Esc)' : 'Full screen'}
+            className={`shrink-0 ${saveState ? '' : 'ml-auto '}h-9 w-9 flex items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors`}
+          >
+            {focusMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          </button>
+        )}
         {active && (
           <button
             onClick={() => setThinkOpen(open => !open)}
             aria-pressed={thinkOpen}
-            className={`shrink-0 ml-auto flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold transition-colors ${thinkOpen ? 'bg-violet-600 text-white shadow-sm' : 'text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-500/10'}`}
+            title="Think with me (Ctrl+J)"
+            className={`shrink-0 flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold transition-colors ${thinkOpen ? 'bg-violet-600 text-white shadow-sm' : 'text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-500/10'}`}
           >
             <Sparkles size={15} /> Think with me
           </button>
@@ -125,7 +159,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
       <div className="sage-canvas flex-1 min-h-0 rounded-3xl overflow-hidden ring-1 ring-gray-200/80 dark:ring-white/[0.08] shadow-sm bg-white dark:bg-[#121212]">
         {active ? (
           <Suspense fallback={<CanvasLoading />}>
-            <ExcalidrawBoard key={active.id} board={active} isDarkMode={isDarkMode} thinkOpen={thinkOpen} onCloseThink={() => setThinkOpen(false)} />
+            <ExcalidrawBoard key={active.id} board={active} isDarkMode={isDarkMode} thinkOpen={thinkOpen} onCloseThink={() => setThinkOpen(false)} onSaveState={setSaveState} />
           </Suspense>
         ) : boards ? (
           <div className="h-full flex flex-col items-center justify-center text-center px-6">

@@ -7,6 +7,9 @@ joins what) plus a PNG snapshot, and asks for one of:
   review     - look for gaps, contradictions and shaky steps in the reasoning
   summarize  - pull the board together into a short written summary
   ask        - answer a free-form question about the board
+  edit       - change the board as asked; replies with edit operations the
+               browser previews and applies (the outline is then a numbered
+               list of shapes n1.. and arrows e1.. to refer to)
 
 Which AI answers, first match wins:
   1. Groq, with a key saved from the app's Settings, or GROQ_API_KEY in
@@ -47,7 +50,7 @@ to things on the board by their labels. Only talk about what is actually on the 
 board. Say plainly when something is fine; never invent problems to seem useful, \
 and never list a kind of problem you can't point to on the board. Match the length \
 of your answer to the board: a board with two or three shapes gets two or three \
-sentences. Plain text only, with simple "- " bullets if you need a list. No \
+sentences. Unless asked for JSON, write plain text only, with simple "- " bullets if you need a list. No \
 headings, no bold, no numbered checklists, no preamble."""
 
 MODE_PROMPTS = {
@@ -67,6 +70,43 @@ MODE_PROMPTS = {
         "steps if the board implies any."
     ),
 }
+
+EDIT_PROMPT = """You are also my editor for this board, like a copilot in a spreadsheet: \
+when I ask a question, answer it; when I ask for a change, make it. You can add \
+shapes, add arrows, rename, remove, move, resize, colour, and tidy the layout; the \
+app places new shapes for you. Keep my ideas and wording unless I ask otherwise, \
+and make only the changes I asked for. Use our conversation so far: "that", "it" \
+or "make it bigger" refer to what we just talked about or changed, and "this" or \
+"these" mean the shapes Selected right now.
+
+Reply with only a JSON object, no other text:
+{"reply": "your answer, or one or two plain sentences on what you changed", "ops": [...]}
+
+Leave ops empty when I'm only asking a question. Each op is one of:
+{"op": "add_node", "ref": "new1", "label": "text", "shape": "box" | "decision" | "oval", "near": "n2"}
+{"op": "add_edge", "from": "n2", "to": "new1", "label": "optional, e.g. Yes or No"}
+{"op": "edit_label", "id": "n1", "label": "new text"}
+{"op": "delete", "id": "n3" or "e2"}
+{"op": "move", "id": "n3", "to": "below" | "above" | "left_of" | "right_of", "of": "n1"}
+{"op": "resize", "id": "n2", "scale": 1.5}
+{"op": "color", "id": "n2", "color": "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink" | "gray" | "none"}
+{"op": "tidy"}
+{"op": "undo_last"}
+
+Refer to existing shapes and arrows by their ids from the board (n1, e1...). Give each \
+new shape a ref (new1, new2...) and use it in later ops. "near" is the shape a new one \
+follows, so it's placed under it. Use a decision shape for yes/no questions and label \
+its outgoing arrows. Use tidy when I ask to rearrange, clean up or reorganise, after \
+any other changes. Use undo_last, alone, when I ask to undo or take back your last \
+change. If something can't be done with these ops, say so in reply. In reply, call \
+shapes by their labels, never by ids like n2.
+
+My message: """
+
+IMPROVE_REQUEST = (
+    "Improve this diagram: fill in the steps or outcomes that are clearly missing, "
+    "and tidy wording that's unclear. Keep everything I've drawn."
+)
 
 # Small models copy markdown into the reply; the panel shows plain text.
 def _plain(text: str) -> str:
@@ -91,6 +131,8 @@ class CanvasThinkRequest(BaseModel):
 
 
 def _ask_text(req: CanvasThinkRequest) -> str:
+    if req.mode == "edit":
+        return EDIT_PROMPT + ((req.question or "").strip() or IMPROVE_REQUEST)
     if req.mode == "ask":
         return (req.question or "").strip() or "What do you make of this board?"
     return MODE_PROMPTS.get(req.mode, MODE_PROMPTS["review"])
@@ -235,9 +277,30 @@ def think_locally(req: CanvasThinkRequest) -> str:
     return _plain(response["response"])
 
 
-def think(req: CanvasThinkRequest) -> dict:
+def _raw_answer(req: CanvasThinkRequest) -> tuple:
     if groq_key():
-        return {"text": think_with_groq(req), "engine": "groq"}
+        return think_with_groq(req), "groq"
     if claude_available():
-        return {"text": think_with_claude(req), "engine": "claude"}
-    return {"text": think_locally(req), "engine": "local"}
+        return think_with_claude(req), "claude"
+    return think_locally(req), "local"
+
+
+def _parse_edits(text: str) -> dict:
+    """The JSON an edit request asks for, forgiving code fences and chatter around it."""
+    start, end = text.find("{"), text.rfind("}")
+    try:
+        data = json.loads(text[start:end + 1]) if start != -1 and end > start else {}
+    except ValueError:
+        data = {}
+    ops = data.get("ops") if isinstance(data.get("ops"), list) else []
+    reply = str(data.get("reply") or "").strip()
+    if not data:
+        reply = "I couldn't turn that into changes on the board. Try asking in a different way."
+    return {"text": reply or ("Here are my changes." if ops else "I didn't find anything to change."), "ops": ops}
+
+
+def think(req: CanvasThinkRequest) -> dict:
+    text, engine = _raw_answer(req)
+    if req.mode == "edit":
+        return {**_parse_edits(text), "engine": engine}
+    return {"text": text, "engine": engine}
