@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Calendar, Download, Upload, Check, X, Info, Sparkles, Trash2, AlertTriangle } from 'lucide-react';
+import { Settings, Bell, Calendar, Download, Upload, Check, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink } from 'lucide-react';
 import { api } from '../../services/api';
 import { notificationService } from '../../services/notificationService';
 import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
-import { getPiApiKey, setPiApiKey } from '../../services/piBackend';
+import { getPiApiKey, setPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -24,7 +24,19 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
   const [confirmText, setConfirmText] = useState<string>('');
   const [piKey, setPiKey] = useState<string>(() => getPiApiKey());
+  // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
+  const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
+  const [publicKind, setPublicKind] = useState<string | null>(null);
   const { showToast } = useToast();
+
+  useEffect(() => {
+    const base = piBackendUrl();
+    if (!base) { setPublicUrl(null); return; }
+    fetch(`${base}/api/public-url`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : { url: null }))
+      .then(json => { setPublicUrl(json.url || null); setPublicKind(json.kind || null); })
+      .catch(() => setPublicUrl(null));
+  }, []);
 
   useEffect(() => {
     setNotificationStatus(notificationService.getPermissionStatus());
@@ -123,7 +135,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
-            Cloud Limits & Reset
+            Server & Reset
           </button>
         </div>
 
@@ -260,6 +272,45 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 <li><strong>Bandwidth Optimization:</strong> Sage uses incremental pull (`getChangesSince`) to minimize data transfer.</li>
                 <li><strong>Storage Safety:</strong> All mutations are persisted locally in IndexedDB first, guaranteeing offline durability.</li>
               </ul>
+            </div>
+
+            {/* Public link through the Cloudflare Tunnel */}
+            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                <Globe size={16} />
+                <span>Your public link</span>
+              </div>
+              {publicUrl ? (
+                <>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    Open Sage from anywhere with this link. It asks for your password.
+                    {publicKind === 'cloudflare-quick' && ' This free link changes when the Pi restarts, so check back here for the current one.'}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <a href={publicUrl} target="_blank" rel="noreferrer" className="flex-1 min-w-0 truncate px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono text-blue-600 dark:text-blue-400 hover:underline">
+                      {publicUrl}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => navigator.clipboard?.writeText(publicUrl).then(() => showToast('Link copied'))}
+                      className="px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-semibold text-gray-700 dark:text-gray-300 flex items-center gap-1.5"
+                    >
+                      <Copy size={13} /> Copy
+                    </button>
+                    <a href={publicUrl} target="_blank" rel="noreferrer" className="px-3 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-semibold flex items-center gap-1.5">
+                      <ExternalLink size={13} /> Open
+                    </a>
+                  </div>
+                </>
+              ) : (
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  {publicUrl === undefined
+                    ? 'Checking…'
+                    : piBackendUrl()
+                      ? 'No public link yet. To make a free one, run sudo deploy/setup_tunnel.sh on the Pi. No domain needed.'
+                      : "This copy of the app isn't connected to your Pi."}
+                </p>
+              )}
             </div>
 
             {/* Raspberry Pi server key */}

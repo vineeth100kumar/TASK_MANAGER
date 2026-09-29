@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # Put Sage on the internet through a Cloudflare Tunnel.
 #
-#   sudo deploy/setup_tunnel.sh tasks.example.com
+#   sudo deploy/setup_tunnel.sh                    # no domain: free trycloudflare.com link
+#   sudo deploy/setup_tunnel.sh tasks.example.com  # your own domain on Cloudflare
 #
-# The hostname must be on a domain in your Cloudflare account. Safe to run
-# again. What it does:
+# Without a hostname it starts a free quick tunnel: no account needed, but the
+# link changes whenever the Pi restarts. Settings > Server & Reset always shows
+# the current one. With a hostname (on a domain in your Cloudflare account) the
+# link is fixed. Safe to run again. With a hostname, what it does:
 #   1. Installs cloudflared from Cloudflare's apt repository.
 #   2. Makes sure Sage's password is set (the tunnel won't start without it).
 #   3. Logs cloudflared in to Cloudflare: open the printed link, pick the domain.
@@ -23,7 +26,6 @@ export HOME=/root
 step() { echo; echo "==> $*"; }
 
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo." >&2; exit 1; }
-[ -n "$HOSTNAME_" ] || { echo "Usage: sudo $0 <hostname, e.g. tasks.example.com>" >&2; exit 2; }
 
 step "cloudflared"
 if ! command -v cloudflared >/dev/null; then
@@ -42,6 +44,25 @@ if ! grep -q '^SAGE_ACCESS_PASSWORD_HASH=.\+' "$ENV_FILE" 2>/dev/null; then
   "$REPO/deploy/set_access_password.sh"
 else
   echo "Already set (change it with: sudo deploy/set_access_password.sh)"
+fi
+
+if [ -z "$HOSTNAME_" ]; then
+  step "Quick tunnel"
+  systemctl disable --now sage-tunnel.service 2>/dev/null || true
+  install -m 644 "$REPO/deploy/systemd/sage-quicktunnel.service" /etc/systemd/system/sage-quicktunnel.service
+  systemctl daemon-reload
+  systemctl enable --quiet sage-quicktunnel.service
+  systemctl restart sage-quicktunnel.service
+  echo "Waiting for the link..."
+  for _ in $(seq 20); do
+    URL="$(curl -fsS http://127.0.0.1:20241/quicktunnel 2>/dev/null | python3 -c 'import json,sys; h=json.load(sys.stdin).get("hostname"); print(f"https://{h}" if h else "")' 2>/dev/null || true)"
+    [ -n "$URL" ] && break
+    sleep 2
+  done
+  echo
+  if [ -n "${URL:-}" ]; then echo "Done. Your link: $URL"; else echo "Started, but no link yet. See: journalctl -u sage-quicktunnel -n 30"; fi
+  echo "It changes when the Pi restarts; Sage shows the current one under Settings > Server & Reset."
+  exit 0
 fi
 
 step "Cloudflare login"
@@ -81,6 +102,7 @@ sed -e "s|@TUNNEL_ID@|$ID|g" -e "s|@HOSTNAME@|$HOSTNAME_|g" \
   "$REPO/deploy/cloudflared/config.yml" > /etc/cloudflared/sage.yml
 cloudflared tunnel --config /etc/cloudflared/sage.yml ingress validate
 install -m 644 "$REPO/deploy/systemd/sage-tunnel.service" /etc/systemd/system/sage-tunnel.service
+systemctl disable --now sage-quicktunnel.service 2>/dev/null || true
 systemctl daemon-reload
 systemctl enable --quiet sage-tunnel.service
 systemctl restart sage-tunnel.service

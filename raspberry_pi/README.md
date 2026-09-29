@@ -19,12 +19,15 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `SAGE_GAS_BACKUP_INTERVAL` | `300` | Seconds between backups to Apps Script. |
 | `SAGE_ACCESS_PASSWORD_HASH` | empty | Turns on the password page (below). Set it with `deploy/set_access_password.sh`. |
 | `SAGE_SESSION_DAYS` | `30` | How long a browser stays logged in after typing the password. |
-| `ANTHROPIC_API_KEY` | empty | Lets Canvas's "Think with me" panel use Claude, which reads both the board's text and a picture of it. Without it the panel uses the local Ollama model, which reads text only. |
+| `GROQ_API_KEY` | empty | Canvas's "Think with me" panel uses Groq when this is set, here or in `lumo/rpi_server/.env` (LUMO's key works). Fast; reads the board's text. |
+| `SAGE_CANVAS_GROQ_MODEL` | LUMO's `GROQ_LLM_MODEL`, else `qwen/qwen3.8-27b` | Groq model for the Canvas panel. Falls back to `openai/gpt-oss-20b` when it's busy. |
+| `ANTHROPIC_API_KEY` | empty | Without a Groq key, lets the Canvas panel use Claude, which reads both the board's text and a picture of it. With neither, the panel uses the local Ollama model, which is slow. |
 | `SAGE_CANVAS_MODEL` | `claude-opus-5-5` | Claude model for the Canvas panel. |
+| `SAGE_PUBLIC_URL` | found automatically | The public link Settings shows. Normally found on its own (named tunnel, quick tunnel or Tailscale Funnel); set it only to override. |
 
 `/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO and the web app use it to pick up a change from another device within a second.
 
-In the web app, enter the same key under Settings > Cloud Limits & Reset > Raspberry Pi server key.
+In the web app, enter the same key under Settings > Server & Reset > Raspberry Pi server key.
 
 ## Reach Sage from anywhere
 
@@ -46,8 +49,10 @@ that it creates a tunnel named `sage`, points the hostname at it, and starts
 the `sage-tunnel` service, which comes back after a reboot. Run it again any
 time; it reuses what already exists.
 
-To try it before setting up a domain, `cloudflared tunnel --url http://localhost:8000`
-prints a temporary `trycloudflare.com` address that lasts until you stop it.
+No domain? Run `sudo deploy/setup_tunnel.sh` with no hostname. It starts a free
+quick tunnel as the `sage-quicktunnel` service, which comes back after a reboot
+with a new random `trycloudflare.com` address. Settings > Server & Reset shows
+the current address, so you don't have to look it up.
 
 ### The password
 

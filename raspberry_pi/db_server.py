@@ -588,7 +588,7 @@ import canvas_thinker
 
 @app.get("/api/canvas/think")
 def canvas_think_status():
-    return {"success": True, "engine": "claude" if canvas_thinker.claude_available() else "local"}
+    return {"success": True, "engine": canvas_thinker.engine()}
 
 @app.post("/api/canvas/think")
 def canvas_think(req: canvas_thinker.CanvasThinkRequest):
@@ -597,6 +597,13 @@ def canvas_think(req: canvas_thinker.CanvasThinkRequest):
     except Exception as e:
         print(f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
+
+# --- Public link (see public_link.py) ---
+import public_link
+
+@app.get("/api/public-url")
+def public_url():
+    return {"success": True, **public_link.find()}
 
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.

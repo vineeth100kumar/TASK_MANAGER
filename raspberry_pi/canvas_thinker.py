@@ -8,18 +8,28 @@ joins what) plus a PNG snapshot, and asks for one of:
   summarize  - pull the board together into a short written summary
   ask        - answer a free-form question about the board
 
-With ANTHROPIC_API_KEY set (in /etc/sage/sage.env), Claude reads the outline
-and the picture. Without it, the Pi's local Ollama model reads the outline
-only, which is free but much weaker at spotting reasoning mistakes.
+Which AI answers, first match wins:
+  1. Groq, when GROQ_API_KEY is set in /etc/sage/sage.env or in LUMO's
+     lumo/rpi_server/.env (the same key the voice assistant uses). Fast, text only.
+  2. Claude, when ANTHROPIC_API_KEY is set. Reads the outline and the picture.
+  3. The Pi's local Ollama model. Free, but slow and much weaker.
 """
 
 import os
+import re
+from pathlib import Path
 from typing import List, Optional
 
+import httpx
 from pydantic import BaseModel
 
 CLAUDE_MODEL = os.getenv("SAGE_CANVAS_MODEL", "claude-opus-5-5")
 LOCAL_MODEL = os.getenv("SAGE_CANVAS_LOCAL_MODEL", "qwen2.5:1.5b")
+GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
+# Same defaults as LUMO's voice assistant.
+GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b"
+GROQ_FALLBACK_MODEL = "openai/gpt-oss-20b"
+LUMO_ENV = Path(__file__).resolve().parent.parent / "lumo" / "rpi_server" / ".env"
 # Keeps a runaway board from turning into a large bill.
 MAX_OUTLINE_CHARS = 60_000
 
@@ -84,8 +94,35 @@ def _transcript(req: CanvasThinkRequest) -> str:
     return f"Our conversation about this board so far:\n\n{lines}"
 
 
+def _lumo_setting(name: str) -> str:
+    """A value from LUMO's .env, so the Groq key only has to be entered once."""
+    try:
+        for line in LUMO_ENV.read_text().splitlines():
+            key, sep, value = line.strip().partition("=")
+            if sep and key.strip() == name:
+                return value.strip().strip('"').strip("'")
+    except OSError:
+        pass
+    return ""
+
+
+def _setting(name: str) -> str:
+    return os.getenv(name, "").strip() or _lumo_setting(name)
+
+
+def groq_key() -> str:
+    key = _setting("GROQ_API_KEY")
+    return "" if key.startswith("your_") else key  # .env.example placeholder
+
+
 def claude_available() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
+
+
+def engine() -> str:
+    if groq_key():
+        return "groq"
+    return "claude" if claude_available() else "local"
 
 
 def think_with_claude(req: CanvasThinkRequest) -> str:
@@ -120,6 +157,36 @@ def think_with_claude(req: CanvasThinkRequest) -> str:
     return text or "No answer came back. Try again."
 
 
+def think_with_groq(req: CanvasThinkRequest) -> str:
+    primary = os.getenv("SAGE_CANVAS_GROQ_MODEL", "").strip() or _setting("GROQ_LLM_MODEL") or GROQ_DEFAULT_MODEL
+    messages = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": "\n\n".join(filter(None, [_transcript(req), _board_text(req), _ask_text(req)]))},
+    ]
+    last_error = ""
+    for model in dict.fromkeys([primary, GROQ_FALLBACK_MODEL]):
+        try:
+            res = httpx.post(
+                GROQ_URL,
+                headers={"Authorization": f"Bearer {groq_key()}"},
+                json={"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048},
+                timeout=60,
+            )
+        except httpx.HTTPError as e:
+            last_error = f"couldn't reach Groq ({e})"
+            continue
+        if res.status_code == 401:
+            raise RuntimeError("Groq rejected the API key. Check GROQ_API_KEY.")
+        if res.status_code != 200:
+            last_error = f"Groq said {res.status_code}: {res.text[:200]}"
+            continue  # busy (429) or model gone: try the fallback
+        text = res.json()["choices"][0]["message"].get("content") or ""
+        # Reasoning models can include their scratch work.
+        text = re.sub(r"<think>.*?</think>", "", text, flags=re.S).strip()
+        return text or "No answer came back. Try again."
+    raise RuntimeError(last_error)
+
+
 def think_locally(req: CanvasThinkRequest) -> str:
     import ollama
 
@@ -129,6 +196,8 @@ def think_locally(req: CanvasThinkRequest) -> str:
 
 
 def think(req: CanvasThinkRequest) -> dict:
+    if groq_key():
+        return {"text": think_with_groq(req), "engine": "groq"}
     if claude_available():
         return {"text": think_with_claude(req), "engine": "claude"}
     return {"text": think_locally(req), "engine": "local"}

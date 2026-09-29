@@ -106,7 +106,7 @@ step "Checking"
 sleep 3
 if curl -fsS http://127.0.0.1:8000/api/health; then echo; else echo "Sage did not answer; see: journalctl -u sage -n 50"; fi
 echo
-echo "Done. Enter this key in the web app under Settings > Cloud Limits & Reset:"
+echo "Done. Enter this key in the web app under Settings > Server & Reset:"
 echo "    sudo grep API_SECRET $ENV_FILE"
 if [ "$LUMO" -eq 1 ]; then
   echo "Check LUMO's link to Sage with:"
