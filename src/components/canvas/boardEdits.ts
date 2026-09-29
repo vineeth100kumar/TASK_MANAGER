@@ -276,17 +276,26 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       }
       elements = elements.map(el => (doomed.has(el.id) ? bump(el, { isDeleted: true }) : el));
     } else if (o.op === 'edit_label') {
-      const shape = live.get(idFor[o.id]);
-      if (!shape) continue;
-      const text = [...live.values()].find(el => el.containerId === shape.id);
-      // Rebuilt under the same id so attached arrows stay attached.
-      const [fresh, freshText] = convertToExcalidrawElements([
-        { type: shape.type, id: shape.id, x: shape.x, y: shape.y, width: shape.width, height: Math.max(shape.height, sizeFor(o.label, KIND_NAMES[shape.type] || 'box').height), strokeColor: shape.strokeColor, backgroundColor: shape.backgroundColor, roundness: shape.roundness, roughness: shape.roughness, strokeWidth: shape.strokeWidth, label: { text: o.label, ...labelLook } } as any,
-      ], { regenerateIds: false }) as any[];
-      const arrowsOnIt = (shape.boundElements || []).filter((b: any) => b.type === 'arrow');
-      replace(shape.id, () => bump(shape, { ...fresh, boundElements: [...arrowsOnIt, { id: freshText.id, type: 'text' }] }));
-      if (text) replace(text.id, el => bump(el, { isDeleted: true }));
-      elements.push(freshText);
+      const target = live.get(idFor[o.id]);
+      if (!target) continue;
+      const oldText = [...live.values()].find(el => el.containerId === target.id);
+      // Only the label is replaced. The shape or arrow keeps its id, place,
+      // links and task marker; a shape grows taller if the new words need it.
+      const isArrow = target.type === 'arrow';
+      const height = isArrow ? target.height : Math.max(target.height, sizeFor(o.label, KIND_NAMES[target.type] || 'box').height);
+      const stand = isArrow
+        ? { type: 'arrow', id: target.id, x: target.x, y: target.y, points: target.points, width: target.width, height: target.height, label: { text: o.label, ...labelLook, fontSize: oldText?.fontSize ?? Math.min(labelLook.fontSize, 16) } }
+        : { type: target.type, id: target.id, x: target.x, y: target.y, width: target.width, height, label: { text: o.label, ...labelLook, fontSize: oldText?.fontSize ?? labelLook.fontSize } };
+      const made = convertToExcalidrawElements([stand as any], { regenerateIds: false }) as any[];
+      const fresh = made.find(el => el.type === 'text');
+      if (!fresh) continue;
+      let text = { ...fresh, containerId: target.id, strokeColor: oldText?.strokeColor ?? fresh.strokeColor };
+      // An arrow's label stays where it was along the arrow.
+      if (isArrow && oldText) text = { ...text, x: oldText.x + oldText.width / 2 - text.width / 2, y: oldText.y + oldText.height / 2 - text.height / 2 };
+      const others = (target.boundElements || []).filter((b: any) => b.id !== oldText?.id);
+      replace(target.id, el => bump(el, { height, boundElements: [...others, { id: text.id, type: 'text' }] }));
+      if (oldText) replace(oldText.id, el => bump(el, { isDeleted: true }));
+      elements.push(text);
     } else if (o.op === 'add_node') {
       const shape = KIND_TYPES[o.shape || 'box'] ? (o.shape as string) : 'box';
       const { width, height } = sizeFor(o.label, shape);

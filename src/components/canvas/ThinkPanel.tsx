@@ -178,7 +178,10 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
         ? { ops, refs, lines: describeEdits(ops, refs), status: 'pending' }
         : undefined;
       const index = turnsRef.current.length;
-      setTurns(prev => [...prev, { role: 'assistant', text: answer.text, engine: answer.engine, proposal }]);
+      // The AI described changes that didn't point at anything on the board.
+      const lost = mode === 'edit' && !ops.length && Array.isArray(answer.ops) && answer.ops.length > 0;
+      const text = lost ? `${answer.text}\n\nI couldn't match those changes to the board, so nothing changed. Try naming the boxes you mean.` : answer.text;
+      setTurns(prev => [...prev, { role: 'assistant', text, engine: answer.engine, proposal }]);
       // Like a spreadsheet copilot: make the change straight away, with Undo
       // beside it. Turn that off to review each change first.
       if (proposal && autoApply) setTimeout(() => apply(index, proposal), 0);

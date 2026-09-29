@@ -116,6 +116,7 @@ IMPROVE_OPS = {"add_node", "add_edge", "edit_label"}
 # Small models copy markdown into the reply; the panel shows plain text.
 def _plain(text: str) -> str:
     text = re.sub(r"<think>.*?</think>", "", text, flags=re.S)
+    text = re.sub(r"<think>.*", "", text, flags=re.S)  # reasoning cut off before it closed
     text = re.sub(r"\*\*(.+?)\*\*", r"\1", text)
     text = re.sub(r"^#{1,6}\s*", "", text, flags=re.M)
     return text.strip()
@@ -258,7 +259,8 @@ def think_with_groq(req: CanvasThinkRequest) -> str:
             res = httpx.post(
                 GROQ_URL,
                 headers={"Authorization": f"Bearer {groq_key()}"},
-                json={"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 2048},
+                # Room for a reasoning model to think and still finish the JSON of a big edit.
+                json={"model": model, "messages": messages, "temperature": 0.3, "max_tokens": 8192 if req.mode == "edit" else 2048},
                 timeout=60,
             )
         except httpx.HTTPError as e:
@@ -292,11 +294,17 @@ def _raw_answer(req: CanvasThinkRequest) -> tuple:
 
 def _parse_edits(text: str) -> dict:
     """The JSON an edit request asks for, forgiving code fences and chatter around it."""
-    start, end = text.find("{"), text.rfind("}")
-    try:
-        data = json.loads(text[start:end + 1]) if start != -1 and end > start else {}
-    except ValueError:
-        data = {}
+    data = {}
+    # Models sometimes put an example or a note before the real answer, so take
+    # the last object that parses and has a reply or ops.
+    decoder = json.JSONDecoder()
+    for match in re.finditer(r"\{", text):
+        try:
+            found, _ = decoder.raw_decode(text, match.start())
+        except ValueError:
+            continue
+        if isinstance(found, dict) and ("ops" in found or "reply" in found):
+            data = found
     ops = data.get("ops") if isinstance(data.get("ops"), list) else []
     reply = str(data.get("reply") or "").strip()
     if not data:
