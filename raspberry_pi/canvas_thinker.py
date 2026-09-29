@@ -71,27 +71,37 @@ MODE_PROMPTS = {
     ),
 }
 
-EDIT_PROMPT = """Change the board as I ask below. You can only add shapes, add arrows, \
-rename shapes, and remove shapes or arrows; the app places new shapes for you. Keep \
-my ideas and wording unless I ask otherwise, and make only the changes the request \
-needs.
+EDIT_PROMPT = """You are also my editor for this board, like a copilot in a spreadsheet: \
+when I ask a question, answer it; when I ask for a change, make it. You can add \
+shapes, add arrows, rename, remove, move, resize, colour, and tidy the layout; the \
+app places new shapes for you. Keep my ideas and wording unless I ask otherwise, \
+and make only the changes I asked for. Use our conversation so far: "that", "it" \
+or "make it bigger" refer to what we just talked about or changed, and "this" or \
+"these" mean the shapes Selected right now.
 
 Reply with only a JSON object, no other text:
-{"reply": "one or two plain sentences saying what you changed", "ops": [...]}
+{"reply": "your answer, or one or two plain sentences on what you changed", "ops": [...]}
 
-Each op is one of:
+Leave ops empty when I'm only asking a question. Each op is one of:
 {"op": "add_node", "ref": "new1", "label": "text", "shape": "box" | "decision" | "oval", "near": "n2"}
 {"op": "add_edge", "from": "n2", "to": "new1", "label": "optional, e.g. Yes or No"}
 {"op": "edit_label", "id": "n1", "label": "new text"}
 {"op": "delete", "id": "n3" or "e2"}
+{"op": "move", "id": "n3", "to": "below" | "above" | "left_of" | "right_of", "of": "n1"}
+{"op": "resize", "id": "n2", "scale": 1.5}
+{"op": "color", "id": "n2", "color": "red" | "orange" | "yellow" | "green" | "teal" | "blue" | "purple" | "pink" | "gray" | "none"}
+{"op": "tidy"}
+{"op": "undo_last"}
 
 Refer to existing shapes and arrows by their ids from the board (n1, e1...). Give each \
-new shape a ref (new1, new2...) and use it in add_edge. "near" is the shape a new one \
+new shape a ref (new1, new2...) and use it in later ops. "near" is the shape a new one \
 follows, so it's placed under it. Use a decision shape for yes/no questions and label \
-its outgoing arrows. If the request can't be done with these ops, return an empty ops \
-list and say why in reply.
+its outgoing arrows. Use tidy when I ask to rearrange, clean up or reorganise, after \
+any other changes. Use undo_last, alone, when I ask to undo or take back your last \
+change. If something can't be done with these ops, say so in reply. In reply, call \
+shapes by their labels, never by ids like n2.
 
-My request: """
+My message: """
 
 IMPROVE_REQUEST = (
     "Improve this diagram: fill in the steps or outcomes that are clearly missing, "

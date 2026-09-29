@@ -94,7 +94,8 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
   const getSnapshot = async (forEdit = false) => {
     const canvas = excalidrawRef.current;
     const elements = canvas ? canvas.getSceneElements() : parseScene(lastSceneJson.current);
-    const { text, refs } = forEdit ? boardGraph(elements) : { text: boardOutline(elements), refs: undefined };
+    const selected = canvas ? Object.keys(canvas.getAppState().selectedElementIds || {}) : [];
+    const { text, refs } = forEdit ? boardGraph(elements, selected) : { text: boardOutline(elements), refs: undefined };
     if (!elements.length) return { outline: text, imagePng: null, refs };
     let imagePng: string | null = null;
     try {

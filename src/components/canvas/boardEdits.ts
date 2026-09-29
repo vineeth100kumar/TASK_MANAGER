@@ -18,13 +18,25 @@ export type EditOp =
   | { op: 'add_node'; ref: string; label: string; shape?: string; near?: string }
   | { op: 'add_edge'; from: string; to: string; label?: string }
   | { op: 'edit_label'; id: string; label: string }
-  | { op: 'delete'; id: string };
+  | { op: 'delete'; id: string }
+  | { op: 'move'; id: string; to: 'below' | 'above' | 'left_of' | 'right_of'; of: string }
+  | { op: 'resize'; id: string; scale: number }
+  | { op: 'color'; id: string; color: string }
+  | { op: 'tidy' }
+  | { op: 'undo_last' };
+
+// Soft fills from Excalidraw's own palette, by the names the AI uses.
+const COLORS: Record<string, string> = {
+  red: '#ffc9c9', orange: '#ffd8a8', yellow: '#ffec99', green: '#b2f2bb', teal: '#96f2d7',
+  blue: '#a5d8ff', purple: '#d0bfff', pink: '#fcc2d7', gray: '#e9ecef', grey: '#e9ecef', none: 'transparent',
+};
+const PLACES = new Set(['below', 'above', 'left_of', 'right_of']);
 
 // Board refs (n1, e1…) to Excalidraw element ids, fixed when the board was read.
 export type RefMap = Record<string, string>;
 
 // The board as the AI sees it when asked to change it.
-export function boardGraph(elements: readonly any[]): { text: string; refs: RefMap } {
+export function boardGraph(elements: readonly any[], selectedIds: string[] = []): { text: string; refs: RefMap } {
   const live = elements.filter(el => !el.isDeleted);
   const labels = new Map<string, string>();
   for (const el of live) if (el.type === 'text' && el.containerId && el.text) labels.set(el.containerId, oneLine(el.text));
@@ -59,6 +71,15 @@ export function boardGraph(elements: readonly any[]): { text: string; refs: RefM
   const notes = live.filter(el => el.type === 'text' && !el.containerId && oneLine(el.text || ''));
   if (notes.length) lines.push('', 'Free text (read only):', ...notes.map(el => `- "${oneLine(el.text)}"`));
 
+  // What "this" and "these" mean: the shapes selected right now, including
+  // the one whose label is selected.
+  const refById = new Map(Object.entries(refs).map(([ref, id]) => [id, ref]));
+  const selected = [...new Set(selectedIds.map(id => {
+    const el = live.find(e => e.id === id);
+    return refById.get(el?.containerId || id);
+  }).filter(Boolean))];
+  if (selected.length) lines.push('', `Selected right now: ${selected.join(', ')}`);
+
   return { text: lines.length ? lines.join('\n') : '(The board is empty.)', refs };
 }
 
@@ -89,6 +110,17 @@ export function cleanOps(raw: unknown, refs: RefMap): EditOp[] {
       ops.push({ op: 'edit_label', id: str(op.id), label: str(op.label) });
     } else if (op.op === 'delete' && refs[str(op.id)]) {
       ops.push({ op: 'delete', id: str(op.id) });
+    } else if (op.op === 'move' && known.has(str(op.id)) && known.has(str(op.of)) && PLACES.has(str(op.to)) && str(op.id) !== str(op.of)) {
+      ops.push({ op: 'move', id: str(op.id), to: str(op.to) as any, of: str(op.of) });
+    } else if (op.op === 'resize' && known.has(str(op.id)) && Number(op.scale) > 0) {
+      ops.push({ op: 'resize', id: str(op.id), scale: Math.min(3, Math.max(0.4, Number(op.scale))) });
+    } else if (op.op === 'color' && known.has(str(op.id)) && COLORS[str(op.color).toLowerCase()]) {
+      ops.push({ op: 'color', id: str(op.id), color: str(op.color).toLowerCase() });
+    } else if (op.op === 'tidy') {
+      ops.push({ op: 'tidy' });
+    } else if (op.op === 'undo_last') {
+      // Taking back the last change stands alone; nothing else in the reply applies.
+      return [{ op: 'undo_last' }];
     }
   }
   return ops;
@@ -109,6 +141,11 @@ export function describeOps(ops: EditOp[], elements: readonly any[], refs: RefMa
       case 'add_edge': return `Connect ${labelOf(o.from)} → ${labelOf(o.to)}${o.label ? ` ("${o.label}")` : ''}`;
       case 'edit_label': return `Rename ${labelOf(o.id)} to "${o.label}"`;
       case 'delete': return o.id.startsWith('e') ? 'Remove an arrow' : `Remove ${labelOf(o.id)}`;
+      case 'move': return `Move ${labelOf(o.id)} ${o.to.replace('_', ' ')} ${labelOf(o.of)}`;
+      case 'resize': return `Make ${labelOf(o.id)} ${o.scale >= 1 ? 'bigger' : 'smaller'}`;
+      case 'color': return o.color === 'none' ? `Clear the colour of ${labelOf(o.id)}` : `Colour ${labelOf(o.id)} ${o.color}`;
+      case 'tidy': return 'Tidy the layout, top to bottom';
+      case 'undo_last': return 'Take back the last change';
     }
   });
 }
@@ -155,9 +192,54 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
   const bump = (el: any, changes: any) => ({ ...el, ...changes, version: (el.version || 1) + 1, versionNonce: Math.floor(Math.random() * 2 ** 31), updated: Date.now() });
   const replace = (id: string, fn: (el: any) => any) => { elements = elements.map(el => (el.id === id ? fn(el) : el)); };
   const makeId = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
+  // Shapes that moved or changed size; their arrows get redrawn at the end.
+  const touched = new Set<string>();
+
+  // Sets a shape's box, carrying its label along.
+  const place = (id: string, x: number, y: number, width?: number, height?: number) => {
+    const shape = byId().get(id);
+    if (!shape) return;
+    const w = width ?? shape.width, h = height ?? shape.height;
+    replace(id, el => bump(el, { x, y, width: w, height: h }));
+    for (const t of elements) {
+      if (t.containerId === id && !t.isDeleted) replace(t.id, el => bump(el, { x: x + w / 2 - el.width / 2, y: y + h / 2 - el.height / 2 }));
+    }
+    touched.add(id);
+  };
 
   for (const o of ops) {
     const live = byId();
+    if (o.op === 'move') {
+      const shape = live.get(idFor[o.id]);
+      const anchor = live.get(idFor[o.of]);
+      if (!shape || !anchor) continue;
+      const cx = anchor.x + anchor.width / 2 - shape.width / 2;
+      const cy = anchor.y + anchor.height / 2 - shape.height / 2;
+      const spot = {
+        below: [cx, anchor.y + anchor.height + GAP_Y],
+        above: [cx, anchor.y - shape.height - GAP_Y],
+        right_of: [anchor.x + anchor.width + GAP_X * 2, cy],
+        left_of: [anchor.x - shape.width - GAP_X * 2, cy],
+      }[o.to];
+      place(shape.id, spot[0], spot[1]);
+      continue;
+    }
+    if (o.op === 'resize') {
+      const shape = live.get(idFor[o.id]);
+      if (!shape) continue;
+      const w = shape.width * o.scale, h = shape.height * o.scale;
+      place(shape.id, shape.x + shape.width / 2 - w / 2, shape.y + shape.height / 2 - h / 2, w, h);
+      continue;
+    }
+    if (o.op === 'color') {
+      const shape = live.get(idFor[o.id]);
+      if (shape) replace(shape.id, el => bump(el, { backgroundColor: COLORS[o.color], fillStyle: 'solid' }));
+      continue;
+    }
+    if (o.op === 'tidy') {
+      for (const [id, box] of tidyLayout([...byId().values()])) place(id, box.x, box.y);
+      continue;
+    }
     if (o.op === 'delete') {
       const target = live.get(idFor[o.id]);
       if (!target) continue;
@@ -224,7 +306,87 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       for (const end of [a, b]) replace(end.id, el => bump(el, { boundElements: [...(el.boundElements || []), { id, type: 'arrow' }] }));
     }
   }
+
+  // Redraw the arrows of anything that moved, and attach them properly if
+  // they were only drawn touching the shape.
+  if (touched.size) {
+    const live = byId();
+    const shapes = [...live.values()].filter(el => SHAPES.has(el.type));
+    for (const arrow of [...live.values()].filter(el => el.type === 'arrow')) {
+      const from = live.get(arrow.startBinding?.elementId) || shapeNear(shapes, arrow, 0);
+      const to = live.get(arrow.endBinding?.elementId) || shapeNear(shapes, arrow, -1);
+      if (!from || !to || from.id === to.id || !(touched.has(from.id) || touched.has(to.id))) continue;
+      const route = arrowBetween(from, to);
+      replace(arrow.id, el => bump(el, { ...route, width: Math.abs(route.points[1][0]), height: Math.abs(route.points[1][1]), startBinding: { elementId: from.id, focus: 0, gap: 6 }, endBinding: { elementId: to.id, focus: 0, gap: 6 } }));
+      for (const end of [from, to]) {
+        if (!(end.boundElements || []).some((b: any) => b.id === arrow.id)) replace(end.id, el => bump(el, { boundElements: [...(el.boundElements || []), { id: arrow.id, type: 'arrow' }] }));
+      }
+      // Keep an arrow's label on its middle.
+      const mx = route.x + route.points[1][0] / 2, my = route.y + route.points[1][1] / 2;
+      for (const t of elements) if (t.containerId === arrow.id && !t.isDeleted) replace(t.id, el => bump(el, { x: mx - el.width / 2, y: my - el.height / 2 }));
+    }
+  }
   return elements;
+}
+
+// A top-to-bottom layout for a flowchart: each shape goes one row below the
+// shapes that point to it, rows are centred on each other, and each row is
+// ordered to follow its parents so arrows cross as little as possible.
+// Shapes nothing connects to go in a row at the bottom.
+function tidyLayout(live: any[]): Map<string, { x: number; y: number }> {
+  const shapes = live.filter(el => SHAPES.has(el.type));
+  const byId = new Map(shapes.map(el => [el.id, el]));
+  const kids = new Map<string, string[]>(shapes.map(el => [el.id, []]));
+  const parents = new Map<string, string[]>(shapes.map(el => [el.id, []]));
+  for (const arrow of live.filter(el => el.type === 'arrow')) {
+    const from = byId.get(arrow.startBinding?.elementId) || shapeNear(shapes, arrow, 0);
+    const to = byId.get(arrow.endBinding?.elementId) || shapeNear(shapes, arrow, -1);
+    if (!from || !to || from.id === to.id) continue;
+    kids.get(from.id)!.push(to.id);
+    parents.get(to.id)!.push(from.id);
+  }
+  const connected = shapes.filter(el => kids.get(el.id)!.length || parents.get(el.id)!.length);
+  // Rows by longest path from a start, ignoring arrows that loop back.
+  const row = new Map<string, number>();
+  const order = [...connected].sort((a, b) => (a.y - b.y) || (a.x - b.x));
+  const starts = order.filter(el => !parents.get(el.id)!.length);
+  const visit = (id: string, depth: number, path: Set<string>) => {
+    if (path.has(id) || (row.get(id) ?? -1) >= depth) return;
+    row.set(id, depth);
+    path.add(id);
+    for (const k of kids.get(id)!) visit(k, depth + 1, path);
+    path.delete(id);
+  };
+  for (const el of starts.length ? starts : order.slice(0, 1)) visit(el.id, 0, new Set());
+  for (const el of order) if (!row.has(el.id)) visit(el.id, 0, new Set()); // parts only reachable through a loop
+  const rows: string[][] = [];
+  for (const el of order) (rows[row.get(el.id)!] ||= []).push(el.id);
+  const loose = shapes.filter(el => !row.has(el.id)).map(el => el.id);
+  if (loose.length) rows.push(loose);
+
+  const top = Math.min(...shapes.map(el => el.y));
+  const centre = shapes.reduce((sum, el) => sum + el.x + el.width / 2, 0) / Math.max(1, shapes.length);
+  const out = new Map<string, { x: number; y: number }>();
+  const slot = new Map<string, number>(); // x centre, for ordering the next row
+  let y = top;
+  for (const ids of rows.filter(Boolean)) {
+    const avgParent = (id: string) => {
+      const xs = parents.get(id)!.map(p => slot.get(p)).filter((v): v is number => v !== undefined);
+      return xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : byId.get(id)!.x;
+    };
+    ids.sort((a, b) => avgParent(a) - avgParent(b));
+    const width = ids.reduce((sum, id) => sum + byId.get(id)!.width, 0) + GAP_X * (ids.length - 1);
+    let x = centre - width / 2;
+    const height = Math.max(...ids.map(id => byId.get(id)!.height));
+    for (const id of ids) {
+      const el = byId.get(id)!;
+      out.set(id, { x, y: y + (height - el.height) / 2 });
+      slot.set(id, x + el.width / 2);
+      x += el.width + GAP_X;
+    }
+    y += height + GAP_Y;
+  }
+  return out;
 }
 
 // Ids of elements the edits created, to select them after applying.
