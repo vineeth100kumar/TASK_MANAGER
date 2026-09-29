@@ -1,7 +1,7 @@
 // The drawing surface for one board. Loaded on demand by CanvasView, since
 // Excalidraw is a large bundle that most visits to the app never need.
 import { useEffect, useRef, useState } from 'react';
-import { Excalidraw, FONT_FAMILY, MainMenu, exportToBlob, getSceneVersion } from '@excalidraw/excalidraw';
+import { CaptureUpdateAction, Excalidraw, FONT_FAMILY, MainMenu, exportToBlob, getSceneVersion } from '@excalidraw/excalidraw';
 import type { ExcalidrawImperativeAPI } from '@excalidraw/excalidraw/types';
 import '@excalidraw/excalidraw/index.css';
 import { api } from '../../services/api';
@@ -9,6 +9,7 @@ import { Board } from '../../services/types';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { ThinkPanel } from './ThinkPanel';
 import { boardOutline } from './boardOutline';
+import { EditOp, RefMap, applyOps, boardGraph, describeOps, newIds } from './boardEdits';
 
 // Fonts are copied into the build by vite.config.ts; Excalidraw falls back to
 // its CDN for anything missing.
@@ -87,11 +88,14 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     canvas.updateScene({ elements: parseScene(json) });
   });
 
-  // What the thinking partner reads: an outline of the board plus a picture of it.
-  const getSnapshot = async () => {
+  // What the thinking partner reads: an outline of the board plus a picture of
+  // it. To change the board it gets numbered shapes instead, and the refs that
+  // map those numbers back to elements.
+  const getSnapshot = async (forEdit = false) => {
     const canvas = excalidrawRef.current;
     const elements = canvas ? canvas.getSceneElements() : parseScene(lastSceneJson.current);
-    if (!elements.length) return { outline: boardOutline(elements), imagePng: null };
+    const { text, refs } = forEdit ? boardGraph(elements) : { text: boardOutline(elements), refs: undefined };
+    if (!elements.length) return { outline: text, imagePng: null, refs };
     let imagePng: string | null = null;
     try {
       const blob = await exportToBlob({
@@ -111,7 +115,28 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     } catch (err) {
       console.warn('[Canvas] Snapshot failed; sending the outline only:', err);
     }
-    return { outline: boardOutline(elements), imagePng };
+    return { outline: text, imagePng, refs };
+  };
+
+  const describeEdits = (ops: EditOp[], refs: RefMap) =>
+    describeOps(ops, excalidrawRef.current?.getSceneElements() || [], refs);
+
+  // Puts the AI's changes on the board as one step (Ctrl+Z takes it back) and
+  // returns a function that restores the board as it was.
+  const applyEdits = (ops: EditOp[], refs: RefMap) => {
+    const canvas = excalidrawRef.current;
+    if (!canvas) return null;
+    const before = canvas.getSceneElementsIncludingDeleted();
+    const after = applyOps(before, ops, refs);
+    const added = newIds(before, after);
+    canvas.updateScene({
+      elements: after,
+      appState: { selectedElementIds: Object.fromEntries(added.map(id => [id, true])) } as any,
+      captureUpdate: CaptureUpdateAction.IMMEDIATELY,
+    });
+    const shown = after.filter(el => added.includes(el.id));
+    if (shown.length) canvas.scrollToContent(shown, { animate: true });
+    return () => canvas.updateScene({ elements: before, captureUpdate: CaptureUpdateAction.IMMEDIATELY });
   };
 
   return (
@@ -142,7 +167,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
       {thinkOpen && (
         // A side column on wider screens, a sheet over the bottom of the canvas on phones.
         <div className="absolute inset-x-0 bottom-0 h-[60%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
-          <ThinkPanel boardTitle={board.title} getSnapshot={getSnapshot} onClose={onCloseThink} />
+          <ThinkPanel boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
         </div>
       )}
     </div>
