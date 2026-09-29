@@ -37,9 +37,10 @@ export const aiEngine = {
         imagePng?: string | null;
         question?: string;
         history: ThinkTurn[];
-    }): Promise<{ text: string; engine: 'claude' | 'local' }> => {
+    }, signal?: AbortSignal): Promise<{ text: string; engine: 'claude' | 'local' }> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), {
             method: 'POST',
+            signal,
             headers: piHeaders({ 'Content-Type': 'application/json' }),
             body: JSON.stringify(payload)
         });
