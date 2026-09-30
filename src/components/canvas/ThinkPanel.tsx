@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw, Wand2, Check, Undo2, LayoutGrid } from 'lucide-react';
+import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw, Wand2, Check, Undo2, LayoutGrid, Paperclip, FileText } from 'lucide-react';
 import { aiEngine, ThinkDetail, ThinkEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
 import { piBackendUrl } from '../../services/piBackend';
 import { EditOp, RefMap, cleanOps } from './boardEdits';
@@ -48,6 +48,12 @@ const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck;
 
 const AUTO_APPLY_KEY = 'sage.canvasAutoApply';
 const DETAIL_KEY = 'sage.canvasDetail';
+// An attached Markdown file goes with the next message as its source. Bigger
+// files are cut to this so the request stays quick and cheap.
+const MAX_FILE_CHARS = 40_000;
+const MAX_FILE_BYTES = 2_000_000;
+const FILE_PROMPT = 'Turn this file into a flowchart.';
+interface Attached { name: string; text: string }
 const DETAILS: Array<{ value: ThinkDetail; label: string; hint: string }> = [
   { value: 'simple', label: 'Simple', hint: 'A short chain of the big steps' },
   { value: 'moderate', label: 'Moderate', hint: 'The main steps with a few branches' },
@@ -88,6 +94,8 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
   const [input, setInput] = useState('');
   const [autoApply, setAutoApply] = useState(readAutoApply);
   const [detail, setDetail] = useState(readDetail);
+  const [attached, setAttached] = useState<Attached | null>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engine, setEngine] = useState<ThinkEngine | null>(null);
@@ -165,18 +173,37 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
     else setError("Couldn't reach the board to make the changes.");
   };
 
+  const pickFile = async (file?: File) => {
+    if (fileRef.current) fileRef.current.value = '';
+    if (!file) return;
+    if (!/\.(md|markdown|txt)$/i.test(file.name)) { setError('Pick a Markdown (.md) file.'); return; }
+    if (file.size > MAX_FILE_BYTES) { setError(`${file.name} is too big. Try a file under 2 MB.`); return; }
+    try {
+      const text = (await file.text()).trim();
+      if (!text) { setError(`${file.name} is empty.`); return; }
+      setAttached({ name: file.name, text: text.slice(0, MAX_FILE_CHARS) });
+      setError(text.length > MAX_FILE_CHARS ? `${file.name} is long, so I'll only read the first part of it.` : null);
+      inputRef.current?.focus();
+    } catch {
+      setError(`Couldn't read ${file.name}.`);
+    }
+  };
+
   const run = async (mode: ThinkMode, label: string, question?: string) => {
     if (busy) return;
     setBusy(true);
     setError(null);
+    const file = attached;
+    setAttached(null);
     const history = turnsRef.current.map(t => ({ role: t.role, text: historyText(t) }));
-    setTurns(prev => [...prev, { role: 'user', text: question || label, label }]);
+    const shown = question || label;
+    setTurns(prev => [...prev, { role: 'user', text: file ? `${shown}\n\nAttached: ${file.name}` : shown, label: file ? undefined : label }]);
     const request = { controller: new AbortController(), timedOut: false };
     abortRef.current = request;
     const timer = setTimeout(() => { request.timedOut = true; request.controller.abort(); }, TIMEOUT_MS);
     try {
       const { outline, imagePng, refs } = await getSnapshot(mode === 'edit');
-      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history, detail }, request.controller.signal);
+      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history, detail, document: file?.text, documentName: file?.name }, request.controller.signal);
       setEngine(answer.engine);
       const ops = mode === 'edit' && refs ? cleanOps(answer.ops, refs) : [];
 
@@ -210,6 +237,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
         setError(e?.message || 'Something went wrong.');
       }
       setTurns(prev => prev.slice(0, -1));
+      if (file) setAttached(file);
     } finally {
       clearTimeout(timer);
       if (abortRef.current === request) abortRef.current = null;
@@ -219,7 +247,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
   };
 
   const send = () => {
-    const q = input.trim();
+    const q = input.trim() || (attached ? FILE_PROMPT : '');
     if (!q) return;
     setInput('');
     run('edit', q, q);
@@ -332,17 +360,30 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
               </button>
             ))}
           </div>
+          {attached && (
+            <div className="flex items-center gap-1.5 w-fit max-w-full h-7 pl-2 pr-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] text-[12px] text-gray-700 dark:text-gray-200">
+              <FileText size={13} className="shrink-0 text-violet-600 dark:text-violet-300" />
+              <span className="truncate">{attached.name}</span>
+              <button onClick={() => setAttached(null)} aria-label={`Remove ${attached.name}`} className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                <X size={12} />
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2">
+            <input ref={fileRef} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="hidden" onChange={e => pickFile(e.target.files?.[0])} />
+            <button onClick={() => fileRef.current?.click()} disabled={busy} aria-label="Attach a Markdown file" title="Attach a Markdown (.md) file to turn into a chart" className="h-10 w-8 shrink-0 flex items-center justify-center rounded-xl text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/[0.06] disabled:opacity-40 transition-colors">
+              <Paperclip size={17} />
+            </button>
             <textarea
               ref={inputRef}
               value={input}
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               rows={2}
-              placeholder="Ask, or tell me what to change…"
+              placeholder={attached ? 'Say what to do, or just send' : 'Ask, or tell me what to change…'}
               className="field flex-1 resize-none max-h-32 h-10 md:h-auto"
             />
-            <button onClick={send} disabled={busy || !input.trim()} aria-label="Send" className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
+            <button onClick={send} disabled={busy || (!input.trim() && !attached)} aria-label="Send" className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
               <ArrowUp size={17} />
             </button>
           </div>

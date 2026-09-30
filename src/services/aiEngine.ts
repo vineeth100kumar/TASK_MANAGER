@@ -42,6 +42,8 @@ export const aiEngine = {
         question?: string;
         history: ThinkTurn[];
         detail?: ThinkDetail;
+        document?: string;
+        documentName?: string;
     }, signal?: AbortSignal): Promise<{ text: string; engine: ThinkEngine; ops?: unknown[] }> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), {
             method: 'POST',

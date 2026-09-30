@@ -39,6 +39,8 @@ LUMO_ENV = Path(__file__).resolve().parent.parent / "lumo" / "rpi_server" / ".en
 SECRETS_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "sage_secrets.json"
 # Keeps a runaway board from turning into a large bill.
 MAX_OUTLINE_CHARS = 60_000
+# A Markdown file attached in the panel; the app trims it to this too.
+MAX_DOCUMENT_CHARS = 40_000
 
 SYSTEM_PROMPT = """You are a thinking partner sitting beside someone as they work \
 through an idea on a whiteboard. The board may be a flowchart, a mind map, a plan, \
@@ -155,6 +157,8 @@ class CanvasThinkRequest(BaseModel):
     question: Optional[str] = None
     history: List[ThinkTurn] = []
     detail: str = "moderate"  # simple | moderate | complex
+    document: Optional[str] = None  # text of an attached .md file
+    documentName: str = ""
 
 
 def _ask_text(req: CanvasThinkRequest) -> str:
@@ -170,7 +174,13 @@ def _ask_text(req: CanvasThinkRequest) -> str:
 def _board_text(req: CanvasThinkRequest) -> str:
     outline = req.outline[:MAX_OUTLINE_CHARS]
     title = req.boardTitle.strip() or "Untitled board"
-    return f'The board is called "{title}". Its current contents:\n\n{outline}'
+    text = f'The board is called "{title}". Its current contents:\n\n{outline}'
+    doc = (req.document or "").strip()[:MAX_DOCUMENT_CHARS]
+    if doc:
+        name = req.documentName.strip() or "notes.md"
+        text += (f'\n\nI attached a Markdown file, "{name}". Use it as the source for what I ask; '
+                 f"when I ask for a chart, build it from this file's content:\n\n<file>\n{doc}\n</file>")
+    return text
 
 
 def _transcript(req: CanvasThinkRequest) -> str:
