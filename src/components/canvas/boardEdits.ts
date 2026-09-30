@@ -172,16 +172,38 @@ const overlaps = (a: any, el: any) => {
   return a.x < b.x + b.width + 20 && a.x + a.width + 20 > b.x && a.y < b.y + b.height + 20 && a.y + a.height + 20 > b.y;
 };
 
-// Points for an arrow between two boxes: down if the target is below,
-// sideways if it's level, and for an arrow looping back up (a retry), out to
-// the right and round, so it doesn't cut through the shapes in between.
-function arrowBetween(a: any, b: any) {
+// Whether the straight line from p to q passes through a shape.
+const crosses = (p: [number, number], q: [number, number], el: any) => {
+  for (let i = 1; i < 24; i++) {
+    const t = i / 24, x = p[0] + (q[0] - p[0]) * t, y = p[1] + (q[1] - p[1]) * t;
+    if (x > el.x - 4 && x < el.x + el.width + 4 && y > el.y - 4 && y < el.y + el.height + 4) return true;
+  }
+  return false;
+};
+
+// Points for an arrow between two boxes: straight down if the target is
+// below, sideways if it's level. An arrow that would cut through other shapes
+// (one skipping a step) goes round them on the left, and one looping back up
+// (a retry) goes round on the right. `lane` spaces out several such arrows so
+// they don't sit on top of each other.
+function arrowBetween(a: any, b: any, shapes: any[] = [], lane = 0) {
   const acx = a.x + a.width / 2, bcx = b.x + b.width / 2;
   const acy = a.y + a.height / 2, bcy = b.y + b.height / 2;
+  const others = shapes.filter(el => el.id !== a.id && el.id !== b.id);
+  // Shapes level with any part of the route, which a detour has to clear.
+  const between = (top: number, bottom: number) => others.filter(el => el.y < bottom && el.y + el.height > top);
   let pts: Array<[number, number]>;
-  if (b.y >= a.y + a.height) pts = [[acx, a.y + a.height + 6], [bcx, b.y - 6]];
-  else if (b.y + b.height <= a.y) {
-    const out = Math.max(a.x + a.width, b.x + b.width) + 50;
+  let detour: 'left' | 'right' | null = null;
+  if (b.y >= a.y + a.height) {
+    pts = [[acx, a.y + a.height + 6], [bcx, b.y - 6]];
+    if (others.some(el => crosses(pts[0], pts[1], el))) {
+      detour = 'left';
+      const out = Math.min(a.x, b.x, ...between(a.y, b.y + b.height).map(el => el.x)) - 40 - lane * 24;
+      pts = [[a.x - 6, acy], [out, acy], [out, bcy], [b.x - 6, bcy]];
+    }
+  } else if (b.y + b.height <= a.y) {
+    detour = 'right';
+    const out = Math.max(a.x + a.width, b.x + b.width, ...between(b.y, a.y + a.height).map(el => el.x + el.width)) + 40 + lane * 24;
     pts = [[a.x + a.width + 6, acy], [out, acy], [out, bcy], [b.x + b.width + 6, bcy]];
   }
   else if (bcx >= acx) pts = [[a.x + a.width + 6, acy], [b.x - 6, bcy]];
@@ -192,10 +214,10 @@ function arrowBetween(a: any, b: any) {
   // Where a label sits: the middle of the middle segment.
   const m = Math.floor((pts.length - 1) / 2);
   const mid: [number, number] = [(pts[m][0] + pts[m + 1][0]) / 2, (pts[m][1] + pts[m + 1][1]) / 2];
-  return { x, y, points, width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), mid };
+  return { x, y, points, width: Math.max(...xs) - Math.min(...xs), height: Math.max(...ys) - Math.min(...ys), mid, detour };
 }
 
-const withoutMid = ({ mid: _mid, ...route }: ReturnType<typeof arrowBetween>) => route;
+const withoutMid = ({ mid: _mid, detour: _detour, ...route }: ReturnType<typeof arrowBetween>) => route;
 
 // Applies edits to the current elements and returns the new element list.
 export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): any[] {
@@ -217,6 +239,22 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
   const makeId = () => Math.random().toString(36).slice(2, 12) + Date.now().toString(36);
   // Shapes that moved or changed size; their arrows get redrawn at the end.
   const touched = new Set<string>();
+  // What each arrow joins, read before anything moves: an arrow that was only
+  // drawn touching its shapes can't be matched to them once they've moved.
+  const startShapes = current.filter(el => !el.isDeleted && SHAPES.has(el.type));
+  const joins = new Map<string, [string | undefined, string | undefined]>();
+  for (const el of current) {
+    if (el.isDeleted || el.type !== 'arrow') continue;
+    joins.set(el.id, [el.startBinding?.elementId || shapeNear(startShapes, el, 0)?.id, el.endBinding?.elementId || shapeNear(startShapes, el, -1)?.id]);
+  }
+  // Arrows that go round other shapes are spaced apart, one lane each.
+  const lanes = { left: 0, right: 0 };
+  const route = (a: any, b: any) => {
+    const shapes = [...byId().values()].filter(el => SHAPES.has(el.type));
+    const plain = arrowBetween(a, b, shapes);
+    if (!plain.detour) return plain;
+    return arrowBetween(a, b, shapes, lanes[plain.detour]++);
+  };
 
   // Sets a shape's box, carrying its label along.
   const place = (id: string, x: number, y: number, width?: number, height?: number) => {
@@ -270,7 +308,7 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       continue;
     }
     if (o.op === 'tidy') {
-      for (const [id, box] of tidyLayout([...byId().values()])) place(id, box.x, box.y);
+      for (const [id, box] of tidyLayout([...byId().values()], joins)) place(id, box.x, box.y);
       continue;
     }
     if (o.op === 'delete') {
@@ -338,7 +376,7 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
       if (!a || !b) continue;
       const id = makeId();
       const made = convertToExcalidrawElements([
-        { type: 'arrow', id, ...withoutMid(arrowBetween(a, b)), ...look, ...(o.label ? { label: { text: o.label, ...labelLook, fontSize: Math.min(labelLook.fontSize, 16) } } : {}) } as any,
+        { type: 'arrow', id, ...withoutMid(route(a, b)), ...look, ...(o.label ? { label: { text: o.label, ...labelLook, fontSize: Math.min(labelLook.fontSize, 16) } } : {}) } as any,
       ], { regenerateIds: false }) as any[];
       const [arrow, ...rest] = made;
       elements.push(
@@ -353,13 +391,18 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
   // they were only drawn touching the shape.
   if (touched.size) {
     const live = byId();
-    const shapes = [...live.values()].filter(el => SHAPES.has(el.type));
-    for (const arrow of [...live.values()].filter(el => el.type === 'arrow')) {
-      const from = live.get(arrow.startBinding?.elementId) || shapeNear(shapes, arrow, 0);
-      const to = live.get(arrow.endBinding?.elementId) || shapeNear(shapes, arrow, -1);
+    lanes.left = 0; lanes.right = 0;
+    // Shorter detours first, so they take the lanes nearest the shapes.
+    const arrows = [...live.values()].filter(el => el.type === 'arrow').map(arrow => {
+      const [fromId, toId] = joins.get(arrow.id) || [];
+      const from = live.get(arrow.startBinding?.elementId) || live.get(fromId as string);
+      const to = live.get(arrow.endBinding?.elementId) || live.get(toId as string);
+      return { arrow, from, to };
+    }).sort((p, q) => (p.from && p.to ? Math.abs(p.from.y - p.to.y) : 0) - (q.from && q.to ? Math.abs(q.from.y - q.to.y) : 0));
+    for (const { arrow, from, to } of arrows) {
       if (!from || !to || from.id === to.id || !(touched.has(from.id) || touched.has(to.id))) continue;
-      const { mid, ...route } = arrowBetween(from, to);
-      replace(arrow.id, el => bump(el, { ...route, startBinding: { elementId: from.id, focus: 0, gap: 6 }, endBinding: { elementId: to.id, focus: 0, gap: 6 } }));
+      const { mid, detour: _detour, ...path } = route(from, to);
+      replace(arrow.id, el => bump(el, { ...path, startBinding: { elementId: from.id, focus: 0, gap: 6 }, endBinding: { elementId: to.id, focus: 0, gap: 6 } }));
       for (const end of [from, to]) {
         if (!(end.boundElements || []).some((b: any) => b.id === arrow.id)) replace(end.id, el => bump(el, { boundElements: [...(el.boundElements || []), { id: arrow.id, type: 'arrow' }] }));
       }
@@ -374,14 +417,15 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
 // shapes that point to it, rows are centred on each other, and each row is
 // ordered to follow its parents so arrows cross as little as possible.
 // Shapes nothing connects to go in a row at the bottom.
-function tidyLayout(live: any[]): Map<string, { x: number; y: number }> {
+function tidyLayout(live: any[], joins: Map<string, [string | undefined, string | undefined]>): Map<string, { x: number; y: number }> {
   const shapes = live.filter(el => SHAPES.has(el.type));
   const byId = new Map(shapes.map(el => [el.id, el]));
   const kids = new Map<string, string[]>(shapes.map(el => [el.id, []]));
   const parents = new Map<string, string[]>(shapes.map(el => [el.id, []]));
   for (const arrow of live.filter(el => el.type === 'arrow')) {
-    const from = byId.get(arrow.startBinding?.elementId) || shapeNear(shapes, arrow, 0);
-    const to = byId.get(arrow.endBinding?.elementId) || shapeNear(shapes, arrow, -1);
+    const [fromId, toId] = joins.get(arrow.id) || [];
+    const from = byId.get(arrow.startBinding?.elementId) || byId.get(fromId as string) || shapeNear(shapes, arrow, 0);
+    const to = byId.get(arrow.endBinding?.elementId) || byId.get(toId as string) || shapeNear(shapes, arrow, -1);
     if (!from || !to || from.id === to.id) continue;
     kids.get(from.id)!.push(to.id);
     parents.get(to.id)!.push(from.id);
