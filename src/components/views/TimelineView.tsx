@@ -52,7 +52,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
       
       {/* Key Milestones Ribbon */}
       {milestones.length > 0 && (
-        <div className="bg-gradient-to-r from-blue-500/10 via-indigo-500/10 to-purple-500/10 dark:from-blue-500/5 dark:via-indigo-500/5 dark:to-purple-500/5 p-6 rounded-3xl border border-blue-200/40 dark:border-blue-500/20">
+        <div className="hero p-6 rounded-3xl">
           <div className="flex items-center gap-2 mb-4">
             <Target size={18} className="text-blue-600 dark:text-blue-400" />
             <h3 className="font-bold text-[15px] text-gray-900 dark:text-white">Milestones & Key Checkpoints</h3>

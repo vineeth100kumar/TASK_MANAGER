@@ -87,7 +87,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={onClose} />
+      <div className="absolute inset-0 scrim" onClick={onClose} />
       <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
         className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl overflow-hidden relative z-10 flex flex-col max-h-[88vh] border border-gray-100 dark:border-white/10">
         

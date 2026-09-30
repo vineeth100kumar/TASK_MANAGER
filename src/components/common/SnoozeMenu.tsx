@@ -84,7 +84,7 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
               initial={{ opacity: 0, scale: 0.95, y: 5 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 
               exit={{ opacity: 0, scale: 0.95, y: 5 }}
-              className="absolute right-0 mt-2 w-56 bg-white dark:bg-[#1c1c1e] rounded-2xl shadow-xl border border-gray-100 dark:border-white/10 z-50 p-1.5 overflow-hidden text-xs"
+              className="absolute right-0 mt-2 w-56 surface-float rounded-2xl z-50 p-1.5 overflow-hidden text-xs"
             >
               {!isCustomOpen ? (
                 <div className="space-y-0.5">
