@@ -6,6 +6,8 @@ export interface ToastAction {
   label: string;
   onAction: () => void;
   durationMs?: number;
+  // A newer toast in the same group replaces the older one instead of stacking.
+  group?: string;
 }
 
 export interface Toast {
@@ -43,9 +45,9 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
   }, []);
 
   const showToast = useCallback((message: string, type: ToastType = 'success', action?: ToastAction) => {
-    const id = Date.now();
+    const id = Date.now() + Math.random();
     const toast: Toast = { id, message, type, action };
-    setToasts(prev => [...prev, toast]);
+    setToasts(prev => [...prev.filter(t => !action?.group || t.action?.group !== action.group), toast]);
 
     const duration = action?.durationMs || (action ? 8000 : 4000);
     setTimeout(() => {

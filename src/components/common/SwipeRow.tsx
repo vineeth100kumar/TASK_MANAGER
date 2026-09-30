@@ -1,7 +1,8 @@
-import React, { useRef } from 'react';
-import { motion, useMotionValue, useTransform, PanInfo } from 'framer-motion';
+import React, { useRef, useState } from 'react';
+import { motion, useMotionValue, useMotionValueEvent, useTransform, PanInfo } from 'framer-motion';
 import { Check, Clock } from 'lucide-react';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { haptic } from '../../utils/progress';
 
 interface SwipeRowProps {
   children: React.ReactNode;
@@ -22,6 +23,16 @@ export function SwipeRow({ children, onSwipeRight, onSwipeLeft, rightLabel = 'Do
   const dragged = useRef(false);
   const rightOpacity = useTransform(x, [0, THRESHOLD], [0, 1]);
   const leftOpacity = useTransform(x, [-THRESHOLD, 0], [1, 0]);
+  // Past the threshold the action "locks in": the icon grows and the phone taps once,
+  // so letting go never feels like a guess.
+  const [armed, setArmed] = useState<'left' | 'right' | null>(null);
+  useMotionValueEvent(x, 'change', (v) => {
+    const next = v > THRESHOLD && onSwipeRight ? 'right' : v < -THRESHOLD && onSwipeLeft ? 'left' : null;
+    if (next !== armed) {
+      if (next) haptic(8);
+      setArmed(next);
+    }
+  });
 
   if (!isMobile || (!onSwipeRight && !onSwipeLeft)) {
     return <div className={className}>{children}</div>;
@@ -31,6 +42,7 @@ export function SwipeRow({ children, onSwipeRight, onSwipeLeft, rightLabel = 'Do
     if (info.offset.x > THRESHOLD && onSwipeRight) onSwipeRight();
     else if (info.offset.x < -THRESHOLD && onSwipeLeft) onSwipeLeft();
     // Let the click that ends a drag pass before re-enabling taps.
+    setArmed(null);
     setTimeout(() => { dragged.current = false; }, 0);
   };
 
@@ -38,12 +50,12 @@ export function SwipeRow({ children, onSwipeRight, onSwipeLeft, rightLabel = 'Do
     <div className={`relative overflow-hidden rounded-2xl ${className}`}>
       {onSwipeRight && (
         <motion.div style={{ opacity: rightOpacity }} className="absolute inset-0 flex items-center pl-5 bg-emerald-500 text-white text-[13px] font-semibold gap-2 rounded-2xl" aria-hidden>
-          <Check size={18} /> {rightLabel}
+          <Check size={18} strokeWidth={armed === 'right' ? 3 : 2} className={`transition-transform duration-200 ${armed === 'right' ? 'scale-125' : ''}`} /> {rightLabel}
         </motion.div>
       )}
       {onSwipeLeft && (
         <motion.div style={{ opacity: leftOpacity }} className="absolute inset-0 flex items-center justify-end pr-5 bg-amber-500 text-white text-[13px] font-semibold gap-2 rounded-2xl" aria-hidden>
-          {leftLabel} <Clock size={18} />
+          {leftLabel} <Clock size={18} strokeWidth={armed === 'left' ? 3 : 2} className={`transition-transform duration-200 ${armed === 'left' ? 'scale-125' : ''}`} />
         </motion.div>
       )}
       <motion.div

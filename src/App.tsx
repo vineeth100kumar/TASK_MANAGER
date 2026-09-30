@@ -7,6 +7,7 @@ import { api } from './services/api';
 import { STATUSES } from './services/constants';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
+import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -172,11 +173,13 @@ function MainApp() {
       await api.workItems.transitionStatus(item.id, newStatus, item.version);
       
       // Provide Universal 8-Second Undo on State Changes
+      if (newStatus === 'done') haptic(12);
       showToast(
-        `Moved to ${(STATUSES as any)[newStatus]?.label || newStatus}`, 
+        newStatus === 'done' ? doneMessage(countDoneToday()) : `Moved to ${(STATUSES as any)[newStatus]?.label || newStatus}`, 
         'success',
         {
           label: 'Undo',
+          group: newStatus === 'done' ? 'done' : undefined,
           onAction: async () => {
             await api.workItems.transitionStatus(item.id, oldItem.status, oldItem.version);
             showToast('Action undone');
