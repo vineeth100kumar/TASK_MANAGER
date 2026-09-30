@@ -78,6 +78,15 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
   // panels is open, such as the library, a menu or a dialog, so they never
   // sit on top of it.
   const [busyCanvas, setBusyCanvas] = useState(false);
+  // "Blank" puts the picker away for this board, remembered in this browser.
+  const blankKey = `sage.canvasBlank.${board.id}`;
+  const [choseBlank, setChoseBlank] = useState(() => {
+    try { return localStorage.getItem(blankKey) === '1'; } catch { return false; }
+  });
+  const startBlank = () => {
+    setChoseBlank(true);
+    try { localStorage.setItem(blankKey, '1'); } catch { /* storage blocked: it just comes back next visit */ }
+  };
   const [candidates, setCandidates] = useState<Array<{ id: string; title: string }>>([]);
   const { showToast } = useToast();
 
@@ -250,13 +259,17 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
             <MainMenu.DefaultItems.Help />
           </MainMenu>
         </Excalidraw>
-        {isEmpty && !busyCanvas && (
+        {isEmpty && !busyCanvas && !choseBlank && (
           // Clicks pass through to the canvas except on the buttons. On a
           // phone the Think with me sheet covers the canvas, so it hides then.
           <div className={`pointer-events-none absolute inset-0 z-[5] items-center justify-center p-6 pr-16 md:pr-6 ${thinkOpen ? 'hidden md:flex' : 'flex'}`}>
             <div className="pointer-events-auto max-w-md text-center space-y-3">
               <p className="text-[13px] font-semibold text-gray-500 dark:text-gray-400">Start from a template, or just start drawing</p>
               <div className="grid grid-cols-2 gap-2">
+                <button onClick={startBlank} className="col-span-2 text-left px-3 py-2.5 rounded-xl bg-white dark:bg-[#1c1c1e] ring-1 ring-gray-200 dark:ring-white/10 hover:ring-violet-400 hover:bg-violet-50/60 dark:hover:bg-violet-500/10 transition-colors">
+                  <span className="block text-[13px] font-semibold text-gray-900 dark:text-gray-100">Blank</span>
+                  <span className="block text-[11.5px] text-gray-500">An empty board to draw on</span>
+                </button>
                 {TEMPLATES.map(t => (
                   <button key={t.name} onClick={() => startFromTemplate(t.ops)} className="text-left px-3 py-2.5 rounded-xl bg-white dark:bg-[#1c1c1e] ring-1 ring-gray-200 dark:ring-white/10 hover:ring-violet-400 hover:bg-violet-50/60 dark:hover:bg-violet-500/10 transition-colors">
                     <span className="block text-[13px] font-semibold text-gray-900 dark:text-gray-100">{t.name}</span>
