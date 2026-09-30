@@ -85,7 +85,9 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
 
   return (
     <div className={focusMode ? 'fixed inset-0 z-40 flex flex-col gap-3 p-3 bg-gray-50 dark:bg-[#0b0b0c]' : 'h-full flex flex-col gap-3'}>
-      <div className="flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 -mx-1 px-1">
+      <div className="flex items-center gap-1.5">
+      {/* Boards scroll sideways when there are many; the actions on the right stay put. */}
+      <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto custom-scrollbar pb-0.5 -ml-1 pl-1">
         {boards?.map(board => {
           const isActive = board.id === active?.id;
           return (
@@ -125,12 +127,14 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
         })}
         <button
           onClick={handleCreate}
+          aria-label="New board"
           className="shrink-0 flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-500/10 transition-colors"
         >
-          <Plus size={15} /> New board
+          <Plus size={15} /> <span className="hidden sm:inline">New board</span>
         </button>
+      </div>
         {active && saveState && (
-          <span className={`shrink-0 ml-auto flex items-center gap-1 text-[12px] font-medium ${saveState === 'error' ? 'text-red-500' : 'text-gray-400'}`}>
+          <span className={`shrink-0 hidden sm:flex items-center gap-1 text-[12px] font-medium ${saveState === 'error' ? 'text-red-500' : 'text-gray-400'}`}>
             {saveState === 'saving' ? <><Loader2 size={12} className="animate-spin" /> Saving</> : saveState === 'saved' ? <><Check size={12} /> Saved</> : <><CloudOff size={12} /> Not saved</>}
           </span>
         )}
@@ -139,7 +143,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
             onClick={() => setFocusMode(f => !f)}
             aria-label={focusMode ? 'Exit full screen' : 'Full screen'}
             title={focusMode ? 'Exit full screen (Esc)' : 'Full screen'}
-            className={`shrink-0 ${saveState ? '' : 'ml-auto '}h-9 w-9 flex items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors`}
+            className={`shrink-0 h-9 w-9 flex items-center justify-center rounded-xl text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors`}
           >
             {focusMode ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
@@ -151,7 +155,7 @@ export function CanvasView({ lifeContext, isDarkMode }: CanvasViewProps) {
             title="Think with me (Ctrl+J)"
             className={`shrink-0 flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold transition-colors ${thinkOpen ? 'bg-violet-600 text-white shadow-sm' : 'text-violet-600 hover:bg-violet-50 dark:text-violet-400 dark:hover:bg-violet-500/10'}`}
           >
-            <Sparkles size={15} /> Think with me
+            <Sparkles size={15} /> Think<span className="hidden sm:inline"> with me</span>
           </button>
         )}
       </div>
