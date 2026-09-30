@@ -246,11 +246,9 @@ export function Sidebar({
         className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden backdrop-blur-3xl border-r border-gray-200/60 dark:border-white/[0.06] shadow-[inset_-1px_0_0_rgb(255_255_255/0.6)] dark:shadow-none transition-[background-color] duration-500 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-gradient-to-b from-orange-50/95 to-[#f7f4f0]/95 dark:from-[#1a130c]/95 dark:to-[#141210]/95' : 'bg-gradient-to-b from-[#f7f7f9]/95 to-[#f1f1f4]/95 dark:from-[#18181b]/95 dark:to-[#131315]/95'}`}
       >
         <div className="w-[280px] h-full flex flex-col">
-          <div className="px-6 pt-5 pb-3 flex items-center justify-center relative">
-            <div className="flex items-center justify-center w-full">
-              <img src="/logo-light.png" alt="Sage Logo" className="h-[112px] w-auto block dark:hidden object-contain mx-auto select-none" draggable={false} />
-              <img src="/logo-dark.png" alt="Sage Logo" className="h-[112px] w-auto hidden dark:block object-contain mx-auto select-none" draggable={false} />
-            </div>
+          <div className="px-6 pt-6 pb-4 flex items-center relative">
+            <img src="/logo-light.png" alt="Sage" className="h-9 w-auto block dark:hidden select-none" draggable={false} />
+            <img src="/logo-dark.png" alt="Sage" className="h-9 w-auto hidden dark:block select-none" draggable={false} />
             <button onClick={() => setIsSidebarOpen(false)} className="absolute right-4 md:hidden p-2 text-gray-500 rounded-lg hover:bg-black/5 dark:hover:bg-white/5" aria-label="Close sidebar">
               <X size={20} />
             </button>
