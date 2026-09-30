@@ -34,17 +34,17 @@ export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
 
         return (
           <div key={status.id} className="flex flex-col w-[320px] shrink-0 snap-start" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, status.id)}>
-            <div className="flex items-center gap-2 mb-4 px-2 sticky top-0 bg-white/80 dark:bg-[#0a0a0b]/80 backdrop-blur-md py-2 z-10">
+            <div className="flex items-center gap-2 mb-3 px-2 sticky top-0 py-2 z-10">
               <div className={`p-1.5 rounded-lg ${status.color.split(' ')[0]} bg-opacity-20`}><div className={`w-2 h-2 rounded-full ${status.dot}`} /></div>
-              <h3 className="font-bold text-[15px]">{status.label}</h3>
-              <span className="text-xs font-semibold bg-gray-100 dark:bg-[#1c1c1e] px-2 py-0.5 rounded-full text-gray-500">{columnTasks.length}</span>
+              <h3 className="font-semibold text-[14px] tracking-[-0.01em]">{status.label}</h3>
+              <span className="text-[11px] font-semibold tabular-nums bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full text-gray-500">{columnTasks.length}</span>
             </div>
-            <div className={`flex flex-col gap-3 bg-[#f5f5f7] dark:bg-[#1c1c1e] p-3 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
+            <div className={`flex flex-col gap-3 surface p-3 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
               {columnTasks.map(task => {
                 const dateText = formatDateRange(task.startDate, task.dueDate);
                 return (
                   <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
-                    className="bg-white dark:bg-[#2c2c2e] p-4 rounded-2xl shadow-sm border border-transparent hover:border-gray-200 dark:hover:border-white/20 cursor-grab active:cursor-grabbing group outline-none focus:ring-2 focus:ring-blue-500/50">
+                    className="surface-item is-interactive p-4 rounded-2xl cursor-grab active:cursor-grabbing group outline-none focus:ring-2 focus:ring-blue-500/50">
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
                         <button 
@@ -57,7 +57,7 @@ export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
                       </div>
                       <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />
                     </div>
-                    <h4 className="text-[15px] font-semibold mb-3 leading-snug group-hover:text-blue-500 line-clamp-2">{task.title}</h4>
+                    <h4 className="text-[14.5px] font-semibold tracking-[-0.01em] mb-3 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">{task.title}</h4>
                     
                     {dateText && (
                       <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-semibold ${task.dueDate && task.dueDate < new Date().toISOString().split('T')[0] ? 'text-red-500' : 'text-gray-400'}`}>

@@ -1,10 +1,17 @@
-import { CheckCircle, Circle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
+import { CheckCircle, Check, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
+
+// "Wed, Sep 30 · 3:00 PM"
+function formatWhen(iso: string) {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return iso;
+  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+}
 
 interface ListViewProps {
   tasks: WorkItem[];
@@ -31,11 +38,11 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
       <div key={title} className="mb-10">
         <div className="flex items-center gap-2 mb-3 px-2">
           {colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
-          <h4 className="font-bold text-[14px] text-gray-900 dark:text-white capitalize">{title}</h4>
-          <span className="text-[12px] font-semibold text-gray-400 bg-gray-100 dark:bg-white/5 px-2 py-0.5 rounded-full">{groupTasks.length}</span>
+          <h4 className="font-semibold text-[13.5px] tracking-[-0.01em] text-gray-900 dark:text-white capitalize">{title}</h4>
+          <span className="text-[11px] font-semibold tabular-nums text-gray-500 bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full">{groupTasks.length}</span>
         </div>
         
-        <div className="flex flex-col gap-1.5">
+        <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
             const dateStr = formatDateRange(task.startDate, task.dueDate);
             const swipeable = task.entityType === 'task' && task.status !== 'done';
@@ -45,16 +52,15 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                 onSwipeLeft={swipeable ? () => snoozeToTomorrow(task) : undefined}>
               <div
                 onClick={() => onSelect(task.id)}
-                className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer transition-all border ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'bg-white dark:bg-[#1c1c1e] border-gray-100 dark:border-white/5 hover:border-gray-300 dark:hover:border-white/20 shadow-sm hover:shadow-md'}`}>
+                className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer border ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'surface-item is-interactive'}`}>
                 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
                   {task.entityType === 'task' ? (
                     <>
                       {task.status !== 'done' && (
-                        <div className="relative group cursor-pointer" onClick={(e) => { e.stopPropagation(); onTransition(task, 'done'); }}>
-                          <Circle size={20} strokeWidth={2.5} className="text-gray-300 dark:text-gray-600 group-hover:opacity-0 transition-opacity" />
-                          <CheckCircle size={20} strokeWidth={2.5} className="text-gray-400 dark:text-gray-500 absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        </div>
+                        <button className="check-ring !w-5 !h-5" aria-label="Complete" onClick={(e) => { e.stopPropagation(); onTransition(task, 'done'); }}>
+                          <Check size={12} strokeWidth={3} />
+                        </button>
                       )}
                       {task.status === 'done' && <CheckCircle size={20} strokeWidth={2.5} className="text-emerald-500" />}
                     </>
@@ -66,8 +72,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
-                      <span className="text-[11px] font-semibold text-gray-400 w-14">{task.key}</span>
-                      <span className={`text-[15px] sm:text-[16px] font-bold tracking-tight ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                      <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-gray-400 w-14 shrink-0">{task.key}</span>
+                      <span className={`text-[15px] font-semibold tracking-[-0.01em] ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
                         <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}
@@ -78,7 +84,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                 </div>
 
                 {task.entityType === 'task' && (
-                  <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
+                  <div className="flex items-center gap-3 sm:gap-4 shrink-0 pl-8 sm:pl-0 mt-1.5 sm:mt-0">
+                    <span className="sm:hidden text-[11px] font-semibold tracking-wide text-gray-400">{task.key}</span>
                     {task.project?.name && (
                       <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/5 text-gray-500">
                         {task.project.name}
@@ -105,13 +112,13 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                 
                 {task.entityType === 'event' && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
-                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.startAt ? new Date(task.startAt).toLocaleString() : 'TBD'}</span>
+                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.startAt ? formatWhen(task.startAt) : 'No time set'}</span>
                   </div>
                 )}
 
                 {task.entityType === 'reminder' && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
-                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.remindAt ? new Date(task.remindAt).toLocaleString() : 'TBD'}</span>
+                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.remindAt ? formatWhen(task.remindAt) : 'No time set'}</span>
                   </div>
                 )}
               </div>

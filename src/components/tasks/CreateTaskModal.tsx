@@ -162,9 +162,9 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-0 font-sans">
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-gray-900/30 dark:bg-black/60 backdrop-blur-sm" onClick={() => !isSubmitting && onClose()} />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 scrim" onClick={() => !isSubmitting && onClose()} />
       <motion.div initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl shadow-black/20 overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8),inset_0_1px_0_rgb(255_255_255/0.06)] overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
         
         <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
           <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
@@ -174,9 +174,10 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext = 
         <div className="px-6 pt-5 pb-2 shrink-0">
           <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5">
              {Object.entries(ENTITY_TYPES).map(([k, v]) => (
-                <label key={k} className={`flex-1 flex items-center justify-center py-1.5 px-3 rounded-lg cursor-pointer transition-all has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60 ${entityType === v ? 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                <label key={k} className={`relative flex-1 flex items-center justify-center py-1.5 px-3 rounded-lg cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60 ${entityType === v ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                   {entityType === v && <motion.span layoutId="entity-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg bg-white dark:bg-[#3a3a3c] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
                    <input type="radio" name="entityType" value={v} checked={entityType === v} onChange={(e) => setEntityType(e.target.value)} className="sr-only" />
-                   <span className="text-[13px] capitalize font-semibold">{v}</span>
+                   <span className="relative text-[13px] capitalize font-semibold">{v}</span>
                 </label>
              ))}
           </div>

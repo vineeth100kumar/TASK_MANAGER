@@ -3,6 +3,29 @@
 
 @theme {
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes fade-in {
+  from { opacity: 0; }
+}
+@keyframes shimmer {
+  from { background-position: 150% 0; }
+  to { background-position: -50% 0; }
+}
+@keyframes pop {
+  0% { transform: scale(1); }
+  40% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+@keyframes breathe {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
 }
 
 @layer base {
@@ -15,14 +38,41 @@
 
   body {
     font-family: var(--font-sans);
-    font-feature-settings: "cv11", "ss01", "ss03";
+    /* cv11 single-storey a, ss01 open digits, ss03 rounded quotes, cv05 l with tail. */
+    font-feature-settings: "cv11", "ss01", "ss03", "cv05";
+    font-optical-sizing: auto;
+    background-color: white;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
   }
 
+  html.dark body {
+    background-color: #0a0a0b;
+  }
+
+  h1, h2, h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+
   ::selection {
     background: rgb(59 130 246 / 0.22);
+  }
+  [data-context="personal"] ::selection {
+    background: rgb(249 115 22 / 0.22);
+  }
+
+  /* Theme switch: a circular reveal from the toggle (see App.tsx). Colours
+     snap during the switch so the new snapshot isn't mid-transition. */
+  html.theme-switching *, html.theme-switching *::before, html.theme-switching *::after {
+    transition: none !important;
+  }
+  ::view-transition-old(root), ::view-transition-new(root) {
+    animation: none;
+    mix-blend-mode: normal;
   }
 
   /* Keyboard focus ring everywhere, without a ring on mouse click. */
@@ -48,6 +98,226 @@
 }
 
 @layer components {
+  /* ---- Backgrounds ------------------------------------------------------ */
+
+  /* Ambient light behind the main area: a soft tinted glow at the top plus a
+     faint grain so large empty areas don't read as flat. */
+  .app-ambient {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 0;
+    background:
+      radial-gradient(60rem 28rem at 12% -8%, rgb(59 130 246 / 0.07), transparent 70%),
+      radial-gradient(48rem 24rem at 95% -12%, rgb(139 92 246 / 0.05), transparent 70%);
+  }
+  [data-context="personal"] .app-ambient {
+    background:
+      radial-gradient(60rem 28rem at 12% -8%, rgb(251 146 60 / 0.10), transparent 70%),
+      radial-gradient(48rem 24rem at 95% -12%, rgb(244 63 94 / 0.05), transparent 70%);
+  }
+  .dark .app-ambient::after {
+    opacity: 0.12;
+  }
+  .dark .app-ambient {
+    background:
+      radial-gradient(60rem 30rem at 12% -10%, rgb(59 130 246 / 0.10), transparent 70%),
+      radial-gradient(48rem 26rem at 95% -14%, rgb(139 92 246 / 0.08), transparent 70%);
+  }
+  .dark [data-context="personal"] .app-ambient {
+    background:
+      radial-gradient(60rem 30rem at 12% -10%, rgb(251 146 60 / 0.10), transparent 70%),
+      radial-gradient(48rem 26rem at 95% -14%, rgb(244 63 94 / 0.06), transparent 70%);
+  }
+  .app-ambient::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    opacity: 0.3;
+    mix-blend-mode: soft-light;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 0 0.5 0 0 0 .5 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  }
+
+  /* Hero banner (Today, Inbox, Focus): layered colour washes, a masked dot
+     grid and a hairline top highlight. Tint comes from --hero-a / --hero-b. */
+  .hero {
+    --hero-a: rgb(59 130 246 / 0.16);
+    --hero-b: rgb(139 92 246 / 0.10);
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+    border: 1px solid rgb(0 0 0 / 0.06);
+    background:
+      radial-gradient(40rem 20rem at 0% 0%, var(--hero-a), transparent 65%),
+      radial-gradient(32rem 18rem at 100% 100%, var(--hero-b), transparent 65%),
+      linear-gradient(180deg, #fbfbfd, #f4f5f8);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.9), 0 1px 2px rgb(16 24 40 / 0.04), 0 12px 32px -18px rgb(16 24 40 / 0.18);
+  }
+  .hero::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: -1;
+    background-image: radial-gradient(rgb(15 23 42 / 0.09) 1px, transparent 1px);
+    background-size: 18px 18px;
+    mask-image: radial-gradient(ellipse 70% 90% at 100% 0%, black, transparent 70%);
+  }
+  .hero-personal { --hero-a: rgb(251 146 60 / 0.20); --hero-b: rgb(244 63 94 / 0.08); }
+  .hero-waiting { --hero-a: rgb(168 85 247 / 0.16); --hero-b: rgb(59 130 246 / 0.06); }
+  .hero-focus { --hero-a: rgb(245 158 11 / 0.18); --hero-b: rgb(251 191 36 / 0.08); }
+  .dark .hero {
+    border-color: rgb(255 255 255 / 0.07);
+    background:
+      radial-gradient(40rem 20rem at 0% 0%, var(--hero-a), transparent 65%),
+      radial-gradient(32rem 18rem at 100% 100%, var(--hero-b), transparent 65%),
+      linear-gradient(180deg, #151518, #0f0f11);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 20px 40px -24px rgb(0 0 0 / 0.8);
+  }
+  .dark .hero::before {
+    background-image: radial-gradient(rgb(255 255 255 / 0.07) 1px, transparent 1px);
+  }
+
+  /* ---- Surfaces --------------------------------------------------------- */
+
+  /* A panel that groups rows (Today cards, board columns). */
+  .surface {
+    background: linear-gradient(180deg, #f7f7f9, #f3f3f6);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.8);
+  }
+  .dark .surface {
+    background: linear-gradient(180deg, #151517, #121214);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+
+  /* A single row or card: white with a soft layered shadow that deepens and
+     lifts on hover. */
+  .surface-item {
+    background-color: white;
+    border: 1px solid rgb(0 0 0 / 0.06);
+    box-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 1px 1px rgb(16 24 40 / 0.02);
+    transition: transform 200ms var(--ease-out-expo), box-shadow 200ms var(--ease-out-expo), border-color 150ms, background-color 150ms;
+  }
+  .surface-item.is-interactive:hover {
+    transform: translateY(-1px);
+    border-color: rgb(0 0 0 / 0.1);
+    box-shadow: 0 1px 2px rgb(16 24 40 / 0.04), 0 10px 24px -14px rgb(16 24 40 / 0.22);
+  }
+  .dark .surface-item {
+    background-color: rgb(255 255 255 / 0.045);
+    border-color: rgb(255 255 255 / 0.07);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.04);
+  }
+  .dark .surface-item.is-interactive:hover {
+    background-color: rgb(255 255 255 / 0.07);
+    border-color: rgb(255 255 255 / 0.12);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.05), 0 12px 28px -16px rgb(0 0 0 / 0.9);
+  }
+
+  /* Floating layer: menus, popovers, dialogs. */
+  .surface-float {
+    background-color: rgb(255 255 255 / 0.96);
+    border: 1px solid rgb(0 0 0 / 0.06);
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.02), 0 4px 8px -2px rgb(16 24 40 / 0.06), 0 24px 48px -12px rgb(16 24 40 / 0.22);
+    backdrop-filter: blur(20px) saturate(1.6);
+  }
+  .dark .surface-float {
+    background-color: rgb(28 28 31 / 0.96);
+    border-color: rgb(255 255 255 / 0.09);
+    box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.06), 0 24px 56px -12px rgb(0 0 0 / 0.75);
+  }
+
+  /* Dimmed layer behind dialogs. */
+  .scrim {
+    animation: fade-in 200ms ease-out;
+    background: rgb(15 23 42 / 0.28);
+    backdrop-filter: blur(6px) saturate(1.2);
+  }
+  .dark .scrim {
+    background: rgb(0 0 0 / 0.6);
+  }
+
+  /* ---- Type ------------------------------------------------------------- */
+
+  /* Small uppercase label above a heading. */
+  .eyebrow {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  /* Display heading with a subtle top-to-bottom ink gradient. */
+  .text-display {
+    letter-spacing: -0.035em;
+    background: linear-gradient(180deg, #0b0b0f 30%, #4b5563);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  .dark .text-display {
+    background: linear-gradient(180deg, #ffffff 35%, #a1a1aa);
+    -webkit-background-clip: text;
+    background-clip: text;
+  }
+
+  /* ---- Motion ----------------------------------------------------------- */
+
+  /* Children fade and rise in one after another. */
+  .stagger > * {
+    animation: rise 480ms var(--ease-out-expo) backwards;
+  }
+  .stagger > *:nth-child(2) { animation-delay: 40ms; }
+  .stagger > *:nth-child(3) { animation-delay: 80ms; }
+  .stagger > *:nth-child(4) { animation-delay: 120ms; }
+  .stagger > *:nth-child(5) { animation-delay: 160ms; }
+  .stagger > *:nth-child(6) { animation-delay: 200ms; }
+  .stagger > *:nth-child(7) { animation-delay: 240ms; }
+  .stagger > *:nth-child(n+8) { animation-delay: 280ms; }
+
+  /* Placeholder block while content loads. */
+  .skeleton {
+    border-radius: 1.5rem;
+    background: linear-gradient(90deg, rgb(0 0 0 / 0.04) 25%, rgb(0 0 0 / 0.08) 50%, rgb(0 0 0 / 0.04) 75%);
+    background-size: 200% 100%;
+    animation: shimmer 1.4s ease-in-out infinite;
+  }
+  .dark .skeleton {
+    background-image: linear-gradient(90deg, rgb(255 255 255 / 0.04) 25%, rgb(255 255 255 / 0.08) 50%, rgb(255 255 255 / 0.04) 75%);
+  }
+
+  /* Round "complete" control: an empty ring that fills with a tick on hover. */
+  .check-ring {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.125rem;
+    height: 1.125rem;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    border: 1.5px solid var(--color-gray-300);
+    color: transparent;
+    transition: border-color 150ms, background-color 150ms, color 150ms, transform 150ms var(--ease-spring);
+  }
+  .check-ring:hover {
+    border-color: var(--color-emerald-500);
+    background-color: rgb(16 185 129 / 0.1);
+    color: var(--color-emerald-600);
+  }
+  .check-ring:active {
+    transform: scale(0.88);
+  }
+  .dark .check-ring {
+    border-color: var(--color-gray-600);
+  }
+  .dark .check-ring:hover {
+    border-color: var(--color-emerald-400);
+    color: var(--color-emerald-400);
+  }
+
   /* Shared form control used by the Add Item form and small dialogs. */
   .field {
     width: 100%;

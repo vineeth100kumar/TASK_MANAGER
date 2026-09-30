@@ -129,7 +129,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 font-sans">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-md" onClick={onClose} />
+      <div className="absolute inset-0 scrim" onClick={onClose} />
       
       <motion.div 
         initial={{ opacity: 0, scale: 0.95, y: 15 }} 

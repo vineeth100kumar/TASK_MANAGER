@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Circle, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
+import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -127,16 +127,16 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-5 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="hero p-5 md:p-8 rounded-3xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2.5 text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
-            <Inbox size={18} />
+          <div className="eyebrow text-blue-600 dark:text-blue-400 mb-2">
+            <Inbox size={14} />
             <span>Universal Inbox</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
-            {items.length === 0 ? 'Inbox is Zero' : `${items.length} unclarified item${items.length === 1 ? '' : 's'}`}
+          <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
+            {items.length === 0 ? 'Inbox zero' : `${items.length} unclarified item${items.length === 1 ? '' : 's'}`}
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
             Thoughts captured without friction. Clarify when you have time, or keep them here.
           </p>
         </div>
@@ -145,7 +145,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
         {items.length > 0 && (
           <button
             onClick={() => setIsTriaging(true)}
-            className="px-4 py-2.5 bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-200 text-white dark:text-black font-semibold text-xs rounded-xl shadow-sm flex items-center gap-2 active:scale-95 transition-all"
+            className="px-4 py-2.5 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 text-white dark:text-black font-semibold text-[12.5px] rounded-xl shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5 flex items-center gap-2 active:scale-[0.97] transition-all"
           >
             <Play size={13} className="fill-current" /> Process inbox
           </button>
@@ -155,7 +155,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-md hidden md:flex items-center gap-2 active:scale-95 transition-transform"
+          className="px-4 py-2.5 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
           <Plus size={14} /> Add Item (N)
         </button>
@@ -164,33 +164,34 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
       {/* Inbox Items List */}
       {items.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
+        <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
           <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
             <CheckCircle2 size={24} />
           </div>
-          <h3 className="text-base font-bold text-gray-900 dark:text-white">Your head is clear</h3>
+          <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">Your head is clear</h3>
           <p className="text-xs text-gray-400 max-w-sm mx-auto">
             Everything captured has been organized or completed. Press <strong>N</strong> anywhere to add a new item.
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {items.map((item) => (
             <motion.div key={item.id} layout>
             <SwipeRow onSwipeRight={() => handleComplete(item)} onSwipeLeft={() => handleSnoozeTomorrow(item)}>
             <div
-              className="p-4 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 shadow-sm hover:border-blue-200 dark:hover:border-blue-800 transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group"
+              className="p-4 rounded-2xl surface-item is-interactive hover:border-blue-200 dark:hover:border-blue-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group"
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
                 <button 
                   onClick={(e) => handleComplete(item, e)} 
-                  className="text-gray-300 hover:text-emerald-500 transition-colors shrink-0"
+                  className="check-ring !w-5 !h-5"
+                  aria-label="Complete"
                 >
-                  <Circle size={20} />
+                  <Check size={12} strokeWidth={3} />
                 </button>
 
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => startClarify(item)}>
-                  <h4 className="font-semibold text-sm text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
+                  <h4 className="font-semibold text-[14px] tracking-[-0.005em] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
                     {item.title}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
@@ -250,7 +251,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       <AnimatePresence>
         {clarifyingItem && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setClarifyingItem(null)} />
+            <div className="absolute inset-0 scrim" onClick={() => setClarifyingItem(null)} />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 

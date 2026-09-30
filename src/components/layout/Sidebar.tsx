@@ -243,7 +243,7 @@ export function Sidebar({
         initial={false} 
         animate={{ width: isSidebarOpen ? 280 : 0, opacity: isSidebarOpen ? 1 : 0 }}
         transition={{ type: "spring", bounce: 0, duration: 0.4 }}
-        className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden bg-[#f5f5f7]/95 dark:bg-[#1c1c1e]/95 backdrop-blur-3xl border-r border-gray-200/50 dark:border-white/5 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-orange-50/90 dark:bg-orange-950/20' : ''}`}
+        className={`fixed md:relative z-40 h-full flex flex-col overflow-hidden backdrop-blur-3xl border-r border-gray-200/60 dark:border-white/[0.06] shadow-[inset_-1px_0_0_rgb(255_255_255/0.6)] dark:shadow-none transition-[background-color] duration-500 ${isSidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'} ${lifeContext === 'personal' ? 'bg-gradient-to-b from-orange-50/95 to-[#f7f4f0]/95 dark:from-[#1a130c]/95 dark:to-[#141210]/95' : 'bg-gradient-to-b from-[#f7f7f9]/95 to-[#f1f1f4]/95 dark:from-[#18181b]/95 dark:to-[#131315]/95'}`}
       >
         <div className="w-[280px] h-full flex flex-col">
           <div className="px-6 pt-5 pb-3 flex items-center justify-center relative">
@@ -259,8 +259,16 @@ export function Sidebar({
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
             <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
-              <button onClick={() => setLifeContext('work')} className={`flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-all ${lifeContext === 'work' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Work</button>
-              <button onClick={() => setLifeContext('personal')} className={`flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-all ${lifeContext === 'personal' ? 'bg-white dark:bg-[#2c2c2e] text-orange-600 dark:text-orange-400 shadow-sm ring-1 ring-black/5 dark:ring-white/5' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Personal</button>
+              {(['work', 'personal'] as const).map(ctx => {
+                const active = lifeContext === ctx;
+                return (
+                  <button key={ctx} onClick={() => setLifeContext(ctx)} aria-pressed={active}
+                    className={`relative flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-colors ${active ? (ctx === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white') : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+                    {active && <motion.span layoutId="context-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg bg-white dark:bg-[#2c2c2e] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
+                    <span className="relative">{ctx === 'work' ? 'Work' : 'Personal'}</span>
+                  </button>
+                );
+              })}
             </div>
 
             <div className="space-y-0.5">
@@ -302,13 +310,15 @@ export function Sidebar({
                     }
                     if(window.innerWidth < 768) setIsSidebarOpen(false); 
                   }}
-                    className={`w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                    <div className="flex items-center gap-3">
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                    {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
+                    <div className="relative flex items-center gap-3">
                       <item.icon size={17} className={item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
                       <span className="text-[14px]">{item.name}</span>
                     </div>
                     {item.count !== undefined && item.count > 0 && (
-                      <span className={`min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums text-center ${
+                      <span className={`relative min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums text-center ${
                         item.highlight 
                           ? 'bg-blue-600 text-white' 
                           : 'bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-gray-300'
@@ -325,7 +335,7 @@ export function Sidebar({
               {lifeContext === 'work' && (
                 <div className="space-y-1">
                   <div className="px-3 flex items-center justify-between mb-2">
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Projects</h4>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">Projects</h4>
                     <button onClick={() => setIsAddProjectOpen(true)} className="text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md p-1 transition-colors" title="Add Project" aria-label="Add Project"><Plus size={16}/></button>
                   </div>
                   {projects.map((project) => {
@@ -333,10 +343,12 @@ export function Sidebar({
                     return (
                       <div key={project.id} className="relative group/proj">
                         <button onClick={() => { setActiveView('tasks'); setActiveWorkspace(project.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-                          className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                          <div className={`w-2.5 h-2.5 rounded-full ${project.color || 'bg-indigo-500'}`} />
-                          <span className="text-[14px] truncate flex-1 text-left font-medium">{project.name}</span>
-                          <span className="text-[10px] font-semibold text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
+                          aria-current={isActive ? 'page' : undefined}
+                          className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                          {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
+                          <div className={`relative w-2 h-2 rounded-full ring-[3px] ring-black/[0.04] dark:ring-white/[0.06] ${project.color || 'bg-indigo-500'}`} />
+                          <span className="relative text-[14px] truncate flex-1 text-left font-medium">{project.name}</span>
+                          <span className="relative text-[10px] font-semibold tracking-wide text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
                         </button>
                         <button onClick={(e) => handleDeleteProject(project.id, project.name, e)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover/proj:opacity-100 transition-opacity" title="Delete Project">
                           <Trash2 size={13} />
@@ -362,9 +374,11 @@ export function Sidebar({
                       return (
                         <div key={area.id} className="relative group/area">
                           <button onClick={() => { setActiveView('tasks'); setActiveWorkspace(area.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'bg-white dark:bg-white/10 text-gray-900 dark:text-white shadow-sm ring-1 ring-black/5 dark:ring-0' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                            <div className={`w-2.5 h-2.5 rounded-full ${area.color || 'bg-purple-500'}`} />
-                            <span className="text-[14px] truncate flex-1 text-left font-medium">{area.name}</span>
+                            aria-current={isActive ? 'page' : undefined}
+                            className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                            {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
+                            <div className={`relative w-2 h-2 rounded-full ring-[3px] ring-black/[0.04] dark:ring-white/[0.06] ${area.color || 'bg-purple-500'}`} />
+                            <span className="relative text-[14px] truncate flex-1 text-left font-medium">{area.name}</span>
                           </button>
                           <button onClick={(e) => handleDeleteArea(area.id, area.name, e)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover/area:opacity-100 transition-opacity" title="Delete Area">
                             <Trash2 size={13} />
@@ -410,7 +424,7 @@ export function Sidebar({
                     initial={{ opacity: 0, y: 6, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 6, scale: 0.98 }}
                     transition={{ duration: 0.14 }}
                     role="menu"
-                    className="absolute bottom-full left-0 right-0 mb-2 p-1 rounded-xl bg-white dark:bg-[#2c2c2e] shadow-xl ring-1 ring-black/5 dark:ring-white/10 origin-bottom z-10">
+                    className="absolute bottom-full left-0 right-0 mb-2 p-1 rounded-xl surface-float origin-bottom z-10">
                     {[
                       { label: 'Settings & Migration', icon: Settings, onClick: () => setIsSettingsOpen?.(true) },
                       { label: 'Data & Sync', icon: Database, onClick: () => setIsDiagnosticsOpen?.(true) },
@@ -449,7 +463,7 @@ export function Sidebar({
       <AnimatePresence>
         {isAddProjectOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isCreatingProj && setIsAddProjectOpen(false)} />
+            <div className="absolute inset-0 scrim" onClick={() => !isCreatingProj && setIsAddProjectOpen(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
@@ -494,7 +508,7 @@ export function Sidebar({
       <AnimatePresence>
         {isAddAreaOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => !isCreatingArea && setIsAddAreaOpen(false)} />
+            <div className="absolute inset-0 scrim" onClick={() => !isCreatingArea && setIsAddAreaOpen(false)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
@@ -530,7 +544,7 @@ export function Sidebar({
       <AnimatePresence>
         {activeGrowthTab && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setActiveGrowthTab(null)} />
+            <div className="absolute inset-0 scrim" onClick={() => setActiveGrowthTab(null)} />
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-xl rounded-3xl shadow-2xl p-6 relative z-10 space-y-6 max-h-[85vh] flex flex-col border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">

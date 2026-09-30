@@ -95,16 +95,16 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
   return (
     <div className="max-w-4xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-5 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="hero hero-waiting p-5 md:p-8 rounded-3xl flex flex-col lg:flex-row items-start lg:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
+          <div className="eyebrow text-purple-600 dark:text-purple-400 mb-2">
             <Hourglass size={18} />
             <span>Waiting For & Delegations</span>
           </div>
-          <h2 className="text-2xl md:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+          <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
             {items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
           </h2>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+          <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
             Track questions asked, tasks delegated, and documents pending someone else's reply.
           </p>
         </div>
@@ -119,7 +119,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
       {/* Waiting Items List */}
       {items.length === 0 ? (
-        <div className="text-center py-20 bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
+        <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
           <div className="w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
             <UserCheck size={24} />
           </div>
@@ -129,7 +129,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
           </p>
         </div>
       ) : (
-        <div className="space-y-3">
+        <div className="space-y-3 stagger">
           {items.map((item) => {
             const wf = item.waitingFor;
             const daysWaiting = wf?.sinceDate ? calculateDaysSince(wf.sinceDate) : 0;
@@ -138,7 +138,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
               <motion.div
                 key={item.id}
                 layout
-                className="p-5 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-purple-500/20 shadow-sm hover:shadow-md transition-all flex flex-col md:flex-row items-start md:items-center justify-between gap-4 group"
+                className="p-4 md:p-5 rounded-2xl surface-item is-interactive hover:!border-purple-400/40 flex flex-col md:flex-row items-start md:items-center justify-between gap-4 group"
               >
                 <div className="flex items-start gap-4 flex-1 min-w-0">
                   <div className="w-9 h-9 rounded-full bg-purple-100 dark:bg-purple-950/50 text-purple-600 dark:text-purple-300 font-semibold text-xs flex items-center justify-center shrink-0 mt-0.5">
@@ -198,7 +198,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
       <AnimatePresence>
         {isAddOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setIsAddOpen(false)} />
+            <div className="absolute inset-0 scrim" onClick={() => setIsAddOpen(false)} />
             <motion.div 
               initial={{ opacity: 0, scale: 0.95, y: 20 }} 
               animate={{ opacity: 1, scale: 1, y: 0 }} 

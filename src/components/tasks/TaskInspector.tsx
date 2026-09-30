@@ -160,7 +160,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
   if (loading || !task) return (
      <>
-       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-black/20 dark:bg-black/60 z-40 backdrop-blur-sm" />
+       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 scrim z-40" />
        <motion.aside initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] flex items-center justify-center shadow-2xl">
          <Loader2 className="animate-spin text-gray-400" size={32} />
        </motion.aside>
@@ -172,7 +172,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
   return (
     <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 bg-black/20 dark:bg-black/60 z-40 backdrop-blur-sm" />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40" />
       
       <motion.aside role="dialog" aria-modal="true"
         initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
@@ -254,7 +254,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       </PropertyRow>
 
                       <PropertyRow icon={CalendarIcon} label="Dates">
-                        <div className="flex items-center gap-2 justify-end">
+                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 justify-end">
                           <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
                             value={toInputDateValue(task.startDate)} onChange={async (e) => { await onUpdateDetails(task, { startDate: e.target.value || null }); loadData(); }} />
                           <span className="text-gray-400 font-bold">→</span>
@@ -519,8 +519,8 @@ function TagAdder({ existing, onAdd }: { existing: string[]; onAdd: (tag: string
 
 function PropertyRow({ icon: Icon, label, children, isLast = false }: { icon: any, label: string, children: React.ReactNode, isLast?: boolean }) {
   return (
-    <div className={`flex items-start justify-between p-4 px-6 ${!isLast ? 'border-b border-black/5 dark:border-white/5' : ''}`}>
-      <div className="flex items-center gap-3 text-gray-500 w-1/3 mt-1.5"><Icon size={18} strokeWidth={2} /><span className="text-[14px] font-semibold">{label}</span></div>
+    <div className={`flex items-start justify-between gap-3 p-4 px-4 sm:px-6 ${!isLast ? 'border-b border-black/5 dark:border-white/5' : ''}`}>
+      <div className="flex items-center gap-2.5 text-gray-500 w-32 sm:w-1/3 shrink-0 mt-1.5"><Icon size={17} strokeWidth={2} className="shrink-0" /><span className="text-[13.5px] font-medium whitespace-nowrap">{label}</span></div>
       <div className="flex-1 flex flex-col items-end text-right min-w-0">{children}</div>
     </div>
   );

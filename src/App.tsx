@@ -1,6 +1,7 @@
-import { useState, useEffect, useCallback } from 'react';
-import { AnimatePresence, LayoutGroup, motion } from 'framer-motion';
-import { Loader2, ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { flushSync } from 'react-dom';
+import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motion';
+import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
 import { STATUSES } from './services/constants';
@@ -62,7 +63,34 @@ function MainApp() {
   useEffect(() => { 
     document.documentElement.classList.toggle('dark', isDarkMode);
     localStorage.setItem('sage-theme', isDarkMode ? 'dark' : 'light');
+    // Match the browser/OS chrome to the app's theme, not the system's.
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute('content', isDarkMode ? '#0a0a0b' : '#ffffff'));
   }, [isDarkMode]);
+
+  // Theme switches reveal as a circle growing from where the user clicked.
+  const lastPointer = useRef({ x: window.innerWidth / 2, y: 0 });
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => { lastPointer.current = { x: e.clientX, y: e.clientY }; };
+    window.addEventListener('pointerdown', onDown, true);
+    return () => window.removeEventListener('pointerdown', onDown, true);
+  }, []);
+  const changeTheme = useCallback((dark: boolean) => {
+    const doc = document as any;
+    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (!doc.startViewTransition || reduce) { setIsDarkMode(dark); return; }
+    const root = document.documentElement;
+    const { x, y } = lastPointer.current;
+    const radius = Math.hypot(Math.max(x, window.innerWidth - x), Math.max(y, window.innerHeight - y));
+    root.classList.add('theme-switching');
+    const transition = doc.startViewTransition(() => { flushSync(() => setIsDarkMode(dark)); });
+    transition.ready.then(() => {
+      root.animate(
+        { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${radius}px at ${x}px ${y}px)`] },
+        { duration: 520, easing: 'cubic-bezier(0.16, 1, 0.3, 1)', pseudoElement: '::view-transition-new(root)' }
+      );
+    }).catch(() => {});
+    transition.finished.finally(() => root.classList.remove('theme-switching'));
+  }, []);
 
   // Handle Responsive Sidebar, Reminder Watcher, Conflict & Entity Sync Listeners
   useEffect(() => {
@@ -222,14 +250,15 @@ function MainApp() {
         isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
-        isDarkMode={isDarkMode} setIsDarkMode={setIsDarkMode}
+        isDarkMode={isDarkMode} setIsDarkMode={changeTheme}
         lifeContext={lifeContext} setLifeContext={setLifeContext}
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
       />
 
-      <main className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0a0500]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={lifeContext} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+        <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
           activeView={activeView} activeWorkspace={activeWorkspace}
@@ -243,14 +272,19 @@ function MainApp() {
 
         {activeView === 'canvas' ? (
           // The canvas pans and zooms itself, so it fills the space instead of scrolling.
-          <div className="flex-1 min-h-0 p-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:p-6">
+          <div className="relative flex-1 min-h-0 p-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:p-6">
             <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
           </div>
         ) : (
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <div className="p-4 pb-28 md:p-8 min-h-full">
+          <motion.div key={`${activeView}:${lifeContext}:${activeWorkspace}`} className="p-4 pb-28 md:p-8 min-h-full"
+            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}>
             {isLoading ? (
-              <div className="h-full flex flex-col items-center justify-center gap-3 text-gray-400 py-32"><Loader2 className="animate-spin" size={28}/><span className="text-[13px] font-medium">Loading your items…</span></div>
+              <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading your items">
+                <div className="skeleton h-36 md:h-44" />
+                <div className="grid md:grid-cols-2 gap-4"><div className="skeleton h-48" /><div className="skeleton h-48" /></div>
+                <div className="skeleton h-16 !rounded-2xl" />
+              </div>
             ) : activeView === 'notes' ? (
               <NotesView lifeContext={lifeContext} />
             ) : activeView === 'inbox' ? (
@@ -272,21 +306,21 @@ function MainApp() {
                 <FilterBar filters={filters} setFilters={setFilters} />
 
                 {workItems.length === 0 ? (
-                  <div className="h-full flex flex-col items-center justify-center text-gray-400 py-20">
-                    <div className="bg-gray-100 dark:bg-white/5 ring-8 ring-gray-50 dark:ring-white/[0.02] p-4 rounded-2xl mb-5 text-gray-500">
+                  <div className="h-full flex flex-col items-center justify-center text-gray-400 py-20 stagger">
+                    <div className="surface-item p-4 rounded-2xl mb-5 text-gray-500 ring-8 ring-gray-100/70 dark:ring-white/[0.03]">
                       <LayoutList size={28} />
                     </div>
                     <h3 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white mb-1.5">No items found</h3>
                     <p className="text-[14px] text-gray-500 max-w-sm text-center leading-relaxed">
                       {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all') ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
-                    <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/20 transition-colors active:scale-[0.98] flex items-center gap-2">
+                    <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition-all active:scale-[0.98] flex items-center gap-2">
                       <Plus size={16} /> Add Item <span className="ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white/20">N</span>
                     </button>
                   </div>
                 ) : (
                   <AnimatePresence mode="wait">
-                    <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }} transition={{ duration: 0.2 }}>
+                    <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
                         {presentationMode === 'list' && <ListView tasks={workItems} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
@@ -307,7 +341,7 @@ function MainApp() {
                 )}
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
         )}
 
@@ -382,10 +416,11 @@ function MainApp() {
       <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast: any) => (
-             <motion.div key={toast.id} initial={{ opacity: 0, y: 20, scale: 0.9 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, scale: 0.9 }}
-                className={`pl-3.5 pr-2 py-2 min-h-11 rounded-xl shadow-lg shadow-black/10 flex items-center gap-3 pointer-events-auto ring-1 ${toast.type==='error'?'bg-red-600 text-white ring-red-700/40':'bg-gray-900/95 dark:bg-[#2c2c2e]/95 text-white ring-white/10 backdrop-blur-xl'}`}>
+             <motion.div key={toast.id} layout initial={{ opacity: 0, y: 16, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96, transition: { duration: 0.16 } }}
+                transition={{ type: 'spring', stiffness: 520, damping: 34 }}
+                className={`pl-3.5 pr-2 py-2 min-h-11 rounded-2xl shadow-xl shadow-black/15 flex items-center gap-3 pointer-events-auto ring-1 ${toast.type==='error'?'bg-red-600 text-white ring-red-700/40':'bg-gray-900/90 dark:bg-[#26262a]/90 text-white ring-white/10 backdrop-blur-xl backdrop-saturate-150'}`}>
                {toast.type === 'error' ? <ShieldAlert size={17} className="shrink-0" /> : <CheckCircle size={18} className="text-emerald-400 dark:text-emerald-600" />}
-               <span className="text-xs font-semibold">{toast.message}</span>
+               <span className="text-[13px] font-medium tracking-[-0.005em]">{toast.message}</span>
                {toast.action && (
                  <button 
                    onClick={() => { toast.action?.onAction(); dismissToast(toast.id); }}
@@ -406,8 +441,10 @@ function MainApp() {
 
 export default function App() {
   return (
-    <ToastProvider>
-      <MainApp />
-    </ToastProvider>
+    <MotionConfig reducedMotion="user">
+      <ToastProvider>
+        <MainApp />
+      </ToastProvider>
+    </MotionConfig>
   );
 }

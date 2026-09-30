@@ -218,7 +218,7 @@ export function ProjectMapView({ items, project, onSelectTask, onRefreshData }: 
   return (
     <div className="max-w-6xl mx-auto space-y-6 pb-20 font-sans">
       {/* Header Banner */}
-      <div className="p-6 md:p-8 rounded-3xl bg-[#f5f5f7] dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
+      <div className="hero p-6 md:p-8 rounded-3xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-blue-600 dark:text-blue-400 mb-1">
             <Network size={18} />
