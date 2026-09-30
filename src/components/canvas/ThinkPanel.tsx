@@ -1,18 +1,31 @@
 import { useEffect, useRef, useState } from 'react';
-import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw, Wand2, Check, Undo2, LayoutGrid, Paperclip, FileText } from 'lucide-react';
+import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw, Wand2, Check, Undo2, LayoutGrid, Paperclip, FileText, MousePointerClick } from 'lucide-react';
 import { aiEngine, ThinkDetail, ThinkEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
 import { piBackendUrl } from '../../services/piBackend';
-import { EditOp, RefMap, cleanOps } from './boardEdits';
+import { EdgeMap, EditOp, RefMap, cleanOps, repairFlow, scopeOps } from './boardEdits';
+import { cleanMarkdown, markdownChart } from './markdownChart';
+
+interface Snapshot {
+  outline: string;
+  imagePng: string | null;
+  refs?: RefMap;
+  selected?: string[];
+  edges?: EdgeMap;
+  edgeLabels?: Record<string, string>;
+}
 
 interface ThinkPanelProps {
   boardId: string;
+  // How many shapes are selected on the board right now.
+  selectedCount: number;
   boardTitle: string;
   // The board as it is right now: a text outline and a PNG (base64, may be null).
-  // forEdit gives numbered shapes and the refs behind the numbers instead.
-  getSnapshot: (forEdit?: boolean) => Promise<{ outline: string; imagePng: string | null; refs?: RefMap }>;
+  // forEdit gives numbered shapes and the refs behind the numbers instead;
+  // useSelection false reads it as if nothing were selected.
+  getSnapshot: (forEdit?: boolean, useSelection?: boolean) => Promise<Snapshot>;
   describeEdits: (ops: EditOp[], refs: RefMap) => string[];
   // Applies edits; returns a function that puts the board back, or null.
-  applyEdits: (ops: EditOp[], refs: RefMap) => (() => void) | null;
+  applyEdits: (ops: EditOp[], refs: RefMap, keepFocus?: boolean) => Promise<(() => void) | null>;
   onClose: () => void;
 }
 
@@ -21,6 +34,7 @@ interface Proposal {
   ops: EditOp[];
   refs: RefMap;
   lines: string[];
+  scoped?: boolean; // made to a selection
   status: 'pending' | 'applied' | 'discarded' | 'undone';
   undo?: () => void;
 }
@@ -39,11 +53,11 @@ const TIMEOUT_MS = 150_000;
 
 // Shortcuts shown above the chat box. Everything typed goes to the editor,
 // which answers questions and makes changes alike.
-const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck; request?: string }> = [
+const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck; request?: string; whole?: boolean }> = [
   { mode: 'review', label: 'Check my thinking', icon: SearchCheck },
   { mode: 'summarize', label: 'Summarize', icon: ListTree },
   { mode: 'edit', label: 'Improve it', icon: Wand2 },
-  { mode: 'edit', label: 'Tidy layout', icon: LayoutGrid, request: 'Tidy the layout so it reads top to bottom.' },
+  { mode: 'edit', label: 'Tidy layout', icon: LayoutGrid, request: 'Tidy the layout so it reads top to bottom.', whole: true },
 ];
 
 const AUTO_APPLY_KEY = 'sage.canvasAutoApply';
@@ -53,6 +67,9 @@ const DETAIL_KEY = 'sage.canvasDetail';
 const MAX_FILE_CHARS = 40_000;
 const MAX_FILE_BYTES = 2_000_000;
 const FILE_PROMPT = 'Turn this file into a flowchart.';
+// Asks about a file that want a chart back, so a chart drawn straight from the
+// file is a fair stand-in when the AI can't make one.
+const wantsChart = (q: string) => q === FILE_PROMPT || /\b(chart|flow|diagram|draw|map|visuali[sz]e)/i.test(q);
 interface Attached { name: string; text: string }
 const DETAILS: Array<{ value: ThinkDetail; label: string; hint: string }> = [
   { value: 'simple', label: 'Simple', hint: 'A short chain of the big steps' },
@@ -67,6 +84,15 @@ const loadChat = (boardId: string): Turn[] => {
     const saved = JSON.parse(localStorage.getItem(chatKey(boardId)) || '[]');
     return Array.isArray(saved) ? saved : [];
   } catch { return []; }
+};
+// The file a board's chart was drawn from stays with its conversation, so
+// later questions and edits can check details against it.
+const sourceKey = (boardId: string) => `sage.canvasSource.${boardId}`;
+const loadSource = (boardId: string): Attached | null => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(sourceKey(boardId)) || 'null');
+    return saved && typeof saved.name === 'string' && typeof saved.text === 'string' ? saved : null;
+  } catch { return null; }
 };
 const readDetail = (): ThinkDetail => {
   try {
@@ -87,7 +113,7 @@ const historyText = (t: Turn) => {
 };
 
 // A chat beside the board: ask about it, or tell it what to change.
-export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, applyEdits, onClose }: ThinkPanelProps) {
+export function ThinkPanel({ boardId, selectedCount, boardTitle, getSnapshot, describeEdits, applyEdits, onClose }: ThinkPanelProps) {
   const [turns, setTurns] = useState<Turn[]>(() => loadChat(boardId));
   const turnsRef = useRef<Turn[]>([]);
   turnsRef.current = turns;
@@ -95,7 +121,19 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
   const [autoApply, setAutoApply] = useState(readAutoApply);
   const [detail, setDetail] = useState(readDetail);
   const [attached, setAttached] = useState<Attached | null>(null);
+  const [source, setSource] = useState<Attached | null>(() => loadSource(boardId));
+  useEffect(() => {
+    try {
+      if (source) localStorage.setItem(sourceKey(boardId), JSON.stringify(source));
+      else localStorage.removeItem(sourceKey(boardId));
+    } catch { /* storage full or blocked: it just isn't kept */ }
+  }, [source, boardId]);
   const fileRef = useRef<HTMLInputElement>(null);
+  // With shapes selected, changes stay inside the selection unless you switch
+  // to the whole board; picking something else turns selection mode back on.
+  const [wholeBoard, setWholeBoard] = useState(false);
+  useEffect(() => setWholeBoard(false), [selectedCount]);
+  const scoped = selectedCount > 0 && !wholeBoard && !attached;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engine, setEngine] = useState<ThinkEngine | null>(null);
@@ -166,9 +204,9 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
     setProposal(index, { status: 'undone', undo: undefined });
   };
 
-  const apply = (index: number, proposal = turnsRef.current[index]?.proposal) => {
+  const apply = async (index: number, proposal = turnsRef.current[index]?.proposal) => {
     if (!proposal) return;
-    const undo = applyEdits(proposal.ops, proposal.refs);
+    const undo = await applyEdits(proposal.ops, proposal.refs, proposal.scoped);
     if (undo) setProposal(index, { status: 'applied', undo });
     else setError("Couldn't reach the board to make the changes.");
   };
@@ -181,31 +219,56 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
     try {
       const text = (await file.text()).trim();
       if (!text) { setError(`${file.name} is empty.`); return; }
-      setAttached({ name: file.name, text: text.slice(0, MAX_FILE_CHARS) });
-      setError(text.length > MAX_FILE_CHARS ? `${file.name} is long, so I'll only read the first part of it.` : null);
+      const clean = cleanMarkdown(text);
+      setAttached({ name: file.name, text: clean.slice(0, MAX_FILE_CHARS) });
+      setError(clean.length > MAX_FILE_CHARS ? `${file.name} is long, so I'll only read the first part of it.` : null);
       inputRef.current?.focus();
     } catch {
       setError(`Couldn't read ${file.name}.`);
     }
   };
 
-  const run = async (mode: ThinkMode, label: string, question?: string) => {
+  // whole: this one works on the whole board even with shapes selected.
+  const run = async (mode: ThinkMode, label: string, question?: string, whole = false) => {
     if (busy) return;
     setBusy(true);
     setError(null);
     const file = attached;
     setAttached(null);
+    const inScope = mode === 'edit' && scoped && !whole;
     const history = turnsRef.current.map(t => ({ role: t.role, text: historyText(t) }));
     const shown = question || label;
     setTurns(prev => [...prev, { role: 'user', text: file ? `${shown}\n\nAttached: ${file.name}` : shown, label: file ? undefined : label }]);
     const request = { controller: new AbortController(), timedOut: false };
     abortRef.current = request;
     const timer = setTimeout(() => { request.timedOut = true; request.controller.abort(); }, TIMEOUT_MS);
+    let snap: Snapshot | null = null;
+    // A plain chart of the attached file, for when the AI can't draw one.
+    const fromFile = () => (file && snap?.refs && wantsChart(shown) ? cleanOps(markdownChart(file.text, detail, file.name).ops, snap.refs) : []);
     try {
-      const { outline, imagePng, refs } = await getSnapshot(mode === 'edit');
-      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history, detail, document: file?.text, documentName: file?.name }, request.controller.signal);
+      snap = await getSnapshot(mode === 'edit', !(mode === 'edit' && (wholeBoard || file || whole)));
+      const { outline, imagePng, refs, selected = [], edges = {}, edgeLabels = {} } = snap;
+      const scope = inScope && selected.length ? selected : undefined;
+      // A new file is the thing to chart; otherwise the board's source file
+      // comes along for reference.
+      const doc = file ? { document: file.text, documentName: file.name, documentRole: 'new' as const }
+        : source ? { document: source.text, documentName: source.name, documentRole: 'source' as const } : {};
+      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history, detail, scope, ...doc }, request.controller.signal);
       setEngine(answer.engine);
-      const ops = mode === 'edit' && refs ? cleanOps(answer.ops, refs) : [];
+      let ops = mode === 'edit' && refs ? cleanOps(answer.ops, refs) : [];
+      let held = 0;
+      if (scope && refs) ({ ops, held } = scopeOps(ops, scope, edges, refs));
+      if (refs && ops[0]?.op !== 'undo_last') ops = repairFlow(ops, edges, refs, edgeLabels);
+      let answerText = answer.text;
+      if (file && !ops.some(o => o.op === 'add_node')) {
+        const backup = fromFile();
+        if (backup.length) {
+          ops = backup;
+          answerText = `The AI didn't send back a chart, so I drew this straight from the headings and lists in ${file.name}. Ask me to improve it, or select part of it to work on.`;
+        }
+      }
+      if (file && ops.some(o => o.op === 'add_node')) setSource(file);
+      if (held) answerText += `\n\nI left ${held === 1 ? 'one change' : `${held} changes`} outside your selection alone.`;
 
       if (ops[0]?.op === 'undo_last') {
         const last = lastApplied();
@@ -220,17 +283,27 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
       }
 
       const proposal: Proposal | undefined = ops.length && refs
-        ? { ops, refs, lines: describeEdits(ops, refs), status: 'pending' }
+        ? { ops, refs, lines: describeEdits(ops, refs), status: 'pending', scoped: Boolean(scope) }
         : undefined;
       const index = turnsRef.current.length;
       // The AI described changes that didn't point at anything on the board.
       const lost = mode === 'edit' && !ops.length && Array.isArray(answer.ops) && answer.ops.length > 0;
-      const text = lost ? `${answer.text}\n\nI couldn't match those changes to the board, so nothing changed. Try naming the boxes you mean.` : answer.text;
+      const text = lost ? `${answerText}\n\nI couldn't match those changes to the board, so nothing changed. Try naming the boxes you mean.` : answerText;
       setTurns(prev => [...prev, { role: 'assistant', text, engine: answer.engine, proposal }]);
       // Like a spreadsheet copilot: make the change straight away, with Undo
       // beside it. Turn that off to review each change first.
       if (proposal && autoApply) setTimeout(() => apply(index, proposal), 0);
     } catch (e: any) {
+      const backup = e?.name === 'AbortError' && !request.timedOut ? [] : fromFile();
+      if (backup.length && snap?.refs) {
+        // The AI couldn't be reached; the file still becomes a chart.
+        const proposal: Proposal = { ops: backup, refs: snap.refs, lines: describeEdits(backup, snap.refs), status: 'pending' };
+        const index = turnsRef.current.length;
+        setTurns(prev => [...prev, { role: 'assistant', text: `I couldn't reach the AI, so I drew this straight from the headings and lists in ${file!.name}.`, proposal }]);
+        setSource(file);
+        if (autoApply) setTimeout(() => apply(index, proposal), 0);
+        return;
+      }
       if (e?.name === 'AbortError') {
         if (request.timedOut) setError("No answer after 2½ minutes, so I stopped waiting. The Pi may be busy; try again in a moment.");
       } else {
@@ -261,7 +334,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
         <Sparkles size={16} className="text-violet-500" />
         <span className="text-[14px] font-semibold flex-1">Think with me</span>
         {turns.length > 0 && (
-          <button onClick={() => { setTurns([]); setError(null); }} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 dark:hover:text-gray-200" aria-label="Start over" title="Start over">
+          <button onClick={() => { setTurns([]); setError(null); setSource(null); }} className="p-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:bg-white/5 dark:hover:text-gray-200" aria-label="Start over" title="Start over">
             <RotateCcw size={15} />
           </button>
         )}
@@ -349,26 +422,50 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
         <div className="shrink-0 border-t border-gray-200/70 dark:border-white/[0.08] p-3 space-y-2">
           {/* One scrolling row on phones, so the answers above keep their room. */}
           <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-3 px-3 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
-            {ACTIONS.map(({ mode, label, icon: Icon, request }) => (
+            {ACTIONS.map(({ mode, label: name, icon: Icon, request, whole }) => {
+              const label = scoped && name === 'Improve it' ? 'Improve selection' : name;
+              return (
               <button
-                key={label}
+                key={name}
                 disabled={busy}
-                onClick={() => run(mode, label, request)}
+                onClick={() => run(mode, label, request, whole)}
                 className="shrink-0 flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20 disabled:opacity-50 transition-colors"
               >
                 <Icon size={13} /> {label}
               </button>
-            ))}
+              );
+            })}
           </div>
-          {attached && (
-            <div className="flex items-center gap-1.5 w-fit max-w-full h-7 pl-2 pr-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] text-[12px] text-gray-700 dark:text-gray-200">
-              <FileText size={13} className="shrink-0 text-violet-600 dark:text-violet-300" />
-              <span className="truncate">{attached.name}</span>
-              <button onClick={() => setAttached(null)} aria-label={`Remove ${attached.name}`} className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
-                <X size={12} />
-              </button>
-            </div>
-          )}
+          {/* What the next message works with: a selection, a file, the board's source. */}
+          <div className="flex flex-wrap gap-1.5 empty:hidden">
+            {selectedCount > 0 && !attached && (
+              <div className="flex items-center gap-1.5 w-fit max-w-full h-7 pl-2 pr-1 rounded-lg bg-violet-50 dark:bg-violet-500/10 text-[12px] text-violet-800 dark:text-violet-200">
+                <MousePointerClick size={13} className="shrink-0" />
+                <span className="truncate">{scoped ? `Working on ${selectedCount === 1 ? '1 selected shape' : `${selectedCount} selected shapes`}` : 'Working on the whole board'}</span>
+                <button onClick={() => setWholeBoard(!wholeBoard)} className="shrink-0 h-5 px-1.5 rounded font-semibold text-violet-600 hover:bg-violet-100 dark:text-violet-300 dark:hover:bg-violet-500/20">
+                  {scoped ? 'Whole board' : 'Just the selection'}
+                </button>
+              </div>
+            )}
+            {source && !attached && (
+              <div className="flex items-center gap-1.5 w-fit max-w-full h-7 pl-2 pr-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] text-[12px] text-gray-600 dark:text-gray-300">
+                <FileText size={13} className="shrink-0 text-violet-600 dark:text-violet-300" />
+                <span className="truncate">Checking against {source.name}</span>
+                <button onClick={() => setSource(null)} aria-label={`Stop using ${source.name}`} title="Stop using this file" className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+            {attached && (
+              <div className="flex items-center gap-1.5 w-fit max-w-full h-7 pl-2 pr-1 rounded-lg bg-gray-100 dark:bg-white/[0.06] text-[12px] text-gray-700 dark:text-gray-200">
+                <FileText size={13} className="shrink-0 text-violet-600 dark:text-violet-300" />
+                <span className="truncate">{attached.name}</span>
+                <button onClick={() => setAttached(null)} aria-label={`Remove ${attached.name}`} className="shrink-0 h-5 w-5 flex items-center justify-center rounded text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                  <X size={12} />
+                </button>
+              </div>
+            )}
+          </div>
           <div className="flex items-end gap-2">
             <input ref={fileRef} type="file" accept=".md,.markdown,.txt,text/markdown,text/plain" className="hidden" onChange={e => pickFile(e.target.files?.[0])} />
             <button onClick={() => fileRef.current?.click()} disabled={busy} aria-label="Attach a Markdown file" title="Attach a Markdown (.md) file to turn into a chart" className="h-10 w-8 shrink-0 flex items-center justify-center rounded-xl text-gray-500 hover:text-gray-800 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/[0.06] disabled:opacity-40 transition-colors">
@@ -380,7 +477,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
               onChange={e => setInput(e.target.value)}
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               rows={2}
-              placeholder={attached ? 'Say what to do, or just send' : 'Ask, or tell me what to change…'}
+              placeholder={attached ? 'Say what to do, or just send' : scoped ? 'What should change in the selection?' : 'Ask, or tell me what to change…'}
               className="field flex-1 resize-none max-h-32 h-10 md:h-auto"
             />
             <button onClick={send} disabled={busy || (!input.trim() && !attached)} aria-label="Send" className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">

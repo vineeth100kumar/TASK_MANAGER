@@ -131,9 +131,51 @@ IMPROVE_REQUEST = (
     "and tidy wording that's unclear. Keep everything I've drawn where it is, at its size."
 )
 
+# How to turn an attached document into a chart. Structure comes from the
+# document itself; the detail level decides how much of it is drawn.
+FILE_RULES = """I attached a document (in <file> tags, with the board above). When I ask for a chart, build \
+it from the document like this:
+- Find the process it describes: who does what, in what order, to reach what outcome. \
+Background, examples, links and reference tables are context, not steps.
+- Start with one oval naming the goal or trigger, and end with an oval for each real \
+outcome (for example Done, or Rejected).
+- Numbered lists and "first/then/next/finally" are steps in that order. Headings are \
+phases; at Simple give each phase one box, at higher levels draw its steps.
+- "If", "when", "unless", "whether", "otherwise" and questions are decisions: a decision \
+shape worded as a short yes/no question, with a labelled arrow for each outcome. Branches \
+join back into the main flow where the document says they do.
+- "Retry", "repeat", "until", "go back" and "again" are loops: an arrow back up to the \
+earlier step.
+- Labels are short (about 2 to 6 words), start with a verb for actions, and use the \
+document's own terms. One idea per shape.
+- Every shape is connected, and the flow reads top to bottom from one start.
+- Draw it as a new chart of its own: don't connect it to, change or remove what's already \
+on the board, and don't use "near" with existing shapes.
+In reply, say in one or two sentences what the chart covers and anything you left out."""
+
+# Working on a selection: the rest of the board is context, not something to change.
+SCOPE_NOTE = """I'm working on the selected shapes ({refs}). Change only those, and add new \
+shapes joined to them where needed; leave every other shape and arrow as it is. Read the \
+whole board first and keep the selection consistent with it: the same terms and style of \
+wording, the same top-to-bottom direction, and joined to the shapes that lead into it and \
+the ones it leads to (listed with the board above). If you replace or split a selected shape, \
+delete it and connect the new shapes to those same neighbours, carrying over arrow labels \
+like Yes or No."""
+
+SELECTION_IMPROVE = (
+    "Improve the selected part of this chart. Make its wording clear and consistent with the "
+    "rest of the chart, fill in steps, decisions or outcomes that are clearly missing inside it "
+    "or between it and its neighbours, and split a shape that holds more than one step. Keep "
+    "what I meant; don't move, resize or recolour anything. If the document the board was drawn "
+    "from is attached, use it to fill in what the selected part leaves out."
+)
+
 # Improve adds and rewords. Moving, resizing or recolouring the shapes I drew
 # isn't what I asked for, so those ops are dropped even if the model sends them.
 IMPROVE_OPS = {"add_node", "add_edge", "edit_label"}
+# Improving a selection may also replace or split a selected shape; the app
+# keeps every change inside the selection.
+SELECTION_IMPROVE_OPS = IMPROVE_OPS | {"delete"}
 
 # Small models copy markdown into the reply; the panel shows plain text.
 def _plain(text: str) -> str:
@@ -158,14 +200,21 @@ class CanvasThinkRequest(BaseModel):
     history: List[ThinkTurn] = []
     detail: str = "moderate"  # simple | moderate | complex
     document: Optional[str] = None  # text of an attached .md file
+    scope: List[str] = []  # selected shape refs that changes are limited to
     documentName: str = ""
+    documentRole: str = "new"  # new: a file to chart | source: the file the board was drawn from
 
 
 def _ask_text(req: CanvasThinkRequest) -> str:
     if req.mode == "edit":
-        detail = DETAIL_PROMPTS.get(req.detail, DETAIL_PROMPTS["moderate"])
-        message = (req.question or "").strip() or IMPROVE_REQUEST
-        return f"{EDIT_PROMPT}\n\n{detail}\n\nMy message: {message}"
+        parts = [EDIT_PROMPT, DETAIL_PROMPTS.get(req.detail, DETAIL_PROMPTS["moderate"])]
+        if (req.document or "").strip() and req.documentRole != "source":
+            parts.append(FILE_RULES)
+        refs = ", ".join(r for r in req.scope if re.fullmatch(r"n\d+", r))
+        if refs:
+            parts.append(SCOPE_NOTE.format(refs=refs))
+        message = (req.question or "").strip() or (SELECTION_IMPROVE if refs else IMPROVE_REQUEST)
+        return "\n\n".join(parts) + f"\n\nMy message: {message}"
     if req.mode == "ask":
         return (req.question or "").strip() or "What do you make of this board?"
     return MODE_PROMPTS.get(req.mode, MODE_PROMPTS["review"])
@@ -178,8 +227,12 @@ def _board_text(req: CanvasThinkRequest) -> str:
     doc = (req.document or "").strip()[:MAX_DOCUMENT_CHARS]
     if doc:
         name = req.documentName.strip() or "notes.md"
-        text += (f'\n\nI attached a Markdown file, "{name}". Use it as the source for what I ask; '
-                 f"when I ask for a chart, build it from this file's content:\n\n<file>\n{doc}\n</file>")
+        if req.documentRole == "source":
+            text += (f'\n\nFor reference, the document this board was drawn from, "{name}". Use it to check '
+                     f"and fill in details when I ask for changes:\n\n<file>\n{doc}\n</file>")
+        else:
+            text += (f'\n\nI attached a Markdown file, "{name}". Use it as the source for what I ask; '
+                     f"when I ask for a chart, build it from this file's content:\n\n<file>\n{doc}\n</file>")
     return text
 
 
@@ -350,6 +403,7 @@ def think(req: CanvasThinkRequest) -> dict:
     if req.mode == "edit":
         edits = _parse_edits(text)
         if not (req.question or "").strip():
-            edits["ops"] = [o for o in edits["ops"] if isinstance(o, dict) and o.get("op") in IMPROVE_OPS]
+            allowed = SELECTION_IMPROVE_OPS if req.scope else IMPROVE_OPS
+            edits["ops"] = [o for o in edits["ops"] if isinstance(o, dict) and o.get("op") in allowed]
         return {**edits, "engine": engine}
     return {"text": text, "engine": engine}
