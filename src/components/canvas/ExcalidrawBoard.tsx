@@ -142,6 +142,22 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     canvas.scrollToContent(after.filter(el => !el.isDeleted), { fitToViewport: true, viewportZoomFactor: 0.8, animate: true } as any);
   };
 
+  // Opening a board shows all of it: a board bigger than the screen is zoomed
+  // out to fit, a small one stays at normal size.
+  const fitted = useRef(false);
+  const fitOnOpen = (canvas: ExcalidrawImperativeAPI) => {
+    if (fitted.current) return;
+    fitted.current = true;
+    setTimeout(() => {
+      const live = canvas.getSceneElements();
+      if (!live.length) return;
+      const { width, height } = canvas.getAppState();
+      const xs = live.flatMap(el => [el.x, el.x + el.width]), ys = live.flatMap(el => [el.y, el.y + el.height]);
+      const tooBig = Math.max(...xs) - Math.min(...xs) > width * 0.9 || Math.max(...ys) - Math.min(...ys) > height * 0.85;
+      if (tooBig) canvas.scrollToContent(live, { fitToViewport: true, viewportZoomFactor: 0.9 } as any);
+    }, 50);
+  };
+
   // Show edits made on another device.
   useDataChanges(() => {
     const canvas = excalidrawRef.current;
@@ -210,7 +226,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     <div className="relative h-full flex">
       <div className="relative flex-1 min-w-0 h-full">
         <Excalidraw
-          excalidrawAPI={(a) => { excalidrawRef.current = a; }}
+          excalidrawAPI={(a) => { excalidrawRef.current = a; fitOnOpen(a); }}
           initialData={initialData}
           onChange={handleChange}
           theme={isDarkMode ? 'dark' : 'light'}
