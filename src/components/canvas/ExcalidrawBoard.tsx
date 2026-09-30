@@ -73,9 +73,11 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     scrollToContent: true,
   }));
   const [isEmpty, setIsEmpty] = useState(() => initialData.elements.length === 0);
-  // The template picker steps aside once you pick a drawing tool, so a
-  // stroke that starts over it draws instead of choosing a template.
-  const [drawingTool, setDrawingTool] = useState(false);
+  // The template picker and the Inbox button step aside while you draw (so a
+  // stroke that starts over them draws) and while one of Excalidraw's own
+  // panels is open, such as the library, a menu or a dialog, so they never
+  // sit on top of it.
+  const [busyCanvas, setBusyCanvas] = useState(false);
   const [candidates, setCandidates] = useState<Array<{ id: string; title: string }>>([]);
   const { showToast } = useToast();
 
@@ -95,7 +97,8 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
 
   const handleChange = (elements: readonly any[], appState: any) => {
     const tool = appState?.activeTool?.type;
-    setDrawingTool(Boolean(tool && tool !== 'selection' && tool !== 'hand'));
+    const drawing = Boolean(tool && tool !== 'selection' && tool !== 'hand');
+    setBusyCanvas(drawing || Boolean(appState?.openSidebar || appState?.openMenu || appState?.openDialog || appState?.openPopup));
     // What the "Add to Inbox" button offers follows the selection.
     const next = taskCandidates(elements, appState?.selectedElementIds);
     setCandidates(prev => (prev.map(c => c.id).join() === next.map(c => c.id).join() ? prev : next));
@@ -247,14 +250,15 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
             <MainMenu.DefaultItems.Help />
           </MainMenu>
         </Excalidraw>
-        {isEmpty && !drawingTool && (
-          // Clicks pass through to the canvas except on the buttons.
-          <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center p-6">
+        {isEmpty && !busyCanvas && (
+          // Clicks pass through to the canvas except on the buttons. On a
+          // phone the Think with me sheet covers the canvas, so it hides then.
+          <div className={`pointer-events-none absolute inset-0 z-[5] items-center justify-center p-6 pr-16 md:pr-6 ${thinkOpen ? 'hidden md:flex' : 'flex'}`}>
             <div className="pointer-events-auto max-w-md text-center space-y-3">
               <p className="text-[13px] font-semibold text-gray-500 dark:text-gray-400">Start from a template, or just start drawing</p>
               <div className="grid grid-cols-2 gap-2">
                 {TEMPLATES.map(t => (
-                  <button key={t.name} onClick={() => startFromTemplate(t.ops)} className="text-left px-3 py-2.5 rounded-xl bg-white/90 dark:bg-white/5 ring-1 ring-gray-200 dark:ring-white/10 hover:ring-violet-400 hover:bg-violet-50/60 dark:hover:bg-violet-500/10 transition-colors">
+                  <button key={t.name} onClick={() => startFromTemplate(t.ops)} className="text-left px-3 py-2.5 rounded-xl bg-white dark:bg-[#1c1c1e] ring-1 ring-gray-200 dark:ring-white/10 hover:ring-violet-400 hover:bg-violet-50/60 dark:hover:bg-violet-500/10 transition-colors">
                     <span className="block text-[13px] font-semibold text-gray-900 dark:text-gray-100">{t.name}</span>
                     <span className="block text-[11.5px] text-gray-500">{t.hint}</span>
                   </button>
@@ -264,7 +268,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
             </div>
           </div>
         )}
-        {candidates.length > 0 && (
+        {candidates.length > 0 && !busyCanvas && (
           <button
             onClick={addToInbox}
             className="absolute left-1/2 -translate-x-1/2 bottom-20 z-[5] flex items-center gap-1.5 h-9 px-4 rounded-full bg-gray-900 text-white dark:bg-white dark:text-gray-900 text-[13px] font-semibold shadow-lg hover:scale-[1.02] transition-transform"
