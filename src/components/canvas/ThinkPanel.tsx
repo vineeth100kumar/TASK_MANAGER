@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, SearchCheck, ListTree, ArrowUp, Loader2, Copy, RotateCcw, Wand2, Check, Undo2, LayoutGrid } from 'lucide-react';
-import { aiEngine, ThinkEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
+import { aiEngine, ThinkDetail, ThinkEngine, ThinkMode, ThinkTurn } from '../../services/aiEngine';
 import { piBackendUrl } from '../../services/piBackend';
 import { EditOp, RefMap, cleanOps } from './boardEdits';
 
@@ -47,6 +47,12 @@ const ACTIONS: Array<{ mode: ThinkMode; label: string; icon: typeof SearchCheck;
 ];
 
 const AUTO_APPLY_KEY = 'sage.canvasAutoApply';
+const DETAIL_KEY = 'sage.canvasDetail';
+const DETAILS: Array<{ value: ThinkDetail; label: string; hint: string }> = [
+  { value: 'simple', label: 'Simple', hint: 'A short chain of the big steps' },
+  { value: 'moderate', label: 'Moderate', hint: 'The main steps with a few branches' },
+  { value: 'complex', label: 'Complex', hint: 'Full detail with decisions, branches and loops' },
+];
 // Each board keeps its own conversation in this browser, so closing the panel
 // or switching boards doesn't lose it. Undo only lasts for this visit.
 const chatKey = (boardId: string) => `sage.canvasChat.${boardId}`;
@@ -55,6 +61,12 @@ const loadChat = (boardId: string): Turn[] => {
     const saved = JSON.parse(localStorage.getItem(chatKey(boardId)) || '[]');
     return Array.isArray(saved) ? saved : [];
   } catch { return []; }
+};
+const readDetail = (): ThinkDetail => {
+  try {
+    const saved = localStorage.getItem(DETAIL_KEY);
+    return DETAILS.some(d => d.value === saved) ? saved as ThinkDetail : 'moderate';
+  } catch { return 'moderate'; }
 };
 const readAutoApply = () => {
   try { return localStorage.getItem(AUTO_APPLY_KEY) !== 'off'; } catch { return true; }
@@ -75,6 +87,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
   turnsRef.current = turns;
   const [input, setInput] = useState('');
   const [autoApply, setAutoApply] = useState(readAutoApply);
+  const [detail, setDetail] = useState(readDetail);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [engine, setEngine] = useState<ThinkEngine | null>(null);
@@ -122,6 +135,11 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
     try { localStorage.setItem(AUTO_APPLY_KEY, next ? 'on' : 'off'); } catch { /* storage blocked */ }
   };
 
+  const chooseDetail = (next: ThinkDetail) => {
+    setDetail(next);
+    try { localStorage.setItem(DETAIL_KEY, next); } catch { /* storage blocked */ }
+  };
+
   // Only the newest applied change can be undone: undoing puts the board back
   // to just before it, which would also drop anything applied after.
   const lastApplied = () => {
@@ -158,7 +176,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
     const timer = setTimeout(() => { request.timedOut = true; request.controller.abort(); }, TIMEOUT_MS);
     try {
       const { outline, imagePng, refs } = await getSnapshot(mode === 'edit');
-      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history }, request.controller.signal);
+      const answer = await aiEngine.canvasThink({ mode, boardTitle, outline, imagePng, question, history, detail }, request.controller.signal);
       setEngine(answer.engine);
       const ops = mode === 'edit' && refs ? cleanOps(answer.ops, refs) : [];
 
@@ -328,10 +346,27 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
               <ArrowUp size={17} />
             </button>
           </div>
-          <label className="flex items-center gap-2 text-[11.5px] text-gray-500 select-none cursor-pointer">
-            <input type="checkbox" checked={autoApply} onChange={toggleAutoApply} className="accent-violet-600" />
-            Make changes right away<span className="hidden md:inline"> (untick to review each one first)</span>
-          </label>
+          <div className="flex items-center justify-between gap-2">
+            <label className="flex items-center gap-2 text-[11.5px] text-gray-500 select-none cursor-pointer min-w-0">
+              <input type="checkbox" checked={autoApply} onChange={toggleAutoApply} className="accent-violet-600" />
+              <span className="truncate">Make changes right away<span className="hidden lg:inline"> (untick to review each one first)</span></span>
+            </label>
+            {/* How much the AI draws when it makes or fills in a chart. */}
+            <div role="radiogroup" aria-label="Chart detail" className="shrink-0 flex rounded-lg bg-gray-100 dark:bg-white/[0.06] p-0.5">
+              {DETAILS.map(d => (
+                <button
+                  key={d.value}
+                  role="radio"
+                  aria-checked={detail === d.value}
+                  title={d.hint}
+                  onClick={() => chooseDetail(d.value)}
+                  className={`h-6 px-2 rounded-md text-[11.5px] font-semibold transition-colors ${detail === d.value ? 'bg-white text-violet-700 shadow-sm dark:bg-white/15 dark:text-violet-200' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}
+                >
+                  {d.label}
+                </button>
+              ))}
+            </div>
+          </div>
           {engine === 'local' && (
             <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq key in Settings, under Server & Reset, for fast, sharper answers.</p>
           )}

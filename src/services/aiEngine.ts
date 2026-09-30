@@ -12,6 +12,8 @@ const getAiUrl = (endpoint: string) => {
 export type ThinkMode = 'review' | 'summarize' | 'ask' | 'edit';
 // Which AI answered: Groq, Claude, or the Pi's own small model.
 export type ThinkEngine = 'groq' | 'claude' | 'local';
+// How big a chart the AI draws: a short chain, the main steps, or full detail.
+export type ThinkDetail = 'simple' | 'moderate' | 'complex';
 export interface ThinkTurn { role: 'user' | 'assistant'; text: string }
 
 // Pulls the server's explanation out of a failed response.
@@ -39,6 +41,7 @@ export const aiEngine = {
         imagePng?: string | null;
         question?: string;
         history: ThinkTurn[];
+        detail?: ThinkDetail;
     }, signal?: AbortSignal): Promise<{ text: string; engine: ThinkEngine; ops?: unknown[] }> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), {
             method: 'POST',
