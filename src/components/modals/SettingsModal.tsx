@@ -8,6 +8,7 @@ import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
 import { getPiApiKey, setPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -16,6 +17,7 @@ interface SettingsModalProps {
 }
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
+  useEscapeKey(onClose);
   const [activeTab, setActiveTab] = useState<'attention' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [notificationStatus, setNotificationStatus] = useState<string>('default');

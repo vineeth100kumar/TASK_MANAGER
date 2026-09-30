@@ -154,7 +154,8 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
       const { width, height } = canvas.getAppState();
       const xs = live.flatMap(el => [el.x, el.x + el.width]), ys = live.flatMap(el => [el.y, el.y + el.height]);
       const tooBig = Math.max(...xs) - Math.min(...xs) > width * 0.9 || Math.max(...ys) - Math.min(...ys) > height * 0.85;
-      if (tooBig) canvas.scrollToContent(live, { fitToViewport: true, viewportZoomFactor: 0.9 } as any);
+      // 0.8 leaves room for the toolbar floating over the top of the board.
+      if (tooBig) canvas.scrollToContent(live, { fitToViewport: true, viewportZoomFactor: 0.8 } as any);
     }, 50);
   };
 

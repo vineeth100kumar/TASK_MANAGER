@@ -5,12 +5,14 @@ import { api } from '../../services/api';
 import { SyncEngineStatus, syncEndpointLabel, syncEngine } from '../../services/syncEngine';
 import { SyncOpRecord } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface SyncDiagnosticsModalProps {
   onClose: () => void;
 }
 
 export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
+  useEscapeKey(onClose);
   const [syncStatus, setSyncStatus] = useState<SyncEngineStatus>(api.sync.getStatus());
   const [operations, setOperations] = useState<SyncOpRecord[]>([]);
   const [isForcing, setIsForcing] = useState(false);
