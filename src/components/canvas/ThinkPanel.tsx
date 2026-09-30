@@ -301,13 +301,14 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
 
       {hasPi && (
         <div className="shrink-0 border-t border-gray-200/70 dark:border-white/[0.08] p-3 space-y-2">
-          <div className="flex flex-wrap gap-1.5">
+          {/* One scrolling row on phones, so the answers above keep their room. */}
+          <div className="flex gap-1.5 overflow-x-auto no-scrollbar -mx-3 px-3 md:mx-0 md:px-0 md:flex-wrap md:overflow-visible">
             {ACTIONS.map(({ mode, label, icon: Icon, request }) => (
               <button
                 key={label}
                 disabled={busy}
                 onClick={() => run(mode, label, request)}
-                className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20 disabled:opacity-50 transition-colors"
+                className="shrink-0 flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-violet-50 text-violet-700 hover:bg-violet-100 dark:bg-violet-500/10 dark:text-violet-300 dark:hover:bg-violet-500/20 disabled:opacity-50 transition-colors"
               >
                 <Icon size={13} /> {label}
               </button>
@@ -321,7 +322,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
               onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); } }}
               rows={2}
               placeholder="Ask, or tell me what to change…"
-              className="field flex-1 resize-none max-h-32"
+              className="field flex-1 resize-none max-h-32 h-10 md:h-auto"
             />
             <button onClick={send} disabled={busy || !input.trim()} aria-label="Send" className="h-10 w-10 shrink-0 flex items-center justify-center rounded-xl bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-40 transition-colors">
               <ArrowUp size={17} />
@@ -329,7 +330,7 @@ export function ThinkPanel({ boardId, boardTitle, getSnapshot, describeEdits, ap
           </div>
           <label className="flex items-center gap-2 text-[11.5px] text-gray-500 select-none cursor-pointer">
             <input type="checkbox" checked={autoApply} onChange={toggleAutoApply} className="accent-violet-600" />
-            Make changes right away (untick to review each one first)
+            Make changes right away<span className="hidden md:inline"> (untick to review each one first)</span>
           </label>
           {engine === 'local' && (
             <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq key in Settings, under Server & Reset, for fast, sharper answers.</p>
