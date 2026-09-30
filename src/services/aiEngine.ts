@@ -42,8 +42,10 @@ export const aiEngine = {
         question?: string;
         history: ThinkTurn[];
         detail?: ThinkDetail;
+        scope?: string[]; // selected shapes that changes are limited to
         document?: string;
         documentName?: string;
+        documentRole?: 'new' | 'source'; // a file to chart, or the one the board came from
     }, signal?: AbortSignal): Promise<{ text: string; engine: ThinkEngine; ops?: unknown[] }> => {
         const res = await fetch(getAiUrl('/api/canvas/think'), {
             method: 'POST',

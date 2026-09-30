@@ -88,6 +88,9 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     try { localStorage.setItem(blankKey, '1'); } catch { /* storage blocked: it just comes back next visit */ }
   };
   const [candidates, setCandidates] = useState<Array<{ id: string; title: string }>>([]);
+  // Shapes selected right now (a selected label counts as its shape), for the
+  // thinking partner's "working on your selection" mode.
+  const [selectedShapes, setSelectedShapes] = useState<string[]>([]);
   const { showToast } = useToast();
 
   const flush = () => {
@@ -111,6 +114,8 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     // What the "Add to Inbox" button offers follows the selection.
     const next = taskCandidates(elements, appState?.selectedElementIds);
     setCandidates(prev => (prev.map(c => c.id).join() === next.map(c => c.id).join() ? prev : next));
+    const picked = selectedShapeIds(elements, appState?.selectedElementIds);
+    setSelectedShapes(prev => (prev.join() === picked.join() ? prev : picked));
     // onChange also fires for selection, scrolling and zoom; only the elements matter.
     const version = getSceneVersion(elements);
     if (version === lastVersion.current) return;
@@ -186,12 +191,15 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
   // What the thinking partner reads: an outline of the board plus a picture of
   // it. To change the board it gets numbered shapes instead, and the refs that
   // map those numbers back to elements.
-  const getSnapshot = async (forEdit = false) => {
+  // useSelection false reads the board as if nothing were selected.
+  const getSnapshot = async (forEdit = false, useSelection = true) => {
     const canvas = excalidrawRef.current;
     const elements = canvas ? canvas.getSceneElements() : parseScene(lastSceneJson.current);
-    const selected = canvas ? Object.keys(canvas.getAppState().selectedElementIds || {}) : [];
-    const { text, refs } = forEdit ? boardGraph(elements, selected) : { text: boardOutline(elements), refs: undefined };
-    if (!elements.length) return { outline: text, imagePng: null, refs };
+    const selected = canvas && useSelection ? Object.keys(canvas.getAppState().selectedElementIds || {}) : [];
+    const graph = forEdit ? boardGraph(elements, selected) : undefined;
+    const text = graph ? graph.text : boardOutline(elements);
+    const extra = graph ? { refs: graph.refs, selected: graph.selected, edges: graph.edges, edgeLabels: graph.edgeLabels } : {};
+    if (!elements.length) return { outline: text, imagePng: null, ...extra };
     let imagePng: string | null = null;
     try {
       const blob = await exportToBlob({
@@ -211,7 +219,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
     } catch (err) {
       console.warn('[Canvas] Snapshot failed; sending the outline only:', err);
     }
-    return { outline: text, imagePng, refs };
+    return { outline: text, imagePng, ...extra };
   };
 
   const describeEdits = (ops: EditOp[], refs: RefMap) =>
@@ -219,15 +227,27 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
 
   // Puts the AI's changes on the board as one step (Ctrl+Z takes it back) and
   // returns a function that restores the board as it was.
-  const applyEdits = (ops: EditOp[], refs: RefMap) => {
+  // keepFocus: the change was to a selection, so the selection becomes what
+  // that part is now (the new shapes plus what's left of it), ready to refine.
+  // Otherwise nothing is left selected, so the next request is about the board.
+  const applyEdits = async (ops: EditOp[], refs: RefMap, keepFocus = false) => {
+    // New labels are measured in the board's fonts. On a board with no text yet
+    // they may not have loaded, and words measured in a narrower stand-in
+    // spill out of their boxes, so load them first (briefly).
+    await Promise.race([
+      Promise.all(['Nunito', 'Excalifont'].map(f => document.fonts?.load(`20px ${f}`).catch(() => null))),
+      new Promise(r => setTimeout(r, 2000)),
+    ]);
     const canvas = excalidrawRef.current;
     if (!canvas) return null;
     const before = canvas.getSceneElementsIncludingDeleted();
     const after = applyOps(before, ops, refs);
     const added = newIds(before, after);
+    const alive = new Set(after.filter(el => !el.isDeleted).map(el => el.id));
+    const focus = keepFocus ? [...Object.keys(canvas.getAppState().selectedElementIds || {}).filter(id => alive.has(id)), ...added.filter(id => after.find(el => el.id === id)?.type !== 'arrow')] : [];
     canvas.updateScene({
       elements: after,
-      appState: { selectedElementIds: Object.fromEntries(added.map(id => [id, true])) } as any,
+      appState: { selectedElementIds: Object.fromEntries(focus.map(id => [id, true])) } as any,
       captureUpdate: CaptureUpdateAction.IMMEDIATELY,
     });
     const shown = after.filter(el => added.includes(el.id));
@@ -293,9 +313,22 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
       {thinkOpen && (
         // A side column on wider screens, a sheet over the bottom of the canvas on phones.
         <div className="absolute inset-x-0 bottom-0 h-[80%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
-          <ThinkPanel boardId={board.id} boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
+          <ThinkPanel selectedCount={selectedShapes.length} boardId={board.id} boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
         </div>
       )}
     </div>
   );
+}
+
+// Ids of the shapes in a selection; a selected label stands for its shape.
+function selectedShapeIds(elements: readonly any[], selectedIds: Record<string, boolean> | undefined): string[] {
+  if (!selectedIds) return [];
+  const byId = new Map(elements.filter(el => !el.isDeleted).map(el => [el.id, el]));
+  const ids = new Set<string>();
+  for (const id of Object.keys(selectedIds)) {
+    const el = byId.get(id);
+    const shape = el?.containerId ? byId.get(el.containerId) : el;
+    if (shape && ['rectangle', 'diamond', 'ellipse'].includes(shape.type)) ids.add(shape.id);
+  }
+  return [...ids].sort();
 }

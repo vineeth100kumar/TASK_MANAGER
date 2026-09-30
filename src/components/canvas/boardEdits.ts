@@ -7,8 +7,9 @@ import { FONT_FAMILY, convertToExcalidrawElements } from '@excalidraw/excalidraw
 const SHAPES = new Set(['rectangle', 'diamond', 'ellipse']);
 const KIND_NAMES: Record<string, string> = { rectangle: 'box', diamond: 'decision', ellipse: 'oval' };
 const KIND_TYPES: Record<string, 'rectangle' | 'diamond' | 'ellipse'> = { box: 'rectangle', decision: 'diamond', oval: 'ellipse' };
-// Most edits a single request should make; more usually means the AI lost the plot.
-const MAX_OPS = 40;
+// Most edits a single request should make. A detailed chart drawn from a file
+// can take about a hundred (a shape and an arrow per step, plus branches).
+const MAX_OPS = 150;
 const GAP_Y = 90;
 const GAP_X = 60;
 
@@ -35,8 +36,11 @@ const PLACES = new Set(['below', 'above', 'left_of', 'right_of']);
 // Board refs (n1, e1…) to Excalidraw element ids, fixed when the board was read.
 export type RefMap = Record<string, string>;
 
+// What each arrow ref joins (shape refs; undefined for a loose end).
+export type EdgeMap = Record<string, [string | undefined, string | undefined]>;
+
 // The board as the AI sees it when asked to change it.
-export function boardGraph(elements: readonly any[], selectedIds: string[] = []): { text: string; refs: RefMap } {
+export function boardGraph(elements: readonly any[], selectedIds: string[] = []): { text: string; refs: RefMap; selected: string[]; edges: EdgeMap; edgeLabels: Record<string, string> } {
   const live = elements.filter(el => !el.isDeleted);
   const labels = new Map<string, string>();
   for (const el of live) if (el.type === 'text' && el.containerId && el.text) labels.set(el.containerId, oneLine(el.text));
@@ -57,13 +61,17 @@ export function boardGraph(elements: readonly any[], selectedIds: string[] = [])
 
   const arrows = live.filter(el => el.type === 'arrow');
   const edgeLines: string[] = [];
+  const edges: EdgeMap = {};
+  const edgeLabels: Record<string, string> = {};
   arrows.forEach((el, i) => {
     const from = refOf.get(el.startBinding?.elementId) || refOf.get(shapeNear(shapes, el, 0)?.id);
     const to = refOf.get(el.endBinding?.elementId) || refOf.get(shapeNear(shapes, el, -1)?.id);
     if (!from && !to) return;
     const ref = `e${i + 1}`;
     refs[ref] = el.id;
+    edges[ref] = [from, to];
     const label = labels.get(el.id);
+    if (label) edgeLabels[ref] = label;
     edgeLines.push(`- ${ref}: ${from || '(nothing)'} → ${to || '(nothing)'}${label ? ` "${label}"` : ''}`);
   });
   if (edgeLines.length) lines.push('', 'Arrows:', ...edgeLines);
@@ -78,9 +86,21 @@ export function boardGraph(elements: readonly any[], selectedIds: string[] = [])
     const el = live.find(e => e.id === id);
     return refById.get(el?.containerId || id);
   }).filter(Boolean))];
-  if (selected.length) lines.push('', `Selected right now: ${selected.join(', ')}`);
+  if (selected.length) {
+    lines.push('', `Selected right now: ${selected.join(', ')}`);
+    // What surrounds the selection, so a change to it fits the flow it sits in.
+    const inside = new Set(selected);
+    const name = (ref: string) => `${ref} "${labels.get(refs[ref]) || ''}"`;
+    const before = new Set<string>(), after = new Set<string>();
+    for (const [from, to] of Object.values(edges)) {
+      if (to && from && inside.has(to) && !inside.has(from)) before.add(from);
+      if (from && to && inside.has(from) && !inside.has(to)) after.add(to);
+    }
+    if (before.size) lines.push(`Leads into the selection: ${[...before].map(name).join(', ')}`);
+    if (after.size) lines.push(`The selection leads to: ${[...after].map(name).join(', ')}`);
+  }
 
-  return { text: lines.length ? lines.join('\n') : '(The board is empty.)', refs };
+  return { text: lines.length ? lines.join('\n') : '(The board is empty.)', refs, selected: selected as string[], edges, edgeLabels };
 }
 
 // The shape an unbound arrow end is drawn on (index 0 = start, -1 = end).
@@ -124,6 +144,59 @@ export function cleanOps(raw: unknown, refs: RefMap): EditOp[] {
     }
   }
   return ops;
+}
+
+// When you're working on a selection, changes stay inside it: new shapes and
+// arrows that join them to it are fine, but shapes and arrows elsewhere on the
+// board are left as they are. Returns how many changes were held back.
+export function scopeOps(ops: EditOp[], selected: string[], edges: EdgeMap, refs: RefMap): { ops: EditOp[]; held: number } {
+  const inside = new Set(selected);
+  const isNew = (ref: string) => !refs[ref];
+  const touchesSelection = (ref: string) => inside.has(ref) || isNew(ref) || (edges[ref] || []).some(end => end && inside.has(end));
+  const kept = ops.filter(o => {
+    switch (o.op) {
+      case 'add_node': return true;
+      case 'add_edge': return isNew(o.from) || isNew(o.to) || inside.has(o.from) || inside.has(o.to);
+      case 'edit_label': case 'delete': return touchesSelection(o.id);
+      case 'move': return inside.has(o.id) || isNew(o.id);
+      case 'resize': case 'color': return inside.has(o.id) || isNew(o.id);
+      case 'tidy': return false; // rearranges the whole board
+      default: return true;
+    }
+  });
+  return { ops: kept, held: ops.length - kept.length };
+}
+
+// Keeps the flow unbroken when a shape in the middle of it is removed. If the
+// AI replaced the shape with new ones but didn't join them up, the shapes
+// before and after are joined to the new ones; if it just removed the shape,
+// they're joined to each other. Arrow labels (Yes/No) carry over.
+export function repairFlow(ops: EditOp[], edges: EdgeMap, refs: RefMap, labels: Record<string, string> = {}): EditOp[] {
+  const removed = new Set(ops.filter(o => o.op === 'delete' && !o.id.startsWith('e')).map(o => (o as any).id as string));
+  if (!removed.size) return ops;
+  const added = ops.filter(o => o.op === 'add_node').map(o => (o as any).ref as string);
+  const newEdges = ops.filter(o => o.op === 'add_edge') as Array<Extract<EditOp, { op: 'add_edge' }>>;
+  // The new shapes' own chain: where it starts (nothing new points in) and ends.
+  const entries = added.filter(r => !newEdges.some(e => e.to === r && added.includes(e.from)));
+  const exits = added.filter(r => !newEdges.some(e => e.from === r && added.includes(e.to)));
+  const extra: EditOp[] = [];
+  const has = (from: string, to: string) => newEdges.some(e => e.from === from && e.to === to) || extra.some(e => e.op === 'add_edge' && e.from === from && e.to === to);
+  for (const gone of removed) {
+    const ins = Object.entries(edges).filter(([, [f, t]]) => t === gone && f && !removed.has(f)).map(([e, [f]]) => ({ from: f!, label: labels[e] }));
+    const outs = Object.entries(edges).filter(([, [f, t]]) => f === gone && t && !removed.has(t)).map(([e, [, t]]) => ({ to: t!, label: labels[e] }));
+    // Only when the AI left that side of the new shapes unjoined to the board.
+    const joinedIn = newEdges.some(e => added.includes(e.to) && !added.includes(e.from));
+    const joinedOut = newEdges.some(e => added.includes(e.from) && !added.includes(e.to));
+    if (added.length) {
+      if (entries.length === 1 && !joinedIn) for (const i of ins) if (!has(i.from, entries[0])) extra.push({ op: 'add_edge', from: i.from, to: entries[0], label: i.label });
+      if (exits.length === 1 && !joinedOut) for (const o of outs) if (!has(exits[0], o.to)) extra.push({ op: 'add_edge', from: exits[0], to: o.to, label: o.label });
+    } else {
+      for (const i of ins) for (const o of outs) {
+        if (i.from !== o.to && !has(i.from, o.to) && !Object.values(edges).some(([f, t]) => f === i.from && t === o.to)) extra.push({ op: 'add_edge', from: i.from, to: o.to, label: i.label || o.label });
+      }
+    }
+  }
+  return extra.length ? [...ops.filter(o => o.op !== 'tidy'), ...extra, ...ops.filter(o => o.op === 'tidy')] : ops;
 }
 
 // One plain line per change, for the preview.
@@ -192,19 +265,49 @@ function arrowBetween(a: any, b: any, shapes: any[] = [], lane = 0) {
   const others = shapes.filter(el => el.id !== a.id && el.id !== b.id);
   // Shapes level with any part of the route, which a detour has to clear.
   const between = (top: number, bottom: number) => others.filter(el => el.y < bottom && el.y + el.height > top);
+  // The nearest clear lane beside the route: step out past whatever the
+  // vertical run or the two short legs to it would cut through, but no
+  // further, so a detour doesn't swing round unrelated drawings.
+  const clearLane = (side: 'left' | 'right', top: number, bottom: number) => {
+    const band = between(top, bottom);
+    const inRow = (el: any, y: number) => el.y - 10 < y && el.y + el.height + 10 > y;
+    let out = side === 'left' ? Math.min(a.x, b.x) - 40 : Math.max(a.x + a.width, b.x + b.width) + 40;
+    for (let moved = true, tries = 0; moved && tries < 50; tries++) {
+      moved = false;
+      for (const el of band) {
+        const hitsRun = el.x - 10 < out && el.x + el.width + 10 > out;
+        const hitsLeg = side === 'left'
+          ? el.x + el.width > out && el.x < Math.max(a.x, b.x) && (inRow(el, acy) || inRow(el, bcy))
+          : el.x < out && el.x + el.width > Math.min(a.x + a.width, b.x + b.width) && (inRow(el, acy) || inRow(el, bcy));
+        if (hitsRun || hitsLeg) {
+          out = side === 'left' ? el.x - 40 : el.x + el.width + 40;
+          moved = true;
+        }
+      }
+    }
+    return out;
+  };
+  // The last legs of a detour: straight across into the target's side, or, if
+  // another shape sits in that row in the way, over the top and down into it.
+  const intoTarget = (out: number, side: 'left' | 'right'): Array<[number, number]> => {
+    const lo = side === 'left' ? out : b.x + b.width, hi = side === 'left' ? b.x : out;
+    const blocked = others.some(el => el.y - 10 < bcy && el.y + el.height + 10 > bcy && el.x < hi && el.x + el.width > lo);
+    if (!blocked) return [[out, bcy], [side === 'left' ? b.x - 6 : b.x + b.width + 6, bcy]];
+    return [[out, b.y - 30], [bcx, b.y - 30], [bcx, b.y - 6]];
+  };
   let pts: Array<[number, number]>;
   let detour: 'left' | 'right' | null = null;
   if (b.y >= a.y + a.height) {
     pts = [[acx, a.y + a.height + 6], [bcx, b.y - 6]];
     if (others.some(el => crosses(pts[0], pts[1], el))) {
       detour = 'left';
-      const out = Math.min(a.x, b.x, ...between(a.y, b.y + b.height).map(el => el.x)) - 40 - lane * 24;
-      pts = [[a.x - 6, acy], [out, acy], [out, bcy], [b.x - 6, bcy]];
+      const out = clearLane('left', a.y, b.y + b.height) - lane * 24;
+      pts = [[a.x - 6, acy], [out, acy], ...intoTarget(out, 'left')];
     }
   } else if (b.y + b.height <= a.y) {
     detour = 'right';
-    const out = Math.max(a.x + a.width, b.x + b.width, ...between(b.y, a.y + a.height).map(el => el.x + el.width)) + 40 + lane * 24;
-    pts = [[a.x + a.width + 6, acy], [out, acy], [out, bcy], [b.x + b.width + 6, bcy]];
+    const out = clearLane('right', b.y, a.y + a.height) + lane * 24;
+    pts = [[a.x + a.width + 6, acy], [out, acy], ...intoTarget(out, 'right')];
   }
   else if (bcx >= acx) pts = [[a.x + a.width + 6, acy], [b.x - 6, bcy]];
   else pts = [[a.x - 6, acy], [b.x + b.width + 6, bcy]];
@@ -384,6 +487,88 @@ export function applyOps(current: readonly any[], ops: EditOp[], refs: RefMap): 
         ...rest,
       );
       for (const end of [a, b]) replace(end.id, el => bump(el, { boundElements: [...(el.boundElements || []), { id, type: 'arrow' }] }));
+    }
+  }
+
+  // A new chart that stands on its own (three or more new shapes, none joined
+  // to what was there) gets its own tidy top-to-bottom layout, beside the
+  // existing drawing rather than tangled up in it.
+  const newRefs = ops.filter(o => o.op === 'add_node').map(o => (o as any).ref as string);
+  const joinsOld = ops.some(o => o.op === 'add_edge' && (newRefs.includes(o.from) !== newRefs.includes(o.to)));
+  const arranged = ops.some(o => o.op === 'tidy' || (o.op === 'move' && newRefs.includes(o.id)));
+  if (newRefs.length >= 3 && !joinsOld && !arranged) {
+    const fresh = new Set(newRefs.map(r => idFor[r]));
+    const live = [...byId().values()];
+    const block = live.filter(el => fresh.has(el.id) || (el.type === 'arrow' && fresh.has(el.startBinding?.elementId) && fresh.has(el.endBinding?.elementId)));
+    const spots = tidyLayout(block, new Map());
+    const old = startShapes.filter(el => byId().has(el.id) && !fresh.has(el.id));
+    const boxes = [...spots].map(([id, p]) => ({ ...p, el: byId().get(id)! }));
+    const minX = Math.min(...boxes.map(b => b.x)), minY = Math.min(...boxes.map(b => b.y));
+    const maxX = Math.max(...boxes.map(b => b.x + b.el.width));
+    // Right of the existing drawing, level with its top; or centred on the origin.
+    const dx = old.length ? Math.max(...old.map(el => el.x + el.width)) + 200 - minX : -(minX + maxX) / 2;
+    const dy = old.length ? Math.min(...old.map(el => el.y)) - minY : -minY;
+    for (const b of boxes) place(b.el.id, b.x + dx, b.y + dy);
+  } else if (newRefs.length && !arranged) {
+    fitIntoFlow(newRefs.map(r => idFor[r]));
+  }
+
+  // New steps joined to an existing flow go right under the step that leads
+  // into them. If that spot is taken by what comes after, the rest of the flow
+  // moves down to make room, like inserting a row; otherwise the new step sits
+  // beside whatever is there (a second branch).
+  function fitIntoFlow(ids: string[]) {
+    const fresh = new Set(ids);
+    const placed = new Set<string>();
+    const ends = (arrow: any) => {
+      const [f, t] = joins.get(arrow.id) || [];
+      return [arrow.startBinding?.elementId || f, arrow.endBinding?.elementId || t] as [string | undefined, string | undefined];
+    };
+    const graph = () => {
+      const kids = new Map<string, string[]>(), parents = new Map<string, string[]>();
+      for (const el of byId().values()) {
+        if (el.type !== 'arrow') continue;
+        const [f, t] = ends(el);
+        if (!f || !t || f === t) continue;
+        (kids.get(f) || kids.set(f, []).get(f)!).push(t);
+        (parents.get(t) || parents.set(t, []).get(t)!).push(f);
+      }
+      return { kids, parents };
+    };
+    for (const id of ids) {
+      const live = byId();
+      const el = live.get(id);
+      if (!el) continue;
+      const { kids, parents } = graph();
+      const parent = (parents.get(id) || []).map(p => live.get(p)).find(p => p && SHAPES.has(p.type) && (!fresh.has(p.id) || placed.has(p.id)));
+      placed.add(id);
+      if (!parent) continue;
+      let x = parent.x + parent.width / 2 - el.width / 2;
+      const y = parent.y + parent.height + GAP_Y;
+      const others = () => [...byId().values()].filter(o => SHAPES.has(o.type) && o.id !== id && (!fresh.has(o.id) || placed.has(o.id)));
+      const blockers = others().filter(o => overlaps({ x, y, width: el.width, height: el.height }, o));
+      if (blockers.length) {
+        // What comes after this step, below it: that's what moves down.
+        const below = new Set<string>();
+        const queue = [...(kids.get(id) || [])];
+        while (queue.length) {
+          const k = queue.shift()!;
+          const shape = live.get(k);
+          if (below.has(k) || k === parent.id || !shape || shape.y < parent.y + parent.height) continue;
+          below.add(k);
+          queue.push(...(kids.get(k) || []));
+        }
+        if (blockers.every(b => below.has(b.id))) {
+          const drop = y + el.height + GAP_Y - Math.min(...blockers.map(b => b.y));
+          for (const k of below) {
+            const shape = byId().get(k);
+            if (shape && (!fresh.has(k) || placed.has(k))) place(k, shape.x, shape.y + drop);
+          }
+        } else {
+          for (let tries = 0; tries < 20 && others().some(o => overlaps({ x, y, width: el.width, height: el.height }, o)); tries++) x += el.width + GAP_X;
+        }
+      }
+      place(id, x, y);
     }
   }
 
