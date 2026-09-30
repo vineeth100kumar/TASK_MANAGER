@@ -39,6 +39,8 @@ LUMO_ENV = Path(__file__).resolve().parent.parent / "lumo" / "rpi_server" / ".en
 SECRETS_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "sage_secrets.json"
 # Keeps a runaway board from turning into a large bill.
 MAX_OUTLINE_CHARS = 60_000
+# A Markdown file attached in the panel; the app trims it to this too.
+MAX_DOCUMENT_CHARS = 40_000
 
 SYSTEM_PROMPT = """You are a thinking partner sitting beside someone as they work \
 through an idea on a whiteboard. The board may be a flowchart, a mind map, a plan, \
@@ -100,9 +102,29 @@ its outgoing arrows. Only move, resize, colour or tidy when I ask for that; neve
 shrink shapes. Use tidy when I ask to rearrange, clean up or reorganise, after \
 any other changes. Use undo_last, alone, when I ask to undo or take back your last \
 change. If something can't be done with these ops, say so in reply. In reply, call \
-shapes by their labels, never by ids like n2.
+shapes by their labels, never by ids like n2."""
 
-My message: """
+# How big a chart to draw when I ask for one, add steps, or tap Improve. It sets
+# the size of new work only; renames, colours and other small asks ignore it.
+DETAIL_PROMPTS = {
+    "simple": (
+        "Detail level: Simple. When you draw or add to a flowchart, keep it to a short, "
+        "high-level chain of about 3 to 5 shapes, one idea each, in a straight line. "
+        "No decisions, branches or loops unless I ask for them."
+    ),
+    "moderate": (
+        "Detail level: Moderate. When you draw or add to a flowchart, cover the main steps "
+        "in about 6 to 10 shapes, with one or two decisions where the flow really splits, "
+        "each with labelled Yes/No arrows to its outcomes."
+    ),
+    "complex": (
+        "Detail level: Complex. When you draw or add to a flowchart, go into full detail, "
+        "usually 12 to 25 shapes: every real step, a decision wherever there is a choice or "
+        "a check, a labelled arrow for every outcome of each decision, what happens when "
+        "something fails, and loops (an arrow back up to an earlier step) where a step can "
+        "repeat, such as retrying."
+    ),
+}
 
 IMPROVE_REQUEST = (
     "Improve this diagram: fill in the steps or outcomes that are clearly missing, "
@@ -134,11 +156,16 @@ class CanvasThinkRequest(BaseModel):
     imagePng: Optional[str] = None  # base64, no data: prefix
     question: Optional[str] = None
     history: List[ThinkTurn] = []
+    detail: str = "moderate"  # simple | moderate | complex
+    document: Optional[str] = None  # text of an attached .md file
+    documentName: str = ""
 
 
 def _ask_text(req: CanvasThinkRequest) -> str:
     if req.mode == "edit":
-        return EDIT_PROMPT + ((req.question or "").strip() or IMPROVE_REQUEST)
+        detail = DETAIL_PROMPTS.get(req.detail, DETAIL_PROMPTS["moderate"])
+        message = (req.question or "").strip() or IMPROVE_REQUEST
+        return f"{EDIT_PROMPT}\n\n{detail}\n\nMy message: {message}"
     if req.mode == "ask":
         return (req.question or "").strip() or "What do you make of this board?"
     return MODE_PROMPTS.get(req.mode, MODE_PROMPTS["review"])
@@ -147,7 +174,13 @@ def _ask_text(req: CanvasThinkRequest) -> str:
 def _board_text(req: CanvasThinkRequest) -> str:
     outline = req.outline[:MAX_OUTLINE_CHARS]
     title = req.boardTitle.strip() or "Untitled board"
-    return f'The board is called "{title}". Its current contents:\n\n{outline}'
+    text = f'The board is called "{title}". Its current contents:\n\n{outline}'
+    doc = (req.document or "").strip()[:MAX_DOCUMENT_CHARS]
+    if doc:
+        name = req.documentName.strip() or "notes.md"
+        text += (f'\n\nI attached a Markdown file, "{name}". Use it as the source for what I ask; '
+                 f"when I ask for a chart, build it from this file's content:\n\n<file>\n{doc}\n</file>")
+    return text
 
 
 def _transcript(req: CanvasThinkRequest) -> str:

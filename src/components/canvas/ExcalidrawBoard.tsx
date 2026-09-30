@@ -292,7 +292,7 @@ export default function ExcalidrawBoard({ board, isDarkMode, thinkOpen, onCloseT
       </div>
       {thinkOpen && (
         // A side column on wider screens, a sheet over the bottom of the canvas on phones.
-        <div className="absolute inset-x-0 bottom-0 h-[60%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
+        <div className="absolute inset-x-0 bottom-0 h-[80%] z-10 border-t md:static md:h-full md:w-[22rem] md:border-t-0 md:border-l border-gray-200/70 dark:border-white/[0.08] shadow-2xl md:shadow-none rounded-t-3xl md:rounded-none overflow-hidden">
           <ThinkPanel boardId={board.id} boardTitle={board.title} getSnapshot={getSnapshot} describeEdits={describeEdits} applyEdits={applyEdits} onClose={onCloseThink} />
         </div>
       )}

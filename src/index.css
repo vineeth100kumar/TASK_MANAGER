@@ -413,6 +413,9 @@
     color: var(--color-gray-400);
   }
 
+  .no-scrollbar { scrollbar-width: none; }
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: rgb(156 163 175 / 0.4) transparent;
