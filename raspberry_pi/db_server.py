@@ -84,7 +84,12 @@ async def require_api_key(request, call_next):
 # Off until SAGE_ACCESS_PASSWORD_HASH is set. Then browsers need the login
 # cookie from /login, and LUMO and scripts get through with the API key alone.
 # The cookie also stands in for the key, so the password is all a browser needs.
-GATE_OPEN_PATHS = {"/login", "/logout", "/api/health"}
+# Icons stay public so the login page and home-screen installs can show them.
+GATE_OPEN_PATHS = {
+    "/login", "/logout", "/api/health",
+    "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png",
+    "/icon-192.png", "/icon-512.png", "/manifest.webmanifest",
+}
 
 
 @app.middleware("http")

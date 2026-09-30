@@ -82,8 +82,8 @@ class NotificationService {
     if (!this.isSupported || Notification.permission !== 'granted') return;
     try {
       new Notification(`Sage: ${title}`, {
-        icon: '/logo-light.png',
-        badge: '/logo-light.png',
+        icon: '/icon-192.png',
+        badge: '/icon-192.png',
         ...options
       });
     } catch (e) {

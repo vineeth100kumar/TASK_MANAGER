@@ -147,6 +147,8 @@ def login_page(next_path: str = "/", message: str = "") -> str:
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Sage</title>
+<link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <style>
   :root {{ color-scheme: light dark; --bg: #f6f5f2; --card: #fff; --text: #1c1b19; --muted: #6b6860; --line: #d9d6cf; --accent: #3b5bdb; --error: #c92a2a; }}
   @media (prefers-color-scheme: dark) {{ :root {{ --bg: #141413; --card: #1f1e1c; --text: #eceae4; --muted: #9c998f; --line: #3a3834; --accent: #748ffc; --error: #ff8787; }} }}
