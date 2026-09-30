@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { WorkItem } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import { useToast } from '../../context/ToastContext';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface TrashModalProps {
   onClose: () => void;
@@ -12,6 +13,7 @@ interface TrashModalProps {
 }
 
 export function TrashModal({ onClose, onRestored }: TrashModalProps) {
+  useEscapeKey(onClose);
   const [deletedItems, setDeletedItems] = useState<WorkItem[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const { showToast } = useToast();

@@ -20,6 +20,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const [data, setData] = useState<any>(null);
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
+  const [aiFailed, setAiFailed] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
   const briefingRequested = useRef(false);
@@ -42,6 +43,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
            setAiBriefing(briefing);
         } catch (e) {
            console.warn('AI Briefing failed:', e);
+           setAiFailed(true);
         } finally {
            setIsAiLoading(false);
         }
@@ -148,6 +150,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
                  <p className="text-sm text-gray-800 dark:text-gray-200 font-medium leading-relaxed">
                     {aiBriefing.strategyText}
                  </p>
+             ) : aiFailed && data.todayFocus?.length > 0 ? (
+                 <p className="text-sm text-gray-500 italic">Sage AI couldn't be reached, so there's no strategy for today yet.</p>
              ) : (
                  <p className="text-sm text-gray-500 italic">Add items to Today's Focus to get an AI strategy.</p>
              )}

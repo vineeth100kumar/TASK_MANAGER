@@ -96,7 +96,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): QuickAddRe
   let m: RegExpMatchArray | null;
   if ((m = text.match(/\bevery\s+weekday[s]?\b/i))) {
     repeatRule = 'weekdays'; repeatLabel = 'Every weekday'; text = strip(text, m);
-  } else if ((m = text.match(/\bevery\s+(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)[a-z]*\b/i))) {
+  } else if ((m = text.match(/\bevery\s+(sun|mon|tue|tues|wed|weds|thu|thur|thurs|fri|sat)(?:day|sday|nesday|rsday|urday)?s?\b/i))) {
     const abbr = m[1].toLowerCase();
     repeatRule = `weekly:${WEEKDAY_ABBR[abbr]}`;
     const day = WEEKDAYS[WEEKDAY_ABBR[abbr]];

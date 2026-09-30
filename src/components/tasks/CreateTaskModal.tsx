@@ -368,7 +368,7 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
               <label className="field-label">Project</label>
               <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
                 {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                {projects.length === 0 && <option value="">No Projects Yet</option>}
+                {projects.length === 0 && <option value="">No projects</option>}
               </select>
             </div>
             <div className="space-y-1">

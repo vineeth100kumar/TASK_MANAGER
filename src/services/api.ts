@@ -10,7 +10,7 @@
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
-import { toInputDateValue, toInputDateTimeValue, parseDateString } from '../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue, parseDateString, parseEstimateMinutes } from '../utils/dateUtils';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 
@@ -310,7 +310,8 @@ export const api = {
       const key = `${prefix}-${count}`;
 
       // Auto-infer quick wins from action verbs if not explicitly set
-      const isShortAction = /(call|email|reply|text|ping|order|buy|pay|send|clean|message|ask|fill|check)/i.test(payload.title || '');
+      // Whole words only, so "task", "context" or "checkout" don't count.
+      const isShortAction = /\b(call|email|reply|text|ping|order|buy|pay|send|clean|message|ask|fill|check)\b/i.test(payload.title || '');
       const estimatedMinutes = payload.estimatedMinutes !== undefined ? payload.estimatedMinutes : (isShortAction ? 10 : null);
       const energy = payload.energy || (isShortAction ? 'low' : 'medium');
 
@@ -369,6 +370,11 @@ export const api = {
       const existing = state.workItems[index];
       const now = new Date().toISOString();
       const nextVersion = (existing.version || 1) + 1;
+
+      // Keep the number the Today view sorts by in step with the typed estimate.
+      if (updates.estimated !== undefined && updates.estimatedMinutes === undefined) {
+        updates = { ...updates, estimatedMinutes: parseEstimateMinutes(updates.estimated) };
+      }
 
       const updated: WorkItem = {
         ...existing,
@@ -959,12 +965,14 @@ export const api = {
         .sort((a, b) => (a.focusOrder || 0) - (b.focusOrder || 0))
         .map(hydrateWorkItem);
 
-      // Quick Wins: Tasks with estimated <= 15 min or low energy
-      const quickWins = activeItems.filter(i => 
-        (i.estimatedMinutes && i.estimatedMinutes <= 15) || 
-        i.energy === 'low' ||
-        (i.estimated && (i.estimated.includes('10m') || i.estimated.includes('15m') || i.estimated.includes('5m')))
-      ).slice(0, 6).map(hydrateWorkItem);
+      // Quick Wins: short or low-energy tasks that aren't already in Focus.
+      // The typed estimate wins over the stored number, which older items
+      // may not have kept in step.
+      const quickWins = activeItems.filter(i => {
+        if (i.isFocus || i.entityType === 'event' || i.entityType === 'milestone') return false;
+        const minutes = i.estimated ? parseEstimateMinutes(i.estimated) : i.estimatedMinutes;
+        return (minutes != null && minutes <= 15) || (minutes == null && i.energy === 'low');
+      }).slice(0, 6).map(hydrateWorkItem);
 
       // Delegated Waiting For
       const waitingFor = activeItems.filter(i => !!i.waitingFor).map(hydrateWorkItem);

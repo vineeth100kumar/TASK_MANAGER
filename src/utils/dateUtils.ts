@@ -98,3 +98,21 @@ export function formatDateRange(start: string | null | undefined, due: string | 
 
   return `${formatDisplayDate(cleanStart)} → ${formatDisplayDate(cleanDue)}`;
 }
+
+/**
+ * Minutes in a typed estimate: "45m", "2h", "1h 30m", "1.5h", "90" (minutes).
+ * Returns null when the text has no number in it.
+ */
+export function parseEstimateMinutes(text: string | null | undefined): number | null {
+  const s = (text || '').toLowerCase().trim();
+  if (!s) return null;
+  let total = 0;
+  let matched = false;
+  for (const m of s.matchAll(/(\d+(?:\.\d+)?)\s*(h|hr|hrs|hours?|m|min|mins|minutes?)?\b/g)) {
+    const n = parseFloat(m[1]);
+    const unit = m[2] || (matched ? 'm' : '');
+    total += unit.startsWith('h') ? n * 60 : n;
+    matched = true;
+  }
+  return matched ? Math.round(total) : null;
+}

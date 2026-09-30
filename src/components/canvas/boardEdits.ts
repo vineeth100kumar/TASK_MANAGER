@@ -158,8 +158,19 @@ const sizeFor = (label: string, shape: string) => {
   return shape === 'box' ? { width, height } : { width: width + 60, height: height + 40 };
 };
 
-const overlaps = (a: any, b: any) =>
-  a.x < b.x + b.width + 20 && a.x + a.width + 20 > b.x && a.y < b.y + b.height + 20 && a.y + a.height + 20 > b.y;
+// An arrow's x/y is its first point, and the rest can run up or left of it,
+// so its box comes from the points.
+const boxOf = (el: any) => {
+  if (!Array.isArray(el.points) || !el.points.length) return el;
+  const xs = el.points.map((p: number[]) => el.x + p[0]), ys = el.points.map((p: number[]) => el.y + p[1]);
+  const x = Math.min(...xs), y = Math.min(...ys);
+  return { x, y, width: Math.max(...xs) - x, height: Math.max(...ys) - y };
+};
+
+const overlaps = (a: any, el: any) => {
+  const b = boxOf(el);
+  return a.x < b.x + b.width + 20 && a.x + a.width + 20 > b.x && a.y < b.y + b.height + 20 && a.y + a.height + 20 > b.y;
+};
 
 // Points for an arrow between two boxes: down if the target is below,
 // sideways if it's level, and for an arrow looping back up (a retry), out to
