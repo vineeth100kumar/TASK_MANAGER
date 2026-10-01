@@ -50,14 +50,17 @@ DEFAULT_PREFS: Dict[str, Any] = {
     "morningTime": "08:00",
     "eveningCheckIn": True,
     "eveningTime": "18:00",
+    # Email starts switched on but sends nothing until the sending account's
+    # app password is entered in Settings. The addresses can be changed there,
+    # or set per install in /etc/sage/sage.env.
     "email": {
-        "enabled": False,
-        "to": "",
+        "enabled": True,
+        "to": os.getenv("SAGE_EMAIL_TO", "vineeth100kumar@gmail.com"),
         "morningPlan": True,
         "reminders": False,
         "smtpHost": "smtp.gmail.com",
         "smtpPort": 587,
-        "smtpUser": "",
+        "smtpUser": os.getenv("SAGE_EMAIL_FROM", "reminder.vk@gmail.com"),
     },
 }
 

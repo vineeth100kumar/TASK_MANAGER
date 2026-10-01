@@ -51,6 +51,7 @@ class SchedulerTests(unittest.TestCase):
         conn.execute("INSERT INTO push_subscriptions VALUES ('https://push.example/1', '{}', 'iPhone', '', NULL)")
         conn.commit()
         conn.close()
+        notifier.save_smtp_password("")  # no email unless a test sets it up
         # India is UTC+5:30, so a wrong timezone shows up as a wrong hour.
         notifier.save_prefs({"timezone": "Asia/Kolkata"})
         self.pushed = []
@@ -132,9 +133,11 @@ class SchedulerTests(unittest.TestCase):
             notifier.run_once(utc(2026, 10, 1, 2, 30))
         session = smtp.return_value.__enter__.return_value
         session.starttls.assert_called_once()
-        session.login.assert_called_once_with("me@example.com", "abcdefghijklmnop")
+        # Signs in as the sending account, not the recipient.
+        session.login.assert_called_once_with("reminder.vk@gmail.com", "abcdefghijklmnop")
         msg = session.send_message.call_args[0][0]
         self.assertEqual(msg["To"], "me@example.com")
+        self.assertIn("reminder.vk@gmail.com", msg["From"])
         self.assertIn("1 thing planned", msg["Subject"])
         html_part = msg.get_body(("html",)).get_content()
         self.assertIn("Ship &lt;report&gt;", html_part)
