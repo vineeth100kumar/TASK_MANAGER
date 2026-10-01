@@ -89,6 +89,9 @@ GATE_OPEN_PATHS = {
     "/login", "/logout", "/api/health",
     "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png",
     "/icon-192.png", "/icon-512.png", "/manifest.webmanifest",
+    # The service worker that shows notifications. It holds no data, and
+    # browsers fetch updates to it without always sending the login cookie.
+    "/sw.js",
 }
 
 
@@ -331,6 +334,7 @@ async def startup_event():
     if not API_SECRET:
         print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
     asyncio.create_task(google_sheets_backup_worker())
+    asyncio.create_task(notifier.scheduler())
 
 
 @app.get("/api/health")
@@ -630,6 +634,106 @@ import public_link
 @app.get("/api/public-url")
 def public_url():
     return {"success": True, **public_link.find()}
+
+# --- Notifications (see notifier.py) ---
+import notifier
+notifier.init_tables()
+
+
+def _notification_config() -> dict:
+    prefs = notifier.get_prefs()
+    return {
+        "success": True,
+        "pushAvailable": notifier.push_available(),
+        "vapidPublicKey": notifier.vapid_public_key(),
+        "prefs": prefs,
+        "devices": [{"label": d["label"], "endpoint": d["endpoint"], "lastSuccessAt": d["lastSuccessAt"]} for d in notifier.list_devices()],
+        "emailPasswordSet": bool(notifier.smtp_password()),
+        "emailReady": notifier.email_ready(prefs),
+    }
+
+
+@app.get("/api/notifications")
+def notification_config():
+    return _notification_config()
+
+
+class PushSubscribeRequest(BaseModel):
+    subscription: Dict[str, Any]
+    label: str = "This device"
+    timezone: Optional[str] = None
+
+
+@app.post("/api/notifications/subscribe")
+def push_subscribe(req: PushSubscribeRequest):
+    try:
+        notifier.save_subscription(req.subscription, req.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if req.timezone:
+        try:
+            notifier.save_prefs({"timezone": req.timezone})
+        except ValueError as e:
+            # Keep the device either way; times stay in the last good timezone.
+            print(f"Ignoring the timezone this device sent: {e}")
+    return _notification_config()
+
+
+class PushUnsubscribeRequest(BaseModel):
+    endpoint: str
+
+
+@app.post("/api/notifications/unsubscribe")
+def push_unsubscribe(req: PushUnsubscribeRequest):
+    notifier.remove_subscription(req.endpoint)
+    return _notification_config()
+
+
+@app.put("/api/notifications/prefs")
+def update_notification_prefs(update: Dict[str, Any]):
+    try:
+        notifier.save_prefs(update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _notification_config()
+
+
+class EmailPasswordRequest(BaseModel):
+    password: str = ""
+
+
+@app.post("/api/notifications/email-password")
+def save_email_password(req: EmailPasswordRequest):
+    notifier.save_smtp_password(req.password)
+    return _notification_config()
+
+
+class NotificationTestRequest(BaseModel):
+    channel: str = "push"  # "push" or "email"
+    endpoint: Optional[str] = None
+
+
+@app.post("/api/notifications/test")
+async def test_notification(req: NotificationTestRequest):
+    prefs = notifier.get_prefs()
+    if req.channel == "email":
+        if not (prefs["email"]["to"] and notifier.smtp_password()):
+            raise HTTPException(status_code=400, detail="Add the address and app password first.")
+        intro = "Email from Sage works. Your morning plan will arrive like this."
+        try:
+            await asyncio.to_thread(
+                notifier.send_email, prefs, "Sage test email",
+                notifier.email_text("You're all set", intro, [], ""), notifier.email_html("You're all set", intro, [], ""),
+            )
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=f"Couldn't send: {e}")
+        return {"success": True}
+    message = {"title": "Sage notifications are on", "body": "Reminders and your morning plan will show up here.", "tag": "test", "url": "/", "urgency": "high", "ttl": 600}
+    results = await asyncio.to_thread(notifier.send_push, message, req.endpoint, prefs)
+    if not results:
+        raise HTTPException(status_code=400, detail="No device has notifications turned on yet.")
+    return {"success": any(r["ok"] for r in results), "results": results}
+
 
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.

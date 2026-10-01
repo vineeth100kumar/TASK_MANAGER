@@ -7,6 +7,7 @@ import { api } from './services/api';
 import { STATUSES } from './services/constants';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
+import { refreshSubscription } from './services/pushNotifications';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -99,6 +100,21 @@ function MainApp() {
       setIsSidebarOpen(false);
     }
     notificationService.startReminderWatcher();
+    refreshSubscription();
+
+    // A tapped notification opens its item: on a cold start through ?open=,
+    // and through the service worker when Sage is already open.
+    const params = new URLSearchParams(window.location.search);
+    const openId = params.get('open');
+    if (openId) {
+      params.delete('open');
+      const rest = params.toString();
+      window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
+    }
+    const onWorkerMessage = (event: MessageEvent) => {
+      if (event.data?.type === 'sage-open-item' && typeof event.data.id === 'string') setSelectedItemId(event.data.id);
+    };
+    navigator.serviceWorker?.addEventListener('message', onWorkerMessage);
 
     const unsubConflict = api.sync.onConflict((c: any) => {
       setActiveConflict(c);
@@ -109,17 +125,25 @@ function MainApp() {
     });
 
     // Replicate all latest data from Google Sheets into IndexedDB on startup (non-blocking)
+    // The item from a tapped notification opens once this device has the
+    // latest data, which on a fresh install is only after this first pull.
+    const openPending = () => { if (openId) setSelectedItemId(openId); };
     if (typeof navigator !== 'undefined' && navigator.onLine) {
       api.sync.fetchAll().then(() => {
         fetchWorkItems(false);
+        openPending();
       }).catch(err => {
         console.warn('[Sync] Startup cloud replication skipped:', err);
+        openPending();
       });
+    } else {
+      openPending();
     }
 
     return () => {
       unsubConflict();
       unsubEntity();
+      navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
     };
   }, []);
 

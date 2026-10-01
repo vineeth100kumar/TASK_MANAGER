@@ -4,3 +4,5 @@ ollama
 pydantic
 httpx
 anthropic
+pywebpush
+tzdata

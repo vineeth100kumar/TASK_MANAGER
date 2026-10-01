@@ -27,6 +27,11 @@ jobs:
           python-version: '3.11'
       - name: Compile Sage server and LUMO
         run: python -m compileall -q raspberry_pi lumo/rpi_server
+      - name: Sage server tests
+        working-directory: raspberry_pi
+        run: |
+          pip install -q pywebpush
+          python -m unittest discover -s tests
       - name: LUMO tests
         working-directory: lumo/rpi_server
         run: |
