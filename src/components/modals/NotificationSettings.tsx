@@ -228,15 +228,20 @@ export function NotificationSettings() {
                   onChange={e => setEmail({ to: e.target.value })} />
               </label>
               <label className="block space-y-1">
+                <span className="text-xs font-medium text-gray-500">Send from</span>
+                <input className={field} type="email" placeholder="reminders@gmail.com" value={email.smtpUser}
+                  onChange={e => setEmail({ smtpUser: e.target.value })} />
+              </label>
+              <label className="block space-y-1">
                 <span className="text-xs font-medium text-gray-500">
-                  {isGmail ? 'Gmail app password' : 'SMTP password'} {config?.emailPasswordSet && <span className="text-emerald-600">· saved</span>}
+                  {isGmail ? `App password for ${email.smtpUser || email.to || 'the sending account'}` : 'SMTP password'} {config?.emailPasswordSet && <span className="text-emerald-600">· saved</span>}
                 </span>
                 <input className={field} type="password" autoComplete="new-password" value={password}
                   placeholder={config?.emailPasswordSet ? 'Leave empty to keep the saved one' : 'xxxx xxxx xxxx xxxx'}
                   onChange={e => setPassword(e.target.value)} />
                 {isGmail && (
                   <span className="text-xs text-gray-400 flex flex-wrap items-center gap-1">
-                    Not your Google password. Make one at
+                    Not the account's normal password. Signed in as the sending account, make one at
                     <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-blue-600 inline-flex items-center gap-0.5">
                       myaccount.google.com/apppasswords <ExternalLink size={11} />
                     </a>
@@ -263,10 +268,6 @@ export function NotificationSettings() {
                   <label className="space-y-1">
                     <span className="text-xs font-medium text-gray-500">Port</span>
                     <input className={field} inputMode="numeric" value={email.smtpPort} onChange={e => setEmail({ smtpPort: Number(e.target.value) || 587 })} />
-                  </label>
-                  <label className="col-span-3 space-y-1">
-                    <span className="text-xs font-medium text-gray-500">Sign in as (if not the address above)</span>
-                    <input className={field} value={email.smtpUser} onChange={e => setEmail({ smtpUser: e.target.value })} />
                   </label>
                 </div>
               )}
