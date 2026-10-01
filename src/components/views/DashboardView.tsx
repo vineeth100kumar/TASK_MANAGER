@@ -8,12 +8,14 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange } from '../../utils/dateUtils';
-import { countDoneToday } from '../../utils/progress';
+import { countDoneToday, weekActivity } from '../../utils/progress';
+import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { ProgressRing } from '../common/ProgressRing';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
+import { ContextTag } from '../common/ContextTag';
 import { ReminderPrompt } from '../common/ReminderPrompt';
 
 const FOCUS_DRAG_TYPE = 'application/x-sage-item';
@@ -25,7 +27,7 @@ interface DashboardViewProps {
   onNavigateView?: (view: string) => void;
 }
 
-export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work', onNavigateView }: DashboardViewProps) {
+export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
   const [data, setData] = useState<any>(null);
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
@@ -40,7 +42,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       const summary = await api.attention.getTodayAttention(lifeContext);
       const habits = await api.habits.list();
       const goals = await api.goals.list();
-      setData({ ...summary, habits, goals, doneToday: countDoneToday(lifeContext) });
+      setData({ ...summary, habits, goals, doneToday: countDoneToday(lifeContext), week: weekActivity(lifeContext) });
 
       if (!briefingRequested.current && summary.todayFocus && summary.todayFocus.length > 0) {
         briefingRequested.current = true;
@@ -68,6 +70,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         inboxCount: 0,
         habits: [],
         goals: [],
+        suggestions: [],
+        week: [],
         doneToday: 0
       });
     }
@@ -83,11 +87,26 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const { complete: handleComplete, isCompleting } = useCompletion(loadAttentionData);
 
   const handleAddToFocus = async (itemId: string) => {
-    const item = [...(data?.dueToday || []), ...(data?.quickWins || [])].find((i: WorkItem) => i.id === itemId);
+    const item = [...(data?.dueToday || []), ...(data?.quickWins || []), ...(data?.suggestions || []), ...(data?.needsAttention || [])].find((i: WorkItem) => i.id === itemId);
     if (!item || item.isFocus) return;
     try {
       await api.focus.toggle(itemId);
+      if (item.isInbox) await api.inbox.clarify(itemId, {});
       showToast('Added to Focus');
+      loadAttentionData();
+    } catch (err: any) {
+      showToast('Could not add to Focus: ' + err.message, 'error');
+    }
+  };
+
+  const handleFocusAll = async (items: WorkItem[]) => {
+    try {
+      for (const item of items) {
+        if (item.isFocus) continue;
+        await api.focus.toggle(item.id);
+        if (item.isInbox) await api.inbox.clarify(item.id, {});
+      }
+      showToast(items.length === 1 ? 'Added to Focus' : `${items.length} added to Focus`);
       loadAttentionData();
     } catch (err: any) {
       showToast('Could not add to Focus: ' + err.message, 'error');
@@ -119,9 +138,17 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   // Items already in Focus show there; Scheduled lists only the rest.
   const scheduled: WorkItem[] = (data.dueToday || []).filter((i: WorkItem) => !i.isFocus);
   const hasScheduled = scheduled.length > 0;
-  const hasQuickWins = data.quickWins?.length > 0;
+
   const hasWaiting = data.waitingFor?.length > 0;
   const focusCount = data.todayFocus?.length || 0;
+  const suggestions: WorkItem[] = data.suggestions || [];
+  // While Focus is empty the suggestions list carries overdue items, so the
+  // Needs Attention card doesn't repeat them.
+  const suggestedIds = new Set(focusCount === 0 ? suggestions.map(i => i.id) : []);
+  const needsAttention: WorkItem[] = (data.needsAttention || []).filter((i: WorkItem) => !suggestedIds.has(i.id) && !i.isFocus);
+  const quickWins: WorkItem[] = (data.quickWins || []).filter((i: WorkItem) => !suggestedIds.has(i.id));
+  const hasQuickWins = quickWins.length > 0;
+  const todayIso = new Date().toISOString().split('T')[0];
 
   // Today's progress: what got done vs what's still in Focus or scheduled.
   const doneToday: number = data.doneToday || 0;
@@ -162,12 +189,13 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
+            {data.week?.length > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
           </div>
 
           {total > 0 && (
             <div className="relative shrink-0 flex items-center justify-center">
-              <div className="md:hidden"><ProgressRing done={doneToday} total={total} size={64} stroke={6} tone={lifeContext} /></div>
-              <div className="hidden md:block"><ProgressRing done={doneToday} total={total} size={112} stroke={9} tone={lifeContext} /></div>
+              <div className="md:hidden"><ProgressRing done={doneToday} total={total} size={64} stroke={6} tone={lifeContext === 'personal' ? 'personal' : 'work'} /></div>
+              <div className="hidden md:block"><ProgressRing done={doneToday} total={total} size={112} stroke={9} tone={lifeContext === 'personal' ? 'personal' : 'work'} /></div>
               <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
                 {allDone ? (
                   <Celebrate distance={46}><Check className="text-emerald-500 w-6 h-6 md:w-9 md:h-9" strokeWidth={3} /></Celebrate>
@@ -206,19 +234,19 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       <ReminderPrompt />
 
       {/* 2. Needs Attention Ribbon (Overdue & Repeatedly Snoozed - Gentle & Actionable) */}
-      {data.needsAttention?.length > 0 && (
+      {needsAttention.length > 0 && (
         <div className="p-5 rounded-3xl bg-red-50/70 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/30 space-y-3">
           <div className="flex items-center justify-between">
             <div className="eyebrow text-red-600 dark:text-red-400">
               <AlertTriangle size={14} />
               <span>Needs Attention</span>
-              <span className="tabular-nums opacity-70">{data.needsAttention.length}</span>
+              <span className="tabular-nums opacity-70">{needsAttention.length}</span>
             </div>
             <span className="hidden sm:inline text-[12px] text-gray-400">Nothing changes unless you say so</span>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {data.needsAttention.slice(0, 4).map((item: WorkItem) => (
+            {needsAttention.slice(0, 4).map((item: WorkItem) => (
               <div key={item.id} className={`p-3.5 rounded-2xl surface-item is-interactive border border-red-100 dark:border-red-900/30 flex items-center justify-between gap-3 ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
                   <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
@@ -259,7 +287,41 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
             )}
           </div>
 
-          {focusCount === 0 && doneToday > 0 && !isFocusDropActive ? (
+          {focusCount === 0 && !isFocusDropActive && suggestions.length > 0 ? (
+            // An empty Focus is a decision to make; Sage offers a short answer.
+            <div className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[13px] text-gray-500 dark:text-gray-400 flex items-center gap-2.5">
+                  {doneToday > 0 && <Celebrate dots={8} distance={20}><Trophy size={16} className="text-emerald-500" /></Celebrate>}
+                  {doneToday > 0 ? 'Focus is clear. Up for one more? These look most pressing.' : 'Nothing in Focus yet. These look most pressing today.'}
+                </div>
+                {suggestions.length > 1 && (
+                  <button onClick={() => handleFocusAll(suggestions)} className="shrink-0 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-600/25 active:scale-[0.97] transition-all">
+                    Focus all {suggestions.length}
+                  </button>
+                )}
+              </div>
+              <div className="space-y-2 stagger">
+                {suggestions.map((item: WorkItem) => {
+                  const reason = item.dueDate && item.dueDate < todayIso ? 'Overdue' : item.priority === 'urgent' ? 'Urgent' : 'High priority';
+                  return (
+                    <div key={item.id} className="p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 border-dashed">
+                      <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
+                        <p className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</p>
+                        <span className="flex items-center gap-1.5 mt-0.5">
+                          <span className={`text-[11px] font-semibold ${reason === 'Overdue' ? 'text-red-500' : 'text-orange-500'}`}>{reason}</span>
+                          <ContextTag item={item} combined={!lifeContext} />
+                        </span>
+                      </div>
+                      <button onClick={() => handleAddToFocus(item.id)} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:scale-[0.97] transition-all">
+                        <Target size={13} /> Focus
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : focusCount === 0 && doneToday > 0 && !isFocusDropActive ? (
             // Finishing Focus is the high point of the day, so it gets a moment.
             <div className="flex flex-col items-center text-center py-6 gap-3">
               <Celebrate>
@@ -305,6 +367,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
                     <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
                       {item.title}
                     </span>
+                    {item.dueDate && item.dueDate < todayIso && <span className="shrink-0 text-[10.5px] font-semibold text-red-500">Overdue</span>}
+                    <ContextTag item={item} combined={!lifeContext} />
                     {index === 0 && <span className="hidden sm:inline shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Up next</span>}
                   </div>
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
@@ -338,7 +402,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
                   <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
                   <div className="min-w-0 flex-1">
                     <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                    <span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span>
+                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
                   </div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 -m-0.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shrink-0" title="Add to Focus" aria-label="Add to Focus">
@@ -367,7 +431,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
           
           <div className="stagger -mb-2">
             <AnimatePresence initial={false}>
-            {data.quickWins.map((item: WorkItem) => (
+            {quickWins.map((item: WorkItem) => (
               <Fold key={item.id}>
               <div
                 draggable={!item.isFocus}
@@ -377,6 +441,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
                 <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
                   {item.title}
                 </span>
+                <ContextTag item={item} combined={!lifeContext} />
                 {item.estimated && <span className="ml-auto shrink-0 text-[11px] font-semibold text-gray-400 tabular-nums">{item.estimated}</span>}
               </div>
               </Fold>
@@ -463,7 +528,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       )}
 
       {/* 6. Habits & Goals (Life Space) */}
-      {lifeContext === 'personal' && (
+      {lifeContext !== 'work' && (data.habits?.length > 0 || data.goals?.length > 0) && (
         <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
           {/* Habits */}
           <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">

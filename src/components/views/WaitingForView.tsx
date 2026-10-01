@@ -9,7 +9,7 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 
 interface WaitingForViewProps {
-  lifeContext: LifeContext;
+  lifeContext?: LifeContext;
   onSelectTask: (id: string) => void;
 }
 
@@ -42,7 +42,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
     try {
       await api.workItems.create({
         title: `Waiting for ${who.trim()}: ${about.trim()}`,
-        lifeContext,
+        lifeContext: lifeContext || 'work',
         entityType: 'task',
         type: 'task',
         priority: 'medium',

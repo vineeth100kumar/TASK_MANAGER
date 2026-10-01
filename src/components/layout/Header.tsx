@@ -25,7 +25,7 @@ interface HeaderProps {
   setPresentationMode: (mode: string) => void;
   setIsCreateModalOpen: (isOpen: boolean) => void;
   setIsDiagnosticsOpen?: (isOpen: boolean) => void;
-  lifeContext?: 'work' | 'personal';
+  lifeContext?: 'work' | 'personal';  // unset means both
 }
 
 function SyncBadge({ onClick }: { onClick?: () => void }) {
@@ -84,26 +84,26 @@ export function Header({
   presentationMode, setPresentationMode, 
   setIsCreateModalOpen, 
   setIsDiagnosticsOpen,
-  lifeContext = 'work' 
+  lifeContext
 }: HeaderProps) {
   const [isViewMenuOpen, setIsViewMenuOpen] = useState(false);
-  const [activeTitle, setActiveTitle] = useState('All Work Items');
+  const [activeTitle, setActiveTitle] = useState('Today');
 
   useEffect(() => {
     if (activeView === 'dashboard') {
-      setActiveTitle(lifeContext === 'personal' ? 'Today · Life Space' : 'Today · Work Space');
+      setActiveTitle(lifeContext === 'personal' ? 'Today · Personal' : lifeContext === 'work' ? 'Today · Work' : 'Today');
     } else if (activeView === 'inbox') {
-      setActiveTitle(lifeContext === 'personal' ? 'Personal Inbox' : 'Work Inbox');
+      setActiveTitle(lifeContext === 'personal' ? 'Personal Inbox' : lifeContext === 'work' ? 'Work Inbox' : 'Inbox');
     } else if (activeView === 'focus') {
-      setActiveTitle('Focus Space');
+      setActiveTitle('Focus');
     } else if (activeView === 'waiting_for') {
-      setActiveTitle('Waiting For & Delegations');
+      setActiveTitle('Waiting For');
     } else if (activeView === 'notes') {
       setActiveTitle('Notes & Docs');
     } else if (activeView === 'canvas') {
       setActiveTitle('Canvas');
     } else if (activeWorkspace === 'all') {
-      setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : 'All Work Items');
+      setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : lifeContext === 'work' ? 'All Work Items' : 'All Items');
     } else {
       const state = api.sync.getState();
       const proj = state.projects.find(p => p.id === activeWorkspace);
@@ -128,7 +128,7 @@ export function Header({
         {!isSidebarOpen && <button onClick={() => setIsSidebarOpen(true)} className="p-2 -ml-2 md:ml-0 text-gray-500 rounded-lg hover:bg-gray-100 dark:hover:bg-white/5 shrink-0" aria-label="Open sidebar"><Menu size={20} /></button>}
         <h1 className="sm:hidden text-[17px] font-semibold tracking-[-0.02em] text-gray-900 dark:text-white truncate">{activeTitle}</h1>
         <div className="relative hidden sm:flex items-center gap-1.5 text-[14px] font-medium text-gray-400 min-w-0 overflow-hidden">
-           <span className="hidden lg:inline shrink-0">{lifeContext === 'personal' ? 'Life Space' : 'Workspace'}</span> <ChevronDown size={14} className="hidden lg:block opacity-50 -rotate-90 shrink-0" />
+           <span className="hidden lg:inline shrink-0">{lifeContext === 'personal' ? 'Personal' : lifeContext === 'work' ? 'Work' : 'Sage'}</span> <ChevronDown size={14} className="hidden lg:block opacity-50 -rotate-90 shrink-0" />
            <AnimatePresence mode="popLayout" initial={false}>
              <motion.span key={activeTitle} initial={{ opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -4 }} transition={{ duration: 0.2, ease: [0.16, 1, 0.3, 1] }}
                className="text-gray-900 dark:text-white font-semibold tracking-[-0.015em] truncate">

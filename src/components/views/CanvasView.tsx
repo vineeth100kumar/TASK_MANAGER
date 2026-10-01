@@ -8,7 +8,7 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 const ExcalidrawBoard = lazy(() => import('../canvas/ExcalidrawBoard'));
 
 interface CanvasViewProps {
-  lifeContext: 'work' | 'personal';
+  lifeContext?: 'work' | 'personal';
   isDarkMode: boolean;
 }
 
