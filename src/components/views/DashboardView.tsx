@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
+import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy, ArrowUpRight } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
@@ -10,6 +10,7 @@ import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange } from '../../utils/dateUtils';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
+import { DayPills } from '../common/DayPills';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { ProgressRing } from '../common/ProgressRing';
@@ -181,15 +182,18 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
       <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} p-5 md:p-8 rounded-3xl`}>
         <div className="flex items-center justify-between gap-5">
           <div className="flex-1 min-w-0">
-            <div className="eyebrow text-gray-500 dark:text-gray-400 mb-2 md:mb-3">
+            <p className="hidden coral:block text-[40px] md:text-[56px] font-semibold leading-none tracking-[-0.02em] mb-2 md:mb-3">
+              {time.toLocaleDateString('en-US', { month: 'long' })}
+            </p>
+            <div className="eyebrow text-gray-500 dark:text-gray-400 mb-2 md:mb-3 coral:hidden">
               {lifeContext === 'personal' ? <Sun size={14} className="text-orange-500"/> : <Sparkles size={14} className="text-blue-500"/>}
               <span>{time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
             </div>
-            <h1 className="text-display text-[30px] md:text-[44px] lg:text-[52px] font-semibold leading-[1.05] pb-1">
+            <h1 className="text-display text-[30px] md:text-[44px] lg:text-[52px] coral:text-[19px] md:coral:text-[22px] lg:coral:text-[22px] font-semibold leading-[1.05] pb-1">
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
-            {data.week?.length > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
+            {data.week?.length > 0 && <div className="mt-4 coral:hidden"><WeekStrip days={data.week} /></div>}
           </div>
 
           {total > 0 && (
@@ -209,6 +213,8 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
             </div>
           )}
         </div>
+
+        {data.week?.length > 0 && <div className="hidden coral:block mt-5 md:mt-6"><DayPills days={data.week} /></div>}
 
         {/* AI briefing: only takes space when there's something to read. */}
         {showBriefing && (
@@ -276,7 +282,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-amber-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Focus</h3>
+              <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Active Focus</h3>
               {focusCount > 0 && <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{focusCount}</span>}
             </div>
             {onNavigateView && (
@@ -358,20 +364,27 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
               <AnimatePresence initial={false}>
               {data.todayFocus.map((item: WorkItem, index: number) => (
                 <Fold key={item.id}>
-                <div className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 hover:border-amber-200 dark:hover:border-amber-500/30 ${index === 0 ? 'ring-1 ring-amber-400/30 dark:ring-amber-400/20' : ''} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
+                <div className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 hover:border-amber-200 dark:hover:border-amber-500/30 ${index === 0 ? 'card-sun ring-1 ring-amber-400/30 dark:ring-amber-400/20 coral:ring-0' : ''} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                   <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
+                    <span className="coral:hidden w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
                       {index + 1}
                     </span>
                     <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
-                    <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
-                      {item.title}
-                    </span>
-                    {item.dueDate && item.dueDate < todayIso && <span className="shrink-0 text-[10.5px] font-semibold text-red-500">Overdue</span>}
-                    <ContextTag item={item} combined={!lifeContext} />
-                    {index === 0 && <span className="hidden sm:inline shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Up next</span>}
+                    <div className="min-w-0 flex-1 flex items-center gap-3 coral:flex-col coral:items-start coral:gap-1">
+                      {index === 0 && <span className="hidden coral:inline text-[12px] font-medium text-gray-500">Up next</span>}
+                      <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] coral:text-[18px] coral:leading-tight text-gray-900 dark:text-white truncate coral:whitespace-normal coral:line-clamp-2 max-w-full cursor-pointer hover:text-amber-500 coral:hover:text-current transition-colors">
+                        {item.title}
+                      </span>
+                      <span className="flex items-center gap-1.5 empty:hidden">
+                        {item.dueDate && item.dueDate < todayIso && <span className="shrink-0 text-[10.5px] font-semibold text-red-500">Overdue</span>}
+                        <ContextTag item={item} combined={!lifeContext} />
+                        {item.estimated && <span className="hidden coral:inline-flex chip">{item.estimated}</span>}
+                      </span>
+                    </div>
+                    {index === 0 && <span className="hidden sm:inline coral:!hidden shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Up next</span>}
                   </div>
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
+                  <button onClick={() => onSelectTask(item.id)} className="round-ink hidden coral:inline-flex" aria-label={`Open ${item.title}`}><ArrowUpRight size={18} /></button>
                 </div>
                 </Fold>
               ))}
@@ -385,7 +398,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
         <div className="lg:col-span-5 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} className="text-blue-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
+            <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
             <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{scheduled.length}</span>
           </div>
 
@@ -400,14 +413,15 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 md:cursor-grab md:active:cursor-grabbing ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                 <div className="flex items-center gap-3 min-w-0 flex-1">
                   <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
-                  <div className="min-w-0 flex-1">
-                    <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
+                  <div className="min-w-0 flex-1 coral:flex coral:flex-col-reverse coral:gap-0.5">
+                    <h4 className="row-title font-semibold text-[13px] coral:text-[18px] coral:leading-tight text-gray-900 dark:text-white truncate coral:whitespace-normal coral:line-clamp-2">{item.title}</h4>
+                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] coral:text-[12px] font-medium text-gray-400 coral:text-gray-500">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
                   </div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 -m-0.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shrink-0" title="Add to Focus" aria-label="Add to Focus">
                   <Target size={16} />
                 </button>
+                <span className="round-ink hidden coral:inline-flex" aria-hidden="true"><ArrowUpRight size={18} /></span>
               </div>
               </Fold>
             ))}
@@ -425,7 +439,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
         <div className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-amber-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Quick Wins</h3>
+            <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Quick Wins</h3>
             <span className="text-[12px] font-medium text-gray-400">15 min or less</span>
           </div>
           
@@ -438,11 +452,11 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
                 className={`p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                 <CompleteButton className="ml-0.5" checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
-                <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
+                <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] coral:text-[16px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
                   {item.title}
                 </span>
                 <ContextTag item={item} combined={!lifeContext} />
-                {item.estimated && <span className="ml-auto shrink-0 text-[11px] font-semibold text-gray-400 tabular-nums">{item.estimated}</span>}
+                {item.estimated && <span className="ml-auto shrink-0 text-[11px] font-semibold text-gray-400 tabular-nums coral:chip coral:text-gray-600 dark:coral:text-gray-300">{item.estimated}</span>}
               </div>
               </Fold>
             ))}
@@ -457,7 +471,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Hourglass size={18} className="text-purple-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Waiting For ({data.waitingFor.length})</h3>
+              <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Waiting For ({data.waitingFor.length})</h3>
             </div>
             {onNavigateView && (
               <button onClick={() => onNavigateView('waiting_for')} className="text-xs font-semibold text-purple-500 hover:underline">
@@ -534,7 +548,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">
             <div className="flex items-center gap-2">
               <Activity size={18} className="text-emerald-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Daily Habit Streaks</h3>
+              <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Daily Habit Streaks</h3>
             </div>
             <div className="space-y-3">
               {data.habits?.map((habit: any) => (
@@ -568,7 +582,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-blue-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Goals</h3>
+              <h3 className="font-semibold text-[15px] coral:text-[20px] tracking-tight text-gray-900 dark:text-white">Active Goals</h3>
             </div>
             <div className="space-y-3">
               {data.goals?.map((goal: any) => (

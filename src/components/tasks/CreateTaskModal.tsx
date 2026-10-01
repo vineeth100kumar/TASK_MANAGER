@@ -186,29 +186,29 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 scrim" onClick={() => !isSubmitting && onClose()} />
       {/* A bottom sheet on phones, where the thumb is; a centred dialog elsewhere. */}
       <motion.div role="dialog" aria-modal="true" aria-label="New item" initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-t-3xl sm:rounded-3xl pb-[env(safe-area-inset-bottom)] sm:pb-0 shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8),inset_0_1px_0_rgb(255_255_255/0.06)] overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
+        className="bg-white dark:bg-[#1c1c1e] dark:coral:bg-[#161616] w-full max-w-2xl rounded-t-3xl sm:rounded-3xl coral:rounded-t-[2.25rem] sm:coral:rounded-[2.25rem] coral:ring-0 pb-[env(safe-area-inset-bottom)] sm:pb-0 shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8),inset_0_1px_0_rgb(255_255_255/0.06)] overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
         
-        <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
+        <div className="h-14 coral:h-16 border-b coral:border-0 border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
-            <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
+            <h2 className="text-[15px] coral:text-[22px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
             {/* Work or personal, one tap; follows the sidebar filter when it narrows to one. */}
-            <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
+            <div className="flex p-0.5 rounded-lg coral:rounded-full bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
               {(['work', 'personal'] as const).map(c => (
                 <button key={c} type="button" aria-pressed={lifeContext === c} onClick={() => setLifeContext(c)}
-                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${lifeContext === c ? (c === 'personal' ? 'bg-white dark:bg-[#3a3a3c] text-orange-600 dark:text-orange-400 shadow-sm' : 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm') : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md coral:rounded-full text-[12px] font-semibold transition-colors ${lifeContext === c ? (c === 'personal' ? 'bg-white dark:bg-[#3a3a3c] text-orange-600 dark:text-orange-400 shadow-sm' : 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm') : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
                   {c === 'work' ? <Briefcase size={12} /> : <Sun size={12} />} {c === 'work' ? 'Work' : 'Personal'}
                 </button>
               ))}
             </div>
           </div>
-          <button onClick={() => !isSubmitting && onClose()} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" disabled={isSubmitting} aria-label="Close"><X size={18}/></button>
+          <button onClick={() => !isSubmitting && onClose()} className="p-1.5 coral:p-2.5 -mr-1.5 rounded-lg coral:rounded-full coral:bg-black/[0.05] dark:coral:bg-white/10 text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" disabled={isSubmitting} aria-label="Close"><X size={18}/></button>
         </div>
 
         <div className="px-6 pt-5 pb-2 shrink-0">
-          <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5">
+          <div className="flex p-1 gap-1 rounded-xl coral:rounded-full bg-gray-100 dark:bg-white/5">
              {Object.entries(ENTITY_TYPES).map(([k, v]) => (
-                <label key={k} className={`relative flex-1 flex items-center justify-center py-1.5 px-3 rounded-lg cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60 ${entityType === v ? 'text-gray-900 dark:text-white' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                   {entityType === v && <motion.span layoutId="entity-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg bg-white dark:bg-[#3a3a3c] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
+                <label key={k} className={`relative flex-1 flex items-center justify-center py-1.5 coral:py-2 px-3 rounded-lg coral:rounded-full cursor-pointer transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-blue-500/60 ${entityType === v ? 'text-gray-900 dark:text-white coral:text-white dark:coral:text-[#070707]' : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                   {entityType === v && <motion.span layoutId="entity-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg coral:rounded-full bg-white dark:bg-[#3a3a3c] coral:bg-[#070707] dark:coral:bg-white shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
                    <input type="radio" name="entityType" value={v} checked={entityType === v} onChange={(e) => setEntityType(e.target.value)} className="sr-only" />
                    <span className="relative text-[13px] capitalize font-semibold">{v}</span>
                 </label>
@@ -346,7 +346,7 @@ const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled
       <span className="mr-auto hidden sm:flex items-center gap-1.5 text-[12px] text-gray-400"><kbd className="kbd">Esc</kbd> to close</span>
     )}
     <button type="button" onClick={onCancel} disabled={isSubmitting} className="px-4 py-2 rounded-xl text-[14px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
-    <button type="submit" disabled={isSubmitting || disabled} className="px-5 py-2 min-w-[7.5rem] justify-center rounded-xl text-[14px] font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 shadow-sm shadow-blue-600/25 transition-all">
+    <button type="submit" disabled={isSubmitting || disabled} className="px-5 py-2 coral:py-3 min-w-[7.5rem] justify-center rounded-xl coral:rounded-full text-[14px] coral:text-[15px] font-semibold bg-blue-600 text-white hover:bg-blue-700 coral:bg-[#070707] coral:hover:bg-black coral:shadow-none dark:coral:bg-[#fcd36a] dark:coral:text-[#070707] active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 shadow-sm shadow-blue-600/25 transition-all">
       {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : label}
     </button>
   </div>

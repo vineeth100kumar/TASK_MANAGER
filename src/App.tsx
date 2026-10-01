@@ -10,6 +10,7 @@ import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { refreshSubscription } from './services/pushNotifications';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
+import { Look, applyLook, chromeColor, savedLook } from './utils/look';
 
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
@@ -40,6 +41,7 @@ function MainApp() {
     const saved = localStorage.getItem('sage-theme');
     return saved ? saved === 'dark' : false;
   });
+  const [look, setLook] = useState<Look>(savedLook);
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
   // Navigation State
@@ -78,8 +80,9 @@ function MainApp() {
     document.documentElement.classList.toggle('dark', isDarkMode);
     localStorage.setItem('sage-theme', isDarkMode ? 'dark' : 'light');
     // Match the browser/OS chrome to the app's theme, not the system's.
-    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute('content', isDarkMode ? '#0a0a0b' : '#ffffff'));
-  }, [isDarkMode]);
+    document.querySelectorAll('meta[name="theme-color"]').forEach(m => m.setAttribute('content', chromeColor(look, isDarkMode)));
+  }, [isDarkMode, look]);
+  useEffect(() => { applyLook(look); }, [look]);
 
   // Theme switches reveal as a circle growing from where the user clicked.
   const lastPointer = useRef({ x: window.innerWidth / 2, y: 0 });
@@ -287,19 +290,20 @@ function MainApp() {
   };
 
   return (
-    <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
+    <div className="app-shell h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
       <Sidebar 
         isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
         isDarkMode={isDarkMode} setIsDarkMode={changeTheme}
+        look={look} setLook={setLook}
         lifeContext={lifeFilter} setLifeContext={setLifeFilter}
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
       />
 
-      <main data-context={lifeFilter} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={lifeFilter} className={`app-main flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}

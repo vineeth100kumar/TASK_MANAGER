@@ -8,7 +8,7 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { downloadTaskImage } from '../../utils/imageExport';
 
-import { toInputDateValue, toInputDateTimeValue, localMinutesBefore } from '../../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue, localMinutesBefore, formatDateRange } from '../../utils/dateUtils';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -176,9 +176,9 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
       
       <motion.aside role="dialog" aria-modal="true"
         initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl"
+        className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] coral:dark:bg-[#121212] border-l coral:border-0 md:coral:rounded-l-[2.25rem] coral:overflow-hidden border-gray-200 dark:border-white/10 flex flex-col shadow-2xl"
       >
-        <div className="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
+        <div className="h-16 coral:h-20 flex items-center justify-between px-6 border-b coral:border-0 border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 coral:dark:bg-[#121212]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-3">
             <span className="text-[13px] font-bold tracking-widest uppercase text-gray-500">{task.key}</span>
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${(WORK_ITEM_TYPES as any)[task.type]?.color || 'bg-gray-100 text-gray-700'}`}>
@@ -194,18 +194,20 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
             <button onClick={handleDuplicate} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Duplicate Item"><Copy size={17} /></button>
             <button onClick={() => { if(window.confirm("Move item to trash?")) { onDelete(task.id); onClose(); } }} className="p-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500" aria-label="Delete item"><Trash2 size={18} /></button>
             <div className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1"></div>
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-700 dark:text-gray-300" aria-label="Close panel"><X size={20} /></button>
+            <button onClick={onClose} className="p-2 coral:p-3 rounded-xl coral:rounded-full coral:bg-black/[0.05] dark:coral:bg-white/10 hover:bg-gray-100 dark:hover:bg-white/10 text-gray-700 dark:text-gray-300" aria-label="Close panel"><X size={20} /></button>
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="px-6 md:px-8 pt-8 pb-6">
-             <textarea className="w-full bg-transparent text-2xl md:text-3xl font-bold resize-none outline-none border-none text-gray-900 dark:text-white leading-tight placeholder-gray-300 dark:placeholder-gray-700 hover:bg-gray-50 dark:hover:bg-white/5 focus:bg-gray-50 dark:focus:bg-white/5 rounded-2xl p-2 -ml-2 transition-colors"
+          <div className="px-6 md:px-8 pt-8 coral:pt-2 pb-6 coral:flex coral:flex-col coral:items-center">
+             {/* Coral look: when it happens, as a bold ink pill above the title. */}
+             <span className="hidden coral:inline-flex chip chip-ink !text-[15px] !px-6 !py-3 mb-4">{whenLabel(task)}</span>
+             <textarea className="w-full bg-transparent text-2xl md:text-3xl coral:text-[30px] md:coral:text-[34px] coral:text-center coral:leading-[1.1] font-bold coral:font-semibold resize-none outline-none border-none text-gray-900 dark:text-white leading-tight placeholder-gray-300 dark:placeholder-gray-700 hover:bg-gray-50 dark:hover:bg-white/5 focus:bg-gray-50 dark:focus:bg-white/5 rounded-2xl p-2 -ml-2 transition-colors"
                 value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onBlur={submitTitle} rows={2} placeholder="Item Title" />
               
-              <div className="flex bg-gray-100/80 dark:bg-white/5 p-1 rounded-[14px] w-fit mt-4 border border-black/5 dark:border-white/5">
-                <button onClick={() => setActiveTab('details')} className={`px-5 py-2 rounded-[10px] text-[14px] font-semibold transition-all ${activeTab === 'details' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Details</button>
-                <button onClick={() => setActiveTab('activity')} className={`px-5 py-2 rounded-[10px] text-[14px] font-semibold flex items-center gap-2 transition-all ${activeTab === 'activity' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+              <div className="flex bg-gray-100/80 dark:bg-white/5 p-1 rounded-[14px] coral:rounded-full w-fit mt-4 border border-black/5 dark:border-white/5">
+                <button onClick={() => setActiveTab('details')} className={`px-5 py-2 rounded-[10px] coral:rounded-full text-[14px] font-semibold transition-all ${activeTab === 'details' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Details</button>
+                <button onClick={() => setActiveTab('activity')} className={`px-5 py-2 rounded-[10px] coral:rounded-full text-[14px] font-semibold flex items-center gap-2 transition-all ${activeTab === 'activity' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
                   Activity Log <span className="bg-gray-200 dark:bg-white/10 px-2 py-0.5 rounded-full text-[11px]">{activities.length}</span>
                 </button>
               </div>
@@ -215,7 +217,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
             {activeTab === 'details' ? (
               <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
                 
-                <div className="bg-[#f5f5f7] dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden">
+                <div className="bg-[#f5f5f7] dark:bg-white/5 rounded-3xl coral:rounded-[1.75rem] border border-black/5 dark:border-white/5 overflow-hidden">
                   
                   {task.entityType === 'task' && (
                     <>
@@ -524,4 +526,13 @@ function PropertyRow({ icon: Icon, label, children, isLast = false }: { icon: an
       <div className="flex-1 flex flex-col items-end text-right min-w-0">{children}</div>
     </div>
   );
+}
+
+// Short "when" for the Coral look's pill: a time range for events, otherwise
+// the due date or the estimate.
+function whenLabel(task: any): string {
+  const time = (v: string) => new Date(v).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  if (task.startAt) return task.endAt ? `${time(task.startAt)} – ${time(task.endAt)}` : time(task.startAt);
+  if (task.remindAt) return time(task.remindAt);
+  return formatDateRange(task.startDate, task.dueDate) || (task.estimated ? `About ${task.estimated}` : 'Anytime');
 }

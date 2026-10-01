@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { Look, LOOKS } from '../../utils/look';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -15,6 +16,8 @@ interface SidebarProps {
   setActiveWorkspace: (ws: string) => void;
   isDarkMode: boolean;
   setIsDarkMode: (dark: boolean) => void;
+  look: Look;
+  setLook: (look: Look) => void;
   lifeContext: LifeFilter;
   setLifeContext: (ctx: LifeFilter) => void;
   setIsTrashOpen?: (open: boolean) => void;
@@ -38,6 +41,7 @@ export function Sidebar({
   activeView, setActiveView, 
   activeWorkspace, setActiveWorkspace, 
   isDarkMode, setIsDarkMode, 
+  look, setLook,
   lifeContext, setLifeContext,
   setIsTrashOpen,
   setIsDiagnosticsOpen,
@@ -310,8 +314,8 @@ export function Sidebar({
                     if(window.innerWidth < 768) setIsSidebarOpen(false); 
                   }}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                    {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
+                    className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white coral:text-white dark:coral:text-[#070707]' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                    {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl coral:rounded-full bg-white dark:bg-white/10 coral:bg-[#070707] dark:coral:bg-white coral:ring-0 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
                     <div className="relative flex items-center gap-3">
                       <item.icon size={17} className={item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
                       <span className="text-[14px]">{item.name}</span>
@@ -440,7 +444,18 @@ export function Sidebar({
                       <span className="flex items-center gap-3"><ExternalLink size={15} className="text-gray-400" /> Google Sheet</span>
                       <span className="text-[10px] text-emerald-500 font-semibold">Live</span>
                     </a>
-                    <div className="px-3 pt-2 pb-1 mt-1 border-t border-gray-100 dark:border-white/5 text-[10px] font-medium text-gray-400 tracking-wide">v6.0 · Local-first</div>
+                    <div className="flex items-center justify-between gap-3 px-3 py-2 mt-1 border-t border-gray-100 dark:border-white/5">
+                      <span className="text-[13px] font-medium text-gray-700 dark:text-gray-200">Look</span>
+                      <div className="flex p-0.5 rounded-lg bg-black/[0.05] dark:bg-white/[0.07]" role="radiogroup" aria-label="Look">
+                        {LOOKS.map(l => (
+                          <button key={l.id} role="radio" aria-checked={look === l.id} onClick={() => setLook(l.id)}
+                            className={`px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${look === l.id ? 'bg-white dark:bg-white/15 text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
+                            {l.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="px-3 pt-2 pb-1 border-t border-gray-100 dark:border-white/5 text-[10px] font-medium text-gray-400 tracking-wide">v6.0 · Local-first</div>
                   </motion.div>
                 )}
               </AnimatePresence>

@@ -1,5 +1,7 @@
 @import "tailwindcss";
 @custom-variant dark (&:where(.dark, .dark *));
+/* Styles that only apply in the Coral look (see utils/look.ts). */
+@custom-variant coral (&:where([data-look="coral"], [data-look="coral"] *));
 
 @theme {
   --font-sans: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -536,3 +538,188 @@
   .custom-scrollbar::-webkit-scrollbar-thumb:hover { background-color: rgb(156 163 175 / 0.6); }
   .dark .custom-scrollbar::-webkit-scrollbar-thumb { background-color: rgb(255 255 255 / 0.18); }
 }
+
+/* ==========================================================================
+   Coral look: big rounded cards, Fredoka, coral #d95639, yellow #fcd36a,
+   ink #070707, paper #f8f8f8. Unlayered on purpose so it wins over the
+   Tailwind utilities on shared surfaces without editing every view.
+   ========================================================================== */
+[data-look="coral"] {
+  --font-sans: "Fredoka Variable", "Fredoka", ui-rounded, ui-sans-serif, system-ui, sans-serif;
+  --coral: #d95639;
+  --sun: #fcd36a;
+  --ink: #070707;
+  --paper: #f8f8f8;
+  --card: #ffffff;
+  --chip: #efefef;
+  /* Blue is the app's accent, so it becomes coral everywhere. */
+  --color-blue-50: #fdf2ef;
+  --color-blue-100: #fbe2db;
+  --color-blue-200: #f6c2b3;
+  --color-blue-300: #ef9c86;
+  --color-blue-400: #e5765c;
+  --color-blue-500: #d95639;
+  --color-blue-600: #c1452a;
+  --color-blue-700: #9f3822;
+  --color-blue-800: #7e2f1f;
+  --color-blue-900: #66291d;
+  --color-blue-950: #38130c;
+  --color-gray-900: #070707;
+  --color-gray-950: #070707;
+}
+[data-look="coral"].dark {
+  --card: #191919;
+  --chip: rgb(255 255 255 / 0.08);
+}
+[data-look="coral"] body {
+  font-feature-settings: normal;
+  background-color: var(--paper);
+}
+[data-look="coral"].dark body,
+[data-look="coral"].dark .app-shell {
+  background-color: var(--ink);
+}
+[data-look="coral"] .app-shell { background-color: var(--paper); }
+[data-look="coral"] h1, [data-look="coral"] h2, [data-look="coral"] h3, [data-look="coral"] h4 {
+  letter-spacing: -0.01em;
+}
+[data-look="coral"] ::selection { background: rgb(217 86 57 / 0.25); }
+[data-look="coral"] :where(button, a, [role="button"], summary):focus-visible { outline-color: var(--coral); }
+[data-look="coral"] .app-ambient { display: none; }
+
+/* Header and phone tab bar sit on the paper, not on white glass. */
+[data-look="coral"] .app-shell header { background-color: rgb(248 248 248 / 0.8); border-color: transparent; }
+[data-look="coral"].dark .app-shell header { background-color: rgb(7 7 7 / 0.75); }
+
+/* Hero: a solid coral block with white type; personal and focus go yellow,
+   waiting goes ink. */
+[data-look="coral"] .hero {
+  --hero-bg: var(--coral);
+  --hero-fg: #ffffff;
+  --hero-soft: rgb(255 255 255 / 0.78);
+  background: var(--hero-bg);
+  color: var(--hero-fg);
+  border: 0;
+  border-radius: 2.25rem;
+  box-shadow: none;
+}
+[data-look="coral"] .hero::before { display: none; }
+[data-look="coral"] .hero.hero-personal,
+[data-look="coral"] .hero.hero-focus { --hero-bg: var(--sun); --hero-fg: var(--ink); --hero-soft: rgb(7 7 7 / 0.65); }
+[data-look="coral"] .hero.hero-waiting { --hero-bg: #1d1d1d; --hero-soft: rgb(255 255 255 / 0.7); }
+[data-look="coral"] .hero :is(h1, h2, h3, .text-display, .text-gray-900, .dark\:text-white) { color: var(--hero-fg); }
+[data-look="coral"] .hero :is(.text-gray-400, .text-gray-500, .text-gray-600, .dark\:text-gray-400, .eyebrow) { color: var(--hero-soft); }
+[data-look="coral"] .hero .eyebrow svg { color: currentColor; }
+
+/* Section panels dissolve: cards sit straight on the page. */
+[data-look="coral"] .surface {
+  background: none;
+  box-shadow: none;
+  border-color: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* Cards: chunky, white, very round. */
+[data-look="coral"] .surface-item {
+  background-color: var(--card);
+  border: 0;
+  border-radius: 1.75rem;
+  padding: 1rem 1.25rem;
+  box-shadow: 0 1px 0 rgb(7 7 7 / 0.03), 0 10px 28px -20px rgb(7 7 7 / 0.35);
+}
+[data-look="coral"] .surface-item.is-interactive:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 1px 0 rgb(7 7 7 / 0.03), 0 16px 32px -18px rgb(7 7 7 / 0.4);
+}
+[data-look="coral"].dark .surface-item { box-shadow: none; }
+[data-look="coral"].dark .surface-item.is-interactive:hover { background-color: #222; box-shadow: none; }
+[data-look="coral"] .surface-float { border-radius: 1.5rem; }
+
+/* The one highlighted card (first thing in Focus): yellow with ink type. */
+[data-look="coral"] .surface-item.card-sun,
+[data-look="coral"].dark .surface-item.card-sun { background-color: var(--sun); }
+[data-look="coral"] .card-sun :is(.text-gray-900, .dark\:text-white, .text-gray-400, .text-gray-500) { color: var(--ink); }
+[data-look="coral"] .card-sun .text-gray-400 { opacity: 0.6; }
+
+/* Type */
+[data-look="coral"] .text-display {
+  background: none;
+  color: var(--ink);
+  letter-spacing: -0.015em;
+  font-weight: 600;
+}
+[data-look="coral"].dark .text-display { color: #fff; }
+[data-look="coral"] .eyebrow { letter-spacing: 0.04em; font-weight: 500; }
+
+/* Pill chips (time, duration, tags). A utility so `coral:chip` works. */
+@utility chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 9999px;
+  background: var(--chip, rgb(0 0 0 / 0.05));
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.chip-ink { background: var(--ink, #070707); color: #fff; }
+.dark .chip-ink { background: #fff; color: var(--ink, #070707); }
+
+/* Round ink action button (open, complete) like the reference's arrows. */
+.round-ink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2.75rem;
+  height: 2.75rem;
+  flex-shrink: 0;
+  border-radius: 9999px;
+  background: var(--ink, #070707);
+  color: #fff;
+  transition: transform 200ms var(--ease-spring);
+}
+.round-ink:hover { transform: rotate(45deg); }
+.round-ink:active { transform: scale(0.9); }
+.dark .round-ink { background: #fff; color: var(--ink, #070707); }
+.card-sun .round-ink { background: var(--ink, #070707); color: #fff; }
+
+/* Complete control: a bold ink ring that fills on press. */
+[data-look="coral"] .check-ring,
+[data-look="coral"] .check-ring.check-sm,
+[data-look="coral"] .check-ring.check-md,
+[data-look="coral"] .check-ring.check-lg {
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 2px solid var(--ink);
+}
+[data-look="coral"] .check-ring:hover { border-color: var(--ink); background-color: var(--ink); color: #fff; }
+[data-look="coral"] .check-ring[data-checked] { border-color: var(--ink); background-color: var(--ink); color: var(--sun); }
+[data-look="coral"] .check-ring[data-checked]::after { border-color: var(--coral); }
+[data-look="coral"].dark .check-ring { border-color: rgb(255 255 255 / 0.55); }
+[data-look="coral"].dark .check-ring:hover,
+[data-look="coral"].dark .check-ring[data-checked] { border-color: var(--sun); background-color: var(--sun); color: var(--ink); }
+[data-look="coral"].dark .card-sun .check-ring { border-color: var(--ink); }
+[data-look="coral"].dark .card-sun .check-ring:hover,
+[data-look="coral"].dark .card-sun .check-ring[data-checked] { background-color: var(--ink); color: var(--sun); }
+
+/* Form fields: soft filled pills. */
+[data-look="coral"] .field {
+  border-radius: 1.1rem;
+  border-color: transparent;
+  background-color: #f1f1f1;
+  min-height: 2.75rem;
+  padding-left: 1rem;
+  padding-right: 1rem;
+}
+[data-look="coral"] .field:hover:not(:disabled) { border-color: rgb(7 7 7 / 0.12); }
+[data-look="coral"] .field:focus { background-color: #fff; border-color: var(--ink); box-shadow: 0 0 0 3px rgb(7 7 7 / 0.08); }
+[data-look="coral"].dark .field { background-color: rgb(255 255 255 / 0.07); border-color: transparent; }
+[data-look="coral"].dark .field:focus { background-color: rgb(255 255 255 / 0.1); border-color: var(--sun); box-shadow: 0 0 0 3px rgb(252 211 106 / 0.15); }
+[data-look="coral"] select.field { background-position: right 1rem center; }
+[data-look="coral"] .hero .progress-ring circle:first-child { stroke: color-mix(in srgb, var(--hero-fg) 22%, transparent); }
+[data-look="coral"] .hero .progress-ring circle + circle { stroke: var(--hero-fg); }
+[data-look="coral"] .app-main { background-color: var(--paper); }
+[data-look="coral"].dark .app-main { background-color: var(--ink); }
+[data-look="coral"] .card-sun .chip { background: rgb(7 7 7 / 0.08); color: var(--ink); }
