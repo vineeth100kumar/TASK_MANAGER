@@ -23,6 +23,29 @@
   40% { transform: scale(1.25); }
   100% { transform: scale(1); }
 }
+@keyframes check-pop {
+  0% { transform: scale(0.8); }
+  45% { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+@keyframes check-ripple {
+  from { opacity: 0.55; transform: scale(1); }
+  to { opacity: 0; transform: scale(2.4); }
+}
+@keyframes check-draw {
+  from { stroke-dashoffset: 24; }
+  to { stroke-dashoffset: 0; }
+}
+@keyframes burst {
+  0% { opacity: 0; transform: rotate(var(--a)) translateY(0) scale(0.4); }
+  20% { opacity: 1; }
+  100% { opacity: 0; transform: rotate(var(--a)) translateY(calc(var(--d) * -1)) scale(1); }
+}
+@keyframes badge-in {
+  0% { opacity: 0; transform: scale(0.6); }
+  60% { opacity: 1; transform: scale(1.08); }
+  100% { transform: scale(1); }
+}
 @keyframes breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
@@ -288,7 +311,8 @@
     background-image: linear-gradient(90deg, rgb(255 255 255 / 0.04) 25%, rgb(255 255 255 / 0.08) 50%, rgb(255 255 255 / 0.04) 75%);
   }
 
-  /* Round "complete" control: an empty ring that fills with a tick on hover. */
+  /* Round "complete" control: an empty ring that hints a tick on hover and,
+     once pressed, fills green with a pop and a ripple (CompleteButton). */
   .check-ring {
     position: relative;
     display: inline-flex;
@@ -302,13 +326,42 @@
     color: transparent;
     transition: border-color 150ms, background-color 150ms, color 150ms, transform 150ms var(--ease-spring);
   }
+  /* A larger invisible hit area than the drawn ring (Fitts's law). */
+  .check-ring::before {
+    content: "";
+    position: absolute;
+    inset: -10px;
+    border-radius: 9999px;
+  }
+  .check-ring.check-sm { width: 1.125rem; height: 1.125rem; }
+  .check-ring.check-md { width: 1.25rem; height: 1.25rem; }
+  .check-ring.check-lg { width: 1.5rem; height: 1.5rem; }
   .check-ring:hover {
     border-color: var(--color-emerald-500);
     background-color: rgb(16 185 129 / 0.1);
     color: var(--color-emerald-600);
   }
   .check-ring:active {
-    transform: scale(0.88);
+    transform: scale(0.86);
+  }
+  .check-ring[data-checked] {
+    border-color: var(--color-emerald-500);
+    background-color: var(--color-emerald-500);
+    color: white;
+    animation: check-pop 420ms var(--ease-spring);
+  }
+  .check-ring[data-checked] svg path {
+    stroke-dasharray: 24;
+    animation: check-draw 320ms 60ms var(--ease-out-expo) backwards;
+  }
+  .check-ring[data-checked]::after {
+    content: "";
+    position: absolute;
+    inset: -2px;
+    border-radius: 9999px;
+    border: 2px solid var(--color-emerald-400);
+    animation: check-ripple 560ms var(--ease-out-expo) forwards;
+    pointer-events: none;
   }
   .dark .check-ring {
     border-color: var(--color-gray-600);
@@ -316,6 +369,55 @@
   .dark .check-ring:hover {
     border-color: var(--color-emerald-400);
     color: var(--color-emerald-400);
+  }
+  .dark .check-ring[data-checked] {
+    border-color: var(--color-emerald-500);
+    background-color: var(--color-emerald-500);
+    color: white;
+  }
+
+  /* A row whose tick was just pressed: the title strikes through and the row
+     settles back before it folds away. */
+  .row-title {
+    background-image: linear-gradient(currentColor, currentColor);
+    background-repeat: no-repeat;
+    background-position: 0 55%;
+    background-size: 0 1.5px;
+    transition: background-size 360ms var(--ease-out-expo), color 250ms;
+  }
+  .is-completing .row-title {
+    background-size: 100% 1.5px;
+    color: var(--color-gray-400);
+  }
+  .is-completing {
+    opacity: 0.75;
+    transition: opacity 300ms;
+  }
+
+  /* Small celebration: a badge that springs in with a ring of dots flying out.
+     Used when Focus or the inbox is cleared. */
+  .celebrate {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    animation: badge-in 520ms var(--ease-spring) backwards;
+  }
+  .celebrate > i {
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin: -3px;
+    border-radius: 9999px;
+    opacity: 0;
+    animation: burst 900ms 120ms var(--ease-out-expo) forwards;
+  }
+
+  /* Today's progress ring. */
+  .progress-ring circle {
+    transition: stroke-dashoffset 700ms var(--ease-out-expo), stroke 300ms;
   }
 
   /* Shared form control used by the Add Item form and small dialogs. */

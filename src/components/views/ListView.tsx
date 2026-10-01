@@ -1,10 +1,12 @@
-import { CheckCircle, Check, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
+import { useState } from 'react';
+import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
+import { CompleteButton } from '../common/CompleteButton';
 
 // "Wed, Sep 30 · 3:00 PM"
 function formatWhen(iso: string) {
@@ -22,6 +24,14 @@ interface ListViewProps {
 
 export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
   const { showToast } = useToast();
+  // Ticks fill at once; the status change follows once the pop has played.
+  const [pressed, setPressed] = useState<Set<string>>(() => new Set());
+  const completeSoon = (task: WorkItem) => {
+    setPressed(prev => new Set(prev).add(task.id));
+    setTimeout(() => {
+      Promise.resolve(onTransition(task, 'done')).catch(() => {}).finally(() => setPressed(prev => { const next = new Set(prev); next.delete(task.id); return next; }));
+    }, 380);
+  };
 
   const snoozeToTomorrow = async (task: WorkItem) => {
     try {
@@ -52,15 +62,13 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                 onSwipeLeft={swipeable ? () => snoozeToTomorrow(task) : undefined}>
               <div
                 onClick={() => onSelect(task.id)}
-                className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer border ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'surface-item is-interactive'}`}>
+                className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer border ${pressed.has(task.id) ? 'is-completing' : ''} ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'surface-item is-interactive'}`}>
                 
                 <div className="flex items-center gap-3 w-full sm:w-auto">
                   {task.entityType === 'task' ? (
                     <>
                       {task.status !== 'done' && (
-                        <button className="check-ring !w-5 !h-5" aria-label="Complete" onClick={(e) => { e.stopPropagation(); onTransition(task, 'done'); }}>
-                          <Check size={12} strokeWidth={3} />
-                        </button>
+                        <CompleteButton checked={pressed.has(task.id)} onComplete={() => completeSoon(task)} />
                       )}
                       {task.status === 'done' && <CheckCircle size={20} strokeWidth={2.5} className="text-emerald-500" />}
                     </>
@@ -73,7 +81,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
                       <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-gray-400 w-14 shrink-0">{task.key}</span>
-                      <span className={`text-[15px] font-semibold tracking-[-0.01em] ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
                         <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}

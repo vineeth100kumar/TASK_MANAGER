@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext } from '../../services/types';
+import { useCompletion } from '../../hooks/useCompletion';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
@@ -75,15 +76,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
     }
   };
 
-  const handleComplete = async (item: WorkItem) => {
-    try {
-      await api.workItems.transitionStatus(item.id, 'done', item.version);
-      showToast('Completed');
-      loadWaiting();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const { complete: handleComplete } = useCompletion(loadWaiting);
 
   const calculateDaysSince = (sinceDate: string) => {
     const start = new Date(sinceDate).getTime();

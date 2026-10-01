@@ -1,6 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
+import { useCompletion } from '../../hooks/useCompletion';
+import { CompleteButton } from '../common/CompleteButton';
+import { Celebrate } from '../common/Celebrate';
+import { Fold } from '../common/Fold';
+import { timeAgo } from '../../utils/progress';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -17,6 +22,9 @@ interface InboxViewProps {
 
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  // Celebrate inbox zero only when it was reached during this visit.
+  const hadItems = useRef(false);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
   const [isTriaging, setIsTriaging] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
@@ -35,6 +43,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     try {
       const inboxItems = await api.inbox.list(lifeContext);
       setItems(inboxItems);
+      if (inboxItems.length > 0) hadItems.current = true;
+      setLoaded(true);
       const [projs, ars] = await Promise.all([
         api.projects.list(),
         api.areas.list()
@@ -81,16 +91,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
-  const handleComplete = async (item: WorkItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
-    try {
-      await api.workItems.transitionStatus(item.id, 'done', item.version);
-      showToast('Completed');
-      loadInbox();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const { complete: handleComplete, isCompleting } = useCompletion(loadInbox);
 
   const handleToggleFocus = async (item: WorkItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -107,7 +108,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     e?.stopPropagation();
     try {
       await api.workItems.softDelete(itemId);
-      showToast('Item deleted');
+      showToast('Moved to trash', 'info', { label: 'Undo', onAction: async () => { await api.workItems.restore(itemId); loadInbox(); } });
       loadInbox();
     } catch (err) {
       console.error(err);
@@ -134,10 +135,10 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             <span>Universal Inbox</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {items.length === 0 ? 'Inbox zero' : `${items.length} unclarified item${items.length === 1 ? '' : 's'}`}
+            {items.length === 0 ? 'Inbox zero' : `${items.length} ${items.length === 1 ? 'thing' : 'things'} to sort`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
-            Thoughts captured without friction. Clarify when you have time, or keep them here.
+            {items.length === 0 ? 'Everything you captured has a home.' : items.length > 3 ? 'Process inbox takes them one at a time. Most take a few seconds each.' : 'Decide what each one is, or keep it here for later.'}
           </p>
         </div>
 
@@ -163,39 +164,42 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       </div>
 
       {/* Inbox Items List */}
-      {items.length === 0 ? (
+      {!loaded ? null : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
-          <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
-            <CheckCircle2 size={24} />
-          </div>
+          {hadItems.current ? (
+            <Celebrate className="mx-auto">
+              <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 flex items-center justify-center ring-8 ring-emerald-500/[0.06]">
+                <CheckCircle2 size={24} />
+              </div>
+            </Celebrate>
+          ) : (
+            <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
+              <CheckCircle2 size={24} />
+            </div>
+          )}
           <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">Your head is clear</h3>
           <p className="text-xs text-gray-400 max-w-sm mx-auto">
-            Everything captured has been organized or completed. Press <strong>N</strong> anywhere to add a new item.
+            Press <strong>N</strong> anywhere to capture the next thought.
           </p>
         </div>
       ) : (
-        <div className="space-y-3 stagger">
+        <div className="stagger -mb-3">
+          <AnimatePresence initial={false}>
           {items.map((item) => (
-            <motion.div key={item.id} layout>
+            <Fold key={item.id} gap={12}>
             <SwipeRow onSwipeRight={() => handleComplete(item)} onSwipeLeft={() => handleSnoozeTomorrow(item)}>
             <div
-              className="p-4 rounded-2xl surface-item is-interactive hover:border-blue-200 dark:hover:border-blue-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group"
+              className={`${isCompleting(item.id) ? 'is-completing' : ''} p-4 rounded-2xl surface-item is-interactive hover:border-blue-200 dark:hover:border-blue-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group`}
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                <button 
-                  onClick={(e) => handleComplete(item, e)} 
-                  className="check-ring !w-5 !h-5"
-                  aria-label="Complete"
-                >
-                  <Check size={12} strokeWidth={3} />
-                </button>
+                <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
 
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => startClarify(item)}>
-                  <h4 className="font-semibold text-[14px] tracking-[-0.005em] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
+                  <h4 className="row-title inline font-semibold text-[14px] tracking-[-0.005em] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
                     {item.title}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
-                    <span>Captured {new Date(item.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span>Captured {timeAgo(item.createdAt)}</span>
                     {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
                     {item.isFocus && <span className="text-amber-500 font-bold">· In Focus</span>}
                   </div>
@@ -217,7 +221,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <span>{item.isFocus ? 'In Focus' : '+ Focus'}</span>
                 </button>
 
-                <SnoozeMenu itemId={item.id} onSnoozed={() => loadInbox()} />
+                <div className="md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
+                  <SnoozeMenu itemId={item.id} onSnoozed={() => loadInbox()} />
+                </div>
 
                 <button 
                   onClick={() => startClarify(item)}
@@ -229,15 +235,17 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
                 <button 
                   onClick={(e) => handleDelete(item.id, e)}
-                  className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                  className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-all md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100"
+                  aria-label="Delete"
                 >
                   <Trash2 size={15} />
                 </button>
               </div>
             </div>
             </SwipeRow>
-            </motion.div>
+            </Fold>
           ))}
+          </AnimatePresence>
         </div>
       )}
 

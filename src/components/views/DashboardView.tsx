@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit } from 'lucide-react';
+import { AnimatePresence } from 'framer-motion';
+import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
@@ -7,6 +8,12 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange } from '../../utils/dateUtils';
+import { countDoneToday } from '../../utils/progress';
+import { useCompletion } from '../../hooks/useCompletion';
+import { CompleteButton } from '../common/CompleteButton';
+import { ProgressRing } from '../common/ProgressRing';
+import { Celebrate } from '../common/Celebrate';
+import { Fold } from '../common/Fold';
 
 const FOCUS_DRAG_TYPE = 'application/x-sage-item';
 
@@ -21,7 +28,6 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
   const [data, setData] = useState<any>(null);
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
-  const [aiFailed, setAiFailed] = useState(false);
   const [isAiLoading, setIsAiLoading] = useState(false);
   // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
   const briefingRequested = useRef(false);
@@ -33,7 +39,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       const summary = await api.attention.getTodayAttention(lifeContext);
       const habits = await api.habits.list();
       const goals = await api.goals.list();
-      setData({ ...summary, habits, goals });
+      setData({ ...summary, habits, goals, doneToday: countDoneToday(lifeContext) });
 
       if (!briefingRequested.current && summary.todayFocus && summary.todayFocus.length > 0) {
         briefingRequested.current = true;
@@ -44,7 +50,6 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
            setAiBriefing(briefing);
         } catch (e) {
            console.warn('AI Briefing failed:', e);
-           setAiFailed(true);
         } finally {
            setIsAiLoading(false);
         }
@@ -61,27 +66,20 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         slippedItems: [],
         inboxCount: 0,
         habits: [],
-        goals: []
+        goals: [],
+        doneToday: 0
       });
     }
   }, [lifeContext]);
 
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 1000);
+    const timer = setInterval(() => setTime(new Date()), 60_000);
     loadAttentionData();
     return () => clearInterval(timer);
   }, [loadAttentionData]);
   useDataChanges(loadAttentionData);
 
-  const handleComplete = async (item: WorkItem) => {
-    try {
-      await api.workItems.transitionStatus(item.id, 'done', item.version);
-      showToast('Completed');
-      loadAttentionData();
-    } catch (err) {
-      console.error(err);
-    }
-  };
+  const { complete: handleComplete, isCompleting } = useCompletion(loadAttentionData);
 
   const handleAddToFocus = async (itemId: string) => {
     const item = [...(data?.dueToday || []), ...(data?.quickWins || [])].find((i: WorkItem) => i.id === itemId);
@@ -117,49 +115,76 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
     );
   }
 
-  const hasScheduled = data.dueToday?.length > 0;
+  // Items already in Focus show there; Scheduled lists only the rest.
+  const scheduled: WorkItem[] = (data.dueToday || []).filter((i: WorkItem) => !i.isFocus);
+  const hasScheduled = scheduled.length > 0;
   const hasQuickWins = data.quickWins?.length > 0;
   const hasWaiting = data.waitingFor?.length > 0;
+  const focusCount = data.todayFocus?.length || 0;
+
+  // Today's progress: what got done vs what's still in Focus or scheduled.
+  const doneToday: number = data.doneToday || 0;
+  const remaining = focusCount + scheduled.length;
+  const total = doneToday + remaining;
+  const allDone = total > 0 && remaining === 0;
 
   const hour = time.getHours();
-  const greeting = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+  const greeting = allDone ? 'All done for today' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  // One line under the greeting that says what the day holds.
-  const dayParts = [
-    data.todayFocus?.length > 0 && `${data.todayFocus.length} in focus`,
-    hasScheduled && `${data.dueToday.length} scheduled`,
-    data.needsAttention?.length > 0 && `${data.needsAttention.length} need${data.needsAttention.length === 1 ? 's' : ''} attention`,
-  ].filter(Boolean) as string[];
-  const daySummary = dayParts.length === 0
-    ? 'A clear day. Pick something from your inbox to focus on.'
-    : dayParts.length === 1 ? `You have ${dayParts[0]} today.`
-    : `You have ${dayParts.slice(0, -1).join(', ')} and ${dayParts[dayParts.length - 1]} today.`;
-
-  const [clockTime, clockPeriod] = (() => {
-    const t = time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-    const m = t.match(/^(.*?)\s*([AaPp]\.?\s?[Mm]\.?)$/);
-    return m ? [m[1], m[2]] : [t, ''];
+  // One line under the greeting that says where the day stands.
+  const daySummary = (() => {
+    if (allDone) return `You finished ${doneToday} ${doneToday === 1 ? 'thing' : 'things'} today. Enjoy the rest of it.`;
+    if (doneToday > 0) return remaining === 1 ? `${doneToday} done. Just one to go.` : `${doneToday} done, ${remaining} to go. Keep the momentum.`;
+    const parts = [
+      focusCount > 0 && `${focusCount} in focus`,
+      hasScheduled && `${scheduled.length} scheduled`,
+    ].filter(Boolean) as string[];
+    if (parts.length === 0) return 'A clear day. Pick one thing from your inbox to focus on.';
+    return `You have ${parts.join(' and ')}. Start with the first one.`;
   })();
-  const [clockHours, clockMinutes] = clockTime.split(':');
+
+  const accent = lifeContext === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-blue-600 dark:text-blue-400';
+  const showBriefing = isAiLoading || !!aiBriefing;
 
   return (
     <div className="max-w-6xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans stagger">
       
-      {/* 1. Greeting & Hero Atmosphere */}
-      <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} p-5 md:p-8 rounded-3xl flex flex-col lg:flex-row items-start lg:items-end justify-between gap-6`}>
-        <div className="flex-1 w-full min-w-0">
-          <div className="eyebrow text-gray-500 dark:text-gray-400 mb-3">
-            {lifeContext === 'personal' ? <Sun size={14} className="text-orange-500"/> : <Sparkles size={14} className="text-blue-500"/>}
-            <span>{lifeContext === 'personal' ? 'Personal Life Space' : 'Work Command Center'}</span>
+      {/* 1. Greeting and today's progress */}
+      <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} p-5 md:p-8 rounded-3xl`}>
+        <div className="flex items-center justify-between gap-5">
+          <div className="flex-1 min-w-0">
+            <div className="eyebrow text-gray-500 dark:text-gray-400 mb-2 md:mb-3">
+              {lifeContext === 'personal' ? <Sun size={14} className="text-orange-500"/> : <Sparkles size={14} className="text-blue-500"/>}
+              <span>{time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+            </div>
+            <h1 className="text-display text-[30px] md:text-[44px] lg:text-[52px] font-semibold leading-[1.05] pb-1">
+              {greeting}
+            </h1>
+            <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
           </div>
-          <h1 className="text-display text-[34px] md:text-[44px] lg:text-[52px] font-semibold leading-[1.05] pb-1">
-            {greeting}
-          </h1>
-          <p className="text-[15px] text-gray-500 dark:text-gray-400 mt-1.5 mb-5">{daySummary}</p>
-          
-          {/* AI Strategy Briefing */}
-          <div className="rounded-2xl p-4 w-full max-w-2xl bg-white/70 dark:bg-white/[0.04] backdrop-blur-md ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-[0_1px_2px_rgb(16_24_40/0.04)]">
-             <div className={`flex items-center gap-2 mb-1.5 font-semibold text-[12px] ${lifeContext === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-blue-600 dark:text-blue-400'}`}>
+
+          {total > 0 && (
+            <div className="relative shrink-0 flex items-center justify-center">
+              <div className="md:hidden"><ProgressRing done={doneToday} total={total} size={64} stroke={6} tone={lifeContext} /></div>
+              <div className="hidden md:block"><ProgressRing done={doneToday} total={total} size={112} stroke={9} tone={lifeContext} /></div>
+              <div className="absolute inset-0 flex flex-col items-center justify-center leading-none">
+                {allDone ? (
+                  <Celebrate distance={46}><Check className="text-emerald-500 w-6 h-6 md:w-9 md:h-9" strokeWidth={3} /></Celebrate>
+                ) : (
+                  <>
+                    <span className="text-[17px] md:text-[28px] font-semibold tracking-tight tabular-nums text-gray-900 dark:text-white">{doneToday}<span className="text-gray-400 font-normal">/{total}</span></span>
+                    <span className="hidden md:block text-[11px] font-medium text-gray-400 mt-1">done</span>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* AI briefing: only takes space when there's something to read. */}
+        {showBriefing && (
+          <div className="mt-4 md:mt-5 rounded-2xl p-4 w-full max-w-2xl bg-white/70 dark:bg-white/[0.04] backdrop-blur-md ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-[0_1px_2px_rgb(16_24_40/0.04)]">
+             <div className={`flex items-center gap-2 mb-1.5 font-semibold text-[12px] ${accent}`}>
                 <BrainCircuit size={14} /> <span>Sage AI Strategy</span>
              </div>
              {isAiLoading ? (
@@ -167,29 +192,13 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
                     <div className="skeleton h-3 w-11/12 !rounded-full" />
                     <div className="skeleton h-3 w-2/3 !rounded-full" />
                  </div>
-             ) : aiBriefing ? (
+             ) : (
                  <p className="text-[14px] text-gray-800 dark:text-gray-200 leading-relaxed animate-[rise_400ms_var(--ease-out-expo)]">
                     {aiBriefing.strategyText}
                  </p>
-             ) : aiFailed && data.todayFocus?.length > 0 ? (
-                 <p className="text-[13.5px] text-gray-500 dark:text-gray-400">Sage AI couldn't be reached, so there's no strategy for today yet.</p>
-             ) : (
-                 <p className="text-[13.5px] text-gray-500 dark:text-gray-400">Add items to Today's Focus to get an AI strategy.</p>
              )}
           </div>
-        </div>
-
-        <div className="text-left lg:text-right shrink-0">
-          <div className="hidden lg:flex items-baseline justify-end gap-2 text-gray-900 dark:text-white" aria-label={time.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}>
-            <span className="text-[68px] leading-none font-extralight tracking-[-0.045em] tabular-nums">
-              {clockHours}<span className="animate-[breathe_2s_ease-in-out_infinite] text-gray-400 dark:text-gray-500">:</span>{clockMinutes}
-            </span>
-            {clockPeriod && <span className="text-[15px] font-medium text-gray-400 tracking-normal">{clockPeriod}</span>}
-          </div>
-          <div className="eyebrow lg:justify-end text-gray-400 mt-2">
-            {time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
-          </div>
-        </div>
+        )}
       </div>
 
       {/* 2. Needs Attention Ribbon (Overdue & Repeatedly Snoozed - Gentle & Actionable) */}
@@ -206,17 +215,15 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
             {data.needsAttention.slice(0, 4).map((item: WorkItem) => (
-              <div key={item.id} className="p-3.5 rounded-2xl surface-item is-interactive border border-red-100 dark:border-red-900/30 flex items-center justify-between gap-3">
+              <div key={item.id} className={`p-3.5 rounded-2xl surface-item is-interactive border border-red-100 dark:border-red-900/30 flex items-center justify-between gap-3 ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
-                  <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
+                  <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
                   <span className="text-[11px] text-red-500 font-medium">
                     {item.dueDate ? formatDateRange(null, item.dueDate) : `Snoozed ${item.snoozeCount} times`}
                   </span>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <button onClick={() => handleComplete(item)} className="p-1.5 text-gray-300 hover:text-emerald-500 rounded-lg hover:bg-emerald-50 dark:hover:bg-emerald-950/30" title="Complete">
-                    <Check size={14} />
-                  </button>
+                <div className="flex items-center gap-2 shrink-0">
+                  <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
                 </div>
               </div>
@@ -238,7 +245,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
             <div className="flex items-center gap-2">
               <Target size={18} className="text-amber-500" />
               <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Focus</h3>
-              {data.todayFocus?.length > 0 && <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{data.todayFocus.length}</span>}
+              {focusCount > 0 && <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{focusCount}</span>}
             </div>
             {onNavigateView && (
               <button onClick={() => onNavigateView('focus')} className="group/link text-[12px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5">
@@ -248,11 +255,31 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
             )}
           </div>
 
-          {(!data.todayFocus || data.todayFocus.length === 0) ? (
+          {focusCount === 0 && doneToday > 0 && !isFocusDropActive ? (
+            // Finishing Focus is the high point of the day, so it gets a moment.
+            <div className="flex flex-col items-center text-center py-6 gap-3">
+              <Celebrate>
+                <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center ring-8 ring-emerald-500/[0.06]">
+                  <Trophy size={22} />
+                </div>
+              </Celebrate>
+              <div>
+                <p className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">Focus cleared</p>
+                <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-0.5">
+                  {hasScheduled ? 'Pull the next thing in from Scheduled, or call it a win.' : hasQuickWins ? 'Got a few minutes? There are quick wins below.' : 'Nothing left in Focus. Pick the next thing when you are ready.'}
+                </p>
+              </div>
+              {!hasScheduled && !hasQuickWins && onNavigateView && (
+                <button onClick={() => onNavigateView('inbox')} className="text-[13px] text-blue-600 dark:text-blue-400 font-semibold hover:underline">
+                  Pick from Inbox →
+                </button>
+              )}
+            </div>
+          ) : focusCount === 0 ? (
             <div className={`flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 py-5 rounded-2xl border border-dashed text-center transition-colors ${isFocusDropActive ? 'border-amber-400 text-amber-600' : 'border-gray-300/80 dark:border-white/10 text-gray-400'}`}>
               <Target size={18} className="shrink-0" />
               <p className="text-[13px] font-medium">
-                {isFocusDropActive ? 'Drop to add to Focus' : hasScheduled ? 'Nothing in Focus yet. Drag an item here from Scheduled.' : 'Nothing in Focus yet.'}
+                {isFocusDropActive ? 'Drop to add to Focus' : hasScheduled ? 'Nothing in Focus yet. Tap the target on a scheduled item, or drag it here.' : 'Nothing in Focus yet. Choose one thing to start with.'}
               </p>
               {!isFocusDropActive && (
                 <button onClick={() => onNavigateView && onNavigateView('inbox')} className="text-[13px] text-blue-500 font-semibold hover:underline">
@@ -261,64 +288,66 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
               )}
             </div>
           ) : (
-            <div className="space-y-2 stagger">
+            <div className="stagger -mb-2">
+              <AnimatePresence initial={false}>
               {data.todayFocus.map((item: WorkItem, index: number) => (
-                <div key={item.id} className="p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 hover:border-amber-200 dark:hover:border-amber-500/30">
+                <Fold key={item.id}>
+                <div className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 hover:border-amber-200 dark:hover:border-amber-500/30 ${index === 0 ? 'ring-1 ring-amber-400/30 dark:ring-amber-400/20' : ''} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                   <div className="flex items-center gap-3 min-w-0 flex-1">
                     <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
                       {index + 1}
                     </span>
-                    <button onClick={() => handleComplete(item)} className="check-ring" aria-label="Complete">
-                      <Check size={11} strokeWidth={3} />
-                    </button>
-                    <span onClick={() => onSelectTask(item.id)} className="font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
+                    <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                    <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
                       {item.title}
                     </span>
+                    {index === 0 && <span className="hidden sm:inline shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Up next</span>}
                   </div>
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
                 </div>
+                </Fold>
               ))}
+              </AnimatePresence>
             </div>
           )}
         </div>
 
-        {/* Due Today (Right: 5 cols). Hidden when empty; see the summary strip below. */}
+        {/* Scheduled today that isn't already in Focus. Hidden when empty; see the summary strip below. */}
         {hasScheduled && (
         <div className="lg:col-span-5 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} className="text-blue-500" />
             <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
-            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{data.dueToday.length}</span>
+            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{scheduled.length}</span>
           </div>
 
-          <div className="space-y-2 stagger">
-            {data.dueToday.map((item: WorkItem) => (
-              <div key={item.id}
-                draggable={!item.isFocus}
+          <div className="stagger -mb-2">
+            <AnimatePresence initial={false}>
+            {scheduled.map((item: WorkItem) => (
+              <Fold key={item.id}>
+              <div
+                draggable
                 onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
                 onClick={() => onSelectTask(item.id)}
-                className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'}`}>
-                <div className="min-w-0 flex-1">
-                  <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                  <span className={`text-[11px] font-medium ${item.isFocus ? 'text-amber-600 dark:text-amber-400' : 'text-gray-400'}`}>{item.isFocus ? 'In Focus' : item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span>
+                className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 md:cursor-grab md:active:cursor-grabbing ${isCompleting(item.id) ? 'is-completing' : ''}`}>
+                <div className="flex items-center gap-3 min-w-0 flex-1">
+                  <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                  <div className="min-w-0 flex-1">
+                    <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
+                    <span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span>
+                  </div>
                 </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  {!item.isFocus && (
-                    <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 rounded-lg text-gray-300 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors" title="Add to Focus" aria-label="Add to Focus">
-                      <Target size={16} />
-                    </button>
-                  )}
-                  <button onClick={(e) => { e.stopPropagation(); handleComplete(item); }} className="check-ring m-1.5" aria-label="Complete">
-                    <Check size={11} strokeWidth={3} />
-                  </button>
-                </div>
+                <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 -m-0.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shrink-0" title="Add to Focus" aria-label="Add to Focus">
+                  <Target size={16} />
+                </button>
               </div>
+              </Fold>
             ))}
+            </AnimatePresence>
           </div>
         </div>
         )}
       </div>
-
       {/* 4. Quick Wins & Delegations (Waiting For). Each card only shows when it has items. */}
       {(hasQuickWins || hasWaiting) && (
       <div className={`grid grid-cols-1 ${hasQuickWins && hasWaiting ? 'lg:grid-cols-2' : ''} gap-4 md:gap-6`}>
@@ -328,24 +357,27 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
         <div className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
           <div className="flex items-center gap-2">
             <Zap size={18} className="text-amber-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Quick Wins (≤ 15 min)</h3>
+            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Quick Wins</h3>
+            <span className="text-[12px] font-medium text-gray-400">15 min or less</span>
           </div>
-          <p className="text-xs text-gray-400">Have 10 minutes free? Knock these out quickly.</p>
-
-          <div className="space-y-2 stagger">
+          
+          <div className="stagger -mb-2">
+            <AnimatePresence initial={false}>
             {data.quickWins.map((item: WorkItem) => (
-              <div key={item.id}
+              <Fold key={item.id}>
+              <div
                 draggable={!item.isFocus}
                 onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
-                className={`p-3 rounded-2xl surface-item is-interactive flex items-center justify-between gap-2 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'}`}>
-                <span onClick={() => onSelectTask(item.id)} className="font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
+                className={`p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
+                <CompleteButton className="ml-0.5" checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
                   {item.title}
                 </span>
-                <button onClick={() => handleComplete(item)} className="check-ring m-1" aria-label="Complete">
-                  <Check size={11} strokeWidth={3} />
-                </button>
+                {item.estimated && <span className="ml-auto shrink-0 text-[11px] font-semibold text-gray-400 tabular-nums">{item.estimated}</span>}
               </div>
+              </Fold>
             ))}
+            </AnimatePresence>
           </div>
         </div>
         )}
@@ -386,7 +418,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
       {/* Empty sections collapse into one quiet line instead of full-size cards. */}
       {(!hasScheduled || !hasQuickWins || !hasWaiting) && (
         <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-[13px] text-gray-400">
-          {!hasScheduled && <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500" /> Nothing scheduled today</span>}
+          {!hasScheduled && <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500" /> {data.dueToday?.length > 0 ? 'Nothing else scheduled' : doneToday > 0 ? 'Nothing left scheduled' : 'Nothing scheduled today'}</span>}
           {!hasQuickWins && <span className="flex items-center gap-1.5"><Zap size={14} /> No quick wins</span>}
           {!hasWaiting && (
             <button onClick={() => onNavigateView && onNavigateView('waiting_for')} className="flex items-center gap-1.5 hover:text-purple-500 transition-colors">
@@ -412,7 +444,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext = 'work',
               <div key={item.id} className="p-3.5 rounded-2xl surface-item is-interactive space-y-2">
                 <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
                 <div className="flex items-center gap-2">
-                  <button onClick={() => handleComplete(item)} className="px-2.5 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-semibold rounded-lg hover:bg-emerald-100">
+                  <button onClick={() => handleComplete(item)} className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold rounded-lg hover:bg-emerald-100">
                     Done
                   </button>
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
