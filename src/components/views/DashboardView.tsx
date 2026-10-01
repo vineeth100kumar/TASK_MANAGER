@@ -16,6 +16,7 @@ import { ProgressRing } from '../common/ProgressRing';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
 import { ContextTag } from '../common/ContextTag';
+import { ReminderPrompt } from '../common/ReminderPrompt';
 
 const FOCUS_DRAG_TYPE = 'application/x-sage-item';
 
@@ -228,6 +229,9 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           </div>
         )}
       </div>
+
+      {/* Offer reminders here, in context, rather than prompting on launch. */}
+      <ReminderPrompt />
 
       {/* 2. Needs Attention Ribbon (Overdue & Repeatedly Snoozed - Gentle & Actionable) */}
       {needsAttention.length > 0 && (

@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Bell, Calendar, Download, Upload, Check, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink } from 'lucide-react';
+import { Settings, Calendar, Download, Upload, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink } from 'lucide-react';
 import { api } from '../../services/api';
-import { notificationService } from '../../services/notificationService';
+import { NotificationSettings } from './NotificationSettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
@@ -20,7 +20,6 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   useEscapeKey(onClose);
   const [activeTab, setActiveTab] = useState<'attention' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
-  const [notificationStatus, setNotificationStatus] = useState<string>('default');
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
@@ -73,17 +72,10 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   }, []);
 
   useEffect(() => {
-    setNotificationStatus(notificationService.getPermissionStatus());
     api.getMeta('resurfacing_days').then(val => {
       if (val) setResurfacingDays(Number(val));
     });
   }, []);
-
-  const handleRequestNotifications = async () => {
-    const granted = await notificationService.requestPermission();
-    setNotificationStatus(granted ? 'granted' : 'denied');
-    showToast(granted ? 'Desktop notifications enabled' : 'Notifications blocked or denied');
-  };
 
   const handleSetResurfacingDays = async (days: number) => {
     setResurfacingDays(days);
@@ -153,7 +145,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
-            Attention & Alerts
+            Notifications
           </button>
           <button
             onClick={() => setActiveTab('data')}
@@ -176,33 +168,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         {/* Tab 1: Attention & Notifications */}
         {activeTab === 'attention' && (
           <div className="space-y-6">
-            {/* Desktop Push Notifications */}
-            <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                  <div className="p-2.5 rounded-xl bg-blue-50 dark:bg-blue-950/40 text-blue-600">
-                    <Bell size={18} />
-                  </div>
-                  <div>
-                    <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Desktop Reminders</h4>
-                    <p className="text-xs text-gray-400">Receive native desktop popups when scheduled reminders are due.</p>
-                  </div>
-                </div>
-
-                {notificationStatus === 'granted' ? (
-                  <span className="px-3 py-1 bg-emerald-50 text-emerald-600 font-semibold text-xs rounded-full flex items-center gap-1">
-                    <Check size={13} /> Enabled
-                  </span>
-                ) : (
-                  <button
-                    onClick={handleRequestNotifications}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm"
-                  >
-                    Enable
-                  </button>
-                )}
-              </div>
-            </div>
+            <NotificationSettings />
 
             {/* Smart Resurfacing Sensitivity */}
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">

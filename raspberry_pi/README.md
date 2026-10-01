@@ -82,6 +82,31 @@ journalctl -u sage | grep "Wrong Sage password"
 
 To take Sage off the internet: `sudo systemctl disable --now sage-tunnel`.
 
+## Notifications
+
+The Pi sends task notifications itself (`notifier.py`), so they arrive while Sage is closed:
+
+- **Reminders** at the time set on a task, event or reminder.
+- **Morning plan** at a chosen time: what's due today and what's overdue. Skipped on an empty day.
+- **Evening check-in** at a chosen time, only when something due today is still open.
+
+Everything is set up in the app under **Settings > Notifications**. Times follow the timezone of the device that last opened Sage with notifications on.
+
+**Push.** Works in Chrome, Edge, Firefox and Safari, and on iPhone/iPad (iOS 16.4+) only from the Home Screen: open Sage in Safari, tap Share > Add to Home Screen, open it from the icon, then tap **Turn on reminders** on Today. Push needs HTTPS, which Tailscale Funnel or a tunnel provides. The Pi makes its push keys on first start (`sage_vapid_private.pem` next to the database); deleting that file means every device has to turn notifications on again.
+
+**Email.** Uses any SMTP account. It's set up to send from reminder.vk@gmail.com to vineeth100kumar@gmail.com; change either under Settings > Notifications > Email. For Gmail, sign in to the sending account, turn on 2-Step Verification, make an app password at https://myaccount.google.com/apppasswords, and paste it under Settings > Notifications > Email, then use **Send a test email**. The password is kept in `sage_secrets.json` on the Pi (or set `SAGE_SMTP_PASSWORD` in `/etc/sage/sage.env`), never in the database or the Apps Script backup.
+
+Optional settings in `/etc/sage/sage.env`:
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `SAGE_VAPID_SUBJECT` | the email address, else the public link | Contact address push services see (`mailto:` or `https://`) |
+| `SAGE_EMAIL_FROM` | reminder.vk@gmail.com | Account that sends the email (the app password belongs to this one) |
+| `SAGE_EMAIL_TO` | vineeth100kumar@gmail.com | Where email goes |
+| `SAGE_SMTP_PASSWORD` | empty | SMTP password, if you'd rather not enter it in the app |
+
+Tests: `cd raspberry_pi && python -m unittest discover -s tests`.
+
 ## Optional: AI endpoints
 
 Two endpoints use a local model through [Ollama](https://ollama.com):

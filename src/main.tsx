@@ -5,6 +5,9 @@ import App from './App'
 // index.css is inlined by Tailwind and its relative url()s break.
 import '@fontsource-variable/inter'
 import './index.css'
+import { registerServiceWorker } from './services/pushNotifications'
+
+registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
