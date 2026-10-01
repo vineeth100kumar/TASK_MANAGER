@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine } from 'lucide-react';
 import { api } from '../../services/api';
-import { Project, Area, Goal, Habit, Note } from '../../services/types';
+import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 
@@ -15,8 +15,8 @@ interface SidebarProps {
   setActiveWorkspace: (ws: string) => void;
   isDarkMode: boolean;
   setIsDarkMode: (dark: boolean) => void;
-  lifeContext: 'work' | 'personal';
-  setLifeContext: (ctx: 'work' | 'personal') => void;
+  lifeContext: LifeFilter;
+  setLifeContext: (ctx: LifeFilter) => void;
   setIsTrashOpen?: (open: boolean) => void;
   setIsDiagnosticsOpen?: (open: boolean) => void;
   setIsSettingsOpen?: (open: boolean) => void;
@@ -90,6 +90,7 @@ export function Sidebar({
   const [growthTarget, setGrowthTarget] = useState(5);
   const [growthDate, setGrowthDate] = useState('');
 
+  const scope = lifeContext === 'all' ? undefined : lifeContext;
   const loadNavData = async () => {
     try {
       const [pList, aList, gList, hList, nList, inbox, focus, waiting] = await Promise.all([
@@ -98,9 +99,9 @@ export function Sidebar({
         api.goals.list(),
         api.habits.list(),
         api.notes.list(),
-        api.inbox.list(lifeContext),
-        api.focus.list(lifeContext),
-        api.waitingFor.list(lifeContext)
+        api.inbox.list(scope),
+        api.focus.list(scope),
+        api.waitingFor.list(scope)
       ]);
       setProjects(pList);
       setAreas(aList);
@@ -257,13 +258,13 @@ export function Sidebar({
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
             <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
-              {(['work', 'personal'] as const).map(ctx => {
+              {(['all', 'work', 'personal'] as const).map(ctx => {
                 const active = lifeContext === ctx;
                 return (
                   <button key={ctx} onClick={() => setLifeContext(ctx)} aria-pressed={active}
                     className={`relative flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-colors ${active ? (ctx === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white') : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
                     {active && <motion.span layoutId="context-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg bg-white dark:bg-[#2c2c2e] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
-                    <span className="relative">{ctx === 'work' ? 'Work' : 'Personal'}</span>
+                    <span className="relative">{ctx === 'all' ? 'All' : ctx === 'work' ? 'Work' : 'Personal'}</span>
                   </button>
                 );
               })}
@@ -330,7 +331,7 @@ export function Sidebar({
             </div>
 
             <div className="space-y-6">
-              {lifeContext === 'work' && (
+              {lifeContext !== 'personal' && (
                 <div className="space-y-1">
                   <div className="px-3 flex items-center justify-between mb-2">
                     <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">Projects</h4>
@@ -360,7 +361,7 @@ export function Sidebar({
                 </div>
               )}
 
-              {lifeContext === 'personal' && (
+              {lifeContext !== 'work' && (
                 <div className="space-y-6">
                   <div className="space-y-1">
                     <div className="px-3 flex items-center justify-between mb-2">

@@ -12,7 +12,7 @@ import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface SettingsModalProps {
   onClose: () => void;
-  lifeContext: LifeContext;
+  lifeContext?: LifeContext;
   onDataChanged?: () => void;
 }
 
@@ -103,7 +103,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
     if (!csvInput.trim() || isImporting) return;
     setIsImporting(true);
     try {
-      const result = await importCSVData(csvInput, lifeContext);
+      const result = await importCSVData(csvInput, lifeContext || 'work');
       showToast(`Imported ${result.imported} tasks from CSV!`);
       setCsvInput('');
       if (onDataChanged) onDataChanged();

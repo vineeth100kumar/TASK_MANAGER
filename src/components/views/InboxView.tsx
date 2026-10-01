@@ -5,6 +5,7 @@ import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
+import { ContextTag } from '../common/ContextTag';
 import { timeAgo } from '../../utils/progress';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
@@ -16,7 +17,7 @@ import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 import { InboxTriage } from './InboxTriage';
 
 interface InboxViewProps {
-  lifeContext: LifeContext;
+  lifeContext?: LifeContext;
   onSelectTask: (id: string) => void;
 }
 
@@ -199,6 +200,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                     {item.title}
                   </h4>
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
+                    <ContextTag item={item} combined={!lifeContext} />
                     <span>Captured {timeAgo(item.createdAt)}</span>
                     {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
                     {item.isFocus && <span className="text-amber-500 font-bold">· In Focus</span>}

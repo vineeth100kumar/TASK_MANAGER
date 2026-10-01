@@ -5,6 +5,7 @@ import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-re
 
 import { api } from './services/api';
 import { STATUSES } from './services/constants';
+import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
@@ -46,7 +47,18 @@ function MainApp() {
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
   const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all' });
-  const [lifeContext, setLifeContext] = useState<'work'|'personal'>('work');
+  // Work and personal show together unless the sidebar filter narrows to one.
+  const [lifeFilter, setLifeFilterState] = useState<LifeFilter>(() => {
+    try {
+      const saved = localStorage.getItem('sage-life-filter');
+      return saved === 'work' || saved === 'personal' ? saved : 'all';
+    } catch { return 'all'; }
+  });
+  const setLifeFilter = useCallback((f: LifeFilter) => {
+    setLifeFilterState(f);
+    try { localStorage.setItem('sage-life-filter', f); } catch { /* storage unavailable */ }
+  }, []);
+  const lifeContext = lifeFilter === 'all' ? undefined : lifeFilter;
   
   // Data State
   const [workItems, setWorkItems] = useState<any[]>([]);
@@ -238,8 +250,11 @@ function MainApp() {
 
   const handleCreateWorkItem = async (payload: any) => {
     try {
-      await api.workItems.create(payload);
-      showToast("Item created");
+      const created = await api.workItems.create(payload);
+      // Say where it went, so nobody wonders whether it saved.
+      const today = new Date();
+      const isToday = payload.dueDate === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+      showToast(payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
       fetchWorkItems(false);
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -254,13 +269,13 @@ function MainApp() {
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
         isDarkMode={isDarkMode} setIsDarkMode={changeTheme}
-        lifeContext={lifeContext} setLifeContext={setLifeContext}
+        lifeContext={lifeFilter} setLifeContext={setLifeFilter}
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
       />
 
-      <main data-context={lifeContext} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={lifeFilter} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
@@ -280,7 +295,7 @@ function MainApp() {
           </div>
         ) : (
         <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <motion.div key={`${activeView}:${lifeContext}:${activeWorkspace}`} className="p-4 pb-28 md:p-8 min-h-full"
+          <motion.div key={`${activeView}:${lifeFilter}:${activeWorkspace}`} className="p-4 pb-28 md:p-8 min-h-full"
             initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}>
             {isLoading ? (
               <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading your items">
@@ -394,6 +409,7 @@ function MainApp() {
             onCreate={handleCreateWorkItem} 
             workspaceId={activeWorkspace !== 'all' ? activeWorkspace : (api.sync.getState().projects[0]?.id || '')} 
             lifeContext={lifeContext} 
+            defaultFocus={activeView === 'focus'}
           />
         )}
       </AnimatePresence>

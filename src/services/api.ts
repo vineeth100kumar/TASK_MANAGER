@@ -925,7 +925,7 @@ export const api = {
   },
 
   attention: {
-    getTodayAttention: async (lifeContext: LifeContext = 'work'): Promise<any> => {
+    getTodayAttention: async (lifeContext?: LifeContext): Promise<any> => {
       await initializeStore();
       const now = new Date();
       const today = now.toISOString().split('T')[0];
@@ -933,7 +933,7 @@ export const api = {
 
       const items = state.workItems.filter(i => 
         i && !i.deletedAt && 
-        (i.lifeContext || 'work') === lifeContext
+        (!lifeContext || (i.lifeContext || 'work') === lifeContext)
       );
 
       // Filter active (not completed, not actively snoozed past now)
@@ -987,7 +987,22 @@ export const api = {
 
       const inboxCount = items.filter(i => i.isInbox && i.status !== 'done').length;
 
+      // What to work on when Focus is empty: overdue first, then the most
+      // urgent, then the longest-waiting. Tasks only.
+      const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, medium: 2, low: 3 };
+      const rank = (i: WorkItem) => (i.dueDate && i.dueDate < today) ? 0 : (i.dueDate === today ? 1 : 2);
+      const suggestions = activeItems
+        .filter(i => !i.isFocus && i.entityType === 'task' && !i.waitingFor && i.status !== 'blocked')
+        // Due-today items already sit in Scheduled with their own Focus button.
+        .filter(i => rank(i) === 0 || (rank(i) === 2 && (i.priority === 'urgent' || i.priority === 'high')))
+        .sort((a, b) => rank(a) - rank(b)
+          || (PRIORITY_RANK[a.priority] ?? 2) - (PRIORITY_RANK[b.priority] ?? 2)
+          || (a.createdAt || '').localeCompare(b.createdAt || ''))
+        .slice(0, 3)
+        .map(hydrateWorkItem);
+
       return {
+        suggestions,
         needsAttention,
         dueToday,
         reminders,

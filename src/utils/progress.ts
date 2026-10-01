@@ -41,3 +41,31 @@ export function timeAgo(iso: string | null | undefined): string {
   if (sameLocalDay(iso, yesterday)) return 'yesterday';
   return then.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
+
+export interface WeekDay {
+  label: string;
+  date: Date;
+  count: number;
+  isToday: boolean;
+  isFuture: boolean;
+}
+
+// Monday to Sunday of the current week, with how many items were finished each day.
+export function weekActivity(lifeContext?: LifeContext): WeekDay[] {
+  const now = new Date();
+  const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
+  const items = api.sync.getState().workItems.filter(i =>
+    i && !i.deletedAt && i.status === 'done' && i.completedAt &&
+    (!lifeContext || (i.lifeContext || 'work') === lifeContext)
+  );
+  return Array.from({ length: 7 }, (_, k) => {
+    const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + k);
+    return {
+      label: date.toLocaleDateString('en-US', { weekday: 'narrow' }),
+      date,
+      count: items.filter(i => sameLocalDay(i.completedAt as string, date)).length,
+      isToday: sameLocalDay(now.toISOString(), date),
+      isFuture: date > now && !sameLocalDay(now.toISOString(), date),
+    };
+  });
+}

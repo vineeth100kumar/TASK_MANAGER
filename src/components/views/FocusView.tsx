@@ -12,11 +12,12 @@ import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
+import { ContextTag } from '../common/ContextTag';
 
 const FOCUS_SLOTS = 5;
 
 interface FocusViewProps {
-  lifeContext: LifeContext;
+  lifeContext?: LifeContext;
   onSelectTask: (id: string) => void;
 }
 
@@ -146,6 +147,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                     {item.title}
                   </h4>
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[12px] text-gray-400 whitespace-nowrap">
+                    <ContextTag item={item} combined={!lifeContext} />
                     <span className="uppercase font-semibold text-[11px] tracking-wide text-gray-400">{item.key}</span>
                     {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
                     {item.project && <span>· {item.project.name}</span>}

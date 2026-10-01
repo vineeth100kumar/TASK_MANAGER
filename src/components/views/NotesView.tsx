@@ -7,7 +7,7 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 
 interface NotesViewProps {
-  lifeContext: 'work' | 'personal';
+  lifeContext?: 'work' | 'personal';
 }
 
 export function NotesView({ lifeContext }: NotesViewProps) {

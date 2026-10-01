@@ -4,6 +4,8 @@
  */
 
 export type LifeContext = 'work' | 'personal';
+// What the app is showing: one context, or both together.
+export type LifeFilter = LifeContext | 'all';
 export type EntityType = 'task' | 'event' | 'reminder' | 'milestone';
 export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'blocked';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';

@@ -7,7 +7,7 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 interface MobileTabBarProps {
   activeView: string;
   activeWorkspace: string;
-  lifeContext: 'work' | 'personal';
+  lifeContext?: 'work' | 'personal';
   onNavigate: (view: string) => void;
   onCreate: () => void;
 }
