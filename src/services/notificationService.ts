@@ -1,10 +1,13 @@
 /**
- * SAGE NOTIFICATION & REMINDER ESCALATION ENGINE
- * Manages browser push/desktop notifications, contextual permission requests,
- * and reminder escalation.
+ * In-tab reminders, for builds that don't use the Pi.
+ *
+ * With the Pi, reminders come as Web Push from the server (see
+ * pushNotifications.ts and raspberry_pi/notifier.py) and reach the device even
+ * when Sage is closed, so this watcher stays off to avoid showing each one twice.
  */
 
 import { api } from './api';
+import { piBackendUrl } from './piBackend';
 
 class NotificationService {
   private isSupported: boolean = false;
@@ -41,7 +44,7 @@ class NotificationService {
 
   startReminderWatcher(): void {
     if (this.checkTimer) clearInterval(this.checkTimer);
-    if (!this.isSupported || Notification.permission !== 'granted') return;
+    if (!this.isSupported || Notification.permission !== 'granted' || piBackendUrl()) return;
 
     // Check every 30 seconds for due reminders
     this.checkDueReminders();
@@ -80,15 +83,12 @@ class NotificationService {
 
   sendNotification(title: string, options?: NotificationOptions): void {
     if (!this.isSupported || Notification.permission !== 'granted') return;
-    try {
-      new Notification(`Sage: ${title}`, {
-        icon: '/icon-192.png',
-        badge: '/icon-192.png',
-        ...options
-      });
-    } catch (e) {
-      console.warn('[NotificationService] Send notification failed:', e);
-    }
+    const full = { icon: '/icon-192.png', badge: '/icon-192.png', ...options };
+    // Phones only show notifications through the service worker.
+    const lookup = 'serviceWorker' in navigator ? navigator.serviceWorker.getRegistration() : Promise.resolve(undefined);
+    lookup
+      .then(reg => { if (reg) return reg.showNotification(title, full); new Notification(title, full); })
+      .catch(e => console.warn('[NotificationService] Send notification failed:', e));
   }
 }
 

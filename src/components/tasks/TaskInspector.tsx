@@ -8,7 +8,7 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { downloadTaskImage } from '../../utils/imageExport';
 
-import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue, localMinutesBefore } from '../../utils/dateUtils';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -292,7 +292,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                             const anchorDate = task.dueDate || task.startDate;
                             let remindAt: string | null = null;
                             if (val !== null && anchorDate) {
-                              remindAt = new Date(new Date(`${anchorDate}T09:00`).getTime() - val * 60000).toISOString().slice(0, 16);
+                              remindAt = localMinutesBefore(`${anchorDate}T09:00`, val);
                             }
                             await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
                             loadData();
@@ -352,7 +352,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                             const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
                             let remindAt: string | null = null;
                             if (val !== null && task.startAt) {
-                              remindAt = new Date(new Date(task.startAt).getTime() - val * 60000).toISOString().slice(0, 16);
+                              remindAt = localMinutesBefore(toInputDateTimeValue(task.startAt), val);
                             }
                             await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
                             loadData();
