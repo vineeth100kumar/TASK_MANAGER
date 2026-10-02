@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { withTime } from '../../utils/reminders';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
 import { useCompletion } from '../../hooks/useCompletion';
@@ -202,7 +203,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
                     <ContextTag item={item} combined={!lifeContext} />
                     <span>Captured {timeAgo(item.createdAt)}</span>
-                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
+                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
                     {item.isFocus && <span className="text-amber-500 font-bold">· In Focus</span>}
                   </div>
                 </div>

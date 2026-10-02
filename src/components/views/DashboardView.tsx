@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { withTime } from '../../utils/reminders';
 import { AnimatePresence } from 'framer-motion';
 import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
@@ -251,7 +252,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
                   <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
                   <span className="text-[11px] text-red-500 font-medium">
-                    {item.dueDate ? formatDateRange(null, item.dueDate) : `Snoozed ${item.snoozeCount} times`}
+                    {item.dueDate ? withTime(formatDateRange(null, item.dueDate), item.dueTime) : `Snoozed ${item.snoozeCount} times`}
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
@@ -402,7 +403,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                   <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
                   <div className="min-w-0 flex-1">
                     <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
+                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? withTime('Due today', item.dueTime) : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
                   </div>
                 </div>
                 <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 -m-0.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shrink-0" title="Add to Focus" aria-label="Add to Focus">

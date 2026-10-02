@@ -5,7 +5,9 @@ import { SpinnerCheck } from '../common/SpinnerCheck';
 import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
 import { Project, Area, LifeContext } from '../../services/types';
-import { parseQuickAdd, QuickAddResult } from '../../utils/quickAddParser';
+import { parseQuickAdd, QuickAddResult, flipGuessedTime, formatShortDate } from '../../utils/quickAddParser';
+import { formatTime } from '../../utils/reminders';
+import { RepeatSelect } from '../common/RepeatSelect';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -54,8 +56,7 @@ function parsedDateTime(p: QuickAddResult | null): string {
   return date ? `${date}T${p?.time || '09:00'}` : '';
 }
 
-/** The form's recurrence selects only know the plain rules, so "every monday" (weekly:1) becomes weekly. */
-const parsedRepeat = (p: QuickAddResult | null) => (p?.repeatRule ? p.repeatRule.replace(/^weekly:\d$/, 'weekly') : '');
+const parsedRepeat = (p: QuickAddResult | null) => p?.repeatRule || '';
 
 function formatDuration(minutes: number | null | undefined): string {
   if (!minutes) return '';
@@ -243,8 +244,12 @@ function SmartTitle({ smart, disabled, placeholder = "Title" }: { smart: SmartTi
   const { title, setTitle, parsed, enabled, setEnabled, entityType, setEntityType } = smart;
   const chips: { icon: React.ElementType; label: string }[] = [];
   if (parsed) {
-    if (parsed.dateLabel) chips.push({ icon: Calendar, label: parsed.dateLabel });
-    if (parsed.time) chips.push({ icon: Clock, label: parsed.time });
+    // The real date next to "Tomorrow" or "Friday", so there's no doubt which day it means.
+    if (parsed.date) {
+      const exact = formatShortDate(parsed.date);
+      chips.push({ icon: Calendar, label: parsed.dateLabel && parsed.dateLabel !== exact ? `${parsed.dateLabel} · ${exact}` : exact });
+    }
+    if (parsed.time && !parsed.timeGuessed) chips.push({ icon: Clock, label: formatTime(parsed.time) });
     if (parsed.priority) chips.push({ icon: Flag, label: parsed.priority[0].toUpperCase() + parsed.priority.slice(1) });
     if (parsed.repeatLabel) chips.push({ icon: Repeat, label: parsed.repeatLabel });
     if (parsed.durationMinutes) chips.push({ icon: Timer, label: formatDuration(parsed.durationMinutes) });
@@ -269,6 +274,14 @@ function SmartTitle({ smart, disabled, placeholder = "Title" }: { smart: SmartTi
             <Icon size={10} /> {label}
           </span>
         ))}
+        {/* "at 5" alone is read as 5 pm; one tap makes it the other one. */}
+        {enabled && parsed?.time && parsed.timeGuessed && (
+          <button type="button" onClick={() => setTitle(flipGuessedTime(title, parsed))}
+            title={`Tap if you meant ${parseInt(parsed.time, 10) >= 12 ? 'am' : 'pm'}`}
+            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/70">
+            <Clock size={10} /> {formatTime(parsed.time)} <span className="opacity-60">· {parseInt(parsed.time, 10) >= 12 ? 'am?' : 'pm?'}</span>
+          </button>
+        )}
         {enabled && parsed && chips.length > 0 && parsed.title !== title.trim() && (
           <span className="text-[11px] font-medium text-gray-400 truncate max-w-full">Saves as "{parsed.title}"</span>
         )}
@@ -398,16 +411,18 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
   const [payload, setPayload] = useState({
     description: '', type: 'task', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
-    areaId: areas[0]?.id || '', startDate: '', dueDate: '', estimated: '',
+    areaId: areas[0]?.id || '', startDate: '', dueDate: '', dueTime: '', estimated: '',
     location: '', repeatRule: '', isFocus: !!defaultFocus
   });
   const [tags, setTags] = useState<string[]>([]);
-  const [reminderLead, setReminderLead] = useState<number | ''>('');
+  // A task with a time reminds you at that time unless you choose otherwise.
+  const [chosenLead, setReminderLead] = useState<number | '' | null>(null);
   // Details most tasks don't need stay folded away until asked for.
   const [moreOpen, setMoreOpen] = useState(() => readPref(MORE_OPTIONS_KEY) === 'open');
   const toggleMore = () => { setMoreOpen(o => { writePref(MORE_OPTIONS_KEY, o ? 'closed' : 'open'); return !o; }); };
   const set = useParsedFields(smart.parsed, p => ({
     dueDate: parsedDate(p),
+    dueTime: p?.time || '',
     priority: p?.priority || 'medium',
     location: p?.location || '',
     repeatRule: parsedRepeat(p),
@@ -423,14 +438,13 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
     }
   }, [projects, areas]);
 
+  const reminderLead: number | '' = chosenLead ?? (payload.dueTime ? 0 : '');
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     const startDate = payload.startDate ? payload.startDate : null;
     const dueDate = payload.dueDate ? payload.dueDate : (payload.startDate ? payload.startDate : null);
-    let remindAt: string | null = null;
-    if (reminderLead !== '' && dueDate) {
-      remindAt = minutesBefore(`${dueDate}T${smart.parsed?.time || '09:00'}`, reminderLead);
-    }
+    // The reminder itself is worked out from the date, time and lead when it saves.
     onSubmit({
       ...payload,
       // Choosing Focus is a decision about the item, so it leaves the Inbox.
@@ -439,8 +453,8 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
       labels: mergeTags(tags, smart.parsed),
       startDate,
       dueDate,
-      remindAt,
-      reminderLeadMinutes: reminderLead === '' ? null : reminderLead
+      dueTime: dueDate && payload.dueTime ? payload.dueTime : null,
+      reminderLeadMinutes: reminderLead === '' || !dueDate ? null : reminderLead
     });
   };
 
@@ -470,6 +484,13 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
           <Calendar size={13} />
           {customDate ? new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Pick date'}
           <input type="date" aria-label="Due date" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)}
+            className="absolute inset-0 opacity-0 cursor-pointer" />
+        </label>
+        <label className={`${chipBase} ${payload.dueTime ? chipOn : chipOff} relative cursor-pointer`}>
+          <Clock size={13} />
+          {payload.dueTime ? formatTime(payload.dueTime) : 'Time'}
+          <input type="time" aria-label="Time" value={payload.dueTime}
+            onChange={e => { set('dueTime', e.target.value); if (e.target.value && !payload.dueDate) set('dueDate', options[0].value); }}
             className="absolute inset-0 opacity-0 cursor-pointer" />
         </label>
         <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5" aria-hidden />
@@ -532,15 +553,8 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         </div>
 
         <div className="space-y-1">
-          <label className="field-label">Recurrence</label>
-          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
-            <option value="">Never</option>
-            <option value="daily">Daily</option>
-            <option value="weekdays">Every weekday</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <label className="field-label">Repeat</label>
+          <RepeatSelect className="field" value={payload.repeatRule} onChange={v => set('repeatRule', v)} disabled={isSubmitting} />
         </div>
 
         <SharedReminderLead value={reminderLead} setValue={setReminderLead} />
@@ -625,15 +639,8 @@ function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeC
           <input type="datetime-local" className="field" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
-          <label className="field-label">Recurrence</label>
-          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
-            <option value="">Never</option>
-            <option value="daily">Daily</option>
-            <option value="weekdays">Every weekday</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <label className="field-label">Repeat</label>
+          <RepeatSelect className="field" value={payload.repeatRule} onChange={v => set('repeatRule', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1 col-span-2">
@@ -689,14 +696,7 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
         </div>
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
-          <select className="field" value={payload.repeatRule} onChange={e => set('repeatRule', e.target.value)} disabled={isSubmitting}>
-            <option value="">Never</option>
-            <option value="daily">Daily</option>
-            <option value="weekdays">Every weekday</option>
-            <option value="weekly">Weekly</option>
-            <option value="monthly">Monthly</option>
-            <option value="yearly">Yearly</option>
-          </select>
+          <RepeatSelect className="field" value={payload.repeatRule} onChange={v => set('repeatRule', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1 col-span-2">

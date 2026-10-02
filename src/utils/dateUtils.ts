@@ -116,10 +116,3 @@ export function parseEstimateMinutes(text: string | null | undefined): number | 
   }
   return matched ? Math.round(total) : null;
 }
-
-/** Local "YYYY-MM-DDTHH:mm" some minutes before another, the format remindAt is stored in. */
-export function localMinutesBefore(localDateTime: string, minutes: number): string {
-  const d = new Date(new Date(localDateTime).getTime() - minutes * 60000);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}

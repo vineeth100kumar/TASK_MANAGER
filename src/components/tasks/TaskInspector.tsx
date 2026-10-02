@@ -8,7 +8,8 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { downloadTaskImage } from '../../utils/imageExport';
 
-import { toInputDateValue, toInputDateTimeValue, localMinutesBefore } from '../../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
+import { RepeatSelect } from '../common/RepeatSelect';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -260,6 +261,8 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                           <span className="text-gray-400 font-bold">→</span>
                           <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
                             value={toInputDateValue(task.dueDate)} onChange={async (e) => { await onUpdateDetails(task, { dueDate: e.target.value || null }); loadData(); }} />
+                          <input type="time" aria-label="Time" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[104px]"
+                            value={task.dueTime || ''} onChange={async (e) => { await onUpdateDetails(task, { dueTime: e.target.value || null }); loadData(); }} />
                         </div>
                       </PropertyRow>
 
@@ -274,27 +277,16 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       </PropertyRow>
 
                       <PropertyRow icon={Activity} label="Recurrence">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
-                          value={task.repeatRule || ''} onChange={async (e) => { await onUpdateDetails(task, { repeatRule: e.target.value || null }); loadData(); }}>
-                          <option value="" className="text-gray-900">Never</option>
-                          <option value="daily" className="text-gray-900">Daily</option>
-                          <option value="weekdays" className="text-gray-900">Every weekday</option>
-                          <option value="weekly" className="text-gray-900">Weekly</option>
-                          <option value="monthly" className="text-gray-900">Monthly</option>
-                          <option value="yearly" className="text-gray-900">Yearly</option>
-                        </select>
+                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                          value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
                           value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
+                            // The reminder time follows from the date, time and this lead.
                             const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
-                            const anchorDate = task.dueDate || task.startDate;
-                            let remindAt: string | null = null;
-                            if (val !== null && anchorDate) {
-                              remindAt = localMinutesBefore(`${anchorDate}T09:00`, val);
-                            }
-                            await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
+                            await onUpdateDetails(task, { reminderLeadMinutes: val, ...(val === null ? { remindAt: null } : {}) });
                             loadData();
                           }}>
                           {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
@@ -335,26 +327,15 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       </PropertyRow>
 
                       <PropertyRow icon={Activity} label="Recurrence">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
-                          value={task.repeatRule || ''} onChange={async (e) => { await onUpdateDetails(task, { repeatRule: e.target.value || null }); loadData(); }}>
-                          <option value="" className="text-gray-900">Never</option>
-                          <option value="daily" className="text-gray-900">Daily</option>
-                          <option value="weekdays" className="text-gray-900">Every weekday</option>
-                          <option value="weekly" className="text-gray-900">Weekly</option>
-                          <option value="monthly" className="text-gray-900">Monthly</option>
-                          <option value="yearly" className="text-gray-900">Yearly</option>
-                        </select>
+                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                          value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
                           value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
                             const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
-                            let remindAt: string | null = null;
-                            if (val !== null && task.startAt) {
-                              remindAt = localMinutesBefore(toInputDateTimeValue(task.startAt), val);
-                            }
-                            await onUpdateDetails(task, { reminderLeadMinutes: val, remindAt });
+                            await onUpdateDetails(task, { reminderLeadMinutes: val, ...(val === null ? { remindAt: null } : {}) });
                             loadData();
                           }}>
                           {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
@@ -381,8 +362,8 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                           }} />
                       </PropertyRow>
                       <PropertyRow icon={Activity} label="Repeat Rule" isLast>
-                        <input type="text" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
-                          value={task.repeatRule || ''} onChange={async (e) => { await onUpdateDetails(task, { repeatRule: e.target.value }); loadData(); }} placeholder="e.g. daily, weekly" />
+                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                          value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
                     </>
                   )}
