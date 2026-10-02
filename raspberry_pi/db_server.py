@@ -15,6 +15,7 @@ from typing import List, Dict, Any, Optional
 from urllib.parse import parse_qs, quote
 
 import access_gate
+import backup
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -26,6 +27,9 @@ GOOGLE_SHEETS_URL = os.getenv(
     "SAGE_GAS_URL",
     "https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec",
 )
+# The key Apps Script expects (its SAGE_AUTH_KEY script property). Without it
+# the backup web app is open to anyone who finds its address.
+GAS_AUTH_KEY = os.getenv("SAGE_GAS_AUTH_KEY", "").strip()
 # How often queued changes are copied to Apps Script, in seconds.
 GAS_BACKUP_INTERVAL = int(os.getenv("SAGE_GAS_BACKUP_INTERVAL", "300"))
 # The shared key every client sends as "Authorization: Bearer <key>". LUMO
@@ -133,17 +137,28 @@ async def login(request: Request):
     if not access_gate.enabled:
         return RedirectResponse(next_path, status_code=303)
     ip = access_gate.client_ip(request)
-    wait = access_gate.locked_for(ip)
+    # Each browser has its own id, so one device's wrong tries don't lock the others.
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    new_device = not device
+    device = device or access_gate.new_device_id()
+
+    def with_device(response):
+        if new_device:
+            response.set_cookie(access_gate.DEVICE_COOKIE, device, max_age=365 * 86400, httponly=True,
+                                secure=access_gate.is_https(request), samesite="lax")
+        return response
+
+    wait = access_gate.locked_for(ip, device)
     if wait:
         minutes = max(1, round(wait / 60))
         page = access_gate.login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
-        return HTMLResponse(page, status_code=429)
+        return with_device(HTMLResponse(page, status_code=429))
     if not access_gate.verify_password(password):
-        access_gate.record_failure(ip)
+        access_gate.record_failure(ip, device)
         print(f"Wrong Sage password from {ip}")
-        return HTMLResponse(access_gate.login_page(next_path, "Wrong password."), status_code=401)
-    access_gate.clear_failures(ip)
-    response = RedirectResponse(next_path, status_code=303)
+        return with_device(HTMLResponse(access_gate.login_page(next_path, "Wrong password."), status_code=401))
+    access_gate.clear_failures(ip, device)
+    response = with_device(RedirectResponse(next_path, status_code=303))
     response.set_cookie(
         access_gate.COOKIE_NAME,
         access_gate.new_session(),
@@ -318,17 +333,24 @@ async def google_sheets_backup_worker():
                     for row_id, payload_str in rows:
                         resp = await client.post(
                             GOOGLE_SHEETS_URL,
+                            params={"authKey": GAS_AUTH_KEY} if GAS_AUTH_KEY else None,
                             content=payload_str,
                             headers={"Content-Type": "text/plain;charset=utf-8"},
                             timeout=30.0
                         )
                         try:
-                            ok = resp.status_code == 200 and resp.json().get('success')
+                            reply = resp.json()
+                            ok = resp.status_code == 200 and bool(reply.get('success'))
                         except ValueError:
-                            ok = False
+                            reply, ok = {}, False
                         if not ok:
                             print(f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
                             break
+                        # A batch can succeed overall while some changes in it were
+                        # refused. Say so rather than dropping them silently.
+                        refused = [r for r in reply.get('results', []) if isinstance(r, dict) and r.get('status') == 'rejected']
+                        if refused:
+                            print(f"Google Sheets backup: {len(refused)} change(s) in batch {row_id} were rejected: {refused[:3]}")
                         cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
                         conn.commit()
             conn.close()
@@ -345,6 +367,7 @@ async def startup_event():
         print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
     asyncio.create_task(google_sheets_backup_worker())
     asyncio.create_task(notifier.scheduler())
+    asyncio.create_task(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
 
 
 @app.get("/api/health")
@@ -582,7 +605,20 @@ def _current_revision() -> int:
 
 
 @app.post("/api/sync/clear")
-async def clear_all():
+async def clear_all(request: Request):
+    # A stray call (a script, a retry, a curl in the wrong tab) must not wipe
+    # everything, so the caller has to say so in words. Read by hand because
+    # the browser sends text/plain to avoid a CORS preflight.
+    try:
+        body = json.loads(await request.body() or b"{}")
+    except ValueError:
+        body = {}
+    if not isinstance(body, dict) or body.get("confirm") != "DELETE":
+        raise HTTPException(status_code=400, detail='Send {"confirm": "DELETE"} to clear all data.')
+    try:
+        saved = await asyncio.to_thread(backup.make_backup, "before-clear")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Couldn't save a backup first, so nothing was cleared: {e}")
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM entities")
@@ -595,7 +631,21 @@ async def clear_all():
     conn.close()
 
     await events.broadcast({"type": "SYNC_CLEARED", "serverRevision": new_rev})
-    return {"success": True, "serverRevision": new_rev, "message": "All database records wiped."}
+    return {"success": True, "serverRevision": new_rev, "message": "All database records wiped.", "backup": saved.name}
+
+
+@app.get("/api/backup/status")
+def backup_status():
+    return {"success": True, **backup.status()}
+
+
+@app.post("/api/backup/run")
+async def backup_run():
+    try:
+        path = await asyncio.to_thread(backup.make_backup, "manual")
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
+    return {"success": True, "file": path.name, **backup.status()}
 
 import re
 import ollama
@@ -763,9 +813,10 @@ def push_subscribe(req: PushSubscribeRequest):
         notifier.save_subscription(req.subscription, req.label)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if req.timezone:
+    if req.timezone and not notifier.get_prefs()["timezoneChosen"]:
         try:
-            notifier.save_prefs({"timezone": req.timezone})
+            # Adopted once, from the first device; changing it later is done in Settings.
+            notifier.save_prefs({"timezone": req.timezone, "timezoneChosen": True})
         except ValueError as e:
             # Keep the device either way; times stay in the last good timezone.
             print(f"Ignoring the timezone this device sent: {e}")
@@ -837,5 +888,5 @@ else:
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host=os.getenv("SAGE_BIND", "127.0.0.1"), port=8000)
 

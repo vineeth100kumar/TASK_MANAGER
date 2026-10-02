@@ -84,6 +84,14 @@ else
   echo "npm is not installed, so the web app was not built. Install Node.js 20+ and re-run."
 fi
 
+if [ "$AUTOSYNC" -eq 1 ]; then
+  step "Letting auto-sync restart sage and lumo (and nothing else) without root"
+  SUDOERS=/etc/sudoers.d/sage-autosync
+  printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart sage, /usr/bin/systemctl restart lumo\n' "$RUN_AS" > "$SUDOERS.tmp"
+  chmod 440 "$SUDOERS.tmp"
+  if visudo -cf "$SUDOERS.tmp" >/dev/null; then mv "$SUDOERS.tmp" "$SUDOERS"; else rm -f "$SUDOERS.tmp"; echo "Couldn't install the sudoers rule; auto-sync won't be able to restart services." >&2; fi
+fi
+
 step "systemd units"
 UNITS=(sage)
 [ "$LUMO" -eq 1 ] && UNITS+=(lumo lumo-obex)
@@ -105,6 +113,9 @@ done
 step "Checking"
 sleep 3
 if curl -fsS http://127.0.0.1:8000/api/health; then echo; else echo "Sage did not answer; see: journalctl -u sage -n 50"; fi
+echo
+echo "Sage listens on this Pi only (127.0.0.1:8000). Reach it through your tunnel or Tailscale link."
+echo "To also open it on the home network, add SAGE_BIND=0.0.0.0 to $ENV_FILE and restart sage."
 echo
 echo "Done. Enter this key in the web app under Settings > Server & Reset:"
 echo "    sudo grep API_SECRET $ENV_FILE"

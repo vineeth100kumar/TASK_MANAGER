@@ -26,6 +26,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Optional
 
 import httpx
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 import websockets
 
 from config import (
@@ -38,12 +39,34 @@ from config import (
 
 logger = logging.getLogger("SageClient")
 
-# Sage compares reminder times against a naive `datetime.now()` in the Pi's own
-# timezone, so every timestamp Lumo sends it has to be naive local time too. An
-# aware IST string would be read as a different moment and the alarm would ring
-# five and a half hours out.
+# Times in Sage are wall-clock times ("2026-10-02T18:00") in the time zone chosen
+# in Sage's settings, the same one the phone notifications use. Lumo reads that
+# zone from Sage on every pull and uses it for "now", so an alarm rings when the
+# phone would, whatever zone the Pi's own clock was left in. Until Sage has
+# answered, the Pi's own zone is used.
+_tz: Optional[ZoneInfo] = None
+
+
+def set_timezone(name: Optional[str]) -> None:
+    global _tz
+    try:
+        _tz = ZoneInfo(name) if name else None
+    except (ZoneInfoNotFoundError, ValueError):
+        _tz = None
+
+
 def now_local() -> datetime.datetime:
-    return datetime.datetime.now()
+    """The current time as naive wall-clock time in Sage's time zone."""
+    if _tz is None:
+        return datetime.datetime.now()
+    return datetime.datetime.now(_tz).replace(tzinfo=None)
+
+
+def to_local_naive(when: datetime.datetime) -> datetime.datetime:
+    """A time from Sage as naive wall-clock time. Ones with an offset ("...Z") are converted."""
+    if when.tzinfo is None:
+        return when
+    return when.astimezone(_tz).replace(tzinfo=None) if _tz else when.astimezone().replace(tzinfo=None)
 
 
 def _key_from_env_file(path: str) -> str:
@@ -263,7 +286,15 @@ class SageClient:
             return False
         rows = (data.get("data") or {}).get(WORK_ITEMS) or []
         self.items = {row["id"]: row for row in rows if isinstance(row, dict) and row.get("id")}
+        await self._refresh_timezone()
         return True
+
+    async def _refresh_timezone(self) -> None:
+        try:
+            config = await self.request("GET", "/api/notifications")
+            set_timezone(((config or {}).get("prefs") or {}).get("timezone"))
+        except Exception as exc:  # an older Sage without the endpoint: keep the Pi's zone
+            logger.debug(f"Couldn't read Sage's time zone: {exc}")
 
     async def _save(self, item_id: str, payload: dict, revision: int) -> bool:
         body = {

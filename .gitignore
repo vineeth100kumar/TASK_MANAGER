@@ -5,6 +5,8 @@ node_modules/
 
 # Production / Build output
 dist/
+dist.next/
+dist.old/
 build/
 
 # Environment files

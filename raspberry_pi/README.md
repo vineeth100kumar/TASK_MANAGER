@@ -16,7 +16,12 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `SAGE_DIST_DIR` | `../dist` | Built web app, served at `/` when present. |
 | `SAGE_CORS_ORIGINS` | `*` | Comma-separated origins allowed to call the API from a browser. |
 | `SAGE_GAS_URL` | the Apps Script URL | Where synced changes are backed up. |
+| `SAGE_GAS_AUTH_KEY` | empty | The key set as `SAGE_AUTH_KEY` in the Apps Script's Script Properties. Sent with every backup. Set it on both sides, otherwise anyone who finds the script's address can read or wipe the Sheet. |
 | `SAGE_GAS_BACKUP_INTERVAL` | `300` | Seconds between backups to Apps Script. |
+| `SAGE_BIND` | `127.0.0.1` | Address Sage listens on (set by `sage.service`). Only this Pi can reach it, so the tunnel, Tailscale and LUMO work while plain http on the home network can't expose the PIN. Set `0.0.0.0` in `/etc/sage/sage.env` to open it to the LAN. |
+| `SAGE_BACKUP_DIR` | `backups/` beside the database | Where nightly copies of the database go. |
+| `SAGE_BACKUP_KEEP` | `14` | How many copies to keep. |
+| `SAGE_BACKUP_TIME` | `03:00` | Local time of the nightly copy (in the time zone chosen in Settings > Notifications). |
 | `SAGE_ACCESS_PASSWORD_HASH` | empty | Turns on the password page (below). Set it with `deploy/set_access_password.sh`. |
 | `SAGE_SESSION_DAYS` | `30` | How long a browser stays logged in after typing the password. |
 | `GROQ_API_KEY` | empty | Canvas's "Think with me" panel uses Groq when this is set, here or in `lumo/rpi_server/.env` (LUMO's key works). Easier: paste it in the app under Settings > Server & Reset, which saves it to `sage_secrets.json` next to the database and takes priority. |
@@ -24,6 +29,18 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `ANTHROPIC_API_KEY` | empty | Without a Groq key, lets the Canvas panel use Claude, which reads both the board's text and a picture of it. With neither, the panel uses the local Ollama model, which is slow. |
 | `SAGE_CANVAS_MODEL` | `claude-opus-5-5` | Claude model for the Canvas panel. |
 | `SAGE_PUBLIC_URL` | found automatically | The public link Settings shows. Normally found on its own (named tunnel, quick tunnel or Tailscale Funnel); set it only to override. |
+
+### Backups
+
+A copy of the database is taken every night, and just before everything is cleared (the clear itself needs `{"confirm": "DELETE"}`). Settings > Server & Reset shows when the last copy was made and has a "Back up now" button. Copies live on the same SD card as the database, so now and then copy `raspberry_pi/backups/` somewhere else. To restore: `sudo systemctl stop sage`, copy a file from `backups/` over `sage_sync.db`, `sudo systemctl start sage`.
+
+### Time zone
+
+One time zone, set in Settings > Notifications, is used by reminders, the morning plan, the nightly backup and LUMO's alarms. The first device to turn notifications on sets it; after that no device's clock moves it.
+
+### Running outside the venv
+
+`pywebpush` can't be installed into Debian's system Python (it refuses system-wide pip installs). Use the venv that `install_pi.sh` creates: `raspberry_pi/venv/bin/pip install -r requirements.txt`.
 
 `/ws` is a live event stream. Send `{"type": "auth", "token": "<key>"}` as the first frame; after that each applied sync batch arrives as `{"type": "SYNC_APPLIED", "serverRevision": n, "changes": [...]}`. LUMO and the web app use it to pick up a change from another device within a second.
 

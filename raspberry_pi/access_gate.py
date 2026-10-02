@@ -27,12 +27,15 @@ COOKIE_NAME = "sage_session"
 SESSION_DAYS = int(os.getenv("SAGE_SESSION_DAYS", "30"))
 
 ITERATIONS = 300_000
-# A short PIN is guessable, so wrong guesses are rationed: an address gets
-# PER_IP_LIMIT tries per WINDOW, and all addresses together get GLOBAL_LIMIT,
-# which makes trying all 10,000 four-digit PINs take about six weeks.
+# A short PIN is guessable, so wrong guesses are rationed: each device (and
+# each address) gets PER_IP_LIMIT tries per WINDOW, and all together get
+# GLOBAL_LIMIT, which makes trying all 10,000 four-digit PINs take about two
+# weeks. The global cap is high enough that a few typos elsewhere don't lock
+# out you, on a device that hasn't been guessing.
 WINDOW = 60 * 60
 PER_IP_LIMIT = 5
-GLOBAL_LIMIT = 10
+GLOBAL_LIMIT = 30
+DEVICE_COOKIE = "sage_device"
 
 enabled = bool(PASSWORD_HASH)
 
@@ -89,28 +92,38 @@ def _trim(times: Deque[float], now: float) -> None:
         times.popleft()
 
 
-def locked_for(ip: str) -> int:
-    """Seconds until this address may try again; 0 when it may try now."""
+def locked_for(ip: str, device: str = "") -> int:
+    """Seconds until this address or device may try again; 0 when it may try now.
+    `device` is the id from the browser's sage_device cookie, so a wrong-PIN
+    streak from one browser doesn't lock the others out."""
     now = time.time()
     _trim(_all_failures, now)
-    mine = _failures.get(ip, deque())
-    _trim(mine, now)
     waits = []
-    if len(mine) >= PER_IP_LIMIT:
-        waits.append(mine[0] + WINDOW - now)
+    for key in filter(None, (ip, device and f"device:{device}")):
+        mine = _failures.get(key, deque())
+        _trim(mine, now)
+        if len(mine) >= PER_IP_LIMIT:
+            waits.append(mine[0] + WINDOW - now)
     if len(_all_failures) >= GLOBAL_LIMIT:
         waits.append(_all_failures[0] + WINDOW - now)
     return int(max(waits)) + 1 if waits else 0
 
 
-def record_failure(ip: str) -> None:
+def record_failure(ip: str, device: str = "") -> None:
     now = time.time()
-    _failures.setdefault(ip, deque()).append(now)
+    for key in filter(None, (ip, device and f"device:{device}")):
+        _failures.setdefault(key, deque()).append(now)
     _all_failures.append(now)
 
 
-def clear_failures(ip: str) -> None:
+def clear_failures(ip: str, device: str = "") -> None:
     _failures.pop(ip, None)
+    if device:
+        _failures.pop(f"device:{device}", None)
+
+
+def new_device_id() -> str:
+    return secrets.token_urlsafe(12)
 
 
 def client_ip(request) -> str:

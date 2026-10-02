@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { withTime } from '../../utils/reminders';
 import { Flag, CheckSquare, MessageSquare, Calendar as CalendarIcon, Check } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
-import { formatDateRange } from '../../utils/dateUtils';
+import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 
 interface BoardViewProps {
@@ -61,7 +61,7 @@ export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
                     <h4 className="text-[14.5px] font-semibold tracking-[-0.01em] mb-3 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">{task.title}</h4>
                     
                     {dateText && (
-                      <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-semibold ${task.dueDate && task.dueDate < new Date().toISOString().split('T')[0] ? 'text-red-500' : 'text-gray-400'}`}>
+                      <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-semibold ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-400'}`}>
                         <CalendarIcon size={12}/>
                         <span>{dateText}</span>
                       </div>

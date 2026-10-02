@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { withTime } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
-import { formatDateRange } from '../../utils/dateUtils';
+import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
@@ -115,7 +115,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                       </span>
                     )}
                     {dateStr && (
-                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.dueDate && task.dueDate < new Date().toISOString().split('T')[0] ? 'text-red-500' : 'text-gray-500'}`}>
+                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
                         <CalendarIcon size={14}/> {dateStr}
                       </span>
                     )}

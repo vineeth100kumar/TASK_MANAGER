@@ -48,7 +48,7 @@ def revision():
 
 class SyncTests(unittest.TestCase):
     def setUp(self):
-        client.post("/api/sync/clear")
+        client.post("/api/sync/clear", content='{"confirm": "DELETE"}', headers={"Content-Type": "text/plain;charset=utf-8"})
 
     def test_delete_reaches_other_devices(self):
         send(op("a", payload={"id": "a", "title": "A"}), op("b", payload={"id": "b", "title": "B"}))
@@ -116,7 +116,7 @@ class SyncTests(unittest.TestCase):
     def test_clear_keeps_revision_counting_up(self):
         send(op("a"))
         before = revision()
-        client.post("/api/sync/clear")
+        client.post("/api/sync/clear", content='{"confirm": "DELETE"}', headers={"Content-Type": "text/plain;charset=utf-8"})
         self.assertGreater(revision(), before)
         send(op("b"))
         changes = client.get("/api/sync/changes", params={"sinceRevision": before}).json()

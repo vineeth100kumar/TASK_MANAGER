@@ -1,3 +1,4 @@
+import { localDateString } from './dateUtils';
 /**
  * SAGE MULTI-TOOL IMPORT ENGINE
  * Imports tasks from CSV, Todoist export, and Notion export.
@@ -86,7 +87,8 @@ function parseCSVLine(line: string): string[] {
 
 function normalizeDateString(raw?: string): string {
   if (!raw) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw.trim())) return raw.trim();
   const d = new Date(raw);
   if (isNaN(d.getTime())) return '';
-  return d.toISOString().split('T')[0];
+  return localDateString(d);
 }

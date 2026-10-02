@@ -66,12 +66,22 @@ export function formatDisplayDate(dStr: string | null | undefined): string {
   return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
 }
 
-export function getTodayString(): string {
-  const d = new Date();
+/** "YYYY-MM-DD" for a moment in the device's own time zone. toISOString() would give the UTC day, which is yesterday for the first hours of an Indian morning. */
+export function localDateString(d: Date = new Date()): string {
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
+}
+
+export function getTodayString(): string {
+  return localDateString();
+}
+
+/** Reads "YYYY-MM-DD" as local midnight; new Date("2026-10-05") would be UTC midnight and can land on the previous day. */
+export function parseLocalDate(value: string): Date {
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value.slice(0, 10));
+  return m && (value.length === 10) ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(value);
 }
 
 export function formatDateRange(start: string | null | undefined, due: string | null | undefined): string | null {

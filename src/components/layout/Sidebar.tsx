@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { parseLocalDate } from '../../utils/dateUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine } from 'lucide-react';
 import { api } from '../../services/api';
@@ -574,7 +575,7 @@ export function Sidebar({
                     <div key={g.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/gitem">
                       <div>
                         <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{g.title}</h4>
-                        <span className="text-xs text-gray-400">Target: {g.targetDate ? new Date(g.targetDate).toLocaleDateString() : 'Ongoing'}</span>
+                        <span className="text-xs text-gray-400">Target: {g.targetDate ? parseLocalDate(g.targetDate).toLocaleDateString() : 'Ongoing'}</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <span className="text-sm font-bold text-blue-500">{g.progress}%</span>

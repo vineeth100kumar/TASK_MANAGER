@@ -28,6 +28,9 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
   const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
   const [publicKind, setPublicKind] = useState<string | null>(null);
+  // Nightly copy of the Pi's database. undefined = still asking, null = Pi not reachable.
+  const [backup, setBackup] = useState<{ lastBackupAt: string | null; count: number; time: string } | null | undefined>(undefined);
+  const [backingUp, setBackingUp] = useState(false);
   const [groqStatus, setGroqStatus] = useState<{ set: boolean; source: string | null; last4: string | null } | null>(null);
   const [groqKey, setGroqKey] = useState('');
   const [savingGroq, setSavingGroq] = useState(false);
@@ -70,6 +73,30 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
       .then(json => { setPublicUrl(json.url || null); setPublicKind(json.kind || null); })
       .catch(() => setPublicUrl(null));
   }, []);
+
+  const loadBackup = () => {
+    const base = piBackendUrl();
+    if (!base) { setBackup(null); return; }
+    fetch(`${base}/api/backup/status`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => setBackup(json?.success ? json : null))
+      .catch(() => setBackup(null));
+  };
+  useEffect(loadBackup, []);
+
+  const backUpNow = async () => {
+    setBackingUp(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/backup/run`, { method: 'POST', headers: piHeaders() });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      showToast('Backup saved on the Pi');
+      loadBackup();
+    } catch (e: any) {
+      showToast(`Backup failed: ${e.message}`, 'error');
+    } finally {
+      setBackingUp(false);
+    }
+  };
 
   useEffect(() => {
     api.getMeta('resurfacing_days').then(val => {
@@ -273,6 +300,33 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 <li><strong>Storage Safety:</strong> All mutations are persisted locally in IndexedDB first, guaranteeing offline durability.</li>
               </ul>
             </div>
+
+            {/* Nightly copy of the Pi database */}
+            {piBackendUrl() && backup !== undefined && (() => {
+              const ageHours = backup?.lastBackupAt ? (Date.now() - new Date(backup.lastBackupAt).getTime()) / 3600000 : null;
+              const state = ageHours === null ? 'bad' : ageHours <= 30 ? 'good' : ageHours <= 72 ? 'warn' : 'bad';
+              const dot = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500' }[state];
+              return (
+                <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${backup ? dot : 'bg-gray-400'}`} aria-hidden="true" />
+                    <span>Pi backup</span>
+                  </div>
+                  <p className="text-xs text-gray-600 dark:text-gray-400">
+                    {backup === null
+                      ? "Couldn't reach the Pi's backup service."
+                      : backup.lastBackupAt
+                        ? `Last copy ${new Date(backup.lastBackupAt).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}. Sage keeps ${backup.count} on the Pi and takes a new one every night at ${backup.time}.`
+                        : `No copy yet. Sage takes one every night at ${backup.time}.`}
+                  </p>
+                  {backup && (
+                    <button onClick={backUpNow} disabled={backingUp} className="px-3 py-2 rounded-xl bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-xs font-semibold disabled:opacity-50">
+                      {backingUp ? 'Backing up…' : 'Back up now'}
+                    </button>
+                  )}
+                </div>
+              );
+            })()}
 
             {/* Public link through the Cloudflare Tunnel */}
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">

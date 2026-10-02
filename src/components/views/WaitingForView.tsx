@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { getTodayString, parseLocalDate } from '../../utils/dateUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
@@ -52,7 +53,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
           who: who.trim(),
           about: about.trim(),
           followUpDate: followUpDate || '',
-          sinceDate: new Date().toISOString().split('T')[0]
+          sinceDate: getTodayString()
         }
       });
       showToast('Delegated follow-up created');
@@ -79,10 +80,11 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
   const { complete: handleComplete } = useCompletion(loadWaiting);
 
   const calculateDaysSince = (sinceDate: string) => {
-    const start = new Date(sinceDate).getTime();
-    const now = Date.now();
-    const diff = Math.floor((now - start) / 86400000);
-    return Math.max(0, diff);
+    const start = parseLocalDate(sinceDate);
+    start.setHours(0, 0, 0, 0);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    return Math.max(0, Math.round((today.getTime() - start.getTime()) / 86400000));
   };
 
   return (
