@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Loader2, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun } from 'lucide-react';
+import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun } from 'lucide-react';
+import { SpinnerCheck } from '../common/SpinnerCheck';
 import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
 import { Project, Area, LifeContext } from '../../services/types';
@@ -20,6 +21,10 @@ const SMART_PARSE_KEY = 'sage-smart-parse';
 const LAST_CONTEXT_KEY = 'sage-last-context';
 const MORE_OPTIONS_KEY = 'sage-add-more-options';
 const KEEP_ADDING_KEY = 'sage-keep-adding';
+// How long the save button shows its tick before the sheet closes or clears.
+const SAVED_HOLD_MS = 520;
+// True for that moment, so the footer's save button can show it.
+const SavedContext = createContext(false);
 
 const readPref = (key: string) => { try { return localStorage.getItem(key); } catch { return null; } };
 const writePref = (key: string, value: string) => { try { localStorage.setItem(key, value); } catch { /* storage unavailable */ } };
@@ -126,6 +131,7 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
   const [keepAdding, setKeepAdding] = useState(() => readPref(KEEP_ADDING_KEY) === 'on');
   const [entityType, setEntityType] = useState('task');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [saved, setSaved] = useState(false);
   const [title, setTitle] = useState('');
   const [smartEnabled, setSmartEnabled] = useState(() => {
     try { return localStorage.getItem(SMART_PARSE_KEY) !== 'off'; } catch { return true; }
@@ -167,6 +173,10 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
       const scope = lifeContext === 'personal' ? { projectId: null } : { areaId: null };
       await onCreate({ ...payload, ...scope, title: parsed?.title || title.trim(), entityType, lifeContext });
       writePref(LAST_CONTEXT_KEY, lifeContext);
+      // Let the save button's spinner close into a tick before moving on.
+      setSaved(true);
+      await new Promise(resolve => setTimeout(resolve, SAVED_HOLD_MS));
+      setSaved(false);
       if (keepAdding) {
         // Stay open for the next one; fields set by hand carry over.
         setIsSubmitting(false);
@@ -216,12 +226,14 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
           </div>
         </div>
 
+        <SavedContext.Provider value={saved}>
         <div className="flex-1 overflow-y-auto custom-scrollbar px-6 pt-3">
           {entityType === 'task' && <TaskForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} defaultFocus={defaultFocus} />}
           {entityType === 'event' && <EventForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} />}
           {entityType === 'reminder' && <ReminderForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} />}
           {entityType === 'milestone' && <MilestoneForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} />}
         </div>
+        </SavedContext.Provider>
       </motion.div>
     </div>
   );
@@ -335,7 +347,9 @@ const SharedReminderLead = ({ value, setValue }: { value: number | ''; setValue:
   </div>
 );
 
-const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled = false, keep }: any) => (
+const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled = false, keep }: any) => {
+  const saved = useContext(SavedContext);
+  return (
   <div className="sticky bottom-0 -mx-6 px-6 py-4 mt-6 border-t border-gray-100 dark:border-white/5 bg-white/90 dark:bg-[#1c1c1e]/90 backdrop-blur flex items-center justify-end gap-2 shrink-0">
     {keep ? (
       <label className="mr-auto flex items-center gap-2 whitespace-nowrap text-[12.5px] font-medium text-gray-500 dark:text-gray-400 cursor-pointer select-none" title="Stay open after saving so you can add the next one">
@@ -346,11 +360,13 @@ const FooterActions = ({ isSubmitting, onCancel, label = 'Create Item', disabled
       <span className="mr-auto hidden sm:flex items-center gap-1.5 text-[12px] text-gray-400"><kbd className="kbd">Esc</kbd> to close</span>
     )}
     <button type="button" onClick={onCancel} disabled={isSubmitting} className="px-4 py-2 rounded-xl text-[14px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
-    <button type="submit" disabled={isSubmitting || disabled} className="px-5 py-2 min-w-[7.5rem] justify-center rounded-xl text-[14px] font-semibold bg-blue-600 text-white hover:bg-blue-700 active:scale-[0.98] disabled:opacity-50 disabled:active:scale-100 flex items-center gap-2 shadow-sm shadow-blue-600/25 transition-all">
-      {isSubmitting ? <Loader2 size={17} className="animate-spin" /> : label}
+    <button type="submit" disabled={isSubmitting || disabled} aria-busy={isSubmitting || undefined}
+      className={`px-5 py-2 min-w-[7.5rem] justify-center rounded-xl text-[14px] font-semibold text-white active:scale-[0.98] disabled:active:scale-100 flex items-center gap-2 shadow-sm transition-all ${saved ? 'bg-emerald-500 shadow-emerald-500/25' : 'bg-blue-600 hover:bg-blue-700 shadow-blue-600/25'} ${isSubmitting ? '' : 'disabled:opacity-50'}`}>
+      {isSubmitting ? <><SpinnerCheck done={saved} /><span className="sr-only">{saved ? 'Added' : 'Saving'}</span></> : label}
     </button>
   </div>
-);
+  );
+};
 
 // One-tap "when" choices for a task: the dates people pick most often.
 function whenOptions() {

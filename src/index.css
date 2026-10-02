@@ -32,6 +32,9 @@
   from { opacity: 0.55; transform: scale(1); }
   to { opacity: 0; transform: scale(2.4); }
 }
+@keyframes ring-spin {
+  to { transform: rotate(360deg); }
+}
 @keyframes check-draw {
   from { stroke-dashoffset: 24; }
   to { stroke-dashoffset: 0; }
@@ -363,8 +366,68 @@
     animation: check-ripple 560ms var(--ease-out-expo) forwards;
     pointer-events: none;
   }
+  /* Saving: the ring goes faint and an emerald arc runs round it until the
+     save lands, then [data-checked] takes over and the tick draws in. */
+  .check-ring[data-saving] {
+    border-color: rgb(16 185 129 / 0.22);
+    background-color: transparent;
+    color: transparent;
+    pointer-events: none;
+  }
+  .check-ring[data-saving]::after {
+    content: "";
+    position: absolute;
+    inset: -1.5px;
+    border-radius: 9999px;
+    border: 1.5px solid transparent;
+    border-top-color: var(--color-emerald-500);
+    border-right-color: var(--color-emerald-500);
+    animation: ring-spin 640ms linear infinite;
+  }
   .dark .check-ring {
     border-color: var(--color-gray-600);
+  }
+  .dark .check-ring[data-saving] {
+    border-color: rgb(52 211 153 / 0.22);
+  }
+  .dark .check-ring[data-saving]::after {
+    border-top-color: var(--color-emerald-400);
+    border-right-color: var(--color-emerald-400);
+  }
+
+  /* Same idea for buttons that save (Add Item): an arc spins, then closes into
+     a full ring as the tick draws (SpinnerCheck). */
+  .spin-check { overflow: visible; }
+  .spin-check circle,
+  .spin-check path {
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .spin-check circle {
+    stroke-dasharray: 30 100;
+    transform-box: fill-box;
+    transform-origin: center;
+    transition: stroke-dasharray 320ms var(--ease-out-expo);
+  }
+  .spin-check path {
+    stroke-dasharray: 100;
+    stroke-dashoffset: 100;
+  }
+  .spin-check[data-state="saving"] circle {
+    animation: ring-spin 640ms linear infinite;
+  }
+  .spin-check[data-state="done"] {
+    animation: check-pop 420ms var(--ease-spring);
+  }
+  .spin-check[data-state="done"] circle {
+    stroke-dasharray: 100 0;
+  }
+  .spin-check[data-state="done"] path {
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset 300ms 140ms var(--ease-out-expo);
   }
   .dark .check-ring:hover {
     border-color: var(--color-emerald-400);

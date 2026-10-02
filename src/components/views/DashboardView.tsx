@@ -84,7 +84,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
   }, [loadAttentionData]);
   useDataChanges(loadAttentionData);
 
-  const { complete: handleComplete, isCompleting } = useCompletion(loadAttentionData);
+  const { complete: handleComplete, isCompleting, isSaving } = useCompletion(loadAttentionData);
 
   const handleAddToFocus = async (itemId: string) => {
     const item = [...(data?.dueToday || []), ...(data?.quickWins || []), ...(data?.suggestions || []), ...(data?.needsAttention || [])].find((i: WorkItem) => i.id === itemId);
@@ -255,7 +255,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                   </span>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
-                  <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                  <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
                   <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
                 </div>
               </div>
@@ -363,7 +363,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                     <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
                       {index + 1}
                     </span>
-                    <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                    <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
                     <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
                       {item.title}
                     </span>
@@ -399,7 +399,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 onClick={() => onSelectTask(item.id)}
                 className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 md:cursor-grab md:active:cursor-grabbing ${isCompleting(item.id) ? 'is-completing' : ''}`}>
                 <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                  <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
                   <div className="min-w-0 flex-1">
                     <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
                     <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? 'Due today' : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
@@ -437,7 +437,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 draggable={!item.isFocus}
                 onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
                 className={`p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
-                <CompleteButton className="ml-0.5" checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                <CompleteButton className="ml-0.5" checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
                 <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
                   {item.title}
                 </span>

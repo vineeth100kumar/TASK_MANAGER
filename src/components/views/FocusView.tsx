@@ -43,7 +43,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
   }, [lifeContext]);
   useDataChanges(loadFocus);
 
-  const { complete, isCompleting } = useCompletion(loadFocus);
+  const { complete, isCompleting, isSaving } = useCompletion(loadFocus);
 
   const handleRemoveFocus = async (itemId: string, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -139,7 +139,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                   {index + 1}
                 </span>
 
-                <CompleteButton size="lg" checked={isCompleting(item.id)} onComplete={() => complete(item)} />
+                <CompleteButton size="lg" checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => complete(item)} />
 
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
                   {index === 0 && <span className="block text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 mb-0.5">Up next</span>}

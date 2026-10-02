@@ -24,13 +24,17 @@ interface ListViewProps {
 
 export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
   const { showToast } = useToast();
-  // Ticks fill at once; the status change follows once the pop has played.
+  // Ticks spin briefly, then fill; the status change follows once the pop has played.
   const [pressed, setPressed] = useState<Set<string>>(() => new Set());
+  const [spinning, setSpinning] = useState<Set<string>>(() => new Set());
+  const drop = (set: Set<string>, id: string) => { const next = new Set(set); next.delete(id); return next; };
   const completeSoon = (task: WorkItem) => {
     setPressed(prev => new Set(prev).add(task.id));
+    setSpinning(prev => new Set(prev).add(task.id));
+    setTimeout(() => setSpinning(prev => drop(prev, task.id)), 320);
     setTimeout(() => {
-      Promise.resolve(onTransition(task, 'done')).catch(() => {}).finally(() => setPressed(prev => { const next = new Set(prev); next.delete(task.id); return next; }));
-    }, 380);
+      Promise.resolve(onTransition(task, 'done')).catch(() => {}).finally(() => setPressed(prev => drop(prev, task.id)));
+    }, 700);
   };
 
   const snoozeToTomorrow = async (task: WorkItem) => {
@@ -68,7 +72,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   {task.entityType === 'task' ? (
                     <>
                       {task.status !== 'done' && (
-                        <CompleteButton checked={pressed.has(task.id)} onComplete={() => completeSoon(task)} />
+                        <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
                       )}
                       {task.status === 'done' && <CheckCircle size={20} strokeWidth={2.5} className="text-emerald-500" />}
                     </>
