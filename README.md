@@ -34,13 +34,20 @@ sudo deploy/install_pi.sh            # --no-lumo, --no-autosync, --user <name>
 
 The installer writes `/etc/sage/sage.env` (with a new `API_SECRET` if there
 isn't one), creates both venvs, builds the web app, and installs the `sage`,
-`lumo`, `lumo-obex` and `sage-autosync` units. Open `http://<pi>:8000`, then
+`lumo`, `lumo-obex` and `sage-autosync` units. Open the Sage link from `deploy/setup_tunnel.sh` (or `http://localhost:8000` on the Pi), then
 enter the key from `sudo grep API_SECRET /etc/sage/sage.env` under
 Settings > Server & Reset.
 
 `sage-autosync` pulls `main` every 30 seconds and restarts only the service
 whose folder changed, so merge through pull requests rather than pushing
-straight to `main`.
+straight to `main`. It runs as your user, not root (a sudoers rule lets it
+restart just `sage` and `lumo`). If a step fails, such as a network blip during
+`pip` or a broken build, it tries again five minutes later and keeps the old
+web app running meanwhile.
+
+Sage listens on the Pi only (`127.0.0.1:8000`), so the PIN and login cookie
+never cross the home network in plain http. Use your tunnel or Tailscale link,
+or set `SAGE_BIND=0.0.0.0` in `/etc/sage/sage.env` to open it on the LAN.
 
 ### Reach it from anywhere
 

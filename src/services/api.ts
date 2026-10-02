@@ -10,7 +10,7 @@
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
-import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes } from '../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
 import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/recurrence';
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
@@ -966,7 +966,7 @@ export const api = {
         who: payload.who,
         about: payload.about || '',
         followUpDate: payload.followUpDate || '',
-        sinceDate: new Date().toISOString().split('T')[0]
+        sinceDate: localDateString()
       } : null;
 
       return api.workItems.updateDetails(id, {
@@ -982,7 +982,7 @@ export const api = {
     getTodayAttention: async (lifeContext?: LifeContext): Promise<any> => {
       await initializeStore();
       const now = new Date();
-      const today = now.toISOString().split('T')[0];
+      const today = localDateString(now);
       const nowIso = now.toISOString();
 
       const items = state.workItems.filter(i => 
@@ -1146,19 +1146,19 @@ export const api = {
   },
 
   clearAllData: async (): Promise<void> => {
-    try {
-      const fetchUrl = getGasUrl('clearAll');
-      await fetch(fetchUrl, {
-        method: 'POST',
-        // text/plain keeps this a simple request; application/json makes the browser
-        // send a CORS preflight, which Apps Script rejects.
-        headers: syncHeaders({ 'Content-Type': 'text/plain;charset=utf-8' }),
-        body: JSON.stringify({ action: 'clearAll' })
-      });
-    } catch (e) {
-      console.error('Failed to clear cloud database', e);
-    }
-    
+    // The Pi saves a backup before it clears, and refuses without the word
+    // below. If it refuses or can't be reached, nothing is wiped here either:
+    // clearing only this device would let the next sync bring everything back.
+    const fetchUrl = getGasUrl('clearAll');
+    const response = await fetch(fetchUrl, {
+      method: 'POST',
+      // text/plain keeps this a simple request; application/json makes the browser
+      // send a CORS preflight, which Apps Script rejects.
+      headers: syncHeaders({ 'Content-Type': 'text/plain;charset=utf-8' }),
+      body: JSON.stringify({ action: 'clearAll', confirm: 'DELETE' })
+    });
+    if (!response.ok) throw new Error(`The server didn't clear its data (HTTP ${response.status}), so nothing was cleared.`);
+
     await clearAllStores();
     state = {
       workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: []

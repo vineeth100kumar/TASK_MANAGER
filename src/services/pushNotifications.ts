@@ -18,6 +18,7 @@ export type PushState =
 
 export interface NotifyPrefs {
   timezone: string;
+  timezoneChosen: boolean;
   reminders: boolean;
   morningPlan: boolean;
   morningTime: string;

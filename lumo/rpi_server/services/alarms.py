@@ -17,7 +17,7 @@ import logging
 from typing import Optional
 
 from config import SAGE_ALARM_TAG
-from services.sage_client import now_local
+from services.sage_client import now_local, to_local_naive
 
 logger = logging.getLogger("AlarmManager")
 
@@ -30,7 +30,7 @@ def _parse(value: Optional[str]) -> Optional[datetime.datetime]:
     if not value:
         return None
     try:
-        return datetime.datetime.fromisoformat(value)
+        return to_local_naive(datetime.datetime.fromisoformat(value.replace("Z", "+00:00")))
     except (TypeError, ValueError):
         return None
 

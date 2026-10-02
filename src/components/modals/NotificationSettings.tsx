@@ -189,7 +189,16 @@ export function NotificationSettings() {
               onChange={e => e.target.value && update({ eveningTime: e.target.value })} />
             <Toggle label="Evening check-in" on={prefs.eveningCheckIn} onChange={on => update({ eveningCheckIn: on })} />
           </Row>
-          <p className="text-xs text-gray-400">Times are in {prefs.timezone.replace(/_/g, ' ')}.</p>
+          <Row title="Time zone" hint="Used for reminders, the plan and LUMO's alarms">
+            <input list="sage-timezones" className="field !w-[11rem] !py-1 !px-2 text-sm" defaultValue={prefs.timezone} key={prefs.timezone}
+              onBlur={e => { const v = e.target.value.trim(); if (v && v !== prefs.timezone) update({ timezone: v }); }} />
+            <datalist id="sage-timezones">
+              {((Intl as any).supportedValuesOf ? (Intl as any).supportedValuesOf('timeZone') as string[] : []).map(z => <option key={z} value={z} />)}
+            </datalist>
+          </Row>
+          {(() => { const here = Intl.DateTimeFormat().resolvedOptions().timeZone; return here && here !== prefs.timezone ? (
+            <button onClick={() => update({ timezone: here })} className="text-xs text-blue-600 dark:text-blue-400 font-semibold text-left">This device is in {here.replace(/_/g, ' ')}. Use it instead?</button>
+          ) : null; })()}
         </div>
       )}
 

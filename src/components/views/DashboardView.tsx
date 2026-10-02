@@ -8,7 +8,7 @@ import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
-import { formatDateRange } from '../../utils/dateUtils';
+import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
@@ -79,7 +79,12 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
   }, [lifeContext]);
 
   useEffect(() => {
-    const timer = setInterval(() => setTime(new Date()), 60_000);
+    let day = getTodayString();
+    const timer = setInterval(() => {
+      setTime(new Date());
+      // Left open overnight, Today's lists were still yesterday's.
+      if (getTodayString() !== day) { day = getTodayString(); loadAttentionData(); }
+    }, 60_000);
     loadAttentionData();
     return () => clearInterval(timer);
   }, [loadAttentionData]);
@@ -149,7 +154,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
   const needsAttention: WorkItem[] = (data.needsAttention || []).filter((i: WorkItem) => !suggestedIds.has(i.id) && !i.isFocus);
   const quickWins: WorkItem[] = (data.quickWins || []).filter((i: WorkItem) => !suggestedIds.has(i.id));
   const hasQuickWins = quickWins.length > 0;
-  const todayIso = new Date().toISOString().split('T')[0];
+  const todayIso = getTodayString();
 
   // Today's progress: what got done vs what's still in Focus or scheduled.
   const doneToday: number = data.doneToday || 0;

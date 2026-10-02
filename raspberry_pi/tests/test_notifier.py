@@ -172,6 +172,16 @@ class SchedulerTests(unittest.TestCase):
         html_part = msg.get_body(("html",)).get_content()
         self.assertIn("Ship &lt;report&gt;", html_part)
 
+    def test_email_refuses_to_log_in_without_starttls(self):
+        notifier.save_smtp_password("abcd efgh ijkl mnop")
+        prefs = notifier.get_prefs()
+        with mock.patch("smtplib.SMTP") as smtp:
+            session = smtp.return_value.__enter__.return_value
+            session.has_extn.return_value = False
+            with self.assertRaises(RuntimeError):
+                notifier.send_email(prefs, "Subject", "text", "<p>html</p>")
+        session.login.assert_not_called()
+
     def test_prefs_are_validated(self):
         with self.assertRaises(ValueError):
             notifier.save_prefs({"timezone": "Mars/Base"})

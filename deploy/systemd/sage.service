@@ -7,7 +7,12 @@ Wants=network-online.target
 Type=simple
 User=@USER@
 WorkingDirectory=@REPO@/raspberry_pi
-ExecStart=@REPO@/raspberry_pi/venv/bin/python -m uvicorn db_server:app --host 0.0.0.0 --port 8000
+# Only this Pi can reach port 8000: the tunnel, Tailscale Funnel and LUMO all
+# connect from here. Plain http on the home network would send the PIN and
+# login cookie unencrypted. To open it to the LAN, set SAGE_BIND=0.0.0.0 in
+# /etc/sage/sage.env and restart sage.
+Environment=SAGE_BIND=127.0.0.1
+ExecStart=@REPO@/raspberry_pi/venv/bin/python -m uvicorn db_server:app --host ${SAGE_BIND} --port 8000
 Restart=always
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1

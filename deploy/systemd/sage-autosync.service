@@ -5,6 +5,8 @@ Wants=network-online.target
 
 [Service]
 Type=simple
+# Not root: it only needs sudo for restarting sage and lumo (see install_pi.sh).
+User=@USER@
 ExecStart=@REPO@/deploy/auto_sync.sh
 Environment=SAGE_REPO=@REPO@
 Environment=SAGE_USER=@USER@

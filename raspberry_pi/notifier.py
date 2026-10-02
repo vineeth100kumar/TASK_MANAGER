@@ -45,6 +45,10 @@ DIGEST_GRACE = datetime.timedelta(hours=3)
 
 DEFAULT_PREFS: Dict[str, Any] = {
     "timezone": "UTC",
+    # False until a time zone was picked on purpose in Settings. Until then the
+    # first device to turn notifications on sets it; after that no device's
+    # clock moves it (a laptop left on UTC used to shift every reminder).
+    "timezoneChosen": False,
     "reminders": True,
     "morningPlan": True,
     "morningTime": "08:00",
@@ -116,6 +120,9 @@ def get_prefs() -> dict:
         saved = json.loads(row[0]) if row else {}
     except ValueError:
         saved = {}
+    # Installs from before the setting existed already hold a real zone.
+    if "timezoneChosen" not in saved and saved.get("timezone") not in (None, "UTC"):
+        saved["timezoneChosen"] = True
     return _merge(DEFAULT_PREFS, saved)
 
 
@@ -128,7 +135,10 @@ def _valid_time(value: Any) -> bool:
 
 
 def save_prefs(update: dict) -> dict:
-    prefs = _merge(get_prefs(), update or {})
+    update = dict(update or {})
+    if "timezone" in update and "timezoneChosen" not in update:
+        update["timezoneChosen"] = True  # picked in Settings
+    prefs = _merge(get_prefs(), update)
     try:
         ZoneInfo(str(prefs["timezone"]))
     except (ZoneInfoNotFoundError, ValueError):
@@ -338,9 +348,12 @@ def send_email(prefs: dict, subject: str, text: str, html_body: str) -> None:
     else:
         with smtplib.SMTP(email["smtpHost"], port, timeout=20) as smtp:
             smtp.ehlo()
-            if smtp.has_extn("starttls"):
-                smtp.starttls(context=context)
-                smtp.ehlo()
+            # Never log in over a plain connection: the app password would
+            # cross the network readable by anyone in the path.
+            if not smtp.has_extn("starttls"):
+                raise RuntimeError("The mail server doesn't offer an encrypted connection (STARTTLS), so Sage won't send the password to it.")
+            smtp.starttls(context=context)
+            smtp.ehlo()
             smtp.login(user, smtp_password())
             smtp.send_message(msg)
 
