@@ -1,4 +1,8 @@
 
+import { useEffect, useState } from 'react';
+import { api } from '../../services/api';
+import { useDataChanges } from '../../hooks/useDataChanges';
+
 interface FilterBarProps {
   filters: any;
   setFilters: (filters: any) => void;
@@ -6,6 +10,11 @@ interface FilterBarProps {
 }
 
 export function FilterBar({ filters, setFilters, entityTypeCounts = {} }: FilterBarProps) {
+  const [tags, setTags] = useState<{ tag: string; count: number }[]>([]);
+  const loadTags = () => { api.workItems.allTags().then(setTags).catch(() => {}); };
+  useEffect(loadTags, []);
+  useDataChanges(loadTags);
+  const currentTag = filters.tag || '';
   const currentType = filters.entityType || 'all';
   const currentPriority = filters.priority || 'all';
   const currentStatus = filters.status || 'all';
@@ -57,9 +66,19 @@ export function FilterBar({ filters, setFilters, entityTypeCounts = {} }: Filter
         {statuses.map(s => <option key={s.id} value={s.id} className="text-gray-900">{s.label}</option>)}
       </select>
 
+      {/* Tag filter: only once some item has a tag */}
+      {(tags.length > 0 || currentTag) && (
+        <select value={currentTag} onChange={e => setFilters({ ...filters, tag: e.target.value })} aria-label="Filter by tag"
+          className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/5 text-gray-700 dark:text-gray-300 outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 font-semibold">
+          <option value="" className="text-gray-900">All tags</option>
+          {currentTag && !tags.some(t => t.tag === currentTag) && <option value={currentTag} className="text-gray-900">#{currentTag}</option>}
+          {tags.map(t => <option key={t.tag} value={t.tag} className="text-gray-900">#{t.tag} ({t.count})</option>)}
+        </select>
+      )}
+
       {/* Reset filters if any active */}
-      {(currentType !== 'all' || currentPriority !== 'all' || currentStatus !== 'all' || filters.search) && (
-        <button onClick={() => setFilters({ search: '', entityType: 'all', priority: 'all', status: 'all' })}
+      {(currentType !== 'all' || currentPriority !== 'all' || currentStatus !== 'all' || currentTag || filters.search) && (
+        <button onClick={() => setFilters({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' })}
           className="text-blue-600 dark:text-blue-400 font-bold px-2 py-1 hover:underline">
           Reset Filters
         </button>

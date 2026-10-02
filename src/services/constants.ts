@@ -19,19 +19,18 @@ export const WORK_ITEM_TYPES = {
 };
 
 export const STATUSES = {
-  todo: { id: 'todo', label: 'To Do', color: 'bg-gray-200/50 text-gray-700 dark:bg-white/10 dark:text-gray-300', dot: 'bg-gray-400' },
-  in_progress: { id: 'in_progress', label: 'In Progress', color: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400', dot: 'bg-blue-500' },
-  in_review: { id: 'in_review', label: 'In Review', color: 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-400', dot: 'bg-purple-500' },
+  todo: { id: 'todo', label: 'To do', color: 'bg-gray-200/50 text-gray-700 dark:bg-white/10 dark:text-gray-300', dot: 'bg-gray-400' },
+  in_progress: { id: 'in_progress', label: 'Doing', color: 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400', dot: 'bg-blue-500' },
   done: { id: 'done', label: 'Done', color: 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-400', dot: 'bg-emerald-500' },
-  blocked: { id: 'blocked', label: 'Blocked', color: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400', dot: 'bg-red-500' },
+  blocked: { id: 'blocked', label: 'Waiting', color: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400', dot: 'bg-red-500' },
 };
 
+// A personal list has no workflow to enforce: an item can move to any status.
 export const ALLOWED_TRANSITIONS = {
-  todo: ['in_progress', 'blocked'],
-  in_progress: ['in_review', 'blocked', 'todo'],
-  in_review: ['done', 'in_progress', 'blocked'],
-  done: ['in_progress'],
-  blocked: ['todo', 'in_progress']
+  todo: ['in_progress', 'blocked', 'done'],
+  in_progress: ['todo', 'blocked', 'done'],
+  done: ['todo', 'in_progress', 'blocked'],
+  blocked: ['todo', 'in_progress', 'done']
 };
 
 export const PRIORITIES = {
@@ -41,10 +40,16 @@ export const PRIORITIES = {
   urgent: { id: 'urgent', label: 'Urgent', color: 'text-red-500' },
 };
 
+// Tags offered before you have used any of your own.
 export const LABELS = [
-  { id: 'lbl_backend', name: 'backend', color: 'bg-blue-100 text-blue-700' },
-  { id: 'lbl_frontend', name: 'frontend', color: 'bg-amber-100 text-amber-700' },
-  { id: 'lbl_urgent', name: 'urgent', color: 'bg-red-100 text-red-700' },
+  { id: 'lbl_errands', name: 'errands', color: 'bg-amber-100 text-amber-700' },
+  { id: 'lbl_home', name: 'home', color: 'bg-blue-100 text-blue-700' },
+  { id: 'lbl_health', name: 'health', color: 'bg-emerald-100 text-emerald-700' },
+  { id: 'lbl_money', name: 'money', color: 'bg-purple-100 text-purple-700' },
+  { id: 'lbl_calls', name: 'calls', color: 'bg-pink-100 text-pink-700' },
 ];
+
+// Focus is for the few things you'll really do today.
+export const FOCUS_LIMIT = 5;
 
 export const uuid = () => crypto.randomUUID ? crypto.randomUUID() : `uuid-${Math.random().toString(36).substring(2, 9)}`;

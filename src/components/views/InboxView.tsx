@@ -101,8 +101,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       await api.focus.toggle(item.id);
       showToast(item.isFocus ? 'Removed from Focus' : 'Added to Focus');
       loadInbox();
-    } catch (err) {
+    } catch (err: any) {
       console.error(err);
+      showToast(err.message || 'Could not change Focus', 'error');
     }
   };
 

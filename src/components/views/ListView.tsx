@@ -114,6 +114,9 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                         {task.estimated}
                       </span>
                     )}
+                    {(task.labels || []).slice(0, 2).map((tag: string) => (
+                      <span key={tag} className="hidden sm:inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500">#{tag}</span>
+                    ))}
                     {dateStr && (
                       <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
                         <CalendarIcon size={14}/> {dateStr}

@@ -144,7 +144,7 @@ export function Header({
 
         <div className="hidden md:flex items-center h-9 px-3 rounded-xl bg-gray-100/80 dark:bg-white/5 border border-transparent transition-all duration-300 ease-[cubic-bezier(0.16,1,0.3,1)] w-44 lg:w-60 focus-within:w-56 lg:focus-within:w-72 hover:bg-gray-100 dark:hover:bg-white/[0.07] focus-within:bg-white dark:focus-within:bg-white/[0.08] focus-within:border-blue-500/40 focus-within:ring-4 focus-within:ring-blue-500/10">
           <Search size={15} className="text-gray-400 shrink-0" />
-          <input type="text" placeholder="Search items..." value={filters.search} onChange={handleSearchChange} className="w-full bg-transparent border-none focus:ring-0 text-[13px] ml-2 outline-none text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500" />
+          <input type="text" placeholder="Search items..." value={filters.search} onChange={handleSearchChange} onKeyDown={e => { if (e.key === 'Escape') { setFilters({ ...filters, search: '' }); (e.target as HTMLInputElement).blur(); } }} className="w-full bg-transparent border-none focus:ring-0 text-[13px] ml-2 outline-none text-gray-900 dark:text-white placeholder:text-gray-400 dark:placeholder:text-gray-500" />
           {!filters.search && <kbd className="kbd ml-1 shrink-0">/</kbd>}
         </div>
 

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
 import { api } from '../../services/api';
@@ -26,13 +26,21 @@ interface TaskInspectorProps {
   onTransition: (task: any, newStatus: string) => Promise<void>;
   onUpdateDetails: (task: any, updates: any) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
+  /** Shows everything with this tag (and closes the panel). */
+  onFilterTag?: (tag: string) => void;
 }
 
-export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, onDelete }: TaskInspectorProps) {
+export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, onDelete, onFilterTag }: TaskInspectorProps) {
   const { showToast } = useToast();
+  // The parent passes a new onClose on every render. Reading it through a ref
+  // keeps loadData stable, so the panel isn't reloaded (and a half-typed
+  // description wiped) each time the app re-renders.
+  const latest = useRef({ onClose, showToast });
+  latest.current = { onClose, showToast };
   const [task, setTask] = useState<any>(null);
   const [comments, setComments] = useState<any[]>([]);
   const [subtasks, setSubtasks] = useState<any[]>([]);
+  const [popularTags, setPopularTags] = useState<string[]>([]);
   const [activities, setActivities] = useState<any[]>([]);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -74,16 +82,17 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
         setEditTitle(t.title);
         setEditDesc(t.description || '');
       }
+      api.workItems.allTags().then(tags => setPopularTags(tags.map(t => t.tag))).catch(() => {});
       setComments(cData); 
       setSubtasks(sData); 
       setActivities(aData);
     } catch (e) {
-      showToast("Failed to load details", "error");
-      onClose();
+      latest.current.showToast("Failed to load details", "error");
+      latest.current.onClose();
     } finally {
       if (isInitial) setLoading(false);
     }
-  }, [taskId, onClose, showToast]);
+  }, [taskId]);
 
   useEffect(() => { loadData(true); }, [loadData]);
   useDataChanges(() => loadData());
@@ -406,12 +415,15 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                   <div className="flex flex-wrap items-center gap-2 bg-white dark:bg-white/5 rounded-3xl border border-gray-200 dark:border-white/10 shadow-sm p-4">
                     {(task.labels || []).map((t: string) => (
                       <span key={t} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[12px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
-                        #{t}
+                        {onFilterTag
+                          ? <button type="button" onClick={() => onFilterTag(t)} title={`Show everything tagged #${t}`} className="hover:underline">#{t}</button>
+                          : <>#{t}</>}
                         <button onClick={async () => { await onUpdateDetails(task, { labels: (task.labels || []).filter((x: string) => x !== t) }); loadData(); }}><X size={11} /></button>
                       </span>
                     ))}
                     <TagAdder
                       existing={task.labels || []}
+                      popular={popularTags}
                       onAdd={async (tag: string) => { await onUpdateDetails(task, { labels: [...(task.labels || []), tag] }); loadData(); }}
                     />
                   </div>
@@ -471,14 +483,15 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
   );
 }
 
-function TagAdder({ existing, onAdd }: { existing: string[]; onAdd: (tag: string) => void }) {
+function TagAdder({ existing, popular, onAdd }: { existing: string[]; popular: string[]; onAdd: (tag: string) => void }) {
   const [draft, setDraft] = useState('');
   const commit = () => {
     const clean = draft.trim().toLowerCase().replace(/^#/, '');
     if (clean && !existing.includes(clean)) onAdd(clean);
     setDraft('');
   };
-  const suggestions = LABELS.filter(l => !existing.includes(l.name));
+  // Your own most used tags first, then the starter ones.
+  const suggestions = [...new Set([...popular, ...LABELS.map(l => l.name)])].filter(name => !existing.includes(name)).slice(0, 8);
   return (
     <div className="flex flex-wrap items-center gap-2">
       <input
@@ -489,9 +502,9 @@ function TagAdder({ existing, onAdd }: { existing: string[]; onAdd: (tag: string
         placeholder="Add a tag..."
         className="bg-transparent border-none outline-none text-[13px] font-medium min-w-[100px]"
       />
-      {suggestions.map(l => (
-        <button key={l.id} type="button" onClick={() => onAdd(l.name)} className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
-          + {l.name}
+      {suggestions.map(name => (
+        <button key={name} type="button" onClick={() => onAdd(name)} className="px-2 py-0.5 rounded-full text-[11px] font-semibold bg-gray-100 dark:bg-white/10 text-gray-500 hover:bg-gray-200">
+          + {name}
         </button>
       ))}
     </div>
