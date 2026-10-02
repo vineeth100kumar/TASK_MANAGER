@@ -106,6 +106,36 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(message["body"], "Ship report and Gym. Plus 1 overdue.")
         self.assertNotIn("morning:2026-10-01", notifier.run_once(utc(2026, 10, 1, 2, 40)))
 
+    def test_snoozed_items_are_not_reminded(self):
+        put_items({"id": "s", "title": "Later please", "remindAt": "2026-10-01T09:00", "snoozedUntil": "2026-10-01T05:00:00Z"})
+        notifier.save_prefs({"morningPlan": False})
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), [])
+
+    def test_reminder_says_the_time(self):
+        put_items({"id": "t", "title": "Call mom", "dueDate": "2026-10-01", "dueTime": "18:00", "remindAt": "2026-10-01T18:00"})
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        notifier.run_once(utc(2026, 10, 1, 12, 30))
+        self.assertEqual(self.pushed[0]["body"], "Due today at 6:00 PM")
+
+    def test_failed_send_is_retried(self):
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00"})
+        notifier.save_prefs({"morningPlan": False})
+        with mock.patch.object(notifier, "send_push", return_value=[{"ok": False, "error": "offline"}]):
+            self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), [])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 31)), ["remind:a:2026-10-01T09:00"])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 32)), [])
+
+    def test_morning_plan_lists_timed_items_in_order(self):
+        put_items(
+            {"id": "1", "title": "Untimed", "dueDate": "2026-10-01", "priority": "urgent"},
+            {"id": "2", "title": "Evening call", "dueDate": "2026-10-01", "dueTime": "18:00"},
+            {"id": "3", "title": "Standup", "entityType": "event", "startAt": "2026-10-01T09:30"},
+        )
+        due, _ = notifier.plan_for_today(notifier.open_items(), utc(2026, 10, 1, 2, 30).astimezone(notifier._tz(notifier.get_prefs())), notifier._tz(notifier.get_prefs()))
+        self.assertEqual([i["title"] for i in due], ["Standup", "Evening call", "Untimed"])
+        tz = notifier._tz(notifier.get_prefs())
+        self.assertEqual(notifier._describe(due[1], tz, utc(2026, 10, 1, 2, 30).astimezone(tz)), "6:00 PM · Evening call")
+
     def test_morning_plan_skips_an_empty_day(self):
         put_items({"id": "5", "title": "Later", "dueDate": "2026-10-05"})
         self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])

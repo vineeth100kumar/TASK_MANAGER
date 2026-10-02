@@ -58,11 +58,16 @@ export interface WorkItem {
   // Temporal fields
   startDate?: string | null; // YYYY-MM-DD
   dueDate?: string | null;   // YYYY-MM-DD
+  dueTime?: string | null;   // HH:mm, a task's time of day; null means any time that day
   startAt?: string | null;   // ISO Datetime
   endAt?: string | null;     // ISO Datetime
   remindAt?: string | null;  // ISO Datetime
   reminderLeadMinutes?: number | null; // minutes before startAt/dueDate that remindAt was set for; null = no lead-based reminder
   repeatRule?: string | null;
+  // The next copy a repeating item made when it was done, and the item a copy came from,
+  // so undoing the completion can take the copy back.
+  spawnedNextId?: string | null;
+  spawnedFromId?: string | null;
   
   // Details & Logistics
   location?: string | null;

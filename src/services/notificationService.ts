@@ -8,6 +8,14 @@
 
 import { api } from './api';
 import { piBackendUrl } from './piBackend';
+import { WorkItem } from './types';
+import { formatTime } from '../utils/reminders';
+
+/** How late a missed reminder may still be shown, matching the Pi's grace. */
+const CATCH_UP_MS = 15 * 60 * 1000;
+
+const isSnoozedNow = (item: WorkItem, now: number) =>
+  !!item.snoozedUntil && new Date(item.snoozedUntil).getTime() > now;
 
 class NotificationService {
   private isSupported: boolean = false;
@@ -55,25 +63,24 @@ class NotificationService {
 
   private async checkDueReminders(): Promise<void> {
     try {
-      const now = new Date();
-      const nowTime = now.getTime();
-
+      const nowTime = Date.now();
       const state = api.sync.getState();
-      const activeItems = state.workItems.filter(i => !i.deletedAt && i.status !== 'done');
+      const activeItems = state.workItems.filter(i => !i.deletedAt && i.status !== 'done' && !isSnoozedNow(i, nowTime));
 
       for (const item of activeItems) {
-        // Check remindAt or startAt or dueDate
         const targetTimeStr = item.remindAt || item.startAt;
-        if (targetTimeStr) {
-          const targetTime = new Date(targetTimeStr).getTime();
-          // If within 1 minute window and not already notified
-          if (Math.abs(nowTime - targetTime) <= 60000 && !this.notifiedIds.has(item.id)) {
-            this.sendNotification(item.title, {
-              body: item.location ? `📍 ${item.location}` : `Due right now · ${item.entityType.toUpperCase()}`,
-              tag: item.id
-            });
-            this.notifiedIds.add(item.id);
-          }
+        if (!targetTimeStr) continue;
+        const targetTime = new Date(targetTimeStr).getTime();
+        // Keyed by time too, so a rescheduled reminder fires again.
+        const key = `${item.id}@${targetTimeStr}`;
+        // A reminder missed while the tab was asleep still shows if it is recent.
+        if (nowTime >= targetTime && nowTime - targetTime <= CATCH_UP_MS && !this.notifiedIds.has(key)) {
+          const time = item.dueTime ? ` at ${formatTime(item.dueTime)}` : '';
+          this.sendNotification(item.title, {
+            body: item.location ? `📍 ${item.location}` : item.entityType === 'event' ? 'Starting now' : `Due${time}`,
+            tag: item.id
+          });
+          this.notifiedIds.add(key);
         }
       }
     } catch (e) {

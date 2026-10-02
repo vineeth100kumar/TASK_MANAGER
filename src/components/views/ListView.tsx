@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { withTime } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
@@ -58,7 +59,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
         
         <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
-            const dateStr = formatDateRange(task.startDate, task.dueDate);
+            const dateStr = withTime(formatDateRange(task.startDate, task.dueDate), task.dueTime);
             const swipeable = task.entityType === 'task' && task.status !== 'done';
             return (
               <SwipeRow key={task.id}

@@ -10,7 +10,9 @@
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
-import { toInputDateValue, toInputDateTimeValue, parseDateString, parseEstimateMinutes } from '../utils/dateUtils';
+import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes } from '../utils/dateUtils';
+import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/recurrence';
+import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 
@@ -166,6 +168,40 @@ async function removeRecord(table: Table, id: string): Promise<void> {
   await deleteFromStore(table, id);
   syncEngine.enqueueOperation(table, id, 'delete', { id });
 }
+
+// The next copy of a repeating item: every date moved to the next occurrence,
+// and the per-copy state (inbox, focus, snooze, waiting) starting fresh.
+async function createNextOccurrence(item: WorkItem): Promise<WorkItem | null> {
+  const today = toDateKey(new Date());
+  const anchor = item.dueDate || item.startDate || (item.startAt ? item.startAt.slice(0, 10) : null);
+  const nextDue = nextOccurrence(item.repeatRule, anchor, today);
+  if (!nextDue) return null;
+  const delta = daysBetween(anchor || today, nextDue);
+  return api.workItems.create({
+    ...item,
+    status: 'todo',
+    completedAt: null,
+    actual: null,
+    startDate: shiftByDays(item.startDate, delta),
+    dueDate: item.dueDate ? shiftByDays(item.dueDate, delta) : (item.startAt ? null : nextDue),
+    startAt: shiftByDays(item.startAt, delta),
+    endAt: shiftByDays(item.endAt, delta),
+    // Lead-time reminders are recalculated from the new date; fixed ones move with it.
+    remindAt: item.reminderLeadMinutes == null ? shiftByDays(item.remindAt, delta) : null,
+    isInbox: false,
+    isFocus: false,
+    focusOrder: null,
+    snoozedUntil: null,
+    snoozeCount: 0,
+    waitingFor: null,
+    blockedReason: null,
+    spawnedNextId: null,
+    spawnedFromId: item.id
+  });
+}
+
+// Snoozed items stay out of every list until their time comes.
+const isSnoozed = (i: WorkItem) => !!i.snoozedUntil && new Date(i.snoozedUntil).getTime() > Date.now();
 
 let externalEntityListeners: Array<(entityType: string, changes: any[]) => void> = [];
 
@@ -350,11 +386,13 @@ export const api = {
         snoozeCount: payload.snoozeCount || 0,
         startDate: toInputDateValue(payload.startDate) || null,
         dueDate: toInputDateValue(payload.dueDate) || null,
+        dueTime: payload.dueTime || null,
         startAt: toInputDateTimeValue(payload.startAt) || null,
         endAt: toInputDateTimeValue(payload.endAt) || null,
         remindAt: toInputDateTimeValue(payload.remindAt) || null,
         reminderLeadMinutes: payload.reminderLeadMinutes ?? null,
         repeatRule: payload.repeatRule || null,
+        spawnedFromId: payload.spawnedFromId || null,
         location: payload.location || null,
         labels: payload.labels || [],
         customFields: payload.customFields || {},
@@ -365,6 +403,9 @@ export const api = {
         updatedAt: now,
         lastTouchedAt: now
       };
+      // A lead-time reminder ("30 min before") is worked out from the date and time.
+      const leadRemindAt = remindAtFor(newItem);
+      if (leadRemindAt !== undefined) newItem.remindAt = leadRemindAt;
 
       state.workItems.unshift(newItem);
       await persist('workItems', newItem);
@@ -397,6 +438,11 @@ export const api = {
         version: nextVersion,
         updatedAt: now
       };
+      // Rescheduling moves a lead-time reminder along with the item.
+      if (['dueDate', 'dueTime', 'startDate', 'startAt', 'reminderLeadMinutes', 'entityType'].some(k => k in updates)) {
+        const leadRemindAt = remindAtFor(updated);
+        if (leadRemindAt !== undefined) updated.remindAt = leadRemindAt;
+      }
 
       state.workItems[index] = updated;
       await persist('workItems', updated, nextVersion);
@@ -418,45 +464,35 @@ export const api = {
         ...existing,
         status: toStatus as any,
         blockedReason: isNowBlocked ? (existing.blockedReason || 'Waiting on external input') : (toStatus === 'done' ? null : existing.blockedReason),
+        // Kept through "done", so undoing it still knows who you were waiting on.
         waitingFor: isNowBlocked && !existing.waitingFor ? {
           who: 'External Party',
           about: existing.title,
           followUpDate: existing.dueDate || '',
           sinceDate: now.split('T')[0]
-        } : (toStatus === 'done' ? null : existing.waitingFor),
+        } : existing.waitingFor,
         completedAt: toStatus === 'done' ? now : null,
         version: nextVersion,
         updatedAt: now,
         lastTouchedAt: now
       };
 
-      state.workItems[index] = updated;
-      await persist('workItems', updated, nextVersion);
-
-      // Auto-Advancing Occurrence Engine for Recurring Tasks
-      if (toStatus === 'done' && existing.repeatRule) {
-        const rule = existing.repeatRule.toLowerCase().trim();
-        const baseDate = parseDateString(existing.dueDate || existing.startDate) || new Date();
-        const nextDate = new Date(baseDate);
-
-        if (rule === 'daily') nextDate.setDate(nextDate.getDate() + 1);
-        else if (rule === 'weekly') nextDate.setDate(nextDate.getDate() + 7);
-        else if (rule === 'monthly') nextDate.setMonth(nextDate.getMonth() + 1);
-
-        const y = nextDate.getFullYear();
-        const m = String(nextDate.getMonth() + 1).padStart(2, '0');
-        const d = String(nextDate.getDate()).padStart(2, '0');
-        const nextDateStr = `${y}-${m}-${d}`;
-
-        await api.workItems.create({
-          ...existing,
-          title: existing.title,
-          status: 'todo',
-          startDate: nextDateStr,
-          dueDate: nextDateStr,
-          completedAt: null
-        });
+      // Repeating items: finishing one makes the next copy, once. Undoing the
+      // finish takes that copy back, unless it has been changed since.
+      const priorCopy = existing.spawnedNextId
+        ? state.workItems.find(i => i && i.id === existing.spawnedNextId && !i.deletedAt) || null
+        : null;
+      if (toStatus === 'done' && existing.status !== 'done' && existing.repeatRule && !priorCopy) {
+        const copy = await createNextOccurrence(existing);
+        updated.spawnedNextId = copy ? copy.id : null;
+      } else if (toStatus !== 'done' && existing.status === 'done' && priorCopy && priorCopy.status !== 'done' && (priorCopy.version || 1) <= 1) {
+        await removeRecord('workItems', priorCopy.id);
+        updated.spawnedNextId = null;
       }
+
+      const at = state.workItems.findIndex(i => i && i.id === id);
+      state.workItems[at] = updated;
+      await persist('workItems', updated, nextVersion);
 
       return hydrateWorkItem(updated);
     },
@@ -842,7 +878,7 @@ export const api = {
   inbox: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.isInbox && i.status !== 'done');
+      let items = state.workItems.filter(i => i && !i.deletedAt && i.isInbox && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => i && (i.lifeContext || 'work') === lifeContext);
       }
@@ -861,7 +897,7 @@ export const api = {
   focus: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done');
+      let items = state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
       }
@@ -902,10 +938,14 @@ export const api = {
       const item = state.workItems.find(i => i && i.id === id);
       if (!item) throw new Error('Item not found');
 
+      // A reminder due while it's snoozed goes off when it comes back instead.
+      const until = new Date(untilIso);
+      const remindAt = item.remindAt && new Date(item.remindAt) < until ? toLocalDateTime(until) : undefined;
       return api.workItems.updateDetails(id, {
         snoozedUntil: untilIso,
         snoozeCount: (item.snoozeCount || 0) + 1,
-        lastTouchedAt: new Date().toISOString()
+        lastTouchedAt: new Date().toISOString(),
+        ...(remindAt ? { remindAt } : {})
       });
     }
   },
@@ -913,7 +953,7 @@ export const api = {
   waitingFor: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.waitingFor && i.status !== 'done');
+      let items = state.workItems.filter(i => i && !i.deletedAt && i.waitingFor && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
       }
@@ -967,7 +1007,7 @@ export const api = {
         i.dueDate === today || 
         (i.startDate && i.startDate <= today && i.dueDate && i.dueDate >= today) ||
         (i.startAt && i.startAt.startsWith(today))
-      ).map(hydrateWorkItem);
+      ).map(hydrateWorkItem).sort((a, b) => timeOfDay(a).localeCompare(timeOfDay(b)));
 
       // Reminders
       const reminders = activeItems.filter(i => 
@@ -999,7 +1039,7 @@ export const api = {
         (i.createdAt && i.createdAt < thresholdAgo && !i.lastTouchedAt)
       ).slice(0, 5).map(hydrateWorkItem);
 
-      const inboxCount = items.filter(i => i.isInbox && i.status !== 'done').length;
+      const inboxCount = items.filter(i => i.isInbox && i.status !== 'done' && !isSnoozed(i)).length;
 
       // What to work on when Focus is empty: overdue first, then the most
       // urgent, then the longest-waiting. Tasks only.

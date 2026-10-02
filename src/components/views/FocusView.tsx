@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { withTime } from '../../utils/reminders';
 import { AnimatePresence } from 'framer-motion';
 import { Target, ArrowUp, ArrowDown, Sparkles, X, Plus, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
@@ -149,7 +150,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                   <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[12px] text-gray-400 whitespace-nowrap">
                     <ContextTag item={item} combined={!lifeContext} />
                     <span className="uppercase font-semibold text-[11px] tracking-wide text-gray-400">{item.key}</span>
-                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {formatDateRange(null, item.dueDate)}</span>}
+                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
                     {item.project && <span>· {item.project.name}</span>}
                   </div>
                 </div>

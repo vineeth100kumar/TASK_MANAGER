@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { withTime } from '../../utils/reminders';
 import { Flag, CheckSquare, MessageSquare, Calendar as CalendarIcon, Check } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange } from '../../utils/dateUtils';
@@ -41,7 +42,7 @@ export function BoardView({ tasks, onSelect, onTransition }: BoardViewProps) {
             </div>
             <div className={`flex flex-col gap-3 surface p-3 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
               {columnTasks.map(task => {
-                const dateText = formatDateRange(task.startDate, task.dueDate);
+                const dateText = withTime(formatDateRange(task.startDate, task.dueDate), task.dueTime);
                 return (
                   <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
                     className="surface-item is-interactive p-4 rounded-2xl cursor-grab active:cursor-grabbing group outline-none focus:ring-2 focus:ring-blue-500/50">

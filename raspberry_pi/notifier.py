@@ -4,7 +4,7 @@ screen, Android, desktop browsers) and email through any SMTP account.
 
 The Pi decides when to notify, so alerts arrive while the app is closed:
   - reminders: an item's remindAt time (set from "Remind me" or a reminder's
-    own time), at most once per item per time
+    own time), at most once per item per time, and not while it is snoozed
   - morning plan: what's due today and what's overdue, at the time chosen in
     Settings
   - evening check-in: what's still open from today, only when something is
@@ -455,8 +455,7 @@ def plan_for_today(items: List[dict], now: datetime.datetime, tz: ZoneInfo) -> T
             overdue.append(item)
 
     def order(item):
-        start = parse_when(item.get("startAt"), tz)
-        return (start is None, start or now, PRIORITY_RANK.get(item.get("priority"), 2), item.get("title") or "")
+        return (_time_of_day(item, tz) or "99:99", PRIORITY_RANK.get(item.get("priority"), 2), item.get("title") or "")
 
     due.sort(key=order)
     overdue.sort(key=lambda i: (i.get("dueDate") or "", PRIORITY_RANK.get(i.get("priority"), 2)))
@@ -467,11 +466,32 @@ def _clock(when: datetime.datetime) -> str:
     return when.strftime("%I:%M %p").lstrip("0")
 
 
+def _due_time(item: dict) -> Optional[datetime.time]:
+    """A task's own time of day ("18:00"), if it has one."""
+    try:
+        return datetime.time.fromisoformat(str(item.get("dueTime") or ""))
+    except ValueError:
+        return None
+
+
+def _time_of_day(item: dict, tz: ZoneInfo) -> Optional[str]:
+    """"HH:MM" an item happens today: an event's start or a task's time."""
+    start = parse_when(item.get("startAt"), tz)
+    if start:
+        return start.astimezone(tz).strftime("%H:%M")
+    due_time = _due_time(item)
+    return due_time.strftime("%H:%M") if due_time else None
+
+
 def _describe(item: dict, tz: ZoneInfo, now: datetime.datetime) -> str:
+    title = item.get("title") or "Untitled"
     start = parse_when(item.get("startAt"), tz)
     if start and start.astimezone(tz).date() == now.date():
-        return f"{_clock(start.astimezone(tz))} · {item.get('title') or 'Untitled'}"
-    return item.get("title") or "Untitled"
+        return f"{_clock(start.astimezone(tz))} · {title}"
+    due_time = _due_time(item)
+    if due_time and item.get("dueDate") == now.date().isoformat():
+        return f"{_clock(datetime.datetime.combine(now.date(), due_time))} · {title}"
+    return title
 
 
 def _list_titles(items: List[dict], limit: int = 3) -> str:
@@ -499,7 +519,8 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
         when = "Starting now" if minutes <= 1 else f"Starts in {minutes} min" if minutes < 60 else f"Starts at {_clock(start)}"
         body = f"{when} · {item['location']}" if item.get("location") else when
     elif item.get("dueDate") == today:
-        body = "Due today"
+        due_time = _due_time(item)
+        body = f"Due today at {_clock(datetime.datetime.combine(now.date(), due_time))}" if due_time else "Due today"
     elif item.get("dueDate") == tomorrow:
         body = "Due tomorrow"
     elif item.get("dueDate") and item["dueDate"] < today:
@@ -525,13 +546,16 @@ def _today_at(now: datetime.datetime, hhmm: str) -> datetime.datetime:
     return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
-def _deliver(prefs: dict, message: dict, email: Optional[Tuple[str, str, str]]) -> None:
-    send_push(message, prefs=prefs)
+def _deliver(prefs: dict, message: dict, email: Optional[Tuple[str, str, str]]) -> bool:
+    """Sends a notification. True when at least one device or the email got it."""
+    delivered = any(r.get("ok") for r in send_push(message, prefs=prefs))
     if email and email_ready(prefs):
         try:
             send_email(prefs, *email)
+            delivered = True
         except Exception as e:
             print(f"Sage email failed: {e}")
+    return delivered
 
 
 def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
@@ -550,12 +574,11 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
         if prefs["reminders"]:
             for item in items:
                 when = parse_when(item.get("remindAt"), tz)
-                if not when or not (when <= now < when + REMINDER_GRACE):
+                if not when or not (when <= now < when + REMINDER_GRACE) or _is_snoozed(item, now, tz):
                     continue
                 key = f"remind:{item.get('id')}:{item.get('remindAt')}"
                 if _already_sent(conn, key):
                     continue
-                _mark_sent(conn, key)  # first, so a slow or failing send never repeats
                 message = reminder_message(item, tz, now)
                 email = None
                 if prefs["email"]["reminders"]:
@@ -565,8 +588,11 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                         email_text(message["title"], message["body"], [], link),
                         email_html(message["title"], message["body"], [], link),
                     )
-                _deliver(prefs, message, email)
-                sent.append(key)
+                # Only marked once it got through, so a failed send is tried
+                # again on the next pass while the reminder is still recent.
+                if _deliver(prefs, message, email):
+                    _mark_sent(conn, key)
+                    sent.append(key)
 
         due, overdue = plan_for_today(items, now, tz)
         day = now.date().isoformat()
@@ -574,8 +600,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
         morning = _today_at(now, prefs["morningTime"])
         key = f"morning:{day}"
         if prefs["morningPlan"] and morning <= now < morning + DIGEST_GRACE and not _already_sent(conn, key):
-            _mark_sent(conn, key)
-            if due or overdue:
+            if not (due or overdue):
+                _mark_sent(conn, key)  # nothing to say today
+            else:
                 title = f"Today: {_plural(len(due), 'thing')} planned" if due else f"{_plural(len(overdue), 'thing')} overdue"
                 body = _list_titles(due or overdue)
                 if due and overdue:
@@ -588,16 +615,18 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     intro = "Here's what's on your plate. Pick one and start there."
                     heading = now.strftime("%A, %B %-d")
                     email = (f"Your plan for {now.strftime('%A')}: {title.split(': ')[-1]}", email_text(heading, intro, sections, link), email_html(heading, intro, sections, link))
-                _deliver(prefs, message, email)
-                sent.append(key)
+                if _deliver(prefs, message, email):
+                    _mark_sent(conn, key)
+                    sent.append(key)
 
         evening = _today_at(now, prefs["eveningTime"])
         key = f"evening:{day}"
         if prefs["eveningCheckIn"] and evening <= now < evening + DIGEST_GRACE and not _already_sent(conn, key):
-            _mark_sent(conn, key)
             # Only things due today: overdue items already had their nudge this morning.
             still_open = [i for i in due if i.get("entityType") != "event"]
-            if still_open:
+            if not still_open:
+                _mark_sent(conn, key)
+            else:
                 message = {
                     "title": f"{_plural(len(still_open), 'thing')} still open from today",
                     "body": f"{_list_titles(still_open)}. Finish one, or move it to tomorrow.",
@@ -605,8 +634,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     "url": "/",
                     "ttl": 3 * 3600,
                 }
-                _deliver(prefs, message, None)
-                sent.append(key)
+                if _deliver(prefs, message, None):
+                    _mark_sent(conn, key)
+                    sent.append(key)
 
         cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
         conn.execute("DELETE FROM notification_log WHERE sent_at < ?", (cutoff,))

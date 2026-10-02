@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { withTime } from '../../utils/reminders';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Target, CalendarDays, Hourglass, Trash2, Check, SkipForward, PartyPopper } from 'lucide-react';
 import { api } from '../../services/api';
@@ -179,7 +180,7 @@ export function InboxTriage({ items, onClose, onChanged }: InboxTriageProps) {
               <h3 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white leading-snug break-words">{item.title}</h3>
               <div className="mt-1.5 flex flex-wrap items-center gap-x-2 text-[13px] text-gray-400">
                 <span>Captured {new Date(item.createdAt).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}</span>
-                {item.dueDate && <span>· {formatDateRange(null, item.dueDate)}</span>}
+                {item.dueDate && <span>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
                 {item.isFocus && <span className="text-amber-500">· In Focus</span>}
               </div>
               {item.description && <p className="mt-3 text-[14px] text-gray-600 dark:text-gray-300 line-clamp-3">{item.description}</p>}
