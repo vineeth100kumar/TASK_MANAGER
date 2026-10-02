@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Trash2, Search, FileText } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note } from '../../services/types';
@@ -17,20 +17,33 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   const [activeTitle, setActiveTitle] = useState('');
   const [activeContent, setActiveContent] = useState('');
   const { showToast } = useToast();
+  // When this editor last changed the open note, so a sync arriving mid-typing
+  // doesn't replace what is being typed.
+  const lastTypedAt = useRef(0);
 
   const loadNotes = async () => {
-    const list = await api.notes.list();
+    // Notes from before work/personal existed have no context and show under both.
+    const list = (await api.notes.list()).filter(n => !lifeContext || !n.lifeContext || n.lifeContext === lifeContext);
     setNotes(list);
-    if (list.length > 0 && !selectedNoteId) {
+    const open = list.find(n => n.id === selectedNoteId);
+    if (!open && list.length > 0) {
       setSelectedNoteId(list[0].id);
       setActiveTitle(list[0].title);
       setActiveContent(list[0].content || '');
+    } else if (!open) {
+      setSelectedNoteId(null);
+      setActiveTitle('');
+      setActiveContent('');
+    } else if (Date.now() - lastTypedAt.current > 2000) {
+      // Show edits made to this note on another device.
+      setActiveTitle(open.title);
+      setActiveContent(open.content || '');
     }
   };
 
   useEffect(() => {
     loadNotes();
-  }, []);
+  }, [lifeContext]);
   useDataChanges(loadNotes);
 
   const selectedNote = notes.find(n => n.id === selectedNoteId);
@@ -45,7 +58,8 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   const handleCreateNote = async () => {
     const newNote = await api.notes.create({
       title: 'New Note',
-      content: ''
+      content: '',
+      lifeContext
     });
     setNotes(prev => [newNote, ...prev]);
     setSelectedNoteId(newNote.id);
@@ -56,6 +70,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
 
   const handleTitleChange = (val: string) => {
     setActiveTitle(val);
+    lastTypedAt.current = Date.now();
     if (selectedNoteId) {
       setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, title: val } : n));
       api.notes.update(selectedNoteId, { title: val });
@@ -64,6 +79,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
 
   const handleContentChange = (val: string) => {
     setActiveContent(val);
+    lastTypedAt.current = Date.now();
     if (selectedNoteId) {
       setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, content: val } : n));
       api.notes.update(selectedNoteId, { content: val });

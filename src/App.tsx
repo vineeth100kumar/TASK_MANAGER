@@ -29,7 +29,6 @@ import { ProjectMapView } from './components/project-map/ProjectMapView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
 import { SettingsModal } from './components/modals/SettingsModal';
-import { ConflictResolutionModal } from './components/modals/ConflictResolutionModal';
 import { FilterBar } from './components/common/FilterBar';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
@@ -69,7 +68,6 @@ function MainApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
-  const [activeConflict, setActiveConflict] = useState<any>(null);
 
   const { showToast, dismissToast, toasts } = useToast();
 
@@ -106,7 +104,7 @@ function MainApp() {
     transition.finished.finally(() => root.classList.remove('theme-switching'));
   }, []);
 
-  // Handle Responsive Sidebar, Reminder Watcher, Conflict & Entity Sync Listeners
+  // Handle Responsive Sidebar, Reminder Watcher & Entity Sync Listeners
   useEffect(() => {
     if (window.innerWidth < 768) {
       setIsSidebarOpen(false);
@@ -128,8 +126,9 @@ function MainApp() {
     };
     navigator.serviceWorker?.addEventListener('message', onWorkerMessage);
 
-    const unsubConflict = api.sync.onConflict((c: any) => {
-      setActiveConflict(c);
+    // Another device deleted or more recently changed something edited here.
+    const unsubOverruled = api.sync.onOverruled((e) => {
+      showToast(e.reason === 'deleted' ? 'That was deleted on another device' : 'Kept the newer copy from another device', 'info');
     });
 
     const unsubEntity = api.sync.onEntityChange(() => {
@@ -153,7 +152,7 @@ function MainApp() {
     }
 
     return () => {
-      unsubConflict();
+      unsubOverruled();
       unsubEntity();
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
     };
@@ -400,19 +399,6 @@ function MainApp() {
       <AnimatePresence>
         {selectedItemId && (
           <TaskInspector taskId={selectedItemId} onClose={() => setSelectedItemId(null)} onTransition={handleTransitionStatus} onUpdateDetails={handleUpdateItemDetails} onDelete={handleSoftDelete} />
-        )}
-      </AnimatePresence>
-
-      <AnimatePresence>
-        {activeConflict && (
-          <ConflictResolutionModal
-            conflict={activeConflict}
-            onResolved={() => {
-              setActiveConflict(null);
-              fetchWorkItems(false);
-            }}
-            onClose={() => setActiveConflict(null)}
-          />
         )}
       </AnimatePresence>
 

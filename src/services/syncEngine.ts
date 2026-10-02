@@ -3,7 +3,7 @@
  * 
  * Features:
  * - Multi-Tab Leader Coordination (Single-worker dispatching via tabSync)
- * - Per-Operation Batch Results handling (Applied, Conflict, Rejected)
+ * - Per-Operation Batch Results handling (Applied, Deleted, Stale, Rejected)
  * - Incremental Pull Protocol (Cloud -> Local delta synchronization)
  * - Exponential Backoff Retries with randomized Jitter
  * - Detailed Operations Queue Inspection & Granular Discard/Retry
@@ -49,13 +49,12 @@ const describeSyncError = (err: any): string => {
   return message;
 };
 
-export type SyncState = 'synced' | 'syncing' | 'pending' | 'retrying' | 'conflict' | 'offline' | 'error';
+export type SyncState = 'synced' | 'syncing' | 'pending' | 'retrying' | 'offline' | 'error';
 
 export interface SyncEngineStatus {
   state: SyncState;
   pendingCount: number;
   failedCount: number;
-  conflictCount: number;
   lastSuccessfulSync: string | null;
   serverRevision: number;
   clientId: string;
@@ -63,18 +62,17 @@ export interface SyncEngineStatus {
   lastError: string | null;
 }
 
-export interface ConflictEvent {
-  operationId: string;
+// A local change the server turned down because another device got there first:
+// the record was deleted there, or saved there more recently.
+export interface OverruledEvent {
   entityType: string;
   entityId: string;
-  reason: string;
-  localRecord: any;
-  serverRecord?: any;
+  reason: 'deleted' | 'stale';
 }
 
 type SyncStatusListener = (status: SyncEngineStatus) => void;
 type EntityChangeListener = (entityType: string, changes: any[]) => void;
-type ConflictListener = (conflict: ConflictEvent) => void;
+type OverruledListener = (event: OverruledEvent) => void;
 
 class SyncEngine {
   private isInitialized = false;
@@ -86,7 +84,7 @@ class SyncEngine {
   private lastError: string | null = null;
   private listeners: Set<SyncStatusListener> = new Set();
   private entityListeners: Set<EntityChangeListener> = new Set();
-  private conflictListeners: Set<ConflictListener> = new Set();
+  private overruledListeners: Set<OverruledListener> = new Set();
   private localChangeListeners: Set<EntityChangeListener> = new Set();
   private noteDebounceTimers: Map<string, any> = new Map();
   // Records saved here but still in the debounce window, so not queued yet.
@@ -100,6 +98,7 @@ class SyncEngine {
   private liveStream: LiveStream | null = null;
   private pullInFlight: Promise<void> | null = null;
   private pullAgain = false;
+  private lastSeq = 0;
 
   async init(): Promise<void> {
     if (this.isInitialized) return;
@@ -125,6 +124,8 @@ class SyncEngine {
     tabCoordinator.subscribe((msg) => {
       if (msg.type === 'ENTITY_MUTATED') {
         this.notifyEntityListeners(msg.entityType, [{ id: msg.entityId, revision: msg.revision }]);
+        // Only the leader tab uploads, so it sends what other tabs queued too.
+        if (tabCoordinator.isSyncLeader()) this.scheduleUpload();
       }
     });
 
@@ -182,13 +183,13 @@ class SyncEngine {
     return () => this.localChangeListeners.delete(listener);
   }
 
-  onConflict(listener: ConflictListener): () => void {
-    this.conflictListeners.add(listener);
-    return () => this.conflictListeners.delete(listener);
+  onOverruled(listener: OverruledListener): () => void {
+    this.overruledListeners.add(listener);
+    return () => this.overruledListeners.delete(listener);
   }
 
-  private notifyConflict(conflict: ConflictEvent): void {
-    this.conflictListeners.forEach(l => l(conflict));
+  private notifyOverruled(event: OverruledEvent): void {
+    this.overruledListeners.forEach(l => l(event));
   }
 
   getStatus(): SyncEngineStatus {
@@ -197,7 +198,6 @@ class SyncEngine {
       state: !isOnline ? 'offline' : this.currentState,
       pendingCount: 0,
       failedCount: 0,
-      conflictCount: 0,
       lastSuccessfulSync: this.lastSuccessfulSync,
       serverRevision: this.serverRevision,
       clientId: this.clientId,
@@ -216,14 +216,12 @@ class SyncEngine {
     const ops = await getAllFromStore<SyncOpRecord>('syncOperations');
     const pending = ops.filter(o => o.status === 'pending' || o.status === 'syncing');
     const failed = ops.filter(o => o.status === 'failed');
-    const conflict = ops.filter(o => o.status === 'failed' && o.lastError?.includes('conflict'));
 
     const base = this.getStatus();
     return {
       ...base,
       pendingCount: pending.length,
-      failedCount: failed.length,
-      conflictCount: conflict.length
+      failedCount: failed.length
     };
   }
 
@@ -247,7 +245,8 @@ class SyncEngine {
     revision: number = 1
   ): Promise<string> {
     const operationId = crypto.randomUUID ? crypto.randomUUID() : `op_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
-    
+    const seq = this.lastSeq = Math.max(Date.now(), this.lastSeq + 1);
+
     const record: SyncOpRecord = {
       operationId,
       clientId: this.clientId,
@@ -258,7 +257,8 @@ class SyncEngine {
       revision,
       attemptCount: 0,
       status: 'pending',
-      createdAt: new Date().toISOString()
+      createdAt: new Date(seq).toISOString(),
+      seq
     };
 
     await putToStore('syncOperations', record);
@@ -274,13 +274,26 @@ class SyncEngine {
     this.notifyListeners();
     this.localChangeListeners.forEach(l => l(entityType, [{ id: entityId, revision }]));
 
-    // 1500ms batch collector window to save mobile battery & Apps Script execution quota
+    this.scheduleUpload();
+    return operationId;
+  }
+
+  // 1500ms batch collector window to save mobile battery & Apps Script execution quota
+  private scheduleUpload(): void {
     if (this.batchDebounceTimer) clearTimeout(this.batchDebounceTimer);
     this.batchDebounceTimer = setTimeout(() => {
       this.processQueue();
     }, 1500);
+  }
 
-    return operationId;
+  // Drops a save still waiting out its debounce, e.g. for a note being deleted,
+  // so the delayed save can't upload after the delete and bring it back.
+  cancelDebounced(entityType: string, id: string): void {
+    const key = entityType === 'boards' ? `board:${id}` : id;
+    const timer = this.noteDebounceTimers.get(key);
+    if (timer) clearTimeout(timer);
+    this.noteDebounceTimers.delete(key);
+    this.debouncedKeys.delete(`${entityType}:${id}`);
   }
 
   // Queues a save once edits pause, so typing or drawing isn't one upload per change.
@@ -352,7 +365,8 @@ class SyncEngine {
     try {
       while (typeof navigator === 'undefined' || navigator.onLine) {
         const ops = await getAllFromStore<SyncOpRecord>('syncOperations');
-        const pendingOps = ops.filter(o => o.status === 'pending');
+        // The store returns ops by their random id; upload them in the order they were made.
+        const pendingOps = ops.filter(o => o.status === 'pending').sort(opOrder);
 
         if (pendingOps.length === 0) {
           const hasFailed = ops.some(o => o.status === 'failed');
@@ -392,34 +406,36 @@ class SyncEngine {
           throw new Error(json.error || 'Server rejected batch');
         }
 
-        // Update server revision
-        if (json.serverRevision) {
-          this.serverRevision = json.serverRevision;
-          await setMeta('serverRevision', this.serverRevision);
-        }
+        // The revision only moves forward through pulls: other devices may have
+        // saved in between, and jumping to the upload's revision would skip them.
 
         // Process Per-Operation Results
-        const results: Array<{ operationId: string; status: string; reason?: string; entityRevision?: number }> = json.results || [];
-        let hadConflict = false;
+        const results: Array<{ operationId: string; status: string; reason?: string; entityRevision?: number; currentRecord?: any }> = json.results || [];
 
         for (const op of batch) {
           const res = results.find(r => r.operationId === op.operationId);
           if (res && (res.status === 'applied' || res.status === 'idempotent')) {
             this.pushedAt.set(`${op.entityType}:${op.entityId}`, Date.now());
             await deleteFromStore('syncOperations', op.operationId);
-          } else if (res && res.status === 'conflict') {
-            hadConflict = true;
+          } else if (res && (res.status === 'deleted' || res.status === 'stale')) {
+            // The server has the final word: the record was deleted on another
+            // device, or another device saved a newer copy. Show that here.
+            await deleteFromStore('syncOperations', op.operationId);
+            const stillQueued = (await getAllFromStore<SyncOpRecord>('syncOperations'))
+              .some(o => o.entityType === op.entityType && o.entityId === op.entityId);
+            if (!stillQueued) {
+              if (res.status === 'deleted') await deleteFromStore(op.entityType, op.entityId);
+              else if (res.currentRecord) await putToStore(op.entityType, res.currentRecord);
+              this.notifyEntityListeners(op.entityType, [{ id: op.entityId }]);
+            }
+            this.notifyOverruled({ entityType: op.entityType, entityId: op.entityId, reason: res.status as 'deleted' | 'stale' });
+          } else if (res && res.status === 'rejected') {
+            // The server will never accept this op (bad table or operation); retrying won't help.
             op.status = 'failed';
-            op.lastError = `Conflict: ${res.reason || 'Stale version'}`;
+            op.attemptCount = (op.attemptCount || 0) + 1;
+            op.lastAttemptAt = new Date().toISOString();
+            op.lastError = res.reason || 'Rejected by the server';
             await putToStore('syncOperations', op);
-            this.notifyConflict({
-              operationId: op.operationId,
-              entityType: op.entityType,
-              entityId: op.entityId,
-              reason: res.reason || 'Stale version',
-              localRecord: op.payload,
-              serverRecord: (res as any).currentRecord
-            });
           } else {
             // Failure / Rejection
             op.attemptCount = (op.attemptCount || 0) + 1;
@@ -432,7 +448,7 @@ class SyncEngine {
 
         this.lastSuccessfulSync = new Date().toISOString();
         await setMeta('lastSuccessfulSync', this.lastSuccessfulSync);
-        this.currentState = hadConflict ? 'conflict' : 'syncing';
+        this.currentState = 'syncing';
         this.lastError = null;
         this.consecutiveFailures = 0;
         this.notifyListeners();
@@ -515,6 +531,17 @@ class SyncEngine {
           }
         }
 
+        // Records deleted on another device. One with an edit still queued here
+        // is left for the upload, which the server answers with "deleted".
+        const deleted: Record<string, string[]> = json.deleted || {};
+        for (const table in deleted) {
+          const ids = (deleted[table] || []).filter(id => !unsynced.has(`${table}:${id}`));
+          for (const id of ids) {
+            await deleteFromStore(table, id);
+          }
+          if (ids.length > 0) this.notifyEntityListeners(table, ids.map(id => ({ id, deleted: true })));
+        }
+
         if (json.serverRevision && json.serverRevision > this.serverRevision) {
           this.serverRevision = json.serverRevision;
           await setMeta('serverRevision', this.serverRevision);
@@ -547,5 +574,9 @@ class SyncEngine {
     this.entityListeners.forEach(l => l(entityType, changes));
   }
 }
+
+// Upload order: when each op was made. Ops queued before `seq` existed fall back to createdAt.
+const opOrder = (a: SyncOpRecord, b: SyncOpRecord) =>
+  (a.seq ?? Date.parse(a.createdAt)) - (b.seq ?? Date.parse(b.createdAt));
 
 export const syncEngine = new SyncEngine();

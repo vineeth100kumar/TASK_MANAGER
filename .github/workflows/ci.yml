@@ -30,7 +30,7 @@ jobs:
       - name: Sage server tests
         working-directory: raspberry_pi
         run: |
-          pip install -q pywebpush
+          pip install -q -r requirements.txt
           python -m unittest discover -s tests
       - name: LUMO tests
         working-directory: lumo/rpi_server
