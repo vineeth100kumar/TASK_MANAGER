@@ -21,6 +21,8 @@ export interface SyncOpRecord {
   lastError?: string;
   status: 'pending' | 'syncing' | 'synced' | 'failed';
   createdAt: string;
+  // Milliseconds, strictly increasing per device, so ops upload in the order they were made.
+  seq?: number;
 }
 
 export interface MetaRecord {

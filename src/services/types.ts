@@ -134,6 +134,7 @@ export interface Note {
   content: string;
   areaId?: string | null;
   projectId?: string | null;
+  lifeContext?: LifeContext;   // unset on older notes, which show under both
   createdAt: string;
   updatedAt: string;
 }

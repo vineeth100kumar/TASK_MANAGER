@@ -35,6 +35,14 @@ API_SECRET = os.getenv("API_SECRET", "").strip()
 # The built web app (npm run build). Served at / when it exists.
 DIST_DIR = Path(os.getenv("SAGE_DIST_DIR", str(Path(__file__).resolve().parent.parent / "dist")))
 CORS_ORIGINS = [o.strip() for o in os.getenv("SAGE_CORS_ORIGINS", "*").split(",") if o.strip()]
+# The tables the web app and LUMO sync. Anything else is refused, so a bad
+# client can't create stray tables that then show up in /api/sync/all.
+SYNC_TABLES = {
+    "workItems", "projects", "areas", "goals", "habits", "notes",
+    "comments", "subtasks", "activities", "boards",
+}
+SYNC_OPERATIONS = {"save", "patch", "delete"}
+LEDGER_DAYS = 90
 
 app.add_middleware(
     CORSMiddleware,
@@ -255,6 +263,8 @@ def init_db():
 
     # Initialize Server Revision if not exists
     cursor.execute("INSERT OR IGNORE INTO metadata (key, value) VALUES ('serverRevision', '1')")
+    # The op ledger only has to outlive retries; trim it so it doesn't grow forever.
+    cursor.execute(f"DELETE FROM sync_operations WHERE processed_at < datetime('now', '-{LEDGER_DAYS} days')")
     conn.commit()
     conn.close()
 
@@ -344,165 +354,248 @@ def health():
 
 # --- API Endpoints ---
 
+def _rows_by_table(rows):
+    out: Dict[str, list] = {}
+    for table_name, payload_str in rows:
+        out.setdefault(table_name, []).append(json.loads(payload_str))
+    return out
+
+
+def _deleted_ids(cursor, since: int = 0) -> Dict[str, list]:
+    """Ids removed on the server after revision `since`, by table, so clients
+    can drop their copies. Deleted rows stay in the table as markers."""
+    cursor.execute(
+        "SELECT table_name, entity_id FROM entities WHERE deleted = 1 AND COALESCE(server_revision, 0) > ?",
+        (since,),
+    )
+    out: Dict[str, list] = {}
+    for table_name, entity_id in cursor.fetchall():
+        out.setdefault(table_name, []).append(entity_id)
+    return out
+
+
 @app.get("/api/sync/all")
 def get_all_data():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     server_rev = get_server_revision(cursor)
-    
     cursor.execute("SELECT table_name, payload FROM entities WHERE deleted = 0")
-    rows = cursor.fetchall()
-    
-    data = {}
-    for table_name, payload_str in rows:
-        if table_name not in data:
-            data[table_name] = []
-        data[table_name].append(json.loads(payload_str))
-        
+    data = _rows_by_table(cursor.fetchall())
+    deleted = _deleted_ids(cursor)
     conn.close()
     return {
         "success": True,
         "schemaVersion": 5,
         "serverRevision": server_rev,
-        "data": data
+        "data": data,
+        "deleted": deleted,
     }
 
 @app.get("/api/sync/changes")
 def get_changes_since(sinceRevision: int = 0):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     server_rev = get_server_revision(cursor)
-    
     cursor.execute(
         "SELECT table_name, payload FROM entities WHERE COALESCE(server_revision, revision) > ? AND deleted = 0",
         (sinceRevision,),
     )
-    rows = cursor.fetchall()
-    
-    changes = {}
-    for table_name, payload_str in rows:
-        if table_name not in changes:
-            changes[table_name] = []
-        changes[table_name].append(json.loads(payload_str))
-        
+    changes = _rows_by_table(cursor.fetchall())
+    deleted = _deleted_ids(cursor, sinceRevision)
     conn.close()
     return {
         "success": True,
         "sinceRevision": sinceRevision,
         "serverRevision": server_rev,
-        "changes": changes
+        "changes": changes,
+        "deleted": deleted,
     }
 
+
+def _parse_time(value) -> Optional[datetime.datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        parsed = datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=datetime.timezone.utc)
+
+
+def _is_older(incoming: Dict[str, Any], existing: Dict[str, Any]) -> bool:
+    """True when the incoming copy was last edited before the one stored here,
+    e.g. a device that was offline sending an edit made before a newer one
+    from another device. Records without updatedAt are never treated as older."""
+    new_time, old_time = _parse_time(incoming.get("updatedAt")), _parse_time(existing.get("updatedAt"))
+    return bool(new_time and old_time and new_time < old_time)
+
+
 @app.post("/api/sync/operations")
-async def process_operations(request: Request, background_tasks: BackgroundTasks):
-    body = await request.body()
-    req_dict = json.loads(body)
-    req = ProcessOperationsRequest(**req_dict)
-    
+async def process_operations(request: Request):
+    try:
+        req_dict = json.loads(await request.body())
+        req = ProcessOperationsRequest(**req_dict)
+    except (ValueError, TypeError) as e:
+        return JSONResponse({"success": False, "error": f"Bad sync request: {e}"}, status_code=400)
+
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
-    
     op_results = []
-    
+    applied_ops = []
+    new_server_rev = None
+
+    def next_rev():
+        # Only a batch that changes something moves the revision, so a retried
+        # batch doesn't make every device pull again.
+        nonlocal new_server_rev
+        if new_server_rev is None:
+            new_server_rev = increment_server_revision(cursor)
+        return new_server_rev
+
     try:
         cursor.execute("BEGIN TRANSACTION")
-        
-        # Get all previously processed operations for idempotency
-        cursor.execute("SELECT operation_id FROM sync_operations")
-        processed_ops = {row[0] for row in cursor.fetchall()}
-        
-        new_server_rev = increment_server_revision(cursor)
-        
+
+        ids = [op.operationId for op in req.operations if op.operationId]
+        processed_ops = set()
+        if ids:
+            marks = ",".join("?" * len(ids))
+            cursor.execute(f"SELECT operation_id FROM sync_operations WHERE operation_id IN ({marks})", ids)
+            processed_ops = {row[0] for row in cursor.fetchall()}
+
+        # Operations are applied in the order sent, which is the order they were made.
         for op in req.operations:
             if not op.operationId:
                 op_results.append({"operationId": "unknown", "status": "rejected", "reason": "Missing operationId"})
                 continue
-                
             if op.operationId in processed_ops:
                 op_results.append({"operationId": op.operationId, "status": "applied", "idempotent": True})
                 continue
-                
+            if op.entityType not in SYNC_TABLES:
+                op_results.append({"operationId": op.operationId, "status": "rejected", "reason": f"Unknown table {op.entityType}"})
+                continue
+            if op.operation not in SYNC_OPERATIONS:
+                op_results.append({"operationId": op.operationId, "status": "rejected", "reason": f"Unknown operation {op.operation}"})
+                continue
+
             table = op.entityType
-            
-            if op.operation in ['save', 'patch']:
-                cursor.execute("SELECT payload, revision FROM entities WHERE table_name = ? AND entity_id = ?", (table, op.entityId))
-                existing = cursor.fetchone()
-                
-                if existing:
-                    existing_payload = json.loads(existing[0])
-                    existing_rev = existing[1]
-                    # Field level merge
-                    merged = {**existing_payload, **(op.payload or {})}
-                    new_rev = max(op.revision or 1, existing_rev + 1)
-                    merged['revision'] = new_rev
-                    
-                    cursor.execute('''
-                        UPDATE entities 
-                        SET payload = ?, revision = ?, deleted = 0, server_revision = ?
-                        WHERE table_name = ? AND entity_id = ?
-                    ''', (json.dumps(merged), new_rev, new_server_rev, table, op.entityId))
+            cursor.execute(
+                "SELECT payload, revision, deleted FROM entities WHERE table_name = ? AND entity_id = ?",
+                (table, op.entityId),
+            )
+            existing = cursor.fetchone()
+            result = {"operationId": op.operationId, "status": "applied"}
+
+            if op.operation in ("save", "patch"):
+                if existing and existing[2]:
+                    # Deleted on another device: an edit made before that must not bring it back.
+                    result = {"operationId": op.operationId, "status": "deleted", "reason": "Deleted on another device"}
+                elif existing and _is_older(op.payload or {}, json.loads(existing[0])):
+                    result = {
+                        "operationId": op.operationId,
+                        "status": "stale",
+                        "reason": "A newer copy was saved from another device",
+                        "currentRecord": json.loads(existing[0]),
+                    }
+                elif existing:
+                    merged = {**json.loads(existing[0]), **(op.payload or {})}
+                    merged["id"] = op.entityId
+                    new_rev = max(op.revision or 1, existing[1] + 1)
+                    merged["revision"] = new_rev
+                    cursor.execute(
+                        "UPDATE entities SET payload = ?, revision = ?, deleted = 0, server_revision = ? WHERE table_name = ? AND entity_id = ?",
+                        (json.dumps(merged), new_rev, next_rev(), table, op.entityId),
+                    )
+                    result["entityRevision"] = new_rev
                 else:
-                    merged = op.payload or {}
+                    merged = {**(op.payload or {}), "id": op.entityId}
                     new_rev = op.revision or 1
-                    merged['revision'] = new_rev
-                    cursor.execute('''
-                        INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) 
-                        VALUES (?, ?, ?, ?, 0, ?)
-                    ''', (table, op.entityId, new_rev, json.dumps(merged), new_server_rev))
-                
-                op_results.append({"operationId": op.operationId, "status": "applied", "entityRevision": new_rev})
-                
-            elif op.operation == 'delete':
-                cursor.execute("DELETE FROM entities WHERE table_name = ? AND entity_id = ?", (table, op.entityId))
-                op_results.append({"operationId": op.operationId, "status": "applied"})
-            
-            # Log operation
-            cursor.execute('''
-                INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation)
-                VALUES (?, ?, ?, ?, ?)
-            ''', (op.operationId, op.clientId, op.entityType, op.entityId, op.operation))
-            
-        # Queue the backup to Google Sheets for the periodic worker
-        cursor.execute("INSERT INTO unsynced_batches (payload) VALUES (?)", (json.dumps(req_dict),))
+                    merged["revision"] = new_rev
+                    cursor.execute(
+                        "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, ?, ?, 0, ?)",
+                        (table, op.entityId, new_rev, json.dumps(merged), next_rev()),
+                    )
+                    result["entityRevision"] = new_rev
+            else:
+                # Keep a marker row (with the last copy, for recovery) so other
+                # devices learn about the delete and stale edits can't revive it.
+                if existing:
+                    cursor.execute(
+                        "UPDATE entities SET deleted = 1, server_revision = ? WHERE table_name = ? AND entity_id = ?",
+                        (next_rev(), table, op.entityId),
+                    )
+                else:
+                    cursor.execute(
+                        "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 1, ?)",
+                        (table, op.entityId, json.dumps({"id": op.entityId}), next_rev()),
+                    )
+
+            op_results.append(result)
+            processed_ops.add(op.operationId)
+            # Stale and deleted outcomes are final answers too, so a retry gets the same one.
+            cursor.execute(
+                "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+                (op.operationId, op.clientId, op.entityType, op.entityId, op.operation),
+            )
+            if result["status"] == "applied":
+                applied_ops.append(op)
+
+        # Queue the applied changes for the Google Sheets backup.
+        if applied_ops:
+            cursor.execute(
+                "INSERT INTO unsynced_batches (payload) VALUES (?)",
+                (json.dumps({
+                    "action": "processOperations",
+                    "clientId": req_dict.get("clientId", ""),
+                    "operations": [op.model_dump() for op in applied_ops],
+                }),),
+            )
         conn.commit()
-        
     except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         conn.close()
 
-    results_by_id = {r["operationId"]: r for r in op_results}
-    applied = [
-        {"entityType": op.entityType, "entityId": op.entityId, "operation": op.operation, "clientId": op.clientId}
-        for op in req.operations
-        if results_by_id.get(op.operationId, {}).get("status") == "applied"
-        and not results_by_id[op.operationId].get("idempotent")
-    ]
-    if applied:
-        await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": new_server_rev, "changes": applied})
+    if applied_ops:
+        await events.broadcast({
+            "type": "SYNC_APPLIED",
+            "serverRevision": new_server_rev,
+            "changes": [
+                {"entityType": op.entityType, "entityId": op.entityId, "operation": op.operation, "clientId": op.clientId}
+                for op in applied_ops
+            ],
+        })
 
     return {
         "success": True,
-        "serverRevision": new_server_rev,
-        "results": op_results
+        "serverRevision": new_server_rev if new_server_rev is not None else _current_revision(),
+        "results": op_results,
     }
 
+
+def _current_revision() -> int:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        return get_server_revision(conn.cursor())
+    finally:
+        conn.close()
+
+
 @app.post("/api/sync/clear")
-async def clear_all(background_tasks: BackgroundTasks):
+async def clear_all():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("DELETE FROM entities")
     cursor.execute("DELETE FROM sync_operations")
-    cursor.execute("UPDATE metadata SET value = '1' WHERE key = 'serverRevision'")
+    # The revision keeps counting up, so devices that were closed during the
+    # clear still see everything saved after it.
+    new_rev = increment_server_revision(cursor)
     cursor.execute("INSERT INTO unsynced_batches (payload) VALUES (?)", (json.dumps({"action": "clearAll"}),))
     conn.commit()
     conn.close()
 
-    await events.broadcast({"type": "SYNC_CLEARED", "serverRevision": 1})
-    return {"success": True, "serverRevision": 1, "message": "All database records wiped."}
+    await events.broadcast({"type": "SYNC_CLEARED", "serverRevision": new_rev})
+    return {"success": True, "serverRevision": new_rev, "message": "All database records wiped."}
 
 import re
 import ollama

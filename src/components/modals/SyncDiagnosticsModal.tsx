@@ -119,14 +119,12 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                 syncStatus.state === 'synced' ? 'bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/30' :
                 syncStatus.state === 'syncing' ? 'bg-blue-50/50 dark:bg-blue-950/20 border-blue-200 dark:border-blue-900/30' :
                 syncStatus.state === 'offline' ? 'bg-amber-50/50 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/30' :
-                syncStatus.state === 'conflict' ? 'bg-orange-50/50 dark:bg-orange-950/20 border-orange-200 dark:border-orange-900/30' :
                 'bg-red-50/50 dark:bg-red-950/20 border-red-200 dark:border-red-900/30'
               }`}>
                 <div className="flex items-center gap-3">
                   {syncStatus.state === 'synced' && <CheckCircle2 size={24} className="text-emerald-500" />}
                   {syncStatus.state === 'syncing' && <RefreshCw size={24} className="text-blue-500 animate-spin" />}
                   {syncStatus.state === 'offline' && <WifiOff size={24} className="text-amber-500" />}
-                  {syncStatus.state === 'conflict' && <AlertTriangle size={24} className="text-orange-500" />}
                   {(syncStatus.state === 'retrying' || syncStatus.state === 'error') && <AlertTriangle size={24} className="text-red-500" />}
                   
                   <div>
@@ -134,7 +132,6 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                       {syncStatus.state === 'synced' ? 'All Changes Persisted & Synced' :
                        syncStatus.state === 'syncing' ? 'Uploading Changes to Google Sheets...' :
                        syncStatus.state === 'offline' ? 'Offline Mode (Local Persistence Active)' :
-                       syncStatus.state === 'conflict' ? 'Conflict Detected (Review Queue)' :
                        'Sync Retrying with Backoff'}
                     </h4>
                     <p className="text-xs text-gray-500 dark:text-gray-400">

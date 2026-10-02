@@ -162,6 +162,7 @@ async function persist(table: Table, record: { id: string }, revision?: number):
 // Remove a record locally and queue the delete for upload.
 async function removeRecord(table: Table, id: string): Promise<void> {
   (state as any)[table] = (state[table] as Array<{ id: string }>).filter(r => r && r.id !== id);
+  syncEngine.cancelDebounced(table, id);
   await deleteFromStore(table, id);
   syncEngine.enqueueOperation(table, id, 'delete', { id });
 }
@@ -188,7 +189,7 @@ export const api = {
         unsubLocal();
       };
     },
-    onConflict: (listener: any) => syncEngine.onConflict(listener),
+    onOverruled: (listener: Parameters<typeof syncEngine.onOverruled>[0]) => syncEngine.onOverruled(listener),
     forceSync: () => syncEngine.forceSyncNow(),
     getStatus: () => syncEngine.getStatus(),
     getDetailedStatus: () => syncEngine.getDetailedStatus(),
@@ -216,6 +217,15 @@ export const api = {
               const merged = [...rows.filter((r: any) => r && !pendingIds.has(r.id)), ...localPending];
               (state as any)[table] = merged;
               await putBatchToStore(table, merged);
+            }
+
+            // Drop anything deleted on another device while this one was away.
+            const deleted: Record<string, string[]> = json.deleted || {};
+            for (const table of tables) {
+              const gone = new Set((deleted[table] || []).filter(id => !unsynced.has(`${table}:${id}`)));
+              if (gone.size === 0) continue;
+              (state as any)[table] = (state[table] as Array<{ id: string }>).filter(r => r && !gone.has(r.id));
+              for (const id of gone) await deleteFromStore(table, id);
             }
 
             if (json.serverRevision) {
@@ -687,6 +697,7 @@ export const api = {
         content: payload.content || '',
         areaId: payload.areaId || null,
         projectId: payload.projectId || null,
+        ...(payload.lifeContext ? { lifeContext: payload.lifeContext } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -875,8 +886,11 @@ export const api = {
         const id = orderedIds[i];
         const item = state.workItems.find(t => t && t.id === id);
         if (item) {
+          // A new edit like any other, so the server keeps it over an older copy.
           item.focusOrder = i;
-          await persist('workItems', item);
+          item.version = (item.version || 1) + 1;
+          item.updatedAt = new Date().toISOString();
+          await persist('workItems', item, item.version);
         }
       }
     }
@@ -1067,9 +1081,14 @@ export const api = {
         putBatchToStore('boards', state.boards)
       ]);
 
-      // Enqueue sync for restored items
-      for (const item of state.workItems) {
-        syncEngine.enqueueOperation('workItems', item.id, 'save', item);
+      // Upload everything restored, not just tasks, so other devices get it too.
+      // Stamped as just saved, so the server takes the backup over newer copies.
+      const restoredAt = new Date().toISOString();
+      for (const table of Object.keys(state) as Table[]) {
+        for (const record of state[table] as Array<{ id: string; updatedAt?: string }>) {
+          if (!record?.id) continue;
+          await syncEngine.enqueueOperation(table, record.id, 'save', record.updatedAt ? { ...record, updatedAt: restoredAt } : record);
+        }
       }
 
       return { success: true, message: `Successfully imported ${state.workItems.length} items from backup` };
