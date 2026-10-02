@@ -92,7 +92,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
     }
   };
 
-  const { complete: handleComplete, isCompleting } = useCompletion(loadInbox);
+  const { complete: handleComplete, isCompleting, isSaving } = useCompletion(loadInbox);
 
   const handleToggleFocus = async (item: WorkItem, e?: React.MouseEvent) => {
     e?.stopPropagation();
@@ -193,7 +193,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
               className={`${isCompleting(item.id) ? 'is-completing' : ''} p-4 rounded-2xl surface-item is-interactive hover:border-blue-200 dark:hover:border-blue-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group`}
             >
               <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                <CompleteButton checked={isCompleting(item.id)} onComplete={() => handleComplete(item)} />
+                <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
 
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => startClarify(item)}>
                   <h4 className="row-title inline font-semibold text-[14px] tracking-[-0.005em] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
