@@ -8,11 +8,12 @@
  */
 
 import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
-import { LABELS, uuid } from './constants';
+import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
 import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/recurrence';
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
+import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 
@@ -138,6 +139,7 @@ function hydrateWorkItem(item: WorkItem): WorkItem {
 
   return {
     ...item,
+    status: (item.status as string) === 'in_review' ? 'in_progress' : item.status,
     startDate: cleanStartDate || null,
     dueDate: cleanDueDate || null,
     startAt: cleanStartAt || null,
@@ -202,6 +204,11 @@ async function createNextOccurrence(item: WorkItem): Promise<WorkItem | null> {
 
 // Snoozed items stay out of every list until their time comes.
 const isSnoozed = (i: WorkItem) => !!i.snoozedUntil && new Date(i.snoozedUntil).getTime() > Date.now();
+
+// Needs sorting: in the Inbox and not placed yet. Something with a date, in
+// Focus, or waiting on someone already has a place.
+const needsSorting = (i: WorkItem) =>
+  !!i.isInbox && !i.isFocus && !i.waitingFor && !i.dueDate && !i.startDate && !i.startAt;
 
 let externalEntityListeners: Array<(entityType: string, changes: any[]) => void> = [];
 
@@ -278,6 +285,16 @@ export const api = {
   },
 
   workItems: {
+    /** Every tag in use on live items, most used first. */
+    allTags: async (lifeContext?: LifeContext): Promise<{ tag: string; count: number }[]> => {
+      await initializeStore();
+      const counts = new Map<string, number>();
+      for (const item of state.workItems) {
+        if (!item || item.deletedAt || (lifeContext && (item.lifeContext || 'work') !== lifeContext)) continue;
+        for (const tag of item.labels || []) counts.set(tag, (counts.get(tag) || 0) + 1);
+      }
+      return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
+    },
     list: async (filters?: {
       projectId?: string;
       lifeContext?: LifeContext;
@@ -285,9 +302,14 @@ export const api = {
       search?: string;
       entityType?: string;
       priority?: string;
+      tag?: string;
     }): Promise<WorkItem[]> => {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt);
+
+      if (filters?.tag) {
+        items = items.filter(i => (i.labels || []).includes(filters.tag as string));
+      }
 
       if (filters?.lifeContext) {
         items = items.filter(i => i && (i.lifeContext || 'work') === filters.lifeContext);
@@ -379,7 +401,11 @@ export const api = {
         actual: null,
         blockedReason: payload.blockedReason || null,
         waitingFor: payload.waitingFor || null,
-        isInbox: payload.isInbox !== undefined ? payload.isInbox : true,
+        // Only things you haven't placed yet need sorting: an item with a date,
+        // in Focus, or already waiting on someone is placed.
+        isInbox: payload.isInbox !== undefined
+          ? payload.isInbox
+          : !(payload.dueDate || payload.startDate || payload.startAt || payload.isFocus || payload.waitingFor),
         isFocus: payload.isFocus || false,
         focusOrder: payload.focusOrder || null,
         snoozedUntil: payload.snoozedUntil || null,
@@ -705,10 +731,11 @@ export const api = {
       await initializeStore();
       const h = state.habits.find(h => h && h.id === id);
       if (!h) throw new Error('Habit not found');
-      const history = h.history || [];
+      // History holds real dates; entries from when it held weekday names are dropped.
+      const history = dateEntries(h.history);
       const has = history.includes(day);
       h.history = has ? history.filter(d => d !== day) : [...history, day];
-      h.streak = h.history.length;
+      h.streak = streakOf(h.history, localDateString());
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
       return h;
@@ -878,7 +905,7 @@ export const api = {
   inbox: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.isInbox && i.status !== 'done' && !isSnoozed(i));
+      let items = state.workItems.filter(i => i && !i.deletedAt && needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => i && (i.lifeContext || 'work') === lifeContext);
       }
@@ -910,6 +937,9 @@ export const api = {
       if (!item) throw new Error('Item not found');
 
       const nextFocus = !item.isFocus;
+      if (nextFocus && state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done').length >= FOCUS_LIMIT) {
+        throw new Error(`Focus is full (${FOCUS_LIMIT}). Finish one or take one out first.`);
+      }
       return api.workItems.updateDetails(id, {
         isFocus: nextFocus,
         focusOrder: nextFocus ? Date.now() : undefined
@@ -1039,7 +1069,7 @@ export const api = {
         (i.createdAt && i.createdAt < thresholdAgo && !i.lastTouchedAt)
       ).slice(0, 5).map(hydrateWorkItem);
 
-      const inboxCount = items.filter(i => i.isInbox && i.status !== 'done' && !isSnoozed(i)).length;
+      const inboxCount = items.filter(i => needsSorting(i) && i.status !== 'done' && !isSnoozed(i)).length;
 
       // What to work on when Focus is empty: overdue first, then the most
       // urgent, then the longest-waiting. Tasks only.

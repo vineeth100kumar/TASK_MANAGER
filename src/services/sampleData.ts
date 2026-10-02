@@ -17,7 +17,7 @@ export const INITIAL_GOALS: Goal[] = [
 ];
 
 export const INITIAL_HABITS: Habit[] = [
-  { id: 'habit_1', name: 'Morning Focus & Deep Work', frequency: 'daily', targetCount: 5, history: ['mon', 'tue', 'wed'], streak: 3, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
+  { id: 'habit_1', name: 'Morning Focus & Deep Work', frequency: 'daily', targetCount: 5, history: [], streak: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }
 ];
 
 export const INITIAL_NOTES: Note[] = [

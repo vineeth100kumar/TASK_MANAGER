@@ -7,6 +7,7 @@ export type LifeContext = 'work' | 'personal';
 // What the app is showing: one context, or both together.
 export type LifeFilter = LifeContext | 'all';
 export type EntityType = 'task' | 'event' | 'reminder' | 'milestone';
+// 'in_review' is no longer offered; items that still have it are shown as in_progress.
 export type TaskStatus = 'todo' | 'in_progress' | 'in_review' | 'done' | 'blocked';
 export type TaskPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -126,7 +127,7 @@ export interface Habit {
   name: string;
   frequency: string; // e.g. "5/week", "daily"
   targetCount: number;
-  history: string[]; // e.g. ["mon", "tue", "fri"]
+  history: string[]; // dates ticked, e.g. ["2026-10-01", "2026-10-02"]
   areaId?: string | null;
   streak?: number;
   createdAt: string;

@@ -3,6 +3,7 @@ import { withTime } from '../../utils/reminders';
 import { AnimatePresence } from 'framer-motion';
 import { Target, ArrowUp, ArrowDown, Sparkles, X, Plus, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
+import { FOCUS_LIMIT } from '../../services/constants';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
@@ -15,7 +16,7 @@ import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
 import { ContextTag } from '../common/ContextTag';
 
-const FOCUS_SLOTS = 5;
+const FOCUS_SLOTS = FOCUS_LIMIT;
 
 interface FocusViewProps {
   lifeContext?: LifeContext;

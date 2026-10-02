@@ -9,6 +9,8 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
+import { weekDates, dateEntries, streakOf } from '../../utils/habits';
+import { formatShortDate } from '../../utils/quickAddParser';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
@@ -547,20 +549,25 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                 <div key={habit.id} className="p-4 rounded-2xl surface-item is-interactive space-y-2">
                   <div className="flex justify-between items-center text-xs font-semibold">
                     <span className="text-gray-900 dark:text-white">{habit.name}</span>
-                    <span className="text-gray-400">{habit.streak || 0} days streak</span>
+                    <span className="text-gray-400">{streakOf(habit.history, todayIso)} {streakOf(habit.history, todayIso) === 1 ? 'day' : 'days'} in a row</span>
                   </div>
                   <div className="flex gap-1">
-                    {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map((day) => {
-                      const isDone = habit.history?.includes(day);
+                    {weekDates(todayIso).map(({ date, label }) => {
+                      const isDone = dateEntries(habit.history).includes(date);
+                      const future = date > todayIso;
                       return (
                         <button
-                          key={day}
-                          onClick={(e) => handleToggleHabit(habit.id, day, e)}
+                          key={date}
+                          disabled={future}
+                          aria-pressed={isDone}
+                          aria-label={`${habit.name}, ${formatShortDate(date)}`}
+                          title={formatShortDate(date)}
+                          onClick={(e) => handleToggleHabit(habit.id, date, e)}
                           className={`flex-1 h-7 rounded-lg text-[10px] font-semibold uppercase transition-all ${
                             isDone ? 'bg-emerald-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:bg-gray-200'
-                          }`}
+                          } ${date === todayIso ? 'ring-2 ring-emerald-400/60' : ''} ${future ? 'opacity-40 cursor-default' : ''}`}
                         >
-                          {day[0]}
+                          {label}
                         </button>
                       );
                     })}

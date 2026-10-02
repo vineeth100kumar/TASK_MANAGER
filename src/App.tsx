@@ -4,7 +4,7 @@ import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motio
 import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
-import { STATUSES } from './services/constants';
+import { STATUSES, FOCUS_LIMIT } from './services/constants';
 import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
@@ -30,6 +30,7 @@ import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
 import { SettingsModal } from './components/modals/SettingsModal';
 import { FilterBar } from './components/common/FilterBar';
+import { ShortcutSheet } from './components/modals/ShortcutSheet';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 
@@ -46,7 +47,8 @@ function MainApp() {
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
-  const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all' });
+  const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
+  const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' });
   // Work and personal show together unless the sidebar filter narrows to one.
   const [lifeFilter, setLifeFilterState] = useState<LifeFilter>(() => {
     try {
@@ -104,6 +106,11 @@ function MainApp() {
     transition.finished.finally(() => root.classList.remove('theme-switching'));
   }, []);
 
+  // The latest fetchWorkItems, which knows the current filters and project. The
+  // effect below runs once, so calling its own copy would reload with the
+  // filters from the first render and drop yours after every sync.
+  const fetchRef = useRef<(showLoading?: boolean) => Promise<void>>(async () => {});
+
   // Handle Responsive Sidebar, Reminder Watcher & Entity Sync Listeners
   useEffect(() => {
     if (window.innerWidth < 768) {
@@ -132,7 +139,7 @@ function MainApp() {
     });
 
     const unsubEntity = api.sync.onEntityChange(() => {
-      fetchWorkItems(false);
+      fetchRef.current(false);
     });
 
     // Replicate all latest data from Google Sheets into IndexedDB on startup (non-blocking)
@@ -141,7 +148,7 @@ function MainApp() {
     const openPending = () => { if (openId) setSelectedItemId(openId); };
     if (typeof navigator !== 'undefined' && navigator.onLine) {
       api.sync.fetchAll().then(() => {
-        fetchWorkItems(false);
+        fetchRef.current(false);
         openPending();
       }).catch(err => {
         console.warn('[Sync] Startup cloud replication skipped:', err);
@@ -164,15 +171,23 @@ function MainApp() {
       const activeTag = (document.activeElement?.tagName || '').toLowerCase();
       const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
 
-      if (!isInput) {
+      // Ctrl/Cmd+C is copy and Cmd+N is a new window, not shortcuts of ours.
+      if (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (e.key === 'n' || e.key === 'N' || e.key === 'c' || e.key === 'C') {
           e.preventDefault();
           setIsCreateModalOpen(true);
-        } else if (e.key === '/' || ((e.metaKey || e.ctrlKey) && e.key === 'k')) {
+        } else if (e.key === '?') {
+          e.preventDefault();
+          setIsShortcutsOpen(open => !open);
+        } else if (e.key === '/') {
           e.preventDefault();
           const searchInput = document.querySelector('input[type="text"][placeholder*="Search"]') as HTMLInputElement;
           if (searchInput) searchInput.focus();
         }
+      } else if (!isInput && (e.metaKey || e.ctrlKey) && !e.altKey && e.key === 'k') {
+        e.preventDefault();
+        const searchInput = document.querySelector('input[type="text"][placeholder*="Search"]') as HTMLInputElement;
+        if (searchInput) searchInput.focus();
       }
     };
 
@@ -193,12 +208,27 @@ function MainApp() {
     }
   }, [filters, activeWorkspace, lifeContext, showToast]);
 
+  fetchRef.current = fetchWorkItems;
+
   useEffect(() => { 
     const debounceTimer = setTimeout(() => {
       fetchWorkItems(true);
     }, 250);
     return () => clearTimeout(debounceTimer);
   }, [filters, activeWorkspace, lifeContext, fetchWorkItems]);
+
+  // Tapping a tag shows everything with it, in the list view.
+  const filterByTag = (tag: string) => {
+    setFilters({ search: '', entityType: 'all', priority: 'all', status: 'all', tag });
+    setActiveView('tasks');
+    setSelectedItemId(null);
+  };
+
+  // Search text belongs to the list. Leaving for another view clears it, so it
+  // isn't still filtering when you come back.
+  useEffect(() => {
+    if (activeView !== 'tasks') setFilters(f => (f.search ? { ...f, search: '' } : f));
+  }, [activeView]);
 
   // Mutations with Universal Undo
   const handleTransitionStatus = async (item: any, newStatus: string) => {
@@ -273,11 +303,17 @@ function MainApp() {
 
   const handleCreateWorkItem = async (payload: any) => {
     try {
+      // Focus holds five. A sixth goes to the Inbox rather than being lost.
+      let focusFull = false;
+      if (payload.isFocus && (await api.focus.list()).length >= FOCUS_LIMIT) {
+        focusFull = true;
+        payload = { ...payload, isFocus: false, focusOrder: undefined, isInbox: undefined };
+      }
       const created = await api.workItems.create(payload);
       // Say where it went, so nobody wonders whether it saved.
       const today = new Date();
       const isToday = payload.dueDate === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      showToast(payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
+      showToast(focusFull ? `Focus is full (${FOCUS_LIMIT}), so this is in your ${payload.dueDate ? 'list' : 'Inbox'}` : payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
       fetchWorkItems(false);
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -353,7 +389,7 @@ function MainApp() {
                     </div>
                     <h3 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white mb-1.5">No items found</h3>
                     <p className="text-[14px] text-gray-500 max-w-sm text-center leading-relaxed">
-                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all') ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
+                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all' || filters.tag) ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
                     <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition-all active:scale-[0.98] flex items-center gap-2">
                       <Plus size={16} /> Add Item <span className="ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white/20">N</span>
@@ -398,8 +434,12 @@ function MainApp() {
 
       <AnimatePresence>
         {selectedItemId && (
-          <TaskInspector taskId={selectedItemId} onClose={() => setSelectedItemId(null)} onTransition={handleTransitionStatus} onUpdateDetails={handleUpdateItemDetails} onDelete={handleSoftDelete} />
+          <TaskInspector taskId={selectedItemId} onClose={() => setSelectedItemId(null)} onFilterTag={filterByTag} onTransition={handleTransitionStatus} onUpdateDetails={handleUpdateItemDetails} onDelete={handleSoftDelete} />
         )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {isShortcutsOpen && <ShortcutSheet onClose={() => setIsShortcutsOpen(false)} />}
       </AnimatePresence>
 
       <AnimatePresence>

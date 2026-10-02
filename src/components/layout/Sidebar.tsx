@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { parseLocalDate } from '../../utils/dateUtils';
+import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
+import { weekDates, dateEntries } from '../../utils/habits';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine } from 'lucide-react';
 import { api } from '../../services/api';
@@ -597,16 +598,16 @@ export function Sidebar({
                     <div key={h.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/hitem">
                       <div>
                         <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{h.name}</h4>
-                        <span className="text-xs text-gray-400">{h.history?.length || 0} / {h.targetCount || 5} days this week</span>
+                        <span className="text-xs text-gray-400">{weekDates(getTodayString()).filter(d => dateEntries(h.history).includes(d.date)).length} / {h.targetCount || 5} days this week</span>
                       </div>
                       <div className="flex items-center gap-3">
                         <div className="flex gap-1">
-                          {['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'].map(day => (
-                            <button key={day} onClick={async () => {
-                              await api.habits.toggleDay(h.id, day);
+                          {weekDates(getTodayString()).map(({ date, label }) => (
+                            <button key={date} disabled={date > getTodayString()} aria-pressed={dateEntries(h.history).includes(date)} onClick={async () => {
+                              await api.habits.toggleDay(h.id, date);
                               loadNavData();
-                            }} className={`w-7 h-7 rounded-lg text-[10px] font-semibold uppercase transition-colors ${h.history?.includes(day) ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-white/10 text-gray-400'}`}>
-                              {day[0]}
+                            }} className={`w-7 h-7 rounded-lg text-[10px] font-semibold uppercase transition-colors ${dateEntries(h.history).includes(date) ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-white/10 text-gray-400'} ${date > getTodayString() ? 'opacity-40' : ''}`}>
+                              {label}
                             </button>
                           ))}
                         </div>
