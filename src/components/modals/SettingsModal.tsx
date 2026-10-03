@@ -3,6 +3,7 @@ import { motion } from 'framer-motion';
 import { Settings, Calendar, Download, Upload, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink } from 'lucide-react';
 import { api } from '../../services/api';
 import { NotificationSettings } from './NotificationSettings';
+import { CaptureGuide } from './CaptureGuide';
 import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
@@ -18,7 +19,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'data' | 'system'>('attention');
+  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -175,6 +176,14 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
             Notifications
           </button>
           <button
+            onClick={() => setActiveTab('capture')}
+            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+              activeTab === 'capture' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Shortcuts
+          </button>
+          <button
             onClick={() => setActiveTab('data')}
             className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
@@ -226,7 +235,10 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </div>
         )}
 
-        {/* Tab 2: Data Portability & Migration */}
+        {/* Tab 2: Setup guide for Siri, Share Sheet, Home Screen and email capture */}
+        {activeTab === 'capture' && <CaptureGuide publicUrl={publicUrl} />}
+
+        {/* Tab 3: Data Portability & Migration */}
         {activeTab === 'data' && (
           <div className="space-y-6">
             {/* Calendar Export */}
@@ -282,7 +294,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </div>
         )}
 
-        {/* Tab 3: Google Sheets Backend Specs & Clear Database */}
+        {/* Tab 4: Google Sheets Backend Specs & Clear Database */}
         {activeTab === 'system' && (
           <div className="space-y-6">
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
