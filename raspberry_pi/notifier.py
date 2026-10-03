@@ -452,6 +452,24 @@ def open_items() -> List[dict]:
     return items
 
 
+def completed_since(since_date: str) -> List[dict]:
+    """Items completed on or after since_date (YYYY-MM-DD)."""
+    conn = _connect()
+    rows = conn.execute("SELECT payload FROM entities WHERE table_name = 'workItems' AND deleted = 0").fetchall()
+    conn.close()
+    items = []
+    for (payload,) in rows:
+        try:
+            item = json.loads(payload)
+        except ValueError:
+            continue
+        ca = item.get("completedAt") or ""
+        if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt"):
+            items.append(item)
+    items.sort(key=lambda i: i.get("completedAt", ""))
+    return items
+
+
 def _is_snoozed(item: dict, now: datetime.datetime, tz: ZoneInfo) -> bool:
     until = parse_when(item.get("snoozedUntil"), tz)
     return bool(until and until > now)
@@ -554,6 +572,7 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
         "body": body,
         "tag": f"item-{item.get('id')}",
         "url": f"/?open={item.get('id')}",
+        "itemId": item.get("id"),
         "urgency": "high",
         "ttl": 3600,
     }
@@ -775,7 +794,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 body = _list_titles(due or overdue)
                 if due and overdue:
                     body += f". Plus {len(overdue)} overdue."
-                message = {"title": title, "body": body, "tag": "morning-plan", "url": "/", "ttl": 6 * 3600}
+                message = {"title": title, "body": body, "tag": "morning-plan", "url": "/?ritual=morning", "ttl": 6 * 3600}
                 email = None
                 if prefs["email"]["morningPlan"]:
                     link = _app_link()
@@ -799,12 +818,47 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     "title": f"{_plural(len(still_open), 'thing')} still open from today",
                     "body": f"{_list_titles(still_open)}. Finish one, or move it to tomorrow.",
                     "tag": "evening-check-in",
-                    "url": "/",
+                    "url": "/?ritual=evening",
                     "ttl": 3 * 3600,
                 }
                 if _deliver(prefs, message, None):
                     _mark_sent(conn, key)
                     sent.append(key)
+
+        # Sunday weekly review push + recap email
+        is_sunday = now.weekday() == 6
+        week_key = f"weekly-review:{day}"
+        if is_sunday and prefs["morningPlan"] and morning <= now < morning + DIGEST_GRACE and not _already_sent(conn, week_key):
+            week_ago = (now.date() - datetime.timedelta(days=7)).isoformat()
+            done_items = completed_since(week_ago)
+            stale = [i for i in items if not i.get("dueDate") and not i.get("isFocus") and i.get("createdAt", "")[:10] < week_ago]
+            if done_items or stale or due or overdue:
+                review_title = f"Week in review: {_plural(len(done_items), 'task')} completed"
+                review_body = _list_titles(done_items[:5]) if done_items else "Nothing completed this week."
+                if stale:
+                    review_body += f" {_plural(len(stale), 'stale item')} to triage."
+                message = {"title": review_title, "body": review_body, "tag": "weekly-review", "url": "/", "ttl": 12 * 3600}
+                email = None
+                if wants_email:
+                    link = _app_link()
+                    sections = [
+                        ("Completed this week", [i.get("title") or "Untitled" for i in done_items]),
+                        ("Due this week", [_describe(i, tz, now) for i in due]),
+                        ("Overdue", [i.get("title") or "Untitled" for i in overdue]),
+                        ("Stale — needs a date or done", [i.get("title") or "Untitled" for i in stale[:10]]),
+                    ]
+                    heading = f"Week of {(now.date() - datetime.timedelta(days=6)).strftime('%b %-d')} – {now.strftime('%b %-d')}"
+                    intro = f"You finished {_plural(len(done_items), 'thing')} this week." if done_items else "Quiet week — nothing got checked off."
+                    email = (
+                        f"Your week: {_plural(len(done_items), 'task')} done",
+                        email_text(heading, intro, sections, link),
+                        email_html(heading, intro, sections, link),
+                    )
+                if _deliver(prefs, message, email):
+                    _mark_sent(conn, week_key)
+                    sent.append(week_key)
+            else:
+                _mark_sent(conn, week_key)
 
         cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=30)).isoformat()
         conn.execute("DELETE FROM notification_log WHERE sent_at < ?", (cutoff,))

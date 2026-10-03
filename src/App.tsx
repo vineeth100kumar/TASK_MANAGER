@@ -33,6 +33,8 @@ import { FilterBar } from './components/common/FilterBar';
 import { ShortcutSheet } from './components/modals/ShortcutSheet';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
+import { MorningPickThree } from './components/modals/MorningPickThree';
+import { EveningShutdown } from './components/modals/EveningShutdown';
 
 function MainApp() {
   // Global State
@@ -70,6 +72,8 @@ function MainApp() {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [isMorningOpen, setIsMorningOpen] = useState(false);
+  const [isEveningOpen, setIsEveningOpen] = useState(false);
 
   const { showToast, dismissToast, toasts } = useToast();
 
@@ -124,14 +128,18 @@ function MainApp() {
     const openId = params.get('open');
     const actionParam = params.get('action');
     const viewParam = params.get('view');
-    if (openId || actionParam || viewParam) {
+    const ritualParam = params.get('ritual');
+    if (openId || actionParam || viewParam || ritualParam) {
       params.delete('open');
       params.delete('action');
       params.delete('view');
+      params.delete('ritual');
       const rest = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
     if (actionParam === 'new-task') setIsCreateModalOpen(true);
+    if (ritualParam === 'morning') setIsMorningOpen(true);
+    if (ritualParam === 'evening') setIsEveningOpen(true);
     if (viewParam === 'focus') setActiveView('focus');
     else if (viewParam === 'dashboard') setActiveView('dashboard');
     else if (viewParam === 'inbox') setActiveView('inbox');
@@ -482,11 +490,18 @@ function MainApp() {
 
       <AnimatePresence>
         {isDiagnosticsOpen && (
-          <SyncDiagnosticsModal 
-            onClose={() => setIsDiagnosticsOpen(false)} 
+          <SyncDiagnosticsModal
+            onClose={() => setIsDiagnosticsOpen(false)}
           />
         )}
       </AnimatePresence>
+
+      {isMorningOpen && (
+        <MorningPickThree onClose={() => setIsMorningOpen(false)} onNavigateView={setActiveView} />
+      )}
+      {isEveningOpen && (
+        <EveningShutdown onClose={() => setIsEveningOpen(false)} />
+      )}
 
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
       <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">

@@ -7,37 +7,60 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 
 self.addEventListener('push', (event) => {
   let data = {};
-  try {
-    data = event.data ? event.data.json() : {};
-  } catch {
-    data = { title: 'Sage', body: event.data ? event.data.text() : '' };
-  }
-  // iOS revokes push for a site that receives a push without showing
-  // anything, so every push shows a notification.
+  try { data = event.data ? event.data.json() : {}; } catch { data = { title: 'Sage', body: event.data ? event.data.text() : '' }; }
+  const itemId = data.itemId || (data.url && new URLSearchParams(new URL(data.url, self.location.origin).search).get('open'));
+  const actions = itemId ? [
+    { action: 'done', title: '✓ Done' },
+    { action: 'snooze', title: '💤 Snooze' },
+    { action: 'tomorrow', title: '→ Tomorrow' },
+  ] : [];
   event.waitUntil(
     self.registration.showNotification(data.title || 'Sage', {
       body: data.body || '',
       tag: data.tag || undefined,
       icon: '/icon-192.png',
       badge: '/icon-192.png',
-      data: { url: data.url || '/' },
+      data: { url: data.url || '/', itemId },
+      actions,
     })
   );
 });
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
-  const url = new URL((event.notification.data && event.notification.data.url) || '/', self.location.origin);
+  const { url, itemId } = event.notification.data || {};
+  const action = event.action;
+
+  if (action && itemId) {
+    event.waitUntil((async () => {
+      try {
+        const resp = await fetch(`/api/items/${encodeURIComponent(itemId)}/${action}`, {
+          method: 'POST',
+          credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ source: 'notification' }),
+        });
+        if (!resp.ok) throw new Error(resp.statusText);
+      } catch (e) {
+        // API failed — fall through to open the app so the user can act manually.
+        const target = new URL(url || '/', self.location.origin);
+        await self.clients.openWindow(target.href);
+      }
+    })());
+    return;
+  }
+
+  const target = new URL(url || '/', self.location.origin);
   event.waitUntil((async () => {
     const windows = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
     const open = windows.find((w) => new URL(w.url).origin === self.location.origin);
     if (open) {
       await open.focus();
-      const id = url.searchParams.get('open');
+      const id = target.searchParams.get('open');
       if (id) open.postMessage({ type: 'sage-open-item', id });
       return;
     }
-    await self.clients.openWindow(url.href);
+    await self.clients.openWindow(target.href);
   })());
 });
 
