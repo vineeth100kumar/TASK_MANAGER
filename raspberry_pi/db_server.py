@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import quick_add
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -647,6 +648,93 @@ async def backup_run():
         raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
     return {"success": True, "file": path.name, **backup.status()}
 
+# --- Quick-Add (Siri Shortcuts / Share Sheet / email capture) ---
+
+class QuickAddRequest(BaseModel):
+    text: str
+    source: str = "api"  # api | email | siri | share-sheet
+
+
+@app.post("/api/quick-add")
+async def quick_add_endpoint(req: QuickAddRequest):
+    text = (req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    parsed = quick_add.parse_quick_add(text)
+    entity_id = f"qa-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}"
+    now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    payload: Dict[str, Any] = {
+        "id": entity_id,
+        "title": parsed.title,
+        "entityType": parsed.entity_type,
+        "status": "todo",
+        "isInbox": parsed.date is None,
+        "isFocus": False,
+        "createdAt": now_iso,
+        "updatedAt": now_iso,
+        "revision": 1,
+        "source": req.source,
+    }
+    if parsed.date:
+        payload["dueDate"] = parsed.date
+    if parsed.time:
+        payload["dueTime"] = parsed.time
+    if parsed.priority:
+        payload["priority"] = parsed.priority
+    if parsed.tags:
+        payload["labels"] = parsed.tags
+    if parsed.location:
+        payload["location"] = parsed.location
+    if parsed.repeat_rule:
+        payload["repeatRule"] = parsed.repeat_rule
+    if parsed.duration_minutes:
+        payload["estimatedMinutes"] = parsed.duration_minutes
+
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        next_rev = increment_server_revision(cursor)
+        cursor.execute(
+            "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
+            ("workItems", entity_id, json.dumps(payload), next_rev),
+        )
+        cursor.execute(
+            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+            (f"quickadd-{entity_id}", req.source, "workItems", entity_id, "save"),
+        )
+        if GOOGLE_SHEETS_URL:
+            cursor.execute(
+                "INSERT INTO unsynced_batches (payload) VALUES (?)",
+                (json.dumps({
+                    "action": "processOperations",
+                    "clientId": req.source,
+                    "operations": [{
+                        "operationId": f"quickadd-{entity_id}",
+                        "clientId": req.source,
+                        "entityType": "workItems",
+                        "entityId": entity_id,
+                        "operation": "save",
+                        "revision": 1,
+                        "payload": payload,
+                    }],
+                }),),
+            )
+        conn.commit()
+    except Exception as e:
+        conn.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        conn.close()
+
+    await events.broadcast({
+        "type": "SYNC_APPLIED",
+        "serverRevision": next_rev,
+        "changes": [{"entityType": "workItems", "entityId": entity_id, "operation": "save", "clientId": req.source}],
+    })
+
+    return {"success": True, "item": payload, "parsed": parsed.to_dict()}
+
+
 import re
 import ollama
 
@@ -850,6 +938,64 @@ class EmailPasswordRequest(BaseModel):
 def save_email_password(req: EmailPasswordRequest):
     notifier.save_smtp_password(req.password)
     return _notification_config()
+
+
+def _email_capture_config() -> dict:
+    prefs = notifier.get_prefs()
+    cap = prefs.get("emailCapture", {})
+    return {
+        "success": True,
+        "emailCapture": cap,
+        "imapPasswordSet": bool(notifier.imap_password()),
+        "emailCaptureReady": notifier.email_capture_ready(prefs),
+    }
+
+
+@app.get("/api/email-capture")
+def email_capture_config():
+    return _email_capture_config()
+
+
+class ImapPasswordRequest(BaseModel):
+    password: str = ""
+
+
+@app.post("/api/email-capture/password")
+def save_imap_password(req: ImapPasswordRequest):
+    notifier.save_imap_password(req.password)
+    return _email_capture_config()
+
+
+@app.put("/api/email-capture/prefs")
+def update_email_capture_prefs(update: Dict[str, Any]):
+    try:
+        notifier.save_prefs({"emailCapture": update})
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _email_capture_config()
+
+
+@app.post("/api/email-capture/test")
+async def test_email_capture():
+    prefs = notifier.get_prefs()
+    if not notifier.email_capture_ready(prefs):
+        raise HTTPException(status_code=400, detail="Email capture is not configured yet. Set IMAP host, user, and password first.")
+    try:
+        items = await asyncio.to_thread(notifier.check_email_inbox, prefs)
+        if items:
+            rev = await asyncio.to_thread(notifier.insert_captured_items, items)
+            if rev:
+                await events.broadcast({
+                    "type": "SYNC_APPLIED",
+                    "serverRevision": rev,
+                    "changes": [
+                        {"entityType": "workItems", "entityId": item["id"], "operation": "save", "clientId": "email-capture"}
+                        for item in items
+                    ],
+                })
+        return {"success": True, "captured": len(items), "items": [{"title": i["title"]} for i in items]}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"IMAP check failed: {e}")
 
 
 class NotificationTestRequest(BaseModel):

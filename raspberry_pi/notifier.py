@@ -66,6 +66,13 @@ DEFAULT_PREFS: Dict[str, Any] = {
         "smtpPort": 587,
         "smtpUser": os.getenv("SAGE_EMAIL_FROM", "reminder.vk@gmail.com"),
     },
+    "emailCapture": {
+        "enabled": False,
+        "imapHost": "imap.gmail.com",
+        "imapPort": 993,
+        "imapUser": "",
+        "folder": "SageInbox",
+    },
 }
 
 PRIORITY_RANK = {"urgent": 0, "high": 1, "medium": 2, "low": 3}
@@ -552,6 +559,154 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
     }
 
 
+# --- Email-to-Inbox capture ---
+
+def imap_password() -> str:
+    return str(_secrets().get("IMAP_PASSWORD") or os.getenv("SAGE_IMAP_PASSWORD", "")).strip()
+
+
+def save_imap_password(password: str) -> None:
+    secrets = _secrets()
+    password = "".join(password.split())
+    if password:
+        secrets["IMAP_PASSWORD"] = password
+    else:
+        secrets.pop("IMAP_PASSWORD", None)
+    SECRETS_FILE.touch(mode=0o600, exist_ok=True)
+    SECRETS_FILE.write_text(json.dumps(secrets))
+
+
+def email_capture_ready(prefs: dict) -> bool:
+    cap = prefs.get("emailCapture", {})
+    return bool(cap.get("enabled") and cap.get("imapHost") and cap.get("imapUser") and imap_password())
+
+
+def check_email_inbox(prefs: dict) -> List[dict]:
+    """Read unread emails from the configured IMAP folder and return them as
+    work-item payloads ready for insertion. Each processed email is moved to
+    a 'SageProcessed' subfolder (created if needed) so it is only captured once."""
+    import imaplib
+    import email as email_lib
+    from email.header import decode_header
+
+    cap = prefs.get("emailCapture", {})
+    if not email_capture_ready(prefs):
+        return []
+
+    host = cap["imapHost"]
+    port = int(cap.get("imapPort", 993))
+    user = cap["imapUser"]
+    folder = cap.get("folder", "SageInbox")
+    password = imap_password()
+
+    items: List[dict] = []
+    try:
+        conn = imaplib.IMAP4_SSL(host, port, timeout=20)
+        conn.login(user, password)
+        # Create the processing folder if it doesn't exist.
+        processed = f"{folder}/SageProcessed"
+        conn.create(processed)  # OK if it already exists
+
+        status, _ = conn.select(folder)
+        if status != "OK":
+            conn.logout()
+            return []
+
+        _, msg_nums = conn.search(None, "UNSEEN")
+        if not msg_nums[0]:
+            conn.logout()
+            return []
+
+        for num in msg_nums[0].split()[:20]:  # cap at 20 per cycle
+            _, data = conn.fetch(num, "(RFC822)")
+            raw = data[0][1] if data and data[0] else None
+            if not raw:
+                continue
+            msg = email_lib.message_from_bytes(raw)
+
+            # Decode subject
+            subject_parts = decode_header(msg.get("Subject", ""))
+            subject = ""
+            for part, charset in subject_parts:
+                if isinstance(part, bytes):
+                    subject += part.decode(charset or "utf-8", errors="replace")
+                else:
+                    subject += part
+            subject = subject.strip() or "Untitled email task"
+
+            # Extract a snippet from the body
+            body_snippet = ""
+            if msg.is_multipart():
+                for part in msg.walk():
+                    if part.get_content_type() == "text/plain":
+                        charset = part.get_content_charset() or "utf-8"
+                        body_snippet = part.get_payload(decode=True).decode(charset, errors="replace")
+                        break
+            else:
+                charset = msg.get_content_charset() or "utf-8"
+                body_snippet = msg.get_payload(decode=True).decode(charset, errors="replace")
+
+            body_snippet = body_snippet.strip()[:500]
+            from_addr = msg.get("From", "")
+
+            now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+            entity_id = f"email-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}"
+            items.append({
+                "id": entity_id,
+                "title": subject,
+                "description": f"From: {from_addr}\n\n{body_snippet}" if body_snippet else f"From: {from_addr}",
+                "entityType": "task",
+                "status": "todo",
+                "isInbox": True,
+                "isFocus": False,
+                "createdAt": now_iso,
+                "updatedAt": now_iso,
+                "revision": 1,
+                "source": "email",
+                "labels": ["email"],
+            })
+
+            # Move to processed folder
+            conn.copy(num, processed)
+            conn.store(num, "+FLAGS", "\\Deleted")
+
+        conn.expunge()
+        conn.logout()
+    except Exception as e:
+        print(f"Email capture error: {e}")
+
+    return items
+
+
+def insert_captured_items(items: List[dict]) -> int:
+    """Insert captured items directly into the entities table. Returns the new
+    server revision (or the current one if nothing was inserted)."""
+    if not items:
+        return 0
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        rev = 0
+        for item in items:
+            rev = increment_server_revision(cursor)
+            cursor.execute(
+                "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
+                ("workItems", item["id"], json.dumps(item), rev),
+            )
+            cursor.execute(
+                "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+                (f"emailcap-{item['id']}", "email-capture", "workItems", item["id"], "save"),
+            )
+        conn.commit()
+        return rev
+    except Exception as e:
+        conn.rollback()
+        print(f"Email capture DB insert error: {e}")
+        return 0
+    finally:
+        conn.close()
+
+
 # --- The scheduler ---
 
 def _today_at(now: datetime.datetime, hhmm: str) -> datetime.datetime:
@@ -656,6 +811,17 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
         conn.commit()
     finally:
         conn.close()
+
+    # Email-to-Inbox capture: check IMAP folder for forwarded emails.
+    if email_capture_ready(prefs):
+        try:
+            captured = check_email_inbox(prefs)
+            if captured:
+                insert_captured_items(captured)
+                print(f"Email capture: {len(captured)} new item(s) from inbox.")
+        except Exception as e:
+            print(f"Email capture failed: {e}")
+
     return sent
 
 

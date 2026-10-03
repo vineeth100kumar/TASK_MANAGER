@@ -119,15 +119,22 @@ function MainApp() {
     notificationService.startReminderWatcher();
     refreshSubscription();
 
-    // A tapped notification opens its item: on a cold start through ?open=,
-    // and through the service worker when Sage is already open.
+    // URL params from notifications (?open=), PWA shortcuts (?action=, ?view=).
     const params = new URLSearchParams(window.location.search);
     const openId = params.get('open');
-    if (openId) {
+    const actionParam = params.get('action');
+    const viewParam = params.get('view');
+    if (openId || actionParam || viewParam) {
       params.delete('open');
+      params.delete('action');
+      params.delete('view');
       const rest = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
+    if (actionParam === 'new-task') setIsCreateModalOpen(true);
+    if (viewParam === 'focus') setActiveView('focus');
+    else if (viewParam === 'dashboard') setActiveView('dashboard');
+    else if (viewParam === 'inbox') setActiveView('inbox');
     const onWorkerMessage = (event: MessageEvent) => {
       if (event.data?.type === 'sage-open-item' && typeof event.data.id === 'string') setSelectedItemId(event.data.id);
     };
