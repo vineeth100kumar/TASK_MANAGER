@@ -652,7 +652,7 @@ async def backup_run():
 
 class QuickAddRequest(BaseModel):
     text: str
-    source: str = "api"  # api | email | siri | share-sheet | whatsapp
+    source: str = "api"  # api | email | siri | share-sheet
 
 
 @app.post("/api/quick-add")
@@ -660,10 +660,7 @@ async def quick_add_endpoint(req: QuickAddRequest):
     text = (req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
-    title_line, notes = quick_add.split_shared_text(text)
-    parsed = quick_add.parse_quick_add(title_line or text)
-    if req.source == "whatsapp" and "whatsapp" not in parsed.tags:
-        parsed.tags.append("whatsapp")
+    parsed = quick_add.parse_quick_add(text)
     entity_id = f"qa-{datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%d%H%M%S')}-{os.urandom(4).hex()}"
     now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
     payload: Dict[str, Any] = {
@@ -678,8 +675,6 @@ async def quick_add_endpoint(req: QuickAddRequest):
         "revision": 1,
         "source": req.source,
     }
-    if notes:
-        payload["description"] = notes
     if parsed.date:
         payload["dueDate"] = parsed.date
     if parsed.time:
