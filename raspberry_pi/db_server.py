@@ -1,4 +1,5 @@
 import json
+import zipfile
 import os
 import hmac
 import sqlite3
@@ -974,6 +975,19 @@ def canvas_think(req: canvas_thinker.CanvasThinkRequest):
     except Exception as e:
         print(f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
+
+# --- WhatsApp chat import (see chat_import.py) ---
+import chat_import
+
+@app.post("/api/chat-import")
+def chat_import_endpoint(req: chat_import.ChatImportRequest):
+    try:
+        return {"success": True, **chat_import.read_chat(req)}
+    except (ValueError, zipfile.BadZipFile) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        print(f"Chat import failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Sage couldn't read the chat: {e}")
 
 # --- Public link (see public_link.py) ---
 import public_link

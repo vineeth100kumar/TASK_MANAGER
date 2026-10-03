@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { withTime } from '../../utils/reminders';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
+import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play, MessageCircle } from 'lucide-react';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { Celebrate } from '../common/Celebrate';
@@ -16,6 +16,7 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { formatDateRange } from '../../utils/dateUtils';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 import { InboxTriage } from './InboxTriage';
+import { ChatImport } from '../modals/ChatImport';
 
 interface InboxViewProps {
   lifeContext?: LifeContext;
@@ -29,6 +30,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const hadItems = useRef(false);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
   const [isTriaging, setIsTriaging] = useState(false);
+  const [isReadingChat, setIsReadingChat] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
 
@@ -154,6 +156,13 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             <Play size={13} className="fill-current" /> Process inbox
           </button>
         )}
+        <button
+          onClick={() => setIsReadingChat(true)}
+          className="px-3.5 py-2.5 surface border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 font-semibold text-[12.5px] rounded-xl flex items-center gap-2 hover:bg-gray-50 dark:hover:bg-white/5 active:scale-[0.97] transition-all"
+          title="Find tasks, plans and milestones in a WhatsApp chat"
+        >
+          <MessageCircle size={14} className="text-green-600" /> From WhatsApp
+        </button>
         <button 
           onClick={() => {
             const event = new KeyboardEvent('keydown', { key: 'n' });
@@ -256,6 +265,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       <AnimatePresence>
         {isTriaging && (
           <InboxTriage items={items} onChanged={loadInbox} onClose={() => { setIsTriaging(false); loadInbox(); }} />
+        )}
+        {isReadingChat && (
+          <ChatImport lifeContext={lifeContext} onAdded={loadInbox} onClose={() => setIsReadingChat(false)} />
         )}
       </AnimatePresence>
 

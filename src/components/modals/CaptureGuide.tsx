@@ -463,6 +463,9 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
               A day or time in that first message, like “friday 8pm”, sets the due date. Sage only sees what you send it.
             </Note>
           </Step>
+          <Step n={5} title={<>To catch up on a whole chat, go to <Ui>Inbox</Ui> and tap <Ui>From WhatsApp</Ui>.</>}>
+            <Note>Export the chat from WhatsApp (tap its name, then Export Chat, Without Media) and pick the file. Sage's AI lists the tasks, plans and milestones it finds, and you tick the ones to keep.</Note>
+          </Step>
         </Steps>
       </Section>
 
