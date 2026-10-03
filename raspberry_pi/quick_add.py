@@ -371,3 +371,45 @@ def parse_quick_add(text: str, now: Optional[datetime.datetime] = None) -> Quick
         result.title = "Untitled"
 
     return result
+
+
+# A message copied or shared out of a chat app carries a header per line:
+# WhatsApp on iPhone "[03/10/2026, 10:12:33 AM] Rahul: see you at 8",
+# on Android "03/10/2026, 10:12 - Rahul: see you at 8". Left in, the date
+# and time in it would be read as the task's due date.
+_CHAT_HEADER = re.compile(
+    r"^\[?\d{1,2}[/.]\d{1,2}[/.]\d{2,4},?\s+\d{1,2}[:.]\d{2}(?:[:.]\d{2})?"
+    r"(?:\s*[ap]\.?\s?m\.?)?\]?\s*(?:-\s*)?([^:\n]{1,40}):\s*",
+    re.I,
+)
+TITLE_LIMIT = 100
+NOTES_LIMIT = 2000
+
+
+def split_shared_text(text: str) -> Tuple[str, str]:
+    """Split shared or forwarded text into (line to parse as the title, notes).
+
+    A short one-liner is returned as is with no notes. A chat message or
+    anything longer has its headers removed, its first line used as the
+    title (cut at a word near TITLE_LIMIT), and the whole original kept as
+    notes so nothing is lost."""
+    original = text.replace("‎", "").replace("‏", "").strip()
+    lines = []
+    had_header = False
+    for raw in original.splitlines():
+        m = _CHAT_HEADER.match(raw.strip())
+        if m:
+            had_header = True
+            raw = raw.strip()[m.end():]
+        if raw.strip():
+            lines.append(raw.strip())
+    if not lines:
+        return "", ""
+    first = lines[0]
+    cut = len(first) > TITLE_LIMIT
+    if cut:
+        first = first[:TITLE_LIMIT].rsplit(" ", 1)[0].rstrip(",.;:-") + "…"
+    if len(lines) == 1 and not cut and not had_header:
+        return first, ""
+    notes = original if len(original) <= NOTES_LIMIT else original[:NOTES_LIMIT].rstrip() + "…"
+    return first, notes
