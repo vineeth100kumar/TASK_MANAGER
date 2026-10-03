@@ -735,6 +735,117 @@ async def quick_add_endpoint(req: QuickAddRequest):
     return {"success": True, "item": payload, "parsed": parsed.to_dict()}
 
 
+# --- Notification quick-actions ---
+class ItemActionRequest(BaseModel):
+    source: str = "notification"
+
+@app.post("/api/items/{item_id}/done")
+async def item_done(item_id: str, req: ItemActionRequest):
+    """Mark an item done from a notification action button."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        row = cursor.execute(
+            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
+            (item_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Item not found")
+        item = json.loads(row[0])
+        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        item["status"] = "done"
+        item["completedAt"] = now_iso
+        item["updatedAt"] = now_iso
+        item["version"] = (item.get("version") or 1) + 1
+        next_rev = increment_server_revision(cursor)
+        cursor.execute(
+            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
+            (json.dumps(item), next_rev, item_id),
+        )
+        cursor.execute(
+            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+            (f"notif-done-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
+    return {"ok": True, "id": item_id, "status": "done"}
+
+
+@app.post("/api/items/{item_id}/snooze")
+async def item_snooze(item_id: str, req: ItemActionRequest):
+    """Snooze an item for 1 hour from a notification action button."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        row = cursor.execute(
+            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
+            (item_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Item not found")
+        item = json.loads(row[0])
+        now_utc = datetime.datetime.now(datetime.timezone.utc)
+        until = (now_utc + datetime.timedelta(hours=1)).isoformat()
+        item["snoozedUntil"] = until
+        item["snoozeCount"] = (item.get("snoozeCount") or 0) + 1
+        item["updatedAt"] = now_utc.isoformat()
+        item["version"] = (item.get("version") or 1) + 1
+        next_rev = increment_server_revision(cursor)
+        cursor.execute(
+            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
+            (json.dumps(item), next_rev, item_id),
+        )
+        cursor.execute(
+            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+            (f"notif-snooze-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
+    return {"ok": True, "id": item_id, "snoozedUntil": until}
+
+
+@app.post("/api/items/{item_id}/tomorrow")
+async def item_tomorrow(item_id: str, req: ItemActionRequest):
+    """Move an item to tomorrow from a notification action button."""
+    import notifier as _notifier
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        row = cursor.execute(
+            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
+            (item_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Item not found")
+        item = json.loads(row[0])
+        prefs = _notifier.get_prefs()
+        tz = _notifier._tz(prefs)
+        now = datetime.datetime.now(datetime.timezone.utc).astimezone(tz)
+        tomorrow = (now.date() + datetime.timedelta(days=1)).isoformat()
+        item["dueDate"] = tomorrow
+        item["snoozedUntil"] = None
+        item["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
+        item["version"] = (item.get("version") or 1) + 1
+        next_rev = increment_server_revision(cursor)
+        cursor.execute(
+            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
+            (json.dumps(item), next_rev, item_id),
+        )
+        cursor.execute(
+            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+            (f"notif-tomorrow-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
+        )
+        conn.commit()
+    finally:
+        conn.close()
+    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
+    return {"ok": True, "id": item_id, "dueDate": tomorrow}
+
+
 import re
 import ollama
 
