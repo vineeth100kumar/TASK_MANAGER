@@ -1057,7 +1057,12 @@ def _email_capture_config() -> dict:
     return {
         "success": True,
         "emailCapture": cap,
-        "imapPasswordSet": bool(notifier.imap_password()),
+        # Its own password, as opposed to the notification email's one it
+        # falls back to (usesEmailPassword).
+        "imapPasswordSet": bool(notifier.own_imap_password()),
+        "usesEmailPassword": not notifier.own_imap_password() and bool(notifier.smtp_password()),
+        "emailAccount": prefs.get("email", {}).get("smtpUser", ""),
+        "mailbox": notifier.imap_user(prefs),
         "emailCaptureReady": notifier.email_capture_ready(prefs),
     }
 
@@ -1090,7 +1095,7 @@ def update_email_capture_prefs(update: Dict[str, Any]):
 async def test_email_capture():
     prefs = notifier.get_prefs()
     if not notifier.email_capture_ready(prefs):
-        raise HTTPException(status_code=400, detail="Email capture is not configured yet. Set IMAP host, user, and password first.")
+        raise HTTPException(status_code=400, detail="Email capture is not set up yet. Turn it on and make sure there is an email password (the notification one is used by default).")
     try:
         items = await asyncio.to_thread(notifier.check_email_inbox, prefs)
         if items:

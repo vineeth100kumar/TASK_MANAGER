@@ -118,16 +118,32 @@ const Note = ({ children }: { children: React.ReactNode }) => (
 );
 
 type EmailCapture = { enabled: boolean; imapHost: string; imapPort: number; imapUser: string; folder: string };
-type EmailConfig = { emailCapture: EmailCapture; imapPasswordSet: boolean; emailCaptureReady: boolean };
+type EmailConfig = {
+  emailCapture: EmailCapture;
+  emailCaptureReady: boolean;
+  imapPasswordSet: boolean;   // a password just for capture
+  usesEmailPassword: boolean; // falling back to the notification email's
+  emailAccount: string;       // the account notifications send from
+  mailbox: string;            // the account Sage actually reads
+};
 
-function EmailSetup() {
+// you@gmail.com -> you+sage@gmail.com, which Gmail delivers to the same inbox.
+const plusAddress = (account: string) => (account.includes('@') ? account.replace('@', '+sage@') : '');
+
+function EmailSteps() {
   const [config, setConfig] = useState<EmailConfig | null | undefined>(undefined);
   const [draft, setDraft] = useState<EmailCapture | null>(null);
   const [password, setPassword] = useState('');
+  const [ownAccount, setOwnAccount] = useState(false);
+  const [showAdvanced, setShowAdvanced] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const { showToast } = useToast();
 
-  const accept = (json: EmailConfig) => { setConfig(json); setDraft(json.emailCapture); };
+  const accept = (json: EmailConfig) => {
+    setConfig(json);
+    setDraft(json.emailCapture);
+    setOwnAccount(Boolean(json.emailCapture.imapUser || json.imapPasswordSet));
+  };
 
   useEffect(() => {
     fetch(`${piBackendUrl()}/api/email-capture`, { headers: piHeaders() })
@@ -158,14 +174,26 @@ function EmailSetup() {
   if (config === undefined) return <Note>Checking your Pi…</Note>;
   if (config === null || !draft) return <Note>Couldn't reach the Pi. Check the server key under Server &amp; Reset, then come back.</Note>;
 
+  const mailbox = (ownAccount && draft.imapUser) || config.emailAccount;
+  const forwardTo = plusAddress(mailbox);
+  const needsPassword = !config.usesEmailPassword && !config.imapPasswordSet;
+
   const save = async () => {
     if (password.trim()) {
       const saved = await call('save', '/api/email-capture/password', 'POST', { password });
       if (!saved) return;
       setPassword('');
     }
-    const json = await call('save', '/api/email-capture/prefs', 'PUT', { ...draft, imapPort: Number(draft.imapPort) || 993 });
+    const prefs = { ...draft, imapUser: ownAccount ? draft.imapUser : '', imapPort: Number(draft.imapPort) || 993 };
+    const json = await call('save', '/api/email-capture/prefs', 'PUT', prefs);
     if (json) { accept(json); showToast(json.emailCaptureReady ? 'Email capture is on' : 'Saved'); }
+  };
+
+  // Back to the notification email's account and password.
+  const useNotificationAccount = async () => {
+    if (config.imapPasswordSet && !(await call('save', '/api/email-capture/password', 'POST', { password: '' }))) return;
+    const json = await call('save', '/api/email-capture/prefs', 'PUT', { ...draft, imapUser: '' });
+    if (json) { accept(json); setOwnAccount(false); }
   };
 
   const checkNow = async () => {
@@ -176,50 +204,105 @@ function EmailSetup() {
   const set = (patch: Partial<EmailCapture>) => setDraft(d => (d ? { ...d, ...patch } : d));
 
   return (
-    <div className="p-4 rounded-xl bg-white dark:bg-black/20 border border-black/10 dark:border-white/10 space-y-3">
-      <div className="flex items-center gap-2 text-xs font-semibold">
-        <span className={`inline-block w-2.5 h-2.5 rounded-full ${config.emailCaptureReady ? 'bg-emerald-500' : 'bg-gray-400'}`} aria-hidden="true" />
-        <span className="text-gray-700 dark:text-gray-300">
-          {config.emailCaptureReady ? `On. Sage checks ${config.emailCapture.folder} every 30 seconds.` : 'Off'}
-        </span>
-      </div>
-      <label className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
-        <input type="checkbox" checked={draft.enabled} onChange={e => set({ enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" />
-        Turn on email capture
-      </label>
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <label className="space-y-1 sm:col-span-2">
-          <span className="text-xs text-gray-500">Gmail address</span>
-          <input className={field} type="email" autoComplete="off" placeholder="you@gmail.com" value={draft.imapUser} onChange={e => set({ imapUser: e.target.value.trim() })} />
-        </label>
-        <label className="space-y-1 sm:col-span-2">
-          <span className="text-xs text-gray-500">App password {config.imapPasswordSet && <span className="text-emerald-600 dark:text-emerald-400">(saved)</span>}</span>
-          <input className={`${field} font-mono`} type="password" autoComplete="off" placeholder={config.imapPasswordSet ? 'Paste a new one to replace it' : 'abcd efgh ijkl mnop'} value={password} onChange={e => setPassword(e.target.value)} />
-        </label>
-        <label className="space-y-1">
-          <span className="text-xs text-gray-500">Label (folder)</span>
-          <input className={field} value={draft.folder} onChange={e => set({ folder: e.target.value.trim() })} />
-        </label>
-        <div className="grid grid-cols-3 gap-2">
-          <label className="space-y-1 col-span-2">
-            <span className="text-xs text-gray-500">IMAP server</span>
-            <input className={field} value={draft.imapHost} onChange={e => set({ imapHost: e.target.value.trim() })} />
+    <Steps>
+      <Step n={1} title={<>In Gmail{mailbox ? <> for <Ui>{mailbox}</Ui></> : ''}, create a label called <Ui>{draft.folder || 'SageInbox'}</Ui>.</>}>
+        <Note>On a computer: the <Ui>+</Ui> next to Labels in the left sidebar.</Note>
+      </Step>
+      <Step n={2} title={<>Make a filter that puts your Sage emails under that label.</>}>
+        <Note>
+          In the search bar, open the filter options and set <Ui>To</Ui> to the address below. Then <Ui>Create filter</Ui> with
+          {' '}<Ui>Skip the Inbox</Ui> and <Ui>Apply the label: {draft.folder || 'SageInbox'}</Ui>.
+        </Note>
+        {forwardTo && <CopyField label="Sage email address" value={forwardTo} />}
+      </Step>
+      <Step n={3} title={<>Turn it on and save.</>}>
+        <div className="p-4 rounded-xl bg-white dark:bg-black/20 border border-black/10 dark:border-white/10 space-y-3">
+          <div className="flex items-center gap-2 text-xs font-semibold">
+            <span className={`inline-block w-2.5 h-2.5 shrink-0 rounded-full ${config.emailCaptureReady ? 'bg-emerald-500' : 'bg-gray-400'}`} aria-hidden="true" />
+            <span className="text-gray-700 dark:text-gray-300">
+              {config.emailCaptureReady ? `On. Sage checks ${config.emailCapture.folder} every 30 seconds.` : 'Off'}
+            </span>
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-900 dark:text-white">
+            <input type="checkbox" checked={draft.enabled} onChange={e => set({ enabled: e.target.checked })} className="w-4 h-4 accent-blue-600" />
+            Turn on email capture
           </label>
-          <label className="space-y-1">
-            <span className="text-xs text-gray-500">Port</span>
-            <input className={field} inputMode="numeric" value={String(draft.imapPort)} onChange={e => set({ imapPort: Number(e.target.value.replace(/\D/g, '')) || 0 })} />
-          </label>
+
+          {!ownAccount ? (
+            <div className="space-y-2">
+              <p className="text-xs text-gray-600 dark:text-gray-300 flex items-start gap-1.5">
+                {config.usesEmailPassword && <Check size={14} className="text-emerald-500 shrink-0 mt-px" />}
+                <span>
+                  {config.usesEmailPassword
+                    ? <>Reads <Ui>{config.emailAccount}</Ui> with the same app password as your notification emails. Nothing else to enter.</>
+                    : <>Uses the account and app password from your notification emails. There's no password there yet, so add it under Notifications first, or paste one here.</>}
+                </span>
+              </p>
+              {needsPassword && (
+                <input className={`${field} font-mono`} type="password" autoComplete="off" placeholder="Gmail app password" aria-label="Gmail app password" value={password} onChange={e => setPassword(e.target.value)} />
+              )}
+              <button type="button" onClick={() => setOwnAccount(true)} className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                Use a different Gmail account
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <label className="block space-y-1">
+                <span className="text-xs text-gray-500">Gmail address</span>
+                <input className={field} type="email" autoComplete="off" placeholder={config.emailAccount || 'you@gmail.com'} value={draft.imapUser} onChange={e => set({ imapUser: e.target.value.trim() })} />
+              </label>
+              <label className="block space-y-1">
+                <span className="text-xs text-gray-500">
+                  App password for that account {config.imapPasswordSet && <span className="text-emerald-600 dark:text-emerald-400">(saved)</span>}
+                </span>
+                <input className={`${field} font-mono`} type="password" autoComplete="off" placeholder={config.imapPasswordSet ? 'Paste a new one to replace it' : 'abcd efgh ijkl mnop'} value={password} onChange={e => setPassword(e.target.value)} />
+              </label>
+              <Note>
+                Make one at <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">myaccount.google.com/apppasswords</a> while
+                signed in to that account. It needs 2-Step Verification.
+              </Note>
+              <button type="button" onClick={useNotificationAccount} disabled={busy !== null} className="text-xs font-semibold text-blue-600 dark:text-blue-400 hover:underline disabled:opacity-50">
+                Use my notification email instead
+              </button>
+            </div>
+          )}
+
+          <button type="button" onClick={() => setShowAdvanced(v => !v)} aria-expanded={showAdvanced} className="text-xs font-semibold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 flex items-center gap-1">
+            <ChevronDown size={14} className={`transition-transform ${showAdvanced ? 'rotate-180' : ''}`} /> Label and server
+          </button>
+          {showAdvanced && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label className="space-y-1">
+                <span className="text-xs text-gray-500">Label (folder)</span>
+                <input className={field} value={draft.folder} onChange={e => set({ folder: e.target.value.trim() })} />
+              </label>
+              <div className="grid grid-cols-3 gap-2">
+                <label className="space-y-1 col-span-2">
+                  <span className="text-xs text-gray-500">IMAP server</span>
+                  <input className={field} value={draft.imapHost} onChange={e => set({ imapHost: e.target.value.trim() })} />
+                </label>
+                <label className="space-y-1">
+                  <span className="text-xs text-gray-500">Port</span>
+                  <input className={field} inputMode="numeric" value={String(draft.imapPort)} onChange={e => set({ imapPort: Number(e.target.value.replace(/\D/g, '')) || 0 })} />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap gap-2 pt-1">
+            <button type="button" onClick={save} disabled={busy !== null} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-sm">
+              {busy === 'save' ? 'Saving…' : 'Save'}
+            </button>
+            <button type="button" onClick={checkNow} disabled={busy !== null || !config.emailCaptureReady} className={smallButton}>
+              <Mail size={13} /> {busy === 'check' ? 'Checking…' : 'Check now'}
+            </button>
+          </div>
         </div>
-      </div>
-      <div className="flex flex-wrap gap-2 pt-1">
-        <button type="button" onClick={save} disabled={busy !== null} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-sm">
-          {busy === 'save' ? 'Saving…' : 'Save'}
-        </button>
-        <button type="button" onClick={checkNow} disabled={busy !== null || !config.emailCaptureReady} className={smallButton}>
-          <Mail size={13} /> {busy === 'check' ? 'Checking…' : 'Check now'}
-        </button>
-      </div>
-    </div>
+      </Step>
+      <Step n={4} title={<>Forward any email to {forwardTo ? <Ui>{forwardTo}</Ui> : <>your <code className="font-mono">+sage</code> address</>}.</>}>
+        <Note>The subject becomes the task, the start of the email goes in its notes, and it's tagged #email. Sage then files the email under {draft.folder || 'SageInbox'}/SageProcessed so it's only added once.</Note>
+      </Step>
+    </Steps>
   );
 }
 
@@ -392,29 +475,7 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
         title="Email to Inbox" hint="Forward an email and it becomes a task"
         open={open === 'email'} onToggle={() => toggle('email')}
       >
-        <Steps>
-          <Step n={1} title={<>In Gmail, create a label called <Ui>SageInbox</Ui>.</>}>
-            <Note>On a computer: the <Ui>+</Ui> next to Labels in the left sidebar.</Note>
-          </Step>
-          <Step n={2} title={<>Make a filter that puts your Sage emails under that label.</>}>
-            <Note>
-              In the search bar, open the filter options, set <Ui>To</Ui> to your address with <code className="font-mono">+sage</code> added
-              (for example <code className="font-mono">you+sage@gmail.com</code>), then <Ui>Create filter</Ui> with <Ui>Skip the Inbox</Ui> and <Ui>Apply the label: SageInbox</Ui>.
-            </Note>
-          </Step>
-          <Step n={3} title={<>Create a Google app password for Sage.</>}>
-            <Note>
-              Go to <a href="https://myaccount.google.com/apppasswords" target="_blank" rel="noreferrer" className="text-blue-600 dark:text-blue-400 hover:underline">myaccount.google.com/apppasswords</a>,
-              {' '}name it “Sage” and copy the 16 letters. It needs 2-Step Verification turned on.
-            </Note>
-          </Step>
-          <Step n={4} title={<>Fill this in and save.</>}>
-            <EmailSetup />
-          </Step>
-          <Step n={5} title={<>Forward any email to your <code className="font-mono">+sage</code> address.</>}>
-            <Note>The subject becomes the task, the start of the email goes in its notes, and it's tagged #email. Sage then files the email under SageInbox/SageProcessed so it's only added once.</Note>
-          </Step>
-        </Steps>
+        <EmailSteps />
       </Section>
     </div>
   );

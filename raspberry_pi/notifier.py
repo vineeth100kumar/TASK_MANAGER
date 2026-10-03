@@ -580,8 +580,21 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
 
 # --- Email-to-Inbox capture ---
 
-def imap_password() -> str:
+def own_imap_password() -> str:
     return str(_secrets().get("IMAP_PASSWORD") or os.getenv("SAGE_IMAP_PASSWORD", "")).strip()
+
+
+def imap_password() -> str:
+    # A Gmail app password works for IMAP as well as SMTP, so email capture
+    # reuses the notification email's password unless it was given its own.
+    return own_imap_password() or smtp_password()
+
+
+def imap_user(prefs: dict) -> str:
+    """The mailbox to read. Blank means the account notifications send from,
+    which is the one the shared app password belongs to."""
+    cap = prefs.get("emailCapture", {})
+    return str(cap.get("imapUser") or prefs.get("email", {}).get("smtpUser") or "").strip()
 
 
 def save_imap_password(password: str) -> None:
@@ -597,7 +610,7 @@ def save_imap_password(password: str) -> None:
 
 def email_capture_ready(prefs: dict) -> bool:
     cap = prefs.get("emailCapture", {})
-    return bool(cap.get("enabled") and cap.get("imapHost") and cap.get("imapUser") and imap_password())
+    return bool(cap.get("enabled") and cap.get("imapHost") and imap_user(prefs) and imap_password())
 
 
 def check_email_inbox(prefs: dict) -> List[dict]:
@@ -614,7 +627,7 @@ def check_email_inbox(prefs: dict) -> List[dict]:
 
     host = cap["imapHost"]
     port = int(cap.get("imapPort", 993))
-    user = cap["imapUser"]
+    user = imap_user(prefs)
     folder = cap.get("folder", "SageInbox")
     password = imap_password()
 

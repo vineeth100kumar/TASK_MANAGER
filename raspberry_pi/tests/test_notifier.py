@@ -246,5 +246,41 @@ class RealPushTests(unittest.TestCase):
             notifier.save_subscription({"endpoint": "http://evil.example/", "keys": {"p256dh": "a", "auth": "b"}}, "x")
 
 
+class EmailCaptureAccountTests(unittest.TestCase):
+    """Email capture reads the notification email's account with its app
+    password unless it was given its own."""
+
+    def setUp(self):
+        notifier.init_tables()
+        conn = sqlite3.connect(notifier.DB_PATH)
+        conn.execute("DELETE FROM metadata WHERE key = 'notifyPrefs'")
+        conn.commit()
+        conn.close()
+        notifier.save_smtp_password("")
+        notifier.save_imap_password("")
+
+    def tearDown(self):
+        notifier.save_smtp_password("")
+        notifier.save_imap_password("")
+
+    def test_reuses_notification_account_and_password(self):
+        notifier.save_smtp_password("abcd efgh ijkl mnop")
+        prefs = notifier.save_prefs({"email": {"smtpUser": "sender@gmail.com"}, "emailCapture": {"enabled": True}})
+        self.assertEqual(notifier.imap_password(), "abcdefghijklmnop")
+        self.assertEqual(notifier.imap_user(prefs), "sender@gmail.com")
+        self.assertTrue(notifier.email_capture_ready(prefs))
+
+    def test_own_account_and_password_win(self):
+        notifier.save_smtp_password("abcd efgh ijkl mnop")
+        notifier.save_imap_password("wxyz wxyz wxyz wxyz")
+        prefs = notifier.save_prefs({"email": {"smtpUser": "sender@gmail.com"}, "emailCapture": {"enabled": True, "imapUser": "other@gmail.com"}})
+        self.assertEqual(notifier.imap_password(), "wxyzwxyzwxyzwxyz")
+        self.assertEqual(notifier.imap_user(prefs), "other@gmail.com")
+
+    def test_not_ready_without_any_password(self):
+        prefs = notifier.save_prefs({"emailCapture": {"enabled": True}})
+        self.assertFalse(notifier.email_capture_ready(prefs))
+
+
 if __name__ == "__main__":
     unittest.main()
