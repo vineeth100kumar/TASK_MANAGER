@@ -3,6 +3,7 @@
 #include "peripherals.h"
 #include "animator.h"
 #include "display.h"
+#include "clockkeeper.h"
 
 #include <WiFi.h>
 #include <ArduinoWebsockets.h>
@@ -89,6 +90,7 @@ static void handleTextMessage(const String& payload) {
     s.notif_active = true;
     s.notif_start = millis();
     s.flag_anim_changed = true;
+    neoPing(90, 170, 255);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
     s.cpu_temp = doc["cpu_temp"] | s.cpu_temp;
@@ -100,6 +102,14 @@ static void handleTextMessage(const String& payload) {
   else if (strcmp(cmd, "CLOCK") == 0) {
     s.h = doc["h"] | s.h;
     s.m = doc["m"] | s.m;
+    clockSync(s.h, s.m, doc["s"] | 0, doc["ms"] | 0);
+    if (doc["alarm_h"].is<int>() && doc["alarm_m"].is<int>()) {
+      s.alarm_h   = doc["alarm_h"];
+      s.alarm_m   = doc["alarm_m"];
+      s.alarm_set = true;
+    } else {
+      s.alarm_set = false;
+    }
     if (doc["weekday"].is<const char*>()) {
       strncpy(s.weekday, doc["weekday"], sizeof(s.weekday) - 1);
     }
@@ -142,21 +152,25 @@ static void handleTextMessage(const String& payload) {
     s.mood     = mood;
     s.schedule = sched;
     animatorSetMood(mood, sched);
+    neoSetSleep(sched == SCHED_SLEEP);
   }
   else if (strcmp(cmd, "LIGHTS") == 0) {
     const char* modeStr = doc["mode"] | "WARM";
     uint8_t bri         = doc["brightness"] | 40;
     uint16_t hue        = doc["hue"] | 0;
 
-    NeoMode nm = NEO_WARM;
-    if (strcmp(modeStr, "COLOR")   == 0) nm = NEO_COLOR;
+    NeoMode nm = NEO_AUTO;
+    if (strcmp(modeStr, "WARM")   == 0) nm = NEO_WARM;
+    else if (strcmp(modeStr, "COLOR")   == 0) nm = NEO_COLOR;
     else if (strcmp(modeStr, "BREATHE") == 0) nm = NEO_BREATHE;
+    else if (strcmp(modeStr, "AURORA")  == 0) nm = NEO_AURORA;
+    else if (strcmp(modeStr, "COMET")   == 0) nm = NEO_COMET;
     else if (strcmp(modeStr, "OFF")     == 0) nm = NEO_OFF;
 
     s.neo_mode       = nm;
     s.neo_brightness = bri;
     s.neo_hue        = hue;
-    applyNeoPixels(nm, bri, hue);
+    neoSetMode(nm, bri, hue);
   }
   else if (strcmp(cmd, "HAPTIC") == 0) {
     uint16_t ms = doc["ms"] | 50;
@@ -167,7 +181,6 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "ALARM_OFF") == 0) {
     s.alarm_ringing = false;
-    neoClear();
   }
   else if (strcmp(cmd, "SHOW_TASKS") == 0) {
     JsonArray arr = doc["items"];
@@ -198,13 +211,14 @@ static void handleTextMessage(const String& payload) {
 
     if (strcmp(st, "LISTENING") == 0) {
       animatorSetAnim(ANIM_FOCUSED, 0, 0, 4000);
+      neoSetVoice(VFX_LISTEN, 0.0f);
     } else if (strcmp(st, "THINKING") == 0) {
       animatorSetAnim(ANIM_SMIRK, 3, -2, 4000);
+      neoSetVoice(VFX_THINK, 0.0f);
     } else if (strcmp(st, "SPEAKING") == 0) {
-      uint8_t dyn_bri = constrain((uint8_t)(s.voice_volume * 100), 25, 100);
-      applyNeoPixels(NEO_COLOR, dyn_bri, 210);
-    } else if (strcmp(st, "IDLE") == 0) {
-      applyNeoPixels(s.neo_mode, s.neo_brightness, s.neo_hue);
+      neoSetVoice(VFX_SPEAK, s.voice_volume);
+    } else {
+      neoSetVoice(VFX_NONE, 0.0f);   // IDLE and anything unknown hand the ring back
     }
   }
 }

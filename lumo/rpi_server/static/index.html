@@ -622,6 +622,203 @@
     }
     @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
     @keyframes slideUp { from { transform: translateY(16px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+    /* =====================================================================
+       Refinement layer — one calm, consistent surface.
+       Loaded last so it quietly overrides the earlier rules.
+       ===================================================================== */
+    @property --phase-r { syntax: '<number>'; inherits: true; initial-value: 10; }
+    @property --phase-g { syntax: '<number>'; inherits: true; initial-value: 132; }
+    @property --phase-b { syntax: '<number>'; inherits: true; initial-value: 255; }
+
+    :root {
+      color-scheme: dark;
+      --bg: #050608;
+      --card: rgba(28, 30, 38, 0.62);
+      --card-border: rgba(255, 255, 255, 0.07);
+      --hairline: rgba(255, 255, 255, 0.06);
+      --accent: #0a84ff;
+      --text: rgba(255, 255, 255, 0.96);
+      --muted: rgba(235, 235, 245, 0.55);
+      --ease: cubic-bezier(0.22, 1, 0.36, 1);      /* decelerating, no overshoot */
+      --spring: cubic-bezier(0.34, 1.4, 0.64, 1);  /* the tiniest bounce */
+      --phase-r: 10; --phase-g: 132; --phase-b: 255;
+      transition: --phase-r 2.4s linear, --phase-g 2.4s linear, --phase-b 2.4s linear;
+    }
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      font-feature-settings: "tnum" 1, "cv11" 1;
+      background-color: var(--bg);
+      background-image:
+        radial-gradient(120% 70% at 50% -12%, rgba(var(--phase-r), var(--phase-g), var(--phase-b), 0.24) 0%, transparent 62%),
+        radial-gradient(80% 50% at 100% 100%, rgba(var(--phase-r), var(--phase-g), var(--phase-b), 0.07) 0%, transparent 70%);
+      background-attachment: fixed;
+      padding: max(18px, env(safe-area-inset-top)) 16px calc(88px + env(safe-area-inset-bottom)) 16px;
+    }
+    .container { max-width: 460px; }
+
+    /* Header: a proper large title */
+    .header { margin: 6px 2px 22px; padding: 0; }
+    .header h1 { font-size: 2rem; font-weight: 700; letter-spacing: -0.035em; }
+    .badge {
+      background: rgba(255,255,255,0.07); border: none; color: var(--muted);
+      padding: 7px 12px; font-weight: 600; letter-spacing: 0.01em;
+      backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+    }
+    .dot { transition: background 0.4s var(--ease), box-shadow 0.4s var(--ease); }
+    .dot.online { animation: breatheDot 3.2s ease-in-out infinite; }
+    @keyframes breatheDot { 0%,100% { box-shadow: 0 0 4px var(--green); } 50% { box-shadow: 0 0 12px var(--green); } }
+
+    /* Cards: glass with a soft top-light, rising in one after another */
+    .card, .lcd-wrapper {
+      background: linear-gradient(180deg, rgba(255,255,255,0.055) 0%, rgba(255,255,255,0.025) 100%), var(--card);
+      border: 1px solid var(--card-border);
+      border-radius: 24px;
+      padding: 20px;
+      margin-bottom: 16px;
+      box-shadow: inset 0 1px 0 rgba(255,255,255,0.06), 0 12px 40px -12px rgba(0,0,0,0.6);
+      backdrop-filter: blur(28px) saturate(150%);
+      -webkit-backdrop-filter: blur(28px) saturate(150%);
+    }
+    .lcd-wrapper { padding: 16px; }
+    .container > .card, .container > .lcd-wrapper {
+      animation: rise 0.7s var(--ease) both;
+    }
+    .container > :nth-child(3)  { animation-delay: 0.04s; }
+    .container > :nth-child(4)  { animation-delay: 0.08s; }
+    .container > :nth-child(5)  { animation-delay: 0.12s; }
+    .container > :nth-child(6)  { animation-delay: 0.16s; }
+    .container > :nth-child(7)  { animation-delay: 0.20s; }
+    .container > :nth-child(8)  { animation-delay: 0.24s; }
+    .container > :nth-child(n+9) { animation-delay: 0.28s; }
+    @keyframes rise { from { opacity: 0; transform: translateY(14px) scale(0.985); } to { opacity: 1; transform: none; } }
+
+    .card-title {
+      font-size: 0.72rem; letter-spacing: 0.09em; margin-bottom: 14px; color: var(--muted);
+    }
+    .card-title .card-sub {
+      text-transform: none; letter-spacing: 0; font-weight: 500; font-size: 0.78rem;
+      color: rgba(var(--phase-r), var(--phase-g), var(--phase-b), 1);
+      filter: brightness(1.25);
+    }
+
+    /* Buttons: quiet by default, spring when pressed */
+    button {
+      font-family: inherit;
+      background: rgba(255,255,255,0.09); border: none; border-radius: 14px;
+      transition: transform 0.35s var(--spring), background 0.3s var(--ease), box-shadow 0.3s var(--ease), color 0.3s var(--ease), opacity 0.3s var(--ease);
+    }
+    button:active { transform: scale(0.96); transition-duration: 0.12s; }
+    @media (hover: hover) {
+      button:hover { background: rgba(255,255,255,0.15); }
+      button.primary:hover { background: #2b95ff; }
+    }
+    button.primary { background: var(--accent); box-shadow: 0 6px 18px -6px rgba(10,132,255,0.7); }
+    button:focus-visible, .screen-btn:focus-visible, .color-dot:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid rgba(var(--phase-r), var(--phase-g), var(--phase-b), 0.9); outline-offset: 2px;
+    }
+
+    /* Display screen picker */
+    .screen-btn {
+      border: none; border-radius: 18px; padding: 14px 6px;
+      background: rgba(255,255,255,0.05);
+      transition: transform 0.35s var(--spring), background 0.35s var(--ease), box-shadow 0.35s var(--ease), color 0.3s var(--ease);
+    }
+    .screen-btn:active { transform: scale(0.95); }
+    @media (hover: hover) { .screen-btn:hover { background: rgba(255,255,255,0.09); } }
+    .screen-btn.active {
+      background: rgba(10,132,255,0.22);
+      box-shadow: inset 0 0 0 1.5px rgba(10,132,255,0.9), 0 8px 24px -8px rgba(10,132,255,0.6);
+    }
+
+    /* Segmented control */
+    .segmented {
+      display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 4px;
+      background: rgba(0,0,0,0.35); border-radius: 16px;
+    }
+    .segmented button {
+      background: transparent; padding: 10px 2px; border-radius: 12px; font-size: 0.8rem;
+      color: var(--muted); letter-spacing: 0.01em;
+    }
+    .segmented button.active {
+      background: rgba(255,255,255,0.16); color: #fff;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+    @media (hover: hover) { .segmented button:not(.active):hover { background: rgba(255,255,255,0.07); color: #fff; } }
+
+    /* Sliders: filled track, round thumb that lifts when held */
+    input[type=range] {
+      --p: 40%;
+      height: 6px; border-radius: 6px; cursor: pointer;
+      background: linear-gradient(to right, rgba(255,255,255,0.92) var(--p), rgba(255,255,255,0.14) var(--p));
+      transition: filter 0.3s var(--ease);
+    }
+    input[type=range]::-webkit-slider-thumb {
+      width: 24px; height: 24px; background: #fff;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.5), 0 0 0 0 rgba(255,255,255,0.18);
+      transition: transform 0.3s var(--spring), box-shadow 0.3s var(--ease);
+    }
+    input[type=range]:active::-webkit-slider-thumb { transform: scale(1.18); box-shadow: 0 4px 14px rgba(0,0,0,0.5), 0 0 0 8px rgba(255,255,255,0.12); }
+    input[type=range].hue-track {
+      background: linear-gradient(to right, #ff3b30, #ff9f0a, #ffd60a, #30d158, #0a84ff, #bf5af2, #ff3b30);
+    }
+    input[type=range]::-moz-range-thumb { width: 24px; height: 24px; background: #fff; border: none; border-radius: 50%; }
+    .slider-label { font-size: 0.8rem; margin-bottom: 10px; }
+    .slider-label span:last-child { color: var(--text); font-weight: 600; }
+    .slider-row { margin: 18px 0 4px; }
+
+    /* Toggle: a proper iOS switch */
+    .slider-toggle { transition: background-color 0.35s var(--ease); }
+    .slider-toggle:before { transition: transform 0.4s var(--spring); box-shadow: 0 2px 6px rgba(0,0,0,0.35); }
+
+    /* Inputs */
+    .add-row input, input[type=text], input[type=time], input[type=number], select {
+      font-family: inherit; transition: background 0.3s var(--ease), box-shadow 0.3s var(--ease);
+    }
+    .add-row input:focus, input[type=text]:focus { background: rgba(255,255,255,0.1); box-shadow: 0 0 0 2px rgba(10,132,255,0.5); }
+
+    /* Palette dots & anim buttons */
+    .color-dot { transition: transform 0.4s var(--spring), box-shadow 0.4s var(--ease), border-color 0.3s var(--ease); }
+    .color-dot:active { transform: scale(0.9); }
+    @media (hover: hover) { .color-dot:hover { transform: scale(1.1); } }
+    .color-dot.active { transform: scale(1.18); border-color: rgba(255,255,255,0.95); }
+    .anim-btn { background: rgba(255,255,255,0.06); border-radius: 16px; }
+
+    /* Lists */
+    .list-item, .task-item-row { border-bottom-color: var(--hairline); }
+    .list-item { animation: fadeIn 0.4s var(--ease) both; }
+    .stat-box { border-radius: 18px; background: rgba(255,255,255,0.045); border-color: var(--hairline); }
+    .stat-val { font-weight: 650; letter-spacing: -0.02em; }
+
+    /* LCD mirror: slimmer bezel, softer glow in the clock's colour */
+    .lcd-bezel {
+      border: 10px solid #15171c; border-radius: 22px;
+      box-shadow: inset 0 0 18px rgba(0,0,0,0.9), 0 18px 50px -14px rgba(var(--phase-r), var(--phase-g), var(--phase-b), 0.35), 0 8px 24px rgba(0,0,0,0.6);
+      transition: box-shadow 2.4s linear;
+    }
+    .lcd-scanlines { opacity: 0.18; }
+    #lcdCanvas { image-rendering: auto; }
+
+    /* LED ring preview */
+    .ring-stage {
+      display: flex; justify-content: center; align-items: center;
+      padding: 8px 0 18px;
+    }
+    #ringCanvas { width: 100%; max-width: 190px; height: auto; aspect-ratio: 1; display: block; }
+
+    #alarmBanner { border-radius: 22px; box-shadow: 0 14px 40px -10px rgba(255,69,58,0.7); }
+
+    /* Scrollbars & selection, quietly */
+    ::selection { background: rgba(10,132,255,0.45); }
+    * { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.18) transparent; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+    }
+    .segmented button[data-mode="OFF"] { grid-column: span 2; }
   </style>
 </head>
 <body>
@@ -850,13 +1047,19 @@
   </div>
 
   <!-- 4. Ambient Lighting -->
-  <div class="card">
-    <div class="card-title">Ambient Lighting</div>
-    <div class="btn-group">
-      <button onclick="setLightMode('WARM')" id="btnWarm" class="warm">Warm</button>
-      <button onclick="setLightMode('COLOR')" id="btnColor">Color</button>
-      <button onclick="setLightMode('BREATHE')" id="btnBreathe">Breathe</button>
-      <button onclick="setLightMode('OFF')" id="btnOff">Off</button>
+  <div class="card" id="lightCard">
+    <div class="card-title">Ambient Lighting <span class="card-sub" id="lightModeNote">Follows the time of day</span></div>
+
+    <div class="ring-stage"><canvas id="ringCanvas" width="384" height="384" aria-label="Live preview of the NeoPixel ring"></canvas></div>
+
+    <div class="segmented" id="lightSeg">
+      <button data-mode="AUTO" class="active" onclick="setLightMode('AUTO')">Auto</button>
+      <button data-mode="WARM" onclick="setLightMode('WARM')">Warm</button>
+      <button data-mode="COLOR" onclick="setLightMode('COLOR')">Color</button>
+      <button data-mode="BREATHE" onclick="setLightMode('BREATHE')">Breathe</button>
+      <button data-mode="AURORA" onclick="setLightMode('AURORA')">Aurora</button>
+      <button data-mode="COMET" onclick="setLightMode('COMET')">Comet</button>
+      <button data-mode="OFF" onclick="setLightMode('OFF')">Off</button>
     </div>
 
     <div class="slider-row">
@@ -865,8 +1068,8 @@
     </div>
 
     <div class="slider-row" id="hueRow" style="display:none;">
-      <div class="slider-label"><span>Color Hue</span><span id="hueVal">0°</span></div>
-      <input type="range" id="hueSlider" min="0" max="360" value="0" oninput="onLightSliderChange()">
+      <div class="slider-label"><span>Color</span><span id="hueVal">0°</span></div>
+      <input type="range" id="hueSlider" class="hue-track" min="0" max="360" value="0" oninput="onLightSliderChange()">
     </div>
   </div>
 
@@ -1412,7 +1615,7 @@
 </div>
 
 <script>
-  let currentLightMode = "WARM";
+  let currentLightMode = "AUTO";
   let activeScreenMode = "FACE";
 
   async function switchDisplay(mode) {
@@ -2092,6 +2295,7 @@
     try {
       const res = await fetch("/api/alarms");
       const alarms = await res.json();
+      window.lumoAlarms = alarms;
       const list = document.getElementById("alarmList");
       list.innerHTML = "";
 
@@ -2236,24 +2440,314 @@
     });
   }
 
+  // ==============================================================================
+  // DAY PHASES — the same palette the firmware uses for the clock face and the
+  // NeoPixel ring, so the page, the screen and the room always agree.
+  // ==============================================================================
+  const PHASE_KEYS = [
+    [0, 70, 80, 190, 0.22], [300, 90, 90, 200, 0.26], [390, 255, 150, 110, 0.60],
+    [540, 255, 214, 150, 0.92], [720, 190, 225, 255, 1.00], [990, 255, 190, 90, 0.92],
+    [1110, 255, 112, 90, 0.78], [1200, 160, 100, 255, 0.55], [1320, 80, 85, 190, 0.34],
+    [1440, 70, 80, 190, 0.22]
+  ];
+  function clockPhase(mod) {
+    mod = ((mod % 1440) + 1440) % 1440;
+    let i = 0;
+    while (i < PHASE_KEYS.length - 2 && mod >= PHASE_KEYS[i + 1][0]) i++;
+    const a = PHASE_KEYS[i], b = PHASE_KEYS[i + 1];
+    let t = (mod - a[0]) / (b[0] - a[0]);
+    t = t * t * (3 - 2 * t);
+    const lerp = (x, y) => x + (y - x) * t;
+    let greeting = "GOOD NIGHT";
+    if (mod >= 300 && mod < 720) greeting = "GOOD MORNING";
+    else if (mod >= 720 && mod < 1020) greeting = "GOOD AFTERNOON";
+    else if (mod >= 1020 && mod < 1260) greeting = "GOOD EVENING";
+    return { r: lerp(a[1], b[1]), g: lerp(a[2], b[2]), b: lerp(a[3], b[3]), level: lerp(a[4], b[4]), greeting };
+  }
+  function minuteOfDayNow() {
+    const d = new Date();
+    return d.getHours() * 60 + d.getMinutes() + d.getSeconds() / 60 + d.getMilliseconds() / 60000;
+  }
+
+  // Tint the page with the colour of the hour. @property makes this glide.
+  function applyPhaseTheme() {
+    const p = clockPhase(minuteOfDayNow());
+    const root = document.documentElement.style;
+    root.setProperty("--phase-r", Math.round(p.r));
+    root.setProperty("--phase-g", Math.round(p.g));
+    root.setProperty("--phase-b", Math.round(p.b));
+  }
+  applyPhaseTheme();
+  setInterval(applyPhaseTheme, 20000);
+
+  // ==============================================================================
+  // LIGHTING CONTROLS
+  // ==============================================================================
+  const LIGHT_NOTES = {
+    AUTO: "Follows the time of day", WARM: "Candlelight", COLOR: "A single colour",
+    BREATHE: "Slow, calm pulse", AURORA: "Drifting northern lights", COMET: "A light that circles", OFF: "Dark"
+  };
+
+  function updateSliderFill(el) {
+    const pct = ((el.value - el.min) / (el.max - el.min)) * 100;
+    el.style.setProperty("--p", pct + "%");
+  }
+
   function setLightMode(mode) {
     currentLightMode = mode;
-    document.getElementById("hueRow").style.display = (mode === 'COLOR') ? "block" : "none";
+    document.querySelectorAll("#lightSeg button").forEach(b => b.classList.toggle("active", b.dataset.mode === mode));
+    document.getElementById("hueRow").style.display = (mode === "COLOR" || mode === "BREATHE" || mode === "COMET") ? "block" : "none";
+    const note = document.getElementById("lightModeNote");
+    if (note) note.textContent = LIGHT_NOTES[mode] || "";
     sendLightState();
   }
 
   function onLightSliderChange() {
-    const bri = document.getElementById("briSlider").value;
-    const hue = document.getElementById("hueSlider").value;
-    document.getElementById("briVal").textContent = `${bri}%`;
-    document.getElementById("hueVal").textContent = `${hue}°`;
-    sendLightState();
+    const briEl = document.getElementById("briSlider");
+    const hueEl = document.getElementById("hueSlider");
+    document.getElementById("briVal").textContent = `${briEl.value}%`;
+    document.getElementById("hueVal").textContent = `${hueEl.value}°`;
+    updateSliderFill(briEl);
+    scheduleLightState();
+  }
+
+  // Dragging a slider fires dozens of events a second; send the latest one.
+  let lightSendTimer = null;
+  function scheduleLightState() {
+    clearTimeout(lightSendTimer);
+    lightSendTimer = setTimeout(sendLightState, 70);
   }
 
   function sendLightState() {
+    clearTimeout(lightSendTimer);
     const bri = parseInt(document.getElementById("briSlider").value);
     const hue = parseInt(document.getElementById("hueSlider").value);
     postApi("/api/lights", { mode: currentLightMode, brightness: bri, hue: hue });
+  }
+  updateSliderFill(document.getElementById("briSlider"));
+
+  // ==============================================================================
+  // LIVE RING PREVIEW — a browser twin of the firmware's scene engine
+  // ==============================================================================
+  const ringCanvas = document.getElementById("ringCanvas");
+  const ringCtx = ringCanvas ? ringCanvas.getContext("2d") : null;
+  const RING_N = 6;
+  const ringCur = Array.from({ length: RING_N }, () => [0, 0, 0]);
+  let ringLast = performance.now();
+
+  const hsvToRgb = (h, s, v) => {
+    h = h - Math.floor(h);
+    const c = v * s, x = c * (1 - Math.abs(((h * 6) % 2) - 1)), m = v - c;
+    const k = Math.floor(h * 6);
+    const [r, g, b] = [[c, x, 0], [x, c, 0], [0, c, x], [0, x, c], [x, 0, c], [c, 0, x]][Math.min(k, 5)];
+    return [r + m, g + m, b + m];
+  };
+  const mixRgb = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t];
+  const scaleRgb = (a, k) => [a[0] * k, a[1] * k, a[2] * k];
+  const addRgb = (a, b) => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+
+  function cometAt(pos, i, tailK) {
+    let d = pos - i;
+    while (d > RING_N / 2) d -= RING_N;
+    while (d <= -RING_N / 2) d += RING_N;
+    if (d >= 0) return Math.exp(-d * tailK);
+    if (d > -1) return 1 + d;
+    return 0;
+  }
+
+  function ringScene(t, mode, hue, onClockScreen, sleeping) {
+    const out = [];
+    let tau = 0.2;
+    const hueRgb = hsvToRgb(hue / 360, 1, 1);
+    if (mode === "OFF") {
+      for (let i = 0; i < RING_N; i++) out.push([0, 0, 0]);
+      tau = 0.3;
+    } else if (mode === "WARM") {
+      tau = 0.25;
+      for (let i = 0; i < RING_N; i++) {
+        const f = 0.93 + 0.04 * Math.sin(t * 1.3 + i * 2.1) + 0.03 * Math.sin(t * 2.9 + i * 0.7);
+        out.push(scaleRgb([1, 0.55, 0.16], f));
+      }
+    } else if (mode === "COLOR") {
+      tau = 0.25;
+      for (let i = 0; i < RING_N; i++) out.push(hueRgb);
+    } else if (mode === "BREATHE") {
+      tau = 0.05;
+      let b = 0.5 - 0.5 * Math.cos(t * 2 * Math.PI / 5);
+      b = 0.10 + 0.90 * b * b * (3 - 2 * b);
+      for (let i = 0; i < RING_N; i++) out.push(scaleRgb(hueRgb, b));
+    } else if (mode === "AURORA") {
+      tau = 0.12;
+      const teal = [0, 0.95, 0.65], violet = [0.55, 0.2, 1], blue = [0.1, 0.45, 1];
+      for (let i = 0; i < RING_N; i++) {
+        const u = 0.5 + 0.5 * Math.sin(t * 0.35 + i * 0.95);
+        const v = 0.5 + 0.5 * Math.sin(t * 0.23 - i * 1.3 + 1.7);
+        const w = 0.55 + 0.45 * Math.sin(t * 0.5 + i * 0.7 + 0.6);
+        out.push(scaleRgb(mixRgb(mixRgb(teal, violet, u), blue, v * 0.6), 0.45 + 0.55 * w));
+      }
+    } else if (mode === "COMET") {
+      tau = 0.04;
+      const pos = ((t / 2.4) % 1) * RING_N;
+      const c = hsvToRgb(hue / 360, 0.85, 1);
+      for (let i = 0; i < RING_N; i++) out.push(scaleRgb(c, 0.05 + 0.95 * cometAt(pos, i, 0.85)));
+    } else { // AUTO
+      const mod = minuteOfDayNow();
+      const ph = clockPhase(mod);
+      const pc = [ph.r / 255, ph.g / 255, ph.b / 255];
+      const breath = 0.5 - 0.5 * Math.cos(t * 2 * Math.PI / 9);
+      const dayGain = 0.40 + 0.60 * ph.level;
+      let glow = (0.50 + 0.14 * breath) * dayGain;
+      if (sleeping) glow *= 0.30;
+      tau = 0.22;
+      for (let i = 0; i < RING_N; i++) out.push(scaleRgb(pc, glow * (0.94 + 0.06 * Math.sin(t * 0.7 + i * 1.05))));
+      if (onClockScreen) {
+        const d = new Date();
+        const sec = d.getSeconds() + d.getMilliseconds() / 1000;
+        const gain = sleeping ? 0.30 : 0.35 + 0.65 * ph.level;
+        const cometCol = mixRgb(pc, [1, 1, 1], 0.55);
+        const pos = sec / 60 * RING_N;
+        for (let i = 0; i < RING_N; i++) out[i] = addRgb(out[i], scaleRgb(cometCol, cometAt(pos, i, 1.15) * gain * 0.85));
+        tau = 0.07;
+        if (sec < 1.4) {
+          const env = Math.sin(Math.PI * sec / 1.4);
+          for (let i = 0; i < RING_N; i++) out[i] = addRgb(out[i], scaleRgb(pc, env * 0.35 * gain));
+        }
+        if (d.getMinutes() === 0 && sec < 4 && !sleeping) {
+          const env = Math.sin(Math.PI * sec / 4);
+          for (let i = 0; i < RING_N; i++) out[i] = mixRgb(out[i], hsvToRgb(i / RING_N + t * 0.35, 0.75, 0.9), env * 0.85);
+        }
+      }
+    }
+    return { out, tau };
+  }
+
+  function renderRing(now) {
+    requestAnimationFrame(renderRing);
+    if (!ringCtx || document.hidden) return;
+    const dt = Math.min(0.1, (now - ringLast) / 1000);
+    ringLast = now;
+    const t = now / 1000;
+
+    const onClock = (typeof lcdState !== "undefined") && lcdState.screen === "CLOCK";
+    const sleeping = (typeof lcdState !== "undefined") && lcdState.schedule === "SLEEP";
+    const hue = parseInt(document.getElementById("hueSlider").value) || 0;
+    const { out, tau } = ringScene(t, currentLightMode, hue, onClock, sleeping);
+
+    const a = 1 - Math.exp(-dt / tau);
+    const master = (parseInt(document.getElementById("briSlider").value) / 100) * 0.6;
+    const W = ringCanvas.width, H = ringCanvas.height;
+    const cx = W / 2, cy = H / 2, R = W * 0.30;
+
+    ringCtx.clearRect(0, 0, W, H);
+    ringCtx.strokeStyle = "rgba(255,255,255,0.07)";
+    ringCtx.lineWidth = 2;
+    ringCtx.beginPath(); ringCtx.arc(cx, cy, R, 0, Math.PI * 2); ringCtx.stroke();
+
+    ringCtx.globalCompositeOperation = "lighter";
+    for (let i = 0; i < RING_N; i++) {
+      for (let c = 0; c < 3; c++) ringCur[i][c] += (out[i][c] - ringCur[i][c]) * a;
+      // A gentler curve than the hardware's gamma, so a dim night glow is still visible on a screen.
+      const lin = ringCur[i].map(v => Math.pow(Math.max(0, Math.min(1, v)), 1.4) * (0.55 + master * 0.9));
+      const col = lin.map(v => Math.round(Math.min(1, v) * 255));
+      const ang = -Math.PI / 2 + (i / RING_N) * Math.PI * 2;
+      const x = cx + Math.cos(ang) * R, y = cy + Math.sin(ang) * R;
+      const glow = ringCtx.createRadialGradient(x, y, 0, x, y, W * 0.17);
+      glow.addColorStop(0, `rgba(${col[0]},${col[1]},${col[2]},0.95)`);
+      glow.addColorStop(0.35, `rgba(${col[0]},${col[1]},${col[2]},0.35)`);
+      glow.addColorStop(1, `rgba(${col[0]},${col[1]},${col[2]},0)`);
+      ringCtx.fillStyle = glow;
+      ringCtx.fillRect(x - W * 0.17, y - W * 0.17, W * 0.34, W * 0.34);
+    }
+    ringCtx.globalCompositeOperation = "source-over";
+    for (let i = 0; i < RING_N; i++) {
+      const ang = -Math.PI / 2 + (i / RING_N) * Math.PI * 2;
+      ringCtx.fillStyle = "rgba(255,255,255,0.10)";
+      ringCtx.beginPath(); ringCtx.arc(cx + Math.cos(ang) * R, cy + Math.sin(ang) * R, 5, 0, Math.PI * 2); ringCtx.fill();
+    }
+  }
+  requestAnimationFrame(renderRing);
+
+  // ==============================================================================
+  // LCD MIRROR — the new clock face, drawn exactly as the firmware lays it out
+  // ==============================================================================
+  function drawLcdClock(ctx) {
+    const d = new Date();
+    const sec = d.getSeconds() + d.getMilliseconds() / 1000;
+    const ph = clockPhase(d.getHours() * 60 + d.getMinutes() + sec / 60);
+    const dim = 0.5 + 0.5 * ph.level;
+    const acc = (a = 1) => `rgba(${Math.round(ph.r * dim)},${Math.round(ph.g * dim)},${Math.round(ph.b * dim)},${a})`;
+    const ink = (a = 1) => `rgba(${Math.round(255 * dim)},${Math.round(255 * dim)},${Math.round(255 * dim)},${a})`;
+    const muted = `rgb(${Math.round(150 * dim)},${Math.round(156 * dim)},${Math.round(170 * dim)})`;
+    const font = "-apple-system, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif";
+
+    ctx.textBaseline = "alphabetic";
+    ctx.textAlign = "center";
+    ctx.fillStyle = acc();
+    ctx.font = `600 11px ${font}`;
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "1.5px";
+    ctx.fillText(ph.greeting, 160, 24);
+    if ("letterSpacing" in ctx) ctx.letterSpacing = "0px";
+
+    // Hero time, colon breathing once a second
+    const h12 = (d.getHours() % 12) || 12;
+    const hs = String(h12), ms = String(d.getMinutes()).padStart(2, "0");
+    const pulse = 0.5 + 0.5 * Math.cos((d.getMilliseconds() / 1000) * Math.PI * 2);
+    ctx.font = `300 88px ${font}`;
+    const wh = ctx.measureText(hs).width, wm = ctx.measureText(ms).width, wc = ctx.measureText(":").width;
+    ctx.font = `500 16px ${font}`;
+    const ap = d.getHours() >= 12 ? "PM" : "AM";
+    const wap = ctx.measureText(ap).width;
+    const total = wh + wc + wm + 8 + wap;
+    let x = (320 - total) / 2;
+    ctx.textAlign = "left";
+    ctx.font = `300 88px ${font}`;
+    ctx.fillStyle = ink(); ctx.fillText(hs, x, 110); x += wh;
+    ctx.fillStyle = ink(0.25 + 0.75 * pulse); ctx.fillText(":", x, 108); x += wc;
+    ctx.fillStyle = ink(); ctx.fillText(ms, x, 110); x += wm + 8;
+    ctx.font = `500 16px ${font}`;
+    ctx.fillStyle = acc(); ctx.fillText(ap, x, 110);
+
+    // Seconds, as a thin sweep
+    ctx.fillStyle = acc(0.16);
+    ctx.beginPath(); ctx.roundRect ? ctx.roundRect(40, 134, 240, 3, 1.5) : ctx.rect(40, 134, 240, 3); ctx.fill();
+    ctx.fillStyle = acc();
+    ctx.fillRect(40, 134, 240 * sec / 60, 3);
+
+    // Date
+    ctx.textAlign = "center";
+    ctx.fillStyle = ink();
+    ctx.font = `500 17px ${font}`;
+    const dateTxt = (lcdState.date || "").replace(/^(\w+)\s/, "$1, ");
+    ctx.fillText(dateTxt, 160, 172);
+
+    // Weather and next alarm
+    ctx.textAlign = "left";
+    ctx.fillStyle = muted;
+    ctx.font = `500 12px ${font}`;
+    const cond = String(lcdState.weather_icon || "");
+    ctx.fillText(`${Math.round(lcdState.temp_c)}°C  ${cond.charAt(0).toUpperCase() + cond.slice(1)}`, 22, 224);
+
+    const nextAlarm = nextAlarmLabel();
+    if (nextAlarm) {
+      ctx.textAlign = "right";
+      ctx.fillStyle = lcdState.alarm_ringing ? "#FF453A" : acc();
+      ctx.fillText(nextAlarm, 298, 224);
+    }
+  }
+
+  function nextAlarmLabel() {
+    const list = (window.lumoAlarms || []).filter(a => a.enabled);
+    if (!list.length) return "";
+    const d = new Date();
+    const nowMin = d.getHours() * 60 + d.getMinutes();
+    let best = null, bestDelta = Infinity;
+    for (const a of list) {
+      let delta = a.h * 60 + a.m - nowMin;
+      if (delta <= 0) delta += 1440;
+      if (delta < bestDelta) { bestDelta = delta; best = a; }
+    }
+    const h12 = (best.h % 12) || 12;
+    return `Alarm ${h12}:${String(best.m).padStart(2, "0")} ${best.h >= 12 ? "PM" : "AM"}`;
   }
 
   async function addAlarm() {
@@ -3224,6 +3718,7 @@
     lcdState.eye_color = data.eye_color || "cyan";
     lcdState.animation = data.animation || "normal";
     lcdState.alarm_ringing = !!data.alarm_ringing;
+    lcdState.schedule = data.schedule || "AWAKE";
     if (data.system) lcdState.system = data.system;
     if (data.spotify) lcdState.spotify = data.spotify;
     if (data.ios_music) lcdState.ios_music = data.ios_music;
@@ -3526,31 +4021,7 @@
       }
     }
     else if (scr === "CLOCK") {
-      ctx.fillStyle = "#00E5FF";
-      ctx.font = "12px sans-serif";
-      ctx.textAlign = "left";
-      ctx.fillText(`🌤️ ${lcdState.temp_c}°C`, 14, 20);
-      ctx.textAlign = "right";
-      ctx.fillText("LUMO", 306, 20);
-      ctx.strokeStyle = "#282c37";
-      ctx.beginPath(); ctx.moveTo(10, 28); ctx.lineTo(310, 28); ctx.stroke();
-
-      ctx.fillStyle = "#ffffff";
-      ctx.font = "bold 52px sans-serif";
-      ctx.textAlign = "center";
-      ctx.fillText(lcdState.time, 160, 105);
-
-      ctx.fillStyle = "#00E5FF";
-      ctx.font = "16px sans-serif";
-      ctx.fillText(lcdState.date, 160, 145);
-
-      ctx.fillStyle = lcdState.alarm_ringing ? "#FF1744" : "#8892b0";
-      ctx.font = "13px sans-serif";
-      ctx.fillText(lcdState.alarm_ringing ? "⏰ ALARM RINGING!" : "⏰ 07:30 ALARM OFF", 160, 180);
-
-      ctx.fillStyle = "#4a5568";
-      ctx.font = "11px monospace";
-      ctx.fillText("Tasks ←    → Music", 160, 222);
+      drawLcdClock(ctx);
     }
     else if (scr === "SYSTEM") {
       ctx.fillStyle = "#00E5FF";

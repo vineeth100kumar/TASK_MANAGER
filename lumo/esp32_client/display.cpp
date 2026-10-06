@@ -1,6 +1,10 @@
 #include <Arduino.h>
 #include "display.h"
 #include "animator.h"
+#include "clockkeeper.h"
+#include <Fonts/FreeSans9pt7b.h>
+#include <Fonts/FreeSans12pt7b.h>
+#include <Fonts/FreeSans24pt7b.h>
 #include <math.h>
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
@@ -430,57 +434,243 @@ static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
   }
 }
 
-static void drawClockScreen(const LumoState& s, bool full) {
-  tft.setFont(NULL);
+// =====================================================================
+//  CLOCK SCREEN
+//
+//  Black canvas, one hero time, one colour. The accent follows the same
+//  day-phase palette the NeoPixel ring uses, and everything dims after dark so
+//  the clock is easy on the eyes on a bedside table. The time is composed in an
+//  off-screen canvas and pushed in one blit, so the colon can breathe without
+//  a single flicker.
+// =====================================================================
+static const int CLK_CANVAS_W = 280;
+static const int CLK_CANVAS_H = 80;
+static const int CLK_CANVAS_X = (320 - CLK_CANVAS_W) / 2;
+static const int CLK_CANVAS_Y = 38;
+static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = 134, CLK_BAR_H = 3;
 
-  if (full) {
-    tft.fillScreen(COLOR_BG_BLACK);
+static GFXcanvas16* timeCanvas = nullptr;
+static bool          canvasTried = false;
+static unsigned long clockEnterMs = 0;
+static int           clockLastBarPx = -1;
+static int           clockLastMinute = -1;
+static uint8_t       clockLastColonStep = 255;
+static bool          clockNeedsStatic = true;
 
-    char wBuf[32];
-    snprintf(wBuf, sizeof(wBuf), "%.1f C  %s", s.temp_c, s.weather_icon);
-    tft.setTextSize(2);
-    tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(12, 10);
-    tft.print(wBuf);
+static inline uint16_t mix565(uint16_t a, uint16_t b, float t) {
+  t = constrain(t, 0.0f, 1.0f);
+  int ar = (a >> 11) & 31, ag = (a >> 5) & 63, ab = a & 31;
+  int br = (b >> 11) & 31, bg = (b >> 5) & 63, bb = b & 31;
+  return (uint16_t)(((int)(ar + (br - ar) * t) << 11) | ((int)(ag + (bg - ag) * t) << 5) | (int)(ab + (bb - ab) * t));
+}
 
-    tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(255, 10);
-    tft.print("LUMO");
-    tft.drawFastHLine(10, 34, 300, tft.color565(50, 50, 60));
+static uint16_t scaled565(uint8_t r, uint8_t g, uint8_t b, float k) {
+  k = constrain(k, 0.0f, 1.0f);
+  return tft.color565((uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k));
+}
 
-    tft.setTextSize(1);
-    tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(40, 218);
-    tft.print("Controlled via Local Web Dashboard");
-  }
+static void clockPalette(const ClockNow& c, uint16_t& accent, uint16_t& ink, uint16_t& muted, const char*& greeting, float fade) {
+  PhaseStyle ph = clockPhase(c.minuteOfDay);
+  float dim = (0.50f + 0.50f * ph.level) * fade;       // night = calm, not dark
+  accent   = scaled565(ph.r, ph.g, ph.b, dim);
+  ink      = scaled565(255, 255, 255, dim);
+  muted    = scaled565(150, 156, 170, dim);
+  greeting = ph.greeting;
+}
 
-  tft.fillRect(20, 52, 280, 55, COLOR_BG_BLACK);
-  char tBuf[16];
-  snprintf(tBuf, sizeof(tBuf), "%02d:%02d", s.h, s.m);
-  tft.setTextSize(6);
-  tft.setTextColor(COLOR_WHITE);
+static void centerText(const char* txt, int baseline, uint16_t color, const GFXfont* font) {
   int16_t x1, y1; uint16_t w, h;
-  tft.getTextBounds(tBuf, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 54);
-  tft.print(tBuf);
+  tft.setFont(font);
+  tft.setTextSize(1);
+  tft.getTextBounds(txt, 0, baseline, &x1, &y1, &w, &h);
+  tft.setTextColor(color);
+  tft.setCursor((320 - (int)w) / 2 - x1, baseline);
+  tft.print(txt);
+}
 
-  tft.fillRect(20, 118, 280, 24, COLOR_BG_BLACK);
+static void drawTempWithDegree(int x, int baseline, float temp, const char* cond, uint16_t color) {
+  char num[12];
+  snprintf(num, sizeof(num), "%.0f", temp);
+  tft.setFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.setTextColor(color);
+  tft.setCursor(x, baseline);
+  tft.print(num);
+  int cx = tft.getCursorX();
+  tft.drawCircle(cx + 3, baseline - 9, 2, color);
+  tft.setCursor(cx + 8, baseline);
+  tft.print("C");
+  if (cond && cond[0]) {
+    char c[14];
+    strncpy(c, cond, sizeof(c) - 1);
+    c[sizeof(c) - 1] = '\0';
+    c[0] = toupper(c[0]);
+    tft.print("  ");
+    tft.print(c);
+  }
+}
+
+// Labels that change at most once a minute: greeting, date, weather, alarm.
+static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) {
+  uint16_t accent, ink, muted; const char* greeting;
+  clockPalette(c, accent, ink, muted, greeting, fade);
+
+  tft.fillRect(0, 6, 320, 26, COLOR_BG_BLACK);
+  centerText(greeting, 24, accent, &FreeSans9pt7b);
+
+  tft.fillRect(0, 146, 320, 36, COLOR_BG_BLACK);
   char dBuf[32];
   snprintf(dBuf, sizeof(dBuf), "%s, %s", s.weekday, s.date);
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_MUTED);
-  tft.getTextBounds(dBuf, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 120);
-  tft.print(dBuf);
+  centerText(dBuf, 172, ink, &FreeSans12pt7b);
 
-  tft.fillRect(20, 155, 280, 24, COLOR_BG_BLACK);
-  char aBuf[32];
-  snprintf(aBuf, sizeof(aBuf), "ALARM  %02d:%02d", s.alarm_h, s.alarm_m);
-  tft.setTextSize(2);
-  tft.setTextColor(s.alarm_ringing ? COLOR_RED_PULSE : COLOR_ACCENT);
-  tft.getTextBounds(aBuf, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 158);
-  tft.print(aBuf);
+  tft.fillRect(0, 196, 320, 38, COLOR_BG_BLACK);
+  drawTempWithDegree(22, 224, s.temp_c, s.weather_icon, muted);
+
+  if (s.alarm_set) {
+    char aBuf[24];
+    uint8_t ah = s.alarm_h % 12; if (ah == 0) ah = 12;
+    snprintf(aBuf, sizeof(aBuf), "Alarm %d:%02d %s", ah, s.alarm_m, s.alarm_h >= 12 ? "PM" : "AM");
+    int16_t x1, y1; uint16_t w, h;
+    tft.setFont(&FreeSans9pt7b);
+    tft.setTextSize(1);
+    tft.getTextBounds(aBuf, 0, 224, &x1, &y1, &w, &h);
+    tft.setTextColor(s.alarm_ringing ? COLOR_RED_PULSE : accent);
+    tft.setCursor(298 - (int)w - x1, 224);
+    tft.print(aBuf);
+  }
+  tft.setFont(NULL);
+}
+
+static void drawClockTime(const ClockNow& c, float fade, bool force) {
+  // Colon breathes once per second; quantised so we only blit when it visibly changes.
+  float pulse = 0.5f + 0.5f * cosf(c.secFrac * 6.2831853f);     // 1 -> 0 -> 1
+  uint8_t step = (uint8_t)(pulse * 12.0f);
+  if (!force && step == clockLastColonStep && fade >= 1.0f) return;
+  clockLastColonStep = step;
+
+  uint16_t accent, ink, muted; const char* greeting;
+  clockPalette(c, accent, ink, muted, greeting, fade);
+  uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.25f + 0.75f * pulse);
+
+  uint8_t dispH = c.h % 12; if (dispH == 0) dispH = 12;
+  char hs[4], ms[4];
+  snprintf(hs, sizeof(hs), "%d", dispH);
+  snprintf(ms, sizeof(ms), "%02d", c.m);
+
+  if (!canvasTried) {
+    canvasTried = true;
+    timeCanvas = new GFXcanvas16(CLK_CANVAS_W, CLK_CANVAS_H);
+    if (timeCanvas && !timeCanvas->getBuffer()) { delete timeCanvas; timeCanvas = nullptr; }
+  }
+
+  // The canvas is the preferred path; with no heap left we draw straight to the
+  // panel (it will shimmer a little, but the clock keeps working).
+  Adafruit_GFX* g = timeCanvas ? (Adafruit_GFX*)timeCanvas : (Adafruit_GFX*)&tft;
+  int ox = timeCanvas ? 0 : CLK_CANVAS_X;
+  int oy = timeCanvas ? 0 : CLK_CANVAS_Y;
+  const int baseline = oy + 72;
+
+  if (timeCanvas) timeCanvas->fillScreen(COLOR_BG_BLACK);
+  else tft.fillRect(CLK_CANVAS_X, CLK_CANVAS_Y, CLK_CANVAS_W, CLK_CANVAS_H, COLOR_BG_BLACK);
+
+  int16_t x1, y1; uint16_t wh, wm, wc, hh;
+  g->setFont(&FreeSans24pt7b);
+  g->setTextSize(2);
+  g->getTextBounds(hs, 0, baseline, &x1, &y1, &wh, &hh);
+  g->getTextBounds(ms, 0, baseline, &x1, &y1, &wm, &hh);
+  g->getTextBounds(":", 0, baseline, &x1, &y1, &wc, &hh);
+
+  const int gap = 3;
+  g->setTextSize(1);
+  g->setFont(&FreeSans12pt7b);
+  uint16_t wap, hap;
+  const char* ap = (c.h >= 12) ? "PM" : "AM";
+  g->getTextBounds(ap, 0, baseline, &x1, &y1, &wap, &hap);
+  g->setFont(&FreeSans24pt7b);
+  g->setTextSize(2);
+
+  int total = wh + gap + wc + gap + wm + 8 + wap;
+  int x = ox + (CLK_CANVAS_W - total) / 2;
+
+  g->setTextColor(ink);
+  g->setCursor(x, baseline);
+  g->print(hs);
+  x += wh + gap;
+  g->setTextColor(colon);
+  g->setCursor(x, baseline);
+  g->print(":");
+  x += wc + gap;
+  g->setTextColor(ink);
+  g->setCursor(x, baseline);
+  g->print(ms);
+  x += wm + 8;
+
+  g->setTextSize(1);
+  g->setFont(&FreeSans12pt7b);
+  g->setTextColor(accent);
+  g->setCursor(x, baseline);
+  g->print(ap);
+  g->setFont(NULL);
+
+  if (timeCanvas) {
+    tft.drawRGBBitmap(CLK_CANVAS_X, CLK_CANVAS_Y, timeCanvas->getBuffer(), CLK_CANVAS_W, CLK_CANVAS_H);
+  }
+}
+
+static void drawClockSeconds(const ClockNow& c, float fade, bool force) {
+  float sec = c.s + c.secFrac;
+  int px = (int)(CLK_BAR_W * sec / 60.0f);
+  if (!force && px == clockLastBarPx) return;
+
+  uint16_t accent, ink, muted; const char* greeting;
+  clockPalette(c, accent, ink, muted, greeting, fade);
+  uint16_t track = mix565(COLOR_BG_BLACK, accent, 0.16f);
+
+  if (force || px < clockLastBarPx) {
+    tft.fillRoundRect(CLK_BAR_X, CLK_BAR_Y, CLK_BAR_W, CLK_BAR_H, 1, track);
+    if (px > 0) tft.fillRect(CLK_BAR_X, CLK_BAR_Y, px, CLK_BAR_H, accent);
+  } else if (px > clockLastBarPx) {
+    int from = max(clockLastBarPx, 0);
+    tft.fillRect(CLK_BAR_X + from, CLK_BAR_Y, px - from, CLK_BAR_H, accent);
+  }
+  clockLastBarPx = px;
+}
+
+// Called every loop while the clock is on screen; paces itself to ~30 fps.
+void displayClockTick(const LumoState& s) {
+  static unsigned long lastDraw = 0;
+  unsigned long now = millis();
+  bool entering = (now - clockEnterMs) < 700;
+  if (!clockNeedsStatic && now - lastDraw < 33) return;
+  lastDraw = now;
+
+  ClockNow c = clockNow();
+  if (!c.synced) {                      // no Pi yet: show whatever we were last told
+    c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
+  }
+
+  float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
+  fade = fade * fade * (3.0f - 2.0f * fade);
+
+  if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+    drawClockStatics(s, c, fade);
+    clockLastMinute = c.m;
+    clockNeedsStatic = false;
+  }
+  drawClockTime(c, fade, entering);
+  if (c.synced) drawClockSeconds(c, fade, entering);
+}
+
+static void drawClockScreen(const LumoState& s, bool full) {
+  if (full) {
+    tft.fillScreen(COLOR_BG_BLACK);
+    clockEnterMs = millis();
+    clockNeedsStatic = true;
+    clockLastBarPx = -1;
+    clockLastMinute = -1;
+    clockLastColonStep = 255;
+  }
+  displayClockTick(s);
 }
 
 static void drawSystemScreen(const LumoState& s, bool full) {
@@ -705,61 +895,88 @@ static void drawTasksScreen(const LumoState& s) {
   tft.print("Controlled via Web Dashboard");
 }
 
-static void drawAlarmScreen(const LumoState& s) {
-  static bool invert = false;
-  invert = !invert;
+// Alarm: drawn once, then only a pulsing frame and the minute change. No more
+// full-screen strobing; it is urgent without being harsh.
+static bool alarmNeedsStatic = true;
 
-  tft.setFont(NULL);
-  tft.fillScreen(invert ? COLOR_RED_PULSE : COLOR_RED_DARK);
-
-  tft.setTextSize(3);
-  tft.setTextColor(COLOR_WHITE);
-  int16_t x1, y1; uint16_t w, h;
-  const char* title = "ALERT: WAKE UP";
-  tft.getTextBounds(title, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 45);
-  tft.print(title);
-
-  tft.setTextSize(5);
-  char aBuf[16];
-  snprintf(aBuf, sizeof(aBuf), "%02d:%02d", s.h, s.m);
-  tft.getTextBounds(aBuf, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 100);
-  tft.print(aBuf);
-
-  tft.setTextSize(2);
-  const char* hint = "TAP DISMISS IN WEB UI";
-  tft.getTextBounds(hint, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 175);
-  tft.print(hint);
+static void drawAlarmFrame(float pulse) {
+  uint16_t col = mix565(0x2000, COLOR_RED_PULSE, pulse);
+  const int t = 5;
+  tft.fillRect(0, 0, 320, t, col);
+  tft.fillRect(0, 240 - t, 320, t, col);
+  tft.fillRect(0, t, t, 240 - 2 * t, col);
+  tft.fillRect(320 - t, t, t, 240 - 2 * t, col);
 }
 
-static void drawConnectingScreen(const LumoState& s) {
-  static int dotCount = 0;
-  dotCount = (dotCount + 1) % 4;
+void displayAlarmReset() { alarmNeedsStatic = true; }
 
-  tft.setFont(NULL);
-  tft.fillScreen(COLOR_BG_STEALTH);
+void displayAlarmTick(const LumoState& s) {
+  static unsigned long lastDraw = 0;
+  static int lastMin = -1;
+  unsigned long now = millis();
+  if (!alarmNeedsStatic && now - lastDraw < 50) return;
+  lastDraw = now;
 
-  drawCyberEye(100, 100, 56, 48, 8, 1.0f, COLOR_ACCENT, true, 0, false);
-  drawCyberEye(220, 100, 56, 48, 8, 1.0f, COLOR_ACCENT, false, 0, false);
+  ClockNow c = clockNow();
+  if (!c.synced) { c.h = s.h; c.m = s.m; }
 
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_WHITE);
-  char msg[32];
-  snprintf(msg, sizeof(msg), "Connecting to Pi%.*s", dotCount, "...");
-  int16_t x1, y1; uint16_t w, h;
-  tft.getTextBounds(msg, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 160);
-  tft.print(msg);
+  if (alarmNeedsStatic) {
+    tft.fillScreen(COLOR_BG_BLACK);
+    centerText("ALARM", 52, COLOR_RED_PULSE, &FreeSans12pt7b);
+    centerText("Press any button to dismiss", 214, COLOR_MUTED, &FreeSans9pt7b);
+    lastMin = -1;
+    alarmNeedsStatic = false;
+  }
 
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_MUTED);
-  char ipBuf[40];
-  snprintf(ipBuf, sizeof(ipBuf), "Host IP: %s", PI_HOSTNAME);
-  tft.getTextBounds(ipBuf, 0, 0, &x1, &y1, &w, &h);
-  tft.setCursor((320 - w) / 2, 195);
-  tft.print(ipBuf);
+  if (c.m != lastMin) {
+    lastMin = c.m;
+    tft.fillRect(10, 70, 300, 90, COLOR_BG_BLACK);
+    uint8_t dh = c.h % 12; if (dh == 0) dh = 12;
+    char tb[8];
+    snprintf(tb, sizeof(tb), "%d:%02d", dh, c.m);
+    int16_t x1, y1; uint16_t w, h;
+    tft.setFont(&FreeSans24pt7b);
+    tft.setTextSize(2);
+    tft.getTextBounds(tb, 0, 140, &x1, &y1, &w, &h);
+    tft.setTextColor(COLOR_WHITE);
+    tft.setCursor((320 - (int)w) / 2 - x1, 140);
+    tft.print(tb);
+    tft.setTextSize(1);
+    tft.setFont(NULL);
+  }
+
+  float pulse = 0.5f + 0.5f * sinf(now / 1000.0f * 6.2831853f * 1.6f);
+  drawAlarmFrame(pulse);
+}
+
+// Connecting: the eyes and caption are drawn once; only three dots breathe.
+static bool connNeedsStatic = true;
+
+void displayConnectingReset() { connNeedsStatic = true; }
+
+void displayConnectingTick() {
+  static unsigned long lastDraw = 0;
+  unsigned long now = millis();
+  if (!connNeedsStatic && now - lastDraw < 80) return;
+  lastDraw = now;
+
+  if (connNeedsStatic) {
+    tft.fillScreen(COLOR_BG_STEALTH);
+    drawCyberEye(100, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, true, 0, false);
+    drawCyberEye(220, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, false, 0, false);
+    centerText("Connecting", 168, COLOR_WHITE, &FreeSans12pt7b);
+    char ipBuf[40];
+    snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
+    centerText(ipBuf, 222, COLOR_MUTED, &FreeSans9pt7b);
+    tft.setFont(NULL);
+    connNeedsStatic = false;
+  }
+
+  for (int i = 0; i < 3; i++) {
+    float phase = now / 1000.0f * 3.2f - i * 0.7f;
+    float k = 0.5f + 0.5f * sinf(phase);
+    tft.fillCircle(144 + i * 16, 190, 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
+  }
 }
 
 static void drawMemoryScreen(const LumoState& s, bool full) {
@@ -820,10 +1037,12 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
       drawTasksScreen(s);
       break;
     case SCREEN_ALARM:
-      drawAlarmScreen(s);
+      if (modeChanged) displayAlarmReset();
+      displayAlarmTick(s);
       break;
     case SCREEN_CONNECTING:
-      drawConnectingScreen(s);
+      if (modeChanged) displayConnectingReset();
+      displayConnectingTick();
       break;
     case SCREEN_MEMORY:
       drawMemoryScreen(s, modeChanged);
