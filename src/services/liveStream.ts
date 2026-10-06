@@ -13,6 +13,8 @@ export type LiveEvent =
 
 const MAX_RETRY_MS = 60000;
 
+export const PHONE_EVENT = 'sage:phone';
+
 export class LiveStream {
   private socket: WebSocket | null = null;
   private retryMs = 1000;
@@ -58,6 +60,9 @@ export class LiveStream {
         this.setConnected(true);
       } else if (event?.type === 'SYNC_APPLIED' || event?.type === 'SYNC_CLEARED') {
         this.onEvent(event);
+      } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
+        // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
+        window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
       }
     };
     socket.onclose = () => {
