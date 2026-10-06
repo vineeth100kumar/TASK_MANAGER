@@ -5,4 +5,5 @@ pydantic
 httpx
 anthropic
 pywebpush
+dbus-next
 tzdata

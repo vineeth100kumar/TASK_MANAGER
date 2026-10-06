@@ -142,3 +142,21 @@ ollama pull qwen2.5:1.5b
 The model is small enough to leave room on a 4 GB Pi 5. Requests use JSON mode
 at low temperature, and `safe_parse_json` strips stray Markdown fences before
 the reply is parsed.
+
+## Phone notifications over Bluetooth
+
+`phone_link.py` pairs the Pi with an iPhone over Bluetooth Low Energy, the way a
+smartwatch pairs. It is never a speaker or headset. Sage shows the phone's
+notifications, now playing and home/away in a corner of the web app.
+
+- Needs BlueZ 5.66+ and `dbus-next` (in `requirements.txt`). Without BlueZ the
+  feature stays off and the rest of Sage is unaffected.
+- Pair once: on the iPhone, forget any old "LUMO Companion" entry, open
+  Settings > Bluetooth, tap **Sage Companion**, confirm the code, and allow
+  **Share System Notifications**.
+- Away is declared after 5 minutes without a connection (`SAGE_PHONE_AWAY_AFTER`).
+- `SAGE_PHONE_APPS` limits notifications to some app bundle ids (empty = all);
+  `SAGE_PHONE_LINK=0` turns the link off.
+- Notification text is kept in memory only, never in the database or the log.
+- Try the panel without a phone:
+  `curl -X POST -H 'Content-Type: application/json' localhost:8000/api/phone/notifications -d '{"app":"Messages","title":"Asha","message":"Dinner at 8?"}'`

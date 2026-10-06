@@ -35,6 +35,7 @@ import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import { MorningPickThree } from './components/modals/MorningPickThree';
 import { EveningShutdown } from './components/modals/EveningShutdown';
+import { PhoneCorner } from './components/common/PhoneCorner';
 
 function MainApp() {
   // Global State
@@ -503,8 +504,10 @@ function MainApp() {
         <EveningShutdown onClose={() => setIsEveningOpen(false)} />
       )}
 
+      <PhoneCorner />
+
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
-      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-4 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
+      <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-16 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
         <AnimatePresence>
           {toasts.map((toast: any) => (
              <motion.div key={toast.id} layout initial={{ opacity: 0, y: 16, scale: 0.96 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 8, scale: 0.96, transition: { duration: 0.16 } }}

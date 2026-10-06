@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import phone_link
 import quick_add
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
@@ -369,6 +370,7 @@ async def startup_event():
     asyncio.create_task(google_sheets_backup_worker())
     asyncio.create_task(notifier.scheduler())
     asyncio.create_task(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
+    asyncio.create_task(phone_link.link.run(events.broadcast))
 
 
 @app.get("/api/health")
@@ -1146,6 +1148,50 @@ async def test_notification(req: NotificationTestRequest):
     return {"success": any(r["ok"] for r in results), "results": results}
 
 
+# --- Phone over Bluetooth (see phone_link.py) ---
+# The iPhone's notifications, now playing and home/away, shown in a corner of
+# the web app. Live changes go out on /ws as PHONE_* events.
+class PhoneNotification(BaseModel):
+    app: Optional[str] = "Phone"
+    title: str
+    message: Optional[str] = ""
+
+
+class PhoneCommand(BaseModel):
+    command: str  # play, pause, toggle, next, previous
+
+
+@app.get("/api/phone")
+def phone_state():
+    return {"success": True, **phone_link.link.snapshot()}
+
+
+@app.post("/api/phone/notifications")
+async def phone_add_notification(item: PhoneNotification):
+    """Shows a notification as if the phone sent it. Handy for trying the
+    corner panel, and for scripts on the Pi."""
+    await phone_link.link.add_notification(item.dict())
+    return {"success": True}
+
+
+@app.delete("/api/phone/notifications/{notification_id}")
+async def phone_dismiss(notification_id: str):
+    if notification_id == "all":
+        await phone_link.link.clear_notifications()
+    else:
+        await phone_link.link.remove_notification(notification_id)
+    return {"success": True}
+
+
+@app.post("/api/phone/media")
+async def phone_media(cmd: PhoneCommand):
+    if cmd.command not in phone_link.COMMANDS:
+        raise HTTPException(status_code=400, detail="Unknown command")
+    if not await phone_link.link.send_command(cmd.command):
+        raise HTTPException(status_code=409, detail="Phone media controls are not connected")
+    return {"success": True}
+
+
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.
 if (DIST_DIR / "index.html").is_file():
@@ -1156,4 +1202,5 @@ else:
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=os.getenv("SAGE_BIND", "127.0.0.1"), port=8000)
+
 
