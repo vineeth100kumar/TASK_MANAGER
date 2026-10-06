@@ -1194,6 +1194,82 @@ async def phone_media(cmd: PhoneCommand):
 
 # --- Web app ---
 # Mounted last so every /api route above wins over a same-named file.
+# --- Bluetooth management (see bluetooth_control.py) ---
+class BluetoothToggle(BaseModel):
+    on: bool
+    seconds: Optional[int] = None
+
+
+class BluetoothName(BaseModel):
+    name: str
+
+
+class BluetoothDecision(BaseModel):
+    accept: bool
+
+
+def _bluetooth():
+    control = phone_link.link.control
+    if control is None:
+        raise HTTPException(status_code=409, detail="Bluetooth isn't available on this machine.")
+    return control
+
+
+async def _bluetooth_do(action):
+    control = _bluetooth()
+    try:
+        await action(control)
+    except HTTPException:
+        raise
+    except (ValueError, LookupError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        import bluetooth_control
+        raise HTTPException(status_code=502, detail=bluetooth_control.friendly(e))
+    return {"success": True, **control.latest}
+
+
+@app.get("/api/bluetooth")
+async def bluetooth_state():
+    control = phone_link.link.control
+    if control is None:
+        return {"success": True, "available": False, "reason": "Bluetooth isn't available on this machine."}
+    return {"success": True, **await control.refresh()}
+
+
+@app.post("/api/bluetooth/power")
+async def bluetooth_power(req: BluetoothToggle):
+    return await _bluetooth_do(lambda c: c.set_power(req.on))
+
+
+@app.post("/api/bluetooth/pairing")
+async def bluetooth_pairing(req: BluetoothToggle):
+    return await _bluetooth_do(lambda c: c.set_pairing(req.on, req.seconds or 180))
+
+
+@app.post("/api/bluetooth/scan")
+async def bluetooth_scan(req: BluetoothToggle):
+    return await _bluetooth_do(lambda c: c.set_scan(req.on))
+
+
+@app.post("/api/bluetooth/name")
+async def bluetooth_name(req: BluetoothName):
+    return await _bluetooth_do(lambda c: c.rename(req.name))
+
+
+@app.post("/api/bluetooth/confirm")
+async def bluetooth_confirm(req: BluetoothDecision):
+    control = _bluetooth()
+    if not await control.confirm(req.accept):
+        raise HTTPException(status_code=409, detail="Nothing is waiting to be confirmed.")
+    return {"success": True, **control.latest}
+
+
+@app.post("/api/bluetooth/devices/{address}/{action}")
+async def bluetooth_device(address: str, action: str):
+    return await _bluetooth_do(lambda c: c.device_action(address, action))
+
+
 if (DIST_DIR / "index.html").is_file():
     app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
 else:

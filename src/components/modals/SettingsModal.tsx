@@ -4,6 +4,7 @@ import { Settings, Calendar, Download, Upload, X, Info, Sparkles, Trash2, AlertT
 import { api } from '../../services/api';
 import { NotificationSettings } from './NotificationSettings';
 import { CaptureGuide } from './CaptureGuide';
+import { BluetoothSettings } from './BluetoothSettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
@@ -19,7 +20,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'data' | 'system'>('attention');
+  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -166,10 +167,10 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         </div>
 
         {/* Tab Navigation */}
-        <div className="flex bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
+        <div className="flex overflow-x-auto bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
           <button
             onClick={() => setActiveTab('attention')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -177,15 +178,23 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </button>
           <button
             onClick={() => setActiveTab('capture')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'capture' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
             Shortcuts
           </button>
           <button
+            onClick={() => setActiveTab('bluetooth')}
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
+              activeTab === 'bluetooth' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Bluetooth
+          </button>
+          <button
             onClick={() => setActiveTab('data')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -193,7 +202,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           </button>
           <button
             onClick={() => setActiveTab('system')}
-            className={`flex-1 py-2 text-xs font-semibold rounded-xl transition-all ${
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
             }`}
           >
@@ -237,6 +246,9 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
 
         {/* Tab 2: Setup guide for Siri, Share Sheet, Home Screen and email capture */}
         {activeTab === 'capture' && <CaptureGuide publicUrl={publicUrl} />}
+
+        {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
+        {activeTab === 'bluetooth' && <BluetoothSettings />}
 
         {/* Tab 3: Data Portability & Migration */}
         {activeTab === 'data' && (
