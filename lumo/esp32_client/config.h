@@ -42,14 +42,14 @@
 #define V_TOL   0.05f
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "1.4.0"
+#define FW_VERSION "1.5.0"
 
 // ===================== ENUMS =====================
 enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT };
 enum ScreenMode   { SCREEN_FACE, SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY };
 enum LumoMood     { MOOD_NORMAL, MOOD_HAPPY, MOOD_BORED, MOOD_SAD, MOOD_EXCITED };
 enum CharSchedule { SCHED_AWAKE, SCHED_DROWSY, SCHED_SLEEP };
-enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM };
+enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM, NEO_AUTO, NEO_AURORA, NEO_COMET };
 enum AnimType     { ANIM_NORMAL, ANIM_FOCUSED, ANIM_SMIRK, ANIM_SCAN, ANIM_DANCE, ANIM_ALERT, ANIM_CURIOUS, ANIM_STANDBY, ANIM_LOOK };
 enum MouthShape   { MOUTH_SMILE, MOUTH_SMIRK, MOUTH_FOCUSED, MOUTH_SAD, MOUTH_SURPRISED, MOUTH_NEUTRAL };
 
@@ -67,13 +67,14 @@ struct LumoState {
   bool     sp_playing = false;
   LumoMood     mood     = MOOD_NORMAL;
   CharSchedule schedule = SCHED_AWAKE;
-  NeoMode  neo_mode       = NEO_WARM;
+  NeoMode  neo_mode       = NEO_AUTO;
   uint8_t  neo_brightness = 40;
   uint16_t neo_hue        = 0;
   char    tasks[5][96];
   uint8_t task_count = 0;
   bool    alarm_ringing = false;
   uint8_t alarm_h = 7, alarm_m = 0;
+  bool    alarm_set = false;   // true when the Pi reports an upcoming alarm
 
   // Pi 5 System Vitals
   float   cpu_temp = 0.0f;

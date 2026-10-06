@@ -240,6 +240,12 @@ class AlarmManager:
                 await hub.send_json({"cmd": "ALARM_RING"})
                 return
 
+    def next_alarm(self) -> Optional[Alarm]:
+        """The enabled alarm that will ring soonest, for the clock face."""
+        now = now_local()
+        upcoming = [a for a in self.alarms if a.enabled and a.rings_at and a.rings_at > now]
+        return min(upcoming, key=lambda a: a.rings_at) if upcoming else None
+
     def list_alarms(self) -> list:
         return [a.to_dict() for a in self.alarms]
 

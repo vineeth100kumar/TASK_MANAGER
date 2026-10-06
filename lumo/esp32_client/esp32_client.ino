@@ -6,19 +6,21 @@
 #include "animator.h"
 #include "display.h"
 #include "ws_client.h"
+#include "clockkeeper.h"
 
 static LumoState lumoState;
 static ScreenMode currentScreen = SCREEN_CONNECTING;
 
 void switchScreen(ScreenMode next) {
   currentScreen = next;
+  neoSetClockScreen(next == SCREEN_CLOCK);
   displayDrawScreen(next, lumoState, true);
 }
 
 void setup() {
   Serial.begin(115200);
   delay(200);
-  Serial.println("\n=== LUMO Companion Firmware v1.2.0 Starting ===");
+  Serial.println("\n=== LUMO Companion Firmware v" FW_VERSION " Starting ===");
 
   ledcAttach(BUZZER_PIN, HAPTIC_FREQ, HAPTIC_RES);
   ledcWrite(BUZZER_PIN, 255);
@@ -61,6 +63,14 @@ void setup() {
 void loop() {
   wsPoll();
   hapticUpdate();
+  neoTick();
+
+  // The ESP32 keeps its own time between Pi updates, so every screen's clock stays live.
+  ClockNow clk = clockNow();
+  if (clk.synced) {
+    lumoState.h = clk.h;
+    lumoState.m = clk.m;
+  }
 
   // Button ladder read (optional, sends events if pressed)
   Button btn = readButton();
@@ -80,6 +90,7 @@ void loop() {
   }
 
   // Handle alarm triggered from Pi
+  neoSetAlarm(lumoState.alarm_ringing);
   if (lumoState.alarm_ringing && currentScreen != SCREEN_ALARM) {
     switchScreen(SCREEN_ALARM);
   } else if (!lumoState.alarm_ringing && currentScreen == SCREEN_ALARM) {
@@ -103,11 +114,7 @@ void loop() {
     lumoState.flag_voice_changed = false;
   }
   else if (currentScreen == SCREEN_CLOCK) {
-    static int lastM = -1;
-    if (lumoState.m != lastM) {
-      lastM = lumoState.m;
-      displayDrawScreen(SCREEN_CLOCK, lumoState, false);
-    }
+    displayClockTick(lumoState);
   }
   else if (currentScreen == SCREEN_SYSTEM) {
     if (lumoState.flag_system_changed) {
@@ -137,17 +144,12 @@ void loop() {
     static unsigned long lastAlarmTick = 0;
     if (millis() - lastAlarmTick >= 500) {
       lastAlarmTick = millis();
-      neoAlarmFlash();
       hapticPulse(80);
-      displayDrawScreen(SCREEN_ALARM, lumoState, false);
     }
+    displayAlarmTick(lumoState);
   }
   else if (currentScreen == SCREEN_CONNECTING) {
-    static unsigned long lastConnTick = 0;
-    if (millis() - lastConnTick >= 600) {
-      lastConnTick = millis();
-      displayDrawScreen(SCREEN_CONNECTING, lumoState, false);
-    }
+    displayConnectingTick();
   }
   else if (currentScreen == SCREEN_MEMORY) {
     if (lumoState.flag_memory_changed) {
@@ -156,5 +158,5 @@ void loop() {
     }
   }
 
-  delay(12);
+  delay(6);
 }
