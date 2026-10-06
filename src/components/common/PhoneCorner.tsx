@@ -1,6 +1,6 @@
 // PhoneCorner - The iPhone's notifications, now playing and home/away, in the
-// corner of the screen: top-right on a phone, bottom-right on a desktop so it
-// stays clear of the header buttons.
+// bottom-right corner. Not shown on the phone-sized layout: the phone itself
+// is where those notifications arrive.
 //
 // The Pi reads them from the phone over Bluetooth (raspberry_pi/phone_link.py)
 // and sends changes on its live stream. A new notification slides in and folds
@@ -12,6 +12,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Smartphone, X, Play, Pause, SkipForward, SkipBack, Music2 } from 'lucide-react';
 import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { PHONE_EVENT } from '../../services/liveStream';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 interface PhoneNotification {
   id: string;
@@ -69,6 +70,7 @@ const NotificationCard = ({ item, onDismiss }: { item: PhoneNotification; onDism
 
 export const PhoneCorner = () => {
   const baseUrl = piBackendUrl();
+  const isMobile = useIsMobile();
   const [status, setStatus] = useState<PhoneStatus | null>(null);
   const [notifications, setNotifications] = useState<PhoneNotification[]>([]);
   const [media, setMedia] = useState<PhoneMedia | null>(null);
@@ -152,13 +154,13 @@ export const PhoneCorner = () => {
   };
 
   const hasMedia = !!media?.title;
-  if (!baseUrl || (!status?.available && notifications.length === 0)) return null;
+  if (isMobile || !baseUrl || (!status?.available && notifications.length === 0)) return null;
 
   const dot = status?.connected ? 'bg-emerald-500' : status?.home ? 'bg-amber-400' : 'bg-gray-300 dark:bg-gray-600';
   const presence = status?.connected ? 'Home · phone connected' : status?.home ? 'Home · phone just left range' : 'Away';
 
   return (
-    <div ref={panelRef} className="fixed z-[90] right-3 md:right-4 top-[calc(0.75rem+env(safe-area-inset-top))] md:top-auto md:bottom-4 flex flex-col md:flex-col-reverse items-end gap-2 w-[min(22rem,calc(100vw-1.5rem))] pointer-events-none">
+    <div ref={panelRef} className="fixed z-[90] right-4 bottom-4 flex flex-col-reverse items-end gap-2 w-[22rem] pointer-events-none">
       <button onClick={() => { setOpen(o => !o); setPeek(null); }} aria-expanded={open} aria-label={`Phone: ${presence}, ${notifications.length} notifications`}
         className="pointer-events-auto h-8 pl-2 pr-2.5 rounded-full flex items-center gap-1.5 bg-white/80 dark:bg-[#1c1c1f]/80 backdrop-blur-xl backdrop-saturate-150 ring-1 ring-black/[0.06] dark:ring-white/10 shadow-sm text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors">
         <span className="relative">
