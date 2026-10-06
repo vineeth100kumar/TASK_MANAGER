@@ -126,6 +126,7 @@ class PhoneLink:
         self._data_buffer = b""
         self._bus = None
         self._chars: Dict[str, Any] = {}
+        self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
 
@@ -214,6 +215,12 @@ class PhoneLink:
             log.info("Phone link off (no BlueZ on the system bus): %s", e)
             return
         self.available = True
+        from bluetooth_control import BluetoothControl
+        self.control = BluetoothControl(self._bus, self._emit, {ANCS_SERVICE, AMS_SERVICE})
+        try:
+            await self.control.register_agent()
+        except Exception as e:
+            log.warning("Could not register the pairing agent (pairing from Sage may not work): %s", e)
         await self._advertise()
         while True:
             try:
@@ -221,7 +228,8 @@ class PhoneLink:
             except Exception as e:
                 log.warning("Phone link error: %s", e)
                 self._chars.clear()
-            await asyncio.sleep(5)
+            # Poll faster while scanning, pairing or connecting so the page keeps up.
+            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") else 5)
 
     async def _objects(self) -> dict:
         intro = await self._bus.introspect(BLUEZ, "/")
@@ -230,6 +238,8 @@ class PhoneLink:
 
     async def _tick(self) -> None:
         objects = await self._objects()
+        if self.control:
+            await self.control.refresh(objects)
         phone_path, phone_name = None, ""
         for path, ifaces in objects.items():
             dev = ifaces.get("org.bluez.Device1")

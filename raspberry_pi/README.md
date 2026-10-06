@@ -160,3 +160,17 @@ notifications, now playing and home/away in a corner of the web app.
 - Notification text is kept in memory only, never in the database or the log.
 - Try the panel without a phone:
   `curl -X POST -H 'Content-Type: application/json' localhost:8000/api/phone/notifications -d '{"app":"Messages","title":"Asha","message":"Dinner at 8?"}'`
+
+### Managing Bluetooth from Sage
+
+Settings > Bluetooth shows the Pi's adapter and devices live, like a phone's
+Bluetooth page: turn Bluetooth on or off, rename the Pi, **Start pairing**
+(a 3 minute window), scan for nearby devices, and **Pair, Connect, Disconnect**
+or **Forget** each one, plus a per-device "Reconnect automatically" switch.
+
+- Pairing is never silent. The Pi accepts a pairing request only while the
+  window is open (or Sage started the pairing), and the code shown on the other
+  device must be confirmed in Sage. Anything else is rejected.
+- `bluetooth_control.py` does this over BlueZ D-Bus; the routes are under
+  `/api/bluetooth` and changes arrive on `/ws` as `BT_STATE`.
+- Without BlueZ the tab says Bluetooth isn't available and nothing else changes.
