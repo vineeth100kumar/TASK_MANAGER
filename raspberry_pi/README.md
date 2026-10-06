@@ -174,3 +174,20 @@ or **Forget** each one, plus a per-device "Reconnect automatically" switch.
 - `bluetooth_control.py` does this over BlueZ D-Bus; the routes are under
   `/api/bluetooth` and changes arrive on `/ws` as `BT_STATE`.
 - Without BlueZ the tab says Bluetooth isn't available and nothing else changes.
+
+## Desk clock (LUMO)
+
+The LUMO ESP32 clock is becoming a screen and buttons for Sage: everything it
+shows and every button press is worked out here, in `desk/`, and the clock only
+draws. This is being built in phases; for now the code is in place but **off**
+(`SAGE_DESK=0`), because LUMO's own server (`lumo/rpi_server`) still drives the
+clock on port 8765.
+
+- `desk/link.py` listens on `0.0.0.0:8765` (`SAGE_DESK_BIND`, `SAGE_DESK_PORT`)
+  for the clock only. The clock's first message must be
+  `{"evt":"HELLO","token":"<6 digits>","fw":"..."}`; anything else is refused.
+- The token is made on first start in `desk_token.txt` next to the database and
+  shown by `GET /api/desk` (behind Sage's key or login like every `/api` route).
+- `desk/controller.py` decides what the clock shows: the time once a minute,
+  the screen, and cards whose LEFT / OK / RIGHT buttons run actions.
+- Don't set `SAGE_DESK=1` while `lumo.service` is running: both want port 8765.

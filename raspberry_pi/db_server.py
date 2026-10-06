@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import desk
 import phone_link
 import quick_add
 
@@ -371,6 +372,9 @@ async def startup_event():
     asyncio.create_task(notifier.scheduler())
     asyncio.create_task(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     asyncio.create_task(phone_link.link.run(events.broadcast))
+    if desk.ENABLED:
+        from desk import run as desk_run
+        asyncio.create_task(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
 
 
 @app.get("/api/health")
@@ -1268,6 +1272,14 @@ async def bluetooth_confirm(req: BluetoothDecision):
 @app.post("/api/bluetooth/devices/{address}/{action}")
 async def bluetooth_device(address: str, action: str):
     return await _bluetooth_do(lambda c: c.device_action(address, action))
+
+
+# --- Desk clock (see desk/) ---
+# LUMO's ESP32 clock as a screen and buttons for Sage. Off until SAGE_DESK=1.
+@app.get("/api/desk")
+def desk_status():
+    from desk import run as desk_run
+    return {"success": True, **desk_run.status(desk.ENABLED)}
 
 
 if (DIST_DIR / "index.html").is_file():
