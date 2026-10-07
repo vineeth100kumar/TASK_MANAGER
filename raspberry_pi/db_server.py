@@ -369,19 +369,30 @@ async def google_sheets_backup_worker():
 
         await asyncio.sleep(GAS_BACKUP_INTERVAL)
 
+# The event loop only holds weak references to tasks, so one nobody keeps can
+# be garbage collected mid-await (the desk clock's port closed that way).
+_background_tasks: set = set()
+
+
+def _background(coro) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
+
 @app.on_event("startup")
 async def startup_event():
     if access_gate.enabled:
         print("Password gate is on: browsers must log in at /login.")
     if not API_SECRET:
         print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
-    asyncio.create_task(google_sheets_backup_worker())
-    asyncio.create_task(notifier.scheduler())
-    asyncio.create_task(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
-    asyncio.create_task(phone_link.link.run(events.broadcast))
+    _background(google_sheets_backup_worker())
+    _background(notifier.scheduler())
+    _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
+    _background(phone_link.link.run(events.broadcast))
     if desk.ENABLED:
         from desk import run as desk_run
-        asyncio.create_task(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
+        _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
 
 
 @app.get("/api/health")
