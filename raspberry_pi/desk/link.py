@@ -81,6 +81,7 @@ class ClockLink:
         self.on_ready: Optional[Ready] = None
         self.on_button: Optional[Button] = None
         self._send_lock = asyncio.Lock()
+        self._serving: Optional[asyncio.Future] = None
 
     @property
     def connected(self) -> bool:
@@ -191,4 +192,7 @@ class ClockLink:
             from websockets import serve  # type: ignore
         async with serve(self.handle, host, port, ping_interval=20, ping_timeout=20):
             log.info("Desk clock link listening on %s:%s", host, port)
-            await asyncio.Future()
+            # Held on self: a future only this coroutine knows about lets the
+            # garbage collector destroy the whole task, closing the port.
+            self._serving = asyncio.get_running_loop().create_future()
+            await self._serving

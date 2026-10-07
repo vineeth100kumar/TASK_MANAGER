@@ -247,5 +247,26 @@ class Pairing(unittest.IsolatedAsyncioTestCase):
             self.assertTrue(self.link.connected)
 
 
+class Listening(unittest.IsolatedAsyncioTestCase):
+    async def test_survives_garbage_collection(self):
+        """Nobody keeps the serving task (as at Sage's startup): a collection
+        must not destroy it and close the clock's port."""
+        import gc
+        import socket
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            port = s.getsockname()[1]
+        link = ClockLink("123456")
+        asyncio.get_running_loop().create_task(link.serve("127.0.0.1", port))
+        await asyncio.sleep(0.2)
+        gc.collect()
+        await asyncio.sleep(0.1)
+        async with connect(f"ws://127.0.0.1:{port}") as clock:
+            await clock.send(json.dumps({"evt": "HELLO", "token": "123456"}))
+            self.assertEqual(json.loads(await asyncio.wait_for(clock.recv(), 2))["cmd"], "PAIRED")
+        link._serving.cancel()
+
+
 if __name__ == "__main__":
     unittest.main()
