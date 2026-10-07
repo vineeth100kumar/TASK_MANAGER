@@ -84,9 +84,15 @@ void loop() {
 
   animatorTick();
 
-  // Transition from CONNECTING to FACE once Pi sends data or connects
-  if (currentScreen == SCREEN_CONNECTING && wsConnected()) {
+  // Leave the connecting screen once Sage has accepted the pairing code.
+  if (currentScreen == SCREEN_CONNECTING && wsConnected() && lumoState.paired) {
     switchScreen(SCREEN_FACE);
+  }
+  // Sage said no: show why on the connecting screen.
+  static bool shownRefused = false;
+  if (currentScreen == SCREEN_CONNECTING && lumoState.pair_refused != shownRefused) {
+    shownRefused = lumoState.pair_refused;
+    displayDrawScreen(SCREEN_CONNECTING, lumoState, true);
   }
 
   // Handle alarm triggered from Pi
@@ -149,7 +155,7 @@ void loop() {
     displayAlarmTick(lumoState);
   }
   else if (currentScreen == SCREEN_CONNECTING) {
-    displayConnectingTick();
+    displayConnectingTick(lumoState);
   }
   else if (currentScreen == SCREEN_MEMORY) {
     if (lumoState.flag_memory_changed) {

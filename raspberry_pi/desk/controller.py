@@ -9,6 +9,10 @@ decided here, from what the Pi last put on the screen:
   the labels under the card say, for example Tomorrow, Done and Snooze.
 - Otherwise UP and DOWN step through the screens.
 
+The desk (desk/desk.py) can claim a press before any of that with
+`before_button` (a ringing alarm takes every button) and gets what is left
+over with `other_button` (play, previous and next for the phone's music).
+
 The clock free-runs its seconds between CLOCK messages, so one a minute, on
 the minute, keeps it exact.
 """
@@ -17,6 +21,7 @@ import asyncio
 import datetime
 import logging
 import time
+import unicodedata
 from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 
 log = logging.getLogger("desk.controller")
@@ -29,10 +34,17 @@ CARD_SECONDS = 120
 ACTION_BUTTONS = ("LEFT", "OK", "RIGHT")
 
 
+# The clock's font only has ASCII, so the usual typographic marks are swapped
+# for plain ones and accents are dropped ("café" shows as "cafe").
+_PLAIN = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '"',
+                        "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00b7": "-"})
+
+
 def fit(text: str, limit: int) -> str:
-    """Cut to the firmware's buffer, counted in bytes as the ESP32 counts
-    them, without splitting a character in two."""
-    return (text or "").encode()[:limit].decode(errors="ignore").rstrip()
+    """Plain ASCII on one line, cut to the firmware's buffer of `limit` bytes."""
+    text = unicodedata.normalize("NFKD", (text or "").translate(_PLAIN))
+    text = " ".join(text.encode("ascii", "ignore").decode().split())
+    return text[:limit].rstrip()
 
 
 class Card:
@@ -57,6 +69,11 @@ class DeskController:
         self.screen = self.screens[0]
         self.card: Optional[Card] = None
         self._clock = clock
+        # Hooks the desk fills in; see the module docstring.
+        self.before_button: Optional[Callable[[str], Awaitable[bool]]] = None
+        self.other_button: Optional[Callable[[str], Awaitable[None]]] = None
+        self.after_redraw: Optional[Callable[[], Awaitable[None]]] = None
+        self.on_screen: Optional[Callable[[str], Awaitable[None]]] = None
         link.on_ready = self.redraw
         link.on_button = self.on_button
 
@@ -83,12 +100,17 @@ class DeskController:
         await self.send_clock()
         await self.link.send({"cmd": "SCREEN", "mode": self.screen})
         await self.link.send({"cmd": "LIGHTS", "mode": "AUTO", "brightness": 40, "hue": 0})
+        self.card = None
+        if self.after_redraw:
+            await self.after_redraw()
 
     async def show_screen(self, screen: str) -> None:
         if screen not in self.screens:
             raise ValueError(f"Unknown screen {screen!r}")
         self.screen = screen
         await self.link.send({"cmd": "SCREEN", "mode": screen})
+        if self.on_screen:
+            await self.on_screen(screen)
 
     async def show_card(
         self,
@@ -121,6 +143,8 @@ class DeskController:
 
     async def on_button(self, button: str) -> None:
         button = button.upper()
+        if self.before_button and await self.before_button(button):
+            return
         if self.card and self._clock() >= self.card.expires_at:
             await self.clear_card()
         if self.card:
@@ -135,6 +159,8 @@ class DeskController:
             step = 1 if button == "DOWN" else -1
             i = self.screens.index(self.screen) if self.screen in self.screens else 0
             await self.show_screen(self.screens[(i + step) % len(self.screens)])
+        elif self.other_button:
+            await self.other_button(button)
 
     # --- Running ---
 

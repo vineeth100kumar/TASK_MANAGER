@@ -14,7 +14,7 @@ void drawTimeBar(const LumoState& s, bool force);
 void displayClockTick(const LumoState& s);
 void displayAlarmTick(const LumoState& s);
 void displayAlarmReset();
-void displayConnectingTick();
+void displayConnectingTick(const LumoState& s);
 void displayConnectingReset();
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor);
 void onNewArt(const uint8_t* data, size_t len);

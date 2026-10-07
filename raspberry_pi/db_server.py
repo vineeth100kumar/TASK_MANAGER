@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote
 import access_gate
 import backup
 import desk
+import item_actions
 import phone_link
 import quick_add
 
@@ -26,6 +27,8 @@ app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 # from /etc/sage/sage.env (see deploy/). The defaults match how this server
 # ran before, so an existing sage_sync.db keeps being used.
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
+# The quick actions write through item_actions; keep it on the same file.
+item_actions.DB_PATH = DB_PATH
 GOOGLE_SHEETS_URL = os.getenv(
     "SAGE_GAS_URL",
     "https://script.google.com/macros/s/AKfycbzZAbFXHcDt9ZfVvH9iJCLyy8AghHhGhEwZZnB6P9RSO0zjvgMcDxojKCm1-VQ1MNrg/exec",
@@ -187,6 +190,8 @@ def logout():
 class EventHub:
     def __init__(self):
         self.sockets: set = set()
+        # In-process listeners (the desk clock) get every event too.
+        self.listeners: list = []
 
     async def broadcast(self, event: dict) -> None:
         message = json.dumps(event)
@@ -195,6 +200,11 @@ class EventHub:
                 await socket.send_text(message)
             except Exception:
                 self.sockets.discard(socket)
+        for listener in list(self.listeners):
+            try:
+                listener(event)
+            except Exception as e:
+                print(f"Event listener failed: {e}")
 
 
 events = EventHub()
@@ -309,10 +319,7 @@ def get_server_revision(cursor):
     return int(row[0]) if row else 1
 
 def increment_server_revision(cursor):
-    current = get_server_revision(cursor)
-    next_rev = current + 1
-    cursor.execute("UPDATE metadata SET value = ? WHERE key = 'serverRevision'", (str(next_rev),))
-    return next_rev
+    return item_actions.next_revision(cursor)
 
 # --- Periodic Backup Worker: Forward to Google Sheets ---
 async def google_sheets_backup_worker():
@@ -374,7 +381,7 @@ async def startup_event():
     asyncio.create_task(phone_link.link.run(events.broadcast))
     if desk.ENABLED:
         from desk import run as desk_run
-        asyncio.create_task(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
+        asyncio.create_task(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
 
 
 @app.get("/api/health")
@@ -753,108 +760,33 @@ class ItemActionRequest(BaseModel):
 @app.post("/api/items/{item_id}/done")
 async def item_done(item_id: str, req: ItemActionRequest):
     """Mark an item done from a notification action button."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cursor = conn.cursor()
-        row = cursor.execute(
-            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
-            (item_id,),
-        ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found")
-        item = json.loads(row[0])
-        now_iso = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        item["status"] = "done"
-        item["completedAt"] = now_iso
-        item["updatedAt"] = now_iso
-        item["version"] = (item.get("version") or 1) + 1
-        next_rev = increment_server_revision(cursor)
-        cursor.execute(
-            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
-            (json.dumps(item), next_rev, item_id),
-        )
-        cursor.execute(
-            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
-            (f"notif-done-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
+    saved = item_actions.mark_done(item_id, req.source)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
     return {"ok": True, "id": item_id, "status": "done"}
 
 
 @app.post("/api/items/{item_id}/snooze")
 async def item_snooze(item_id: str, req: ItemActionRequest):
     """Snooze an item for 1 hour from a notification action button."""
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cursor = conn.cursor()
-        row = cursor.execute(
-            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
-            (item_id,),
-        ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found")
-        item = json.loads(row[0])
-        now_utc = datetime.datetime.now(datetime.timezone.utc)
-        until = (now_utc + datetime.timedelta(hours=1)).isoformat()
-        item["snoozedUntil"] = until
-        item["snoozeCount"] = (item.get("snoozeCount") or 0) + 1
-        item["updatedAt"] = now_utc.isoformat()
-        item["version"] = (item.get("version") or 1) + 1
-        next_rev = increment_server_revision(cursor)
-        cursor.execute(
-            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
-            (json.dumps(item), next_rev, item_id),
-        )
-        cursor.execute(
-            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
-            (f"notif-snooze-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
-    return {"ok": True, "id": item_id, "snoozedUntil": until}
+    saved = item_actions.snooze(item_id, req.source)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
+    return {"ok": True, "id": item_id, "snoozedUntil": saved[0]["snoozedUntil"]}
 
 
 @app.post("/api/items/{item_id}/tomorrow")
 async def item_tomorrow(item_id: str, req: ItemActionRequest):
     """Move an item to tomorrow from a notification action button."""
     import notifier as _notifier
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        cursor = conn.cursor()
-        row = cursor.execute(
-            "SELECT payload FROM entities WHERE table_name = 'workItems' AND entity_id = ? AND deleted = 0",
-            (item_id,),
-        ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="Item not found")
-        item = json.loads(row[0])
-        prefs = _notifier.get_prefs()
-        tz = _notifier._tz(prefs)
-        now = datetime.datetime.now(datetime.timezone.utc).astimezone(tz)
-        tomorrow = (now.date() + datetime.timedelta(days=1)).isoformat()
-        item["dueDate"] = tomorrow
-        item["snoozedUntil"] = None
-        item["updatedAt"] = datetime.datetime.now(datetime.timezone.utc).isoformat()
-        item["version"] = (item.get("version") or 1) + 1
-        next_rev = increment_server_revision(cursor)
-        cursor.execute(
-            "UPDATE entities SET payload = ?, revision = revision + 1, server_revision = ? WHERE table_name = 'workItems' AND entity_id = ?",
-            (json.dumps(item), next_rev, item_id),
-        )
-        cursor.execute(
-            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
-            (f"notif-tomorrow-{item_id}-{next_rev}", req.source, "workItems", item_id, "save"),
-        )
-        conn.commit()
-    finally:
-        conn.close()
-    await events.broadcast({"type": "SYNC_APPLIED", "serverRevision": next_rev})
-    return {"ok": True, "id": item_id, "dueDate": tomorrow}
+    today = datetime.datetime.now(_notifier._tz(_notifier.get_prefs())).date()
+    saved = item_actions.move_to_tomorrow(item_id, req.source, today)
+    if not saved:
+        raise HTTPException(status_code=404, detail="Item not found")
+    await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
+    return {"ok": True, "id": item_id, "dueDate": saved[0]["dueDate"]}
 
 
 import re
