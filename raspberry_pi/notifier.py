@@ -29,7 +29,7 @@ import ssl
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
@@ -746,6 +746,23 @@ def _today_at(now: datetime.datetime, hhmm: str) -> datetime.datetime:
     return now.replace(hour=hour, minute=minute, second=0, microsecond=0)
 
 
+# Set by the desk clock (desk/run.py): clock_reminder(item, message) returns
+# True when the clock took the reminder (you're home and it is connected), in
+# which case no push or email goes out for it. Called from the scheduler's
+# worker thread.
+clock_reminder: Optional[Callable[[dict, dict], bool]] = None
+
+
+def _taken_by_clock(item: dict, message: dict) -> bool:
+    if clock_reminder is None:
+        return False
+    try:
+        return bool(clock_reminder(item, message))
+    except Exception as e:
+        print(f"Desk clock reminder failed, sending it to the phone instead: {e}")
+        return False
+
+
 def _deliver(prefs: dict, message: dict, email: Optional[Tuple[str, str, str]]) -> bool:
     """Sends a notification. True when at least one device or the email got it."""
     delivered = any(r.get("ok") for r in send_push(message, prefs=prefs))
@@ -765,7 +782,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
     now = (now_utc or datetime.datetime.now(datetime.timezone.utc)).astimezone(tz)
     has_devices = bool(list_devices())
     wants_email = email_ready(prefs)
-    if not has_devices and not wants_email:
+    if not has_devices and not wants_email and clock_reminder is None:
         return []
     items = open_items()
     sent: List[str] = []
@@ -780,6 +797,10 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 if _already_sent(conn, key):
                     continue
                 message = reminder_message(item, tz, now)
+                if _taken_by_clock(item, message):
+                    _mark_sent(conn, key)
+                    sent.append(key)
+                    continue
                 email = None
                 if prefs["email"]["reminders"]:
                     link = _app_link()

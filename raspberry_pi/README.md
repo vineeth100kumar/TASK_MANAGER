@@ -177,17 +177,44 @@ or **Forget** each one, plus a per-device "Reconnect automatically" switch.
 
 ## Desk clock (LUMO)
 
-The LUMO ESP32 clock is becoming a screen and buttons for Sage: everything it
-shows and every button press is worked out here, in `desk/`, and the clock only
-draws. This is being built in phases; for now the code is in place but **off**
-(`SAGE_DESK=0`), because LUMO's own server (`lumo/rpi_server`) still drives the
-clock on port 8765.
+The LUMO ESP32 clock is a screen and five buttons for Sage. Everything it shows
+and every button press is worked out here, in `desk/`; the clock only draws.
+`deploy/install_pi.sh` turns it on (`SAGE_DESK=1`) and retires LUMO's old
+server (`lumo.service`, `lumo-obex.service`).
+
+What it does:
+
+- **Time and alarms.** The time on every minute and the next alarm. An alarm is
+  a Sage reminder labelled `alarm`: it rings at its reminder time, checked every
+  second. While it rings, RIGHT snoozes 5 minutes and any other button stops it
+  and sets it for the same time tomorrow. Unanswered, it stops after 10 minutes.
+- **Today.** The Tasks screen lists what's due today and what's overdue, kept
+  current as anything changes on any device.
+- **Reminders.** When your phone is home (see the phone link above), a reminder
+  shows as a card on the clock with Tomorrow, Done and Snooze (1 hour) under
+  LEFT, OK and RIGHT, instead of a push. Away, it goes to the phone. Without
+  the phone link the clock and the phone both get it.
+- **Phone.** Notifications show as cards. What's playing shows on the
+  now-playing screen with its cover (from iTunes); there LEFT, OK and RIGHT are
+  previous, play/pause and next.
+- **Weather** (open-meteo, every 30 min, `SAGE_DESK_LAT` / `SAGE_DESK_LON`), the
+  **Pi's vitals** on the System screen, and a face whose mood follows the hour
+  (asleep 00:00-08:00, drowsy from 22:00) and the music.
+- UP and DOWN step through Face, Clock, Tasks, Now playing and System.
+
+How it's built:
 
 - `desk/link.py` listens on `0.0.0.0:8765` (`SAGE_DESK_BIND`, `SAGE_DESK_PORT`)
   for the clock only. The clock's first message must be
   `{"evt":"HELLO","token":"<6 digits>","fw":"..."}`; anything else is refused.
-- The token is made on first start in `desk_token.txt` next to the database and
-  shown by `GET /api/desk` (behind Sage's key or login like every `/api` route).
-- `desk/controller.py` decides what the clock shows: the time once a minute,
-  the screen, and cards whose LEFT / OK / RIGHT buttons run actions.
-- Don't set `SAGE_DESK=1` while `lumo.service` is running: both want port 8765.
+- The token is made on first start in `desk_token.txt` next to the database,
+  printed by the installer and shown by `GET /api/desk` (behind Sage's key or
+  login like every `/api` route). The firmware takes it as `DESK_TOKEN` in
+  `secrets.h`.
+- `desk/controller.py` draws screens and cards and routes buttons;
+  `desk/desk.py` runs the features above; `alarms.py`, `today.py`,
+  `ambient.py` and `art.py` hold their logic. Item changes go through
+  `item_actions.py`, the same code as the notification buttons, so every
+  device syncs them.
+- Known gap: Done on the clock doesn't create a repeating item's next copy yet
+  (the app does that when you tick it there).

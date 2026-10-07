@@ -33,6 +33,23 @@ static void handleTextMessage(const String& payload) {
 
   const char* cmd = doc["cmd"] | "";
 
+  if (strcmp(cmd, "PAIRED") == 0) {
+    s.paired = doc["ok"] | false;
+    s.pair_refused = !s.paired;
+    Serial.printf("[WS] %s\n", s.paired ? "Paired with Sage" : "Sage refused DESK_TOKEN");
+    return;
+  }
+  if (strcmp(cmd, "ACTIONS") == 0) {
+    strlcpy(s.act_left,  doc["left"]  | "", sizeof(s.act_left));
+    strlcpy(s.act_ok,    doc["ok"]    | "", sizeof(s.act_ok));
+    strlcpy(s.act_right, doc["right"] | "", sizeof(s.act_right));
+    if (!s.act_left[0] && !s.act_ok[0] && !s.act_right[0]) {
+      s.notif_active = false;   // the card was answered or timed out
+    }
+    s.flag_anim_changed = true;
+    return;
+  }
+
   if (strcmp(cmd, "SCREEN") == 0) {
     const char* m = doc["mode"] | "FACE";
     if (strcmp(m, "FACE") == 0)         s.next_screen = SCREEN_FACE;
@@ -247,12 +264,14 @@ void wsInit(LumoState& state) {
       Serial.println("[WS] Connected to Pi server!");
       isConnected = true;
       reconnectInterval = 2000;
-      char readyMsg[64];
-      snprintf(readyMsg, sizeof(readyMsg), "{\"evt\":\"READY\",\"fw\":\"%s\"}", FW_VERSION);
-      client.send(readyMsg);
+      // The first frame must be HELLO with the pairing code, or Sage hangs up.
+      char hello[80];
+      snprintf(hello, sizeof(hello), "{\"evt\":\"HELLO\",\"token\":\"%s\",\"fw\":\"%s\"}", DESK_TOKEN, FW_VERSION);
+      client.send(hello);
     } else if (event == WebsocketsEvent::ConnectionClosed) {
       Serial.println("[WS] Disconnected from Pi server");
       isConnected = false;
+      if (statePtr) statePtr->paired = false;
     }
   });
 }

@@ -2,17 +2,17 @@
 # Keep the Pi's checkout on origin/main and restart only what changed.
 #
 # Runs as the checkout's owner (not root) under sage-autosync.service. The only
-# thing it needs root for is restarting sage and lumo, which install_pi.sh
-# allows through a sudoers rule limited to exactly those two commands.
+# thing it needs root for is restarting sage, which install_pi.sh allows
+# through a sudoers rule limited to exactly that command.
 # Untracked files (the SQLite database, venvs, .env files, the firmware's
-# secrets.h, LUMO's photo library) survive the reset.
+# secrets.h) survive the reset.
 #
 #   Sage server changed (raspberry_pi/)       -> reinstall its deps if needed, restart sage
 #   Web app changed (src/, public/, ...)      -> npm ci if the lockfile changed, rebuild dist/
-#   LUMO server changed (lumo/rpi_server/)    -> reinstall its deps if needed, restart lumo
 #   deploy/ changed                           -> nothing automatic; re-run install_pi.sh
 #
-# A LUMO-only change never restarts Sage, and the other way round.
+# Sage also drives the desk clock (raspberry_pi/desk/); the clock's firmware
+# (lumo/esp32_client/) is flashed by hand and never restarts anything.
 #
 # The commit that was last deployed completely is remembered in
 # .git/sage-deployed. If a step fails (a network blip during pip or npm, a
@@ -53,9 +53,6 @@ deploy_changes() {
   if grep -q '^raspberry_pi/requirements.txt$' <<<"$changed"; then
     as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt" || { log "pip failed for sage"; return 1; }
   fi
-  if grep -q '^lumo/rpi_server/requirements.txt$' <<<"$changed"; then
-    as_user "$REPO/lumo/rpi_server/venv/bin/pip" install -q -r "$REPO/lumo/rpi_server/requirements.txt" || { log "pip failed for lumo"; return 1; }
-  fi
 
   if grep -qE '^(src/|public/|index\.html$|package(-lock)?\.json$|vite\.config\.|tailwind\.config\.|postcss\.config\.|\.env\.production$)' <<<"$changed"; then
     if grep -qE '^package(-lock)?\.json$' <<<"$changed" && command -v npm >/dev/null; then
@@ -66,9 +63,6 @@ deploy_changes() {
 
   if grep -q '^raspberry_pi/' <<<"$changed"; then
     log "restarting sage"; restart_unit sage || return 1
-  fi
-  if grep -q '^lumo/rpi_server/' <<<"$changed"; then
-    log "restarting lumo"; restart_unit lumo || return 1
   fi
   if grep -q '^deploy/' <<<"$changed"; then
     log "deploy/ changed; run 'sudo deploy/install_pi.sh' to apply it"
@@ -96,7 +90,7 @@ sync_once() {
     changed=$(as_user git -C "$REPO" diff --name-only "$deployed" "$new")
   else
     log "last deployed commit is unknown; redoing every step"
-    changed=$(printf '%s\n' raspberry_pi/requirements.txt lumo/rpi_server/requirements.txt package.json src/ raspberry_pi/ lumo/rpi_server/)
+    changed=$(printf '%s\n' raspberry_pi/requirements.txt package.json src/ raspberry_pi/)
   fi
 
   if deploy_changes "$changed"; then

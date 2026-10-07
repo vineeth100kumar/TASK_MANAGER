@@ -141,11 +141,12 @@ class Controller(unittest.IsolatedAsyncioTestCase):
         await desk.on_button("DOWN")
         self.assertEqual(self.link.sent[-1], {"cmd": "SCREEN", "mode": "CLOCK"})
 
-    def test_fit_counts_bytes_and_keeps_characters_whole(self):
+    def test_fit_keeps_to_what_the_clock_can_draw(self):
         from desk.controller import fit
-        self.assertEqual(fit("Dinner at 8? 🍜🍜", 15), "Dinner at 8?")
-        self.assertEqual(fit("Dinner at 8? 🍜🍜", 17), "Dinner at 8? 🍜")
-        self.assertEqual(fit("café au lait", 4), "caf")
+        self.assertEqual(fit("Dinner at 8? 🍜🍜", 40), "Dinner at 8?")
+        self.assertEqual(fit("Café “au lait” — now", 40), 'Cafe "au lait" - now')
+        self.assertEqual(fit("two\nlines  here", 40), "two lines here")
+        self.assertEqual(fit("Call the plumber", 9), "Call the")
         self.assertEqual(fit(None, 10), "")
 
     async def test_unknown_screen_refused(self):

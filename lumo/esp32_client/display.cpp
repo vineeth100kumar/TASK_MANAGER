@@ -320,12 +320,31 @@ static void drawFaceFull(const LumoState& s) {
   tft.setTextSize(1);
   tft.setTextColor(COLOR_MUTED);
   tft.setCursor(240, 12);
-  tft.print("v1.3.0");
+  tft.print("v" FW_VERSION);
 
   tft.drawFastHLine(16, 30, 288, tft.color565(35, 45, 60));
 
   drawTimeBar(s, true);
   forceFaceClear = true;
+}
+
+// The labels the Pi set for LEFT, OK and RIGHT, in a row at y.
+static void drawActionBar(const LumoState& s, int y, uint16_t bg) {
+  tft.setFont(NULL);
+  tft.setTextSize(1);
+  const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
+  const char* keys[3]   = { "<", "OK", ">" };
+  const int   xs[3]     = { 24, 124, 224 };
+  for (int i = 0; i < 3; i++) {
+    tft.fillRect(xs[i], y, 90, 10, bg);
+    if (!labels[i][0]) continue;
+    tft.setCursor(xs[i], y);
+    tft.setTextColor(COLOR_ACCENT);
+    tft.print(keys[i]);
+    tft.print(" ");
+    tft.setTextColor(COLOR_WHITE);
+    tft.print(labels[i]);
+  }
 }
 
 static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
@@ -343,16 +362,23 @@ static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
   int rx = 220 + gx;
   int cy = 104 + gy;
 
-  // Notification Banner
-  bool notifActive = s.notif_active && (millis() - s.notif_start < 4500);
+  // Notification Banner. A card with actions (a reminder) stays up until
+  // it is answered; a plain one goes after 4.5 s.
+  static bool bannerWasShown = false;
+  bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
+  bool notifActive = s.notif_active && (hasActions || millis() - s.notif_start < 4500);
+  int bannerH = hasActions ? 62 : 48;
   if (notifActive) {
-    cy += 16;
+    cy += hasActions ? 24 : 16;
     fullRefresh = true;
+  } else if (bannerWasShown) {
+    fullRefresh = true;   // wipe the banner that just went away
   }
+  bannerWasShown = notifActive;
 
   // High-Performance Dirty-Rect Erase: Only wipe previous bounding boxes
   if (fullRefresh || forceFaceClear) {
-    tft.fillRect(30, 34, 260, 166, COLOR_BG_STEALTH);
+    tft.fillRect(14, 34, 292, 166, COLOR_BG_STEALTH);   // as wide as the banner
     forceFaceClear = false;
   } else {
     if (prevEyeL.valid) {
@@ -367,21 +393,23 @@ static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
   }
 
   if (notifActive) {
-    tft.fillRoundRect(14, 36, 292, 48, 8, tft.color565(20, 25, 35));
-    tft.drawRoundRect(14, 36, 292, 48, 8, COLOR_ACCENT);
+    tft.fillRoundRect(14, 36, 292, bannerH, 8, tft.color565(20, 25, 35));
+    tft.drawRoundRect(14, 36, 292, bannerH, 8, COLOR_ACCENT);
 
     tft.setTextSize(1);
     tft.setTextColor(COLOR_ACCENT);
     tft.setCursor(24, 42);
-    tft.printf("// ALERT: %s [%s]", s.notif_title, s.notif_app);
+    tft.printf("%s: %s", s.notif_app, s.notif_title);
 
-    tft.setTextSize(2);
+    tft.setTextSize(hasActions ? 1 : 2);
     tft.setTextColor(COLOR_WHITE);
     tft.setCursor(24, 56);
-    char cutBody[24];
-    strncpy(cutBody, s.notif_body, sizeof(cutBody) - 1);
-    cutBody[23] = '\0';
+    // 46 characters fit at the small size, 23 at the large one.
+    char cutBody[47];
+    strlcpy(cutBody, s.notif_body, hasActions ? 47 : 24);
     tft.print(cutBody);
+
+    if (hasActions) drawActionBar(s, 78, tft.color565(20, 25, 35));
   }
 
   float el = animatorGetEyelidL();
@@ -762,7 +790,9 @@ static void drawSpotifyScreen(const LumoState& s, bool full) {
   tft.setCursor(124, 108);
   int curSec = s.sp_progress_ms / 1000;
   int totSec = s.sp_duration_ms / 1000;
-  tft.printf("%d:%02d / %d:%02d", curSec / 60, curSec % 60, totSec / 60, totSec % 60);
+  if (totSec > 0) {
+    tft.printf("%d:%02d / %d:%02d", curSec / 60, curSec % 60, totSec / 60, totSec % 60);
+  }
 
   tft.setTextColor(s.sp_playing ? COLOR_GREEN : COLOR_MUTED);
   tft.setCursor(124, 126);
@@ -770,6 +800,10 @@ static void drawSpotifyScreen(const LumoState& s, bool full) {
 
   float pct = (s.sp_duration_ms > 0) ? ((float)s.sp_progress_ms / s.sp_duration_ms) : 0.0f;
   drawProgressBar(12, 162, 296, 8, pct, COLOR_GREEN, tft.color565(40, 40, 40));
+
+  tft.setTextColor(COLOR_MUTED);
+  tft.setCursor(12, 186);
+  tft.print("< Prev        OK Play/Pause        Next >");
 }
 
 static void drawTasksScreen(const LumoState& s) {
@@ -923,7 +957,7 @@ void displayAlarmTick(const LumoState& s) {
   if (alarmNeedsStatic) {
     tft.fillScreen(COLOR_BG_BLACK);
     centerText("ALARM", 52, COLOR_RED_PULSE, &FreeSans12pt7b);
-    centerText("Press any button to dismiss", 214, COLOR_MUTED, &FreeSans9pt7b);
+    centerText("RIGHT: 5 more min    Other: stop", 214, COLOR_MUTED, &FreeSans9pt7b);
     lastMin = -1;
     alarmNeedsStatic = false;
   }
@@ -954,7 +988,7 @@ static bool connNeedsStatic = true;
 
 void displayConnectingReset() { connNeedsStatic = true; }
 
-void displayConnectingTick() {
+void displayConnectingTick(const LumoState& s) {
   static unsigned long lastDraw = 0;
   unsigned long now = millis();
   if (!connNeedsStatic && now - lastDraw < 80) return;
@@ -964,10 +998,15 @@ void displayConnectingTick() {
     tft.fillScreen(COLOR_BG_STEALTH);
     drawCyberEye(100, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, true, 0, false);
     drawCyberEye(220, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, false, 0, false);
-    centerText("Connecting", 168, COLOR_WHITE, &FreeSans12pt7b);
-    char ipBuf[40];
-    snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
-    centerText(ipBuf, 222, COLOR_MUTED, &FreeSans9pt7b);
+    if (s.pair_refused) {
+      centerText("Not paired", 168, COLOR_RED_PULSE, &FreeSans12pt7b);
+      centerText("Check DESK_TOKEN in secrets.h", 222, COLOR_MUTED, &FreeSans9pt7b);
+    } else {
+      centerText("Connecting", 168, COLOR_WHITE, &FreeSans12pt7b);
+      char ipBuf[40];
+      snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
+      centerText(ipBuf, 222, COLOR_MUTED, &FreeSans9pt7b);
+    }
     tft.setFont(NULL);
     connNeedsStatic = false;
   }
@@ -1042,7 +1081,7 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
       break;
     case SCREEN_CONNECTING:
       if (modeChanged) displayConnectingReset();
-      displayConnectingTick();
+      displayConnectingTick(s);
       break;
     case SCREEN_MEMORY:
       drawMemoryScreen(s, modeChanged);

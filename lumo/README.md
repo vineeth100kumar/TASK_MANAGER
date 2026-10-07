@@ -38,7 +38,7 @@ Install the following via the Arduino IDE Library Manager:
 
 ### Flashing:
 1. Open `esp32_client/esp32_client.ino` in the Arduino IDE.
-2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS` and `PI_HOSTNAME`. `secrets.h` is gitignored, so your password stays off GitHub.
+2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS`, `PI_HOSTNAME` (the Pi's IP) and `DESK_TOKEN` (the six-digit pairing code `deploy/install_pi.sh` prints). `secrets.h` is gitignored, so your password stays off GitHub. A clock with the wrong code shows "Not paired".
 3. Select board: **ESP32C3 Dev Module**.
 4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**.
 5. Upload the sketch to your ESP32-C3.
@@ -47,8 +47,13 @@ Install the following via the Arduino IDE Library Manager:
 
 ## 3. Raspberry Pi 5 Server Setup
 
-LUMO now lives in the TASK_MANAGER repository next to Sage, and one installer
-sets up both. From the checkout on the Pi:
+**Retired.** From firmware 1.6.0 the clock is driven by Sage's own server
+(`raspberry_pi/desk/`, see [its README](../raspberry_pi/README.md#desk-clock-lumo)),
+and `deploy/install_pi.sh` stops and disables `lumo.service` and
+`lumo-obex.service`. The rest of this section, and sections 4 and 5, describe
+the old server, kept here until the photo frame moves to Sage.
+
+LUMO used to have its own installer step. From the checkout on the Pi:
 
 ```bash
 sudo deploy/install_pi.sh

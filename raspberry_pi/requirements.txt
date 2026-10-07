@@ -8,3 +8,4 @@ anthropic
 pywebpush
 dbus-next
 tzdata
+pillow

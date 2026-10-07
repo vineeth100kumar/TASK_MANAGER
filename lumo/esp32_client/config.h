@@ -19,6 +19,10 @@
 #error "Missing esp32_client/secrets.h: copy secrets.example.h to secrets.h and set your Wi-Fi details."
 #endif
 
+#ifndef DESK_TOKEN
+#error "Add DESK_TOKEN to secrets.h (see secrets.example.h): the pairing code from Sage on the Pi."
+#endif
+
 // ===================== PI SERVER =====================
 #define PI_WS_PORT   8765
 #define PI_WS_PATH   "/"
@@ -42,7 +46,7 @@
 #define V_TOL   0.05f
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "1.5.0"
+#define FW_VERSION "1.6.0"
 
 // ===================== ENUMS =====================
 enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT };
@@ -90,6 +94,15 @@ struct LumoState {
 
   // Phone Notifications Overlay
   bool          notif_active = false;
+  // Labels for LEFT, OK and RIGHT under the card (ACTIONS from the Pi). While
+  // any is set the card stays up; the Pi decides what the presses do.
+  char          act_left[12]  = "";
+  char          act_ok[12]    = "";
+  char          act_right[12] = "";
+
+  // Pairing: false until the Pi accepts DESK_TOKEN; refused after it says no.
+  bool          paired = false;
+  bool          pair_refused = false;
   char          notif_app[20]   = "";
   char          notif_title[28] = "";
   char          notif_body[64]  = "";

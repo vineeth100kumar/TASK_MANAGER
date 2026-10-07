@@ -1,27 +1,25 @@
 # Sage + LUMO
 
 One repository for Sage, the task manager, and LUMO, the desk clock that shows
-Sage's tasks and rings its alarms. Both run on the same Raspberry Pi 5 as two
-separate services, so a crash in one never takes the other down.
+Sage's tasks and rings its alarms. Sage's server on the Raspberry Pi 5 does all
+the work; the clock is a screen and five buttons that it drives.
 
 | Folder | What it is |
 | --- | --- |
 | `src/`, `public/`, `index.html` | Sage web app (React + Vite). Data lives in the browser and syncs to the Pi. |
-| `raspberry_pi/` | Sage server (`db_server.py`, port 8000): sync API, `/ws` event stream, AI routes, and it serves the built web app. |
+| `raspberry_pi/` | Sage server (`db_server.py`, port 8000): sync API, `/ws` event stream, AI routes, the phone link, and it serves the built web app. `desk/` drives the clock on port 8765. |
 | `google-apps-script/` | Backup sync target, used when no Pi is configured. |
-| `lumo/rpi_server/` | LUMO server (ports 8080, 8081, 8765): dashboard, clock link, Bluetooth music, weather, Jarvis voice, memories. |
 | `lumo/esp32_client/` | LUMO clock firmware (ESP32-C3). |
+| `lumo/rpi_server/` | LUMO's old server, retired: Sage does its jobs now. Kept until the photo frame moves over. |
 | `deploy/` | Pi installer, systemd units, and the auto-sync that deploys `main`. |
 
 LUMO came from `vineeth100kumar/lumo-pi-system`; its history is kept under
 `lumo/` (use `git log -- lumo/` or `git log --follow`).
 
 ```
-iPhone ──Bluetooth──▶ LUMO :8080 ◀──ws :8765── ESP32 clock
-                         │
-                         │ /api/sync + /ws, with API_SECRET
-                         ▼
-browser ──/api/sync──▶ Sage :8000 (SQLite + Ollama) ──backup──▶ Apps Script
+iPhone ──Bluetooth──▶ Sage :8000 (SQLite + Ollama) ◀──ws :8765, pairing code── ESP32 clock
+                         ▲          │
+browser ──/api/sync──────┘          └──backup──▶ Apps Script
 ```
 
 ## Install on the Pi
@@ -29,19 +27,20 @@ browser ──/api/sync──▶ Sage :8000 (SQLite + Ollama) ──backup──
 ```bash
 git clone https://github.com/vineeth100kumar/TASK_MANAGER.git
 cd TASK_MANAGER
-sudo deploy/install_pi.sh            # --no-lumo, --no-autosync, --user <name>
+sudo deploy/install_pi.sh            # --no-desk, --no-autosync, --user <name>
 ```
 
 The installer writes `/etc/sage/sage.env` (with a new `API_SECRET` if there
-isn't one), creates both venvs, builds the web app, and installs the `sage`,
-`lumo`, `lumo-obex` and `sage-autosync` units. Open the Sage link from `deploy/setup_tunnel.sh` (or `http://localhost:8000` on the Pi), then
+isn't one), creates the venv, builds the web app, installs the `sage` and
+`sage-autosync` units, and prints the desk clock's pairing code (see
+[the desk clock](raspberry_pi/README.md#desk-clock-lumo)). Open the Sage link from `deploy/setup_tunnel.sh` (or `http://localhost:8000` on the Pi), then
 enter the key from `sudo grep API_SECRET /etc/sage/sage.env` under
 Settings > Server & Reset.
 
 `sage-autosync` pulls `main` every 30 seconds and restarts only the service
 whose folder changed, so merge through pull requests rather than pushing
 straight to `main`. It runs as your user, not root (a sudoers rule lets it
-restart just `sage` and `lumo`). If a step fails, such as a network blip during
+restart just `sage`). If a step fails, such as a network blip during
 `pip` or a broken build, it tries again five minutes later and keeps the old
 web app running meanwhile.
 

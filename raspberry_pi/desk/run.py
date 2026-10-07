@@ -5,27 +5,33 @@ import datetime
 import logging
 from typing import Callable, Optional
 
-from desk.controller import DeskController
+import notifier
+from desk.desk import Desk
 from desk.link import ClockLink, load_token
 
 log = logging.getLogger("desk")
 
 link: Optional[ClockLink] = None
-controller: Optional[DeskController] = None
+desk: Optional[Desk] = None
 
 
-async def run(now: Callable[[], datetime.datetime]) -> None:
-    global link, controller
+async def run(now: Callable[[], datetime.datetime], events, phone) -> None:
+    """events is Sage's EventHub (its listeners and broadcast), phone the
+    phone_link.link that knows whether you're home and what's playing."""
+    global link, desk
     link = ClockLink(load_token())
-    controller = DeskController(link, now)
-    ticker = asyncio.create_task(controller.tick_forever())
+    desk = Desk(link, now, phone, events.broadcast)
+    events.listeners.append(desk.on_event)
+    notifier.clock_reminder = desk.clock_reminder
+    jobs = asyncio.create_task(desk.run())
     try:
         await link.serve()
     except OSError as e:
         # Most likely LUMO's old server still holds the port.
         log.error("Desk clock link could not start: %s", e)
     finally:
-        ticker.cancel()
+        notifier.clock_reminder = None
+        jobs.cancel()
 
 
 def status(enabled: bool) -> dict:

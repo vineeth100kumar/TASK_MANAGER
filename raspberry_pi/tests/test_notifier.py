@@ -69,6 +69,42 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(self.pushed[0]["body"], "Due today")
         self.assertEqual(self.pushed[0]["url"], "/?open=a")
 
+    def test_reminder_taken_by_the_desk_clock_skips_the_phone(self):
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00", "dueDate": "2026-10-01"})
+        notifier.save_prefs({"morningPlan": False})
+        seen = []
+        with mock.patch.object(notifier, "clock_reminder", lambda item, message: seen.append(message["title"]) or True):
+            self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), ["remind:a:2026-10-01T09:00"])
+            self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 31)), [])  # not twice
+        self.assertEqual(seen, ["Call the bank"])
+        self.assertEqual(self.pushed, [])
+
+    def test_reminder_goes_to_the_phone_when_the_clock_passes_or_fails(self):
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00"})
+        notifier.save_prefs({"morningPlan": False})
+
+        def broken(item, message):
+            raise RuntimeError("clock fell off the desk")
+
+        for hook in (lambda item, message: False, broken):
+            conn = sqlite3.connect(notifier.DB_PATH)
+            conn.execute("DELETE FROM notification_log")
+            conn.commit()
+            conn.close()
+            with mock.patch.object(notifier, "clock_reminder", hook):
+                self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), ["remind:a:2026-10-01T09:00"])
+        self.assertEqual(len(self.pushed), 2)
+
+    def test_desk_clock_alone_still_gets_reminders(self):
+        conn = sqlite3.connect(notifier.DB_PATH)
+        conn.execute("DELETE FROM push_subscriptions")
+        conn.commit()
+        conn.close()
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00"})
+        notifier.save_prefs({"morningPlan": False})
+        with mock.patch.object(notifier, "clock_reminder", lambda item, message: True):
+            self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), ["remind:a:2026-10-01T09:00"])
+
     def test_utc_reminder_and_stale_reminder(self):
         put_items(
             {"id": "z", "title": "UTC one", "remindAt": "2026-10-01T03:30:00Z"},

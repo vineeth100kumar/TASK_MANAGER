@@ -125,3 +125,43 @@ class SyncTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class QuickActionTests(unittest.TestCase):
+    """Done, Snooze and Tomorrow from a notification (or the desk clock)."""
+
+    def setUp(self):
+        client.post("/api/sync/clear", content='{"confirm": "DELETE"}', headers={"Content-Type": "text/plain;charset=utf-8"})
+        send(op("t1", payload={"id": "t1", "title": "Gym", "status": "todo", "version": 1}))
+        self.sent = []
+        self.listener = self.sent.append
+        db_server.events.listeners.append(self.listener)
+        self.addCleanup(db_server.events.listeners.remove, self.listener)
+
+    def item(self):
+        rows = client.get("/api/sync/changes", params={"sinceRevision": 0}).json()["changes"]["workItems"]
+        return next(r for r in rows if r["id"] == "t1")
+
+    def test_done_saves_like_a_sync_and_says_what_changed(self):
+        before = revision()
+        resp = client.post("/api/items/t1/done", json={"source": "desk"})
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(self.item()["status"], "done")
+        self.assertEqual(self.item()["version"], 2)
+        self.assertEqual(revision(), before + 1)
+        self.assertEqual(self.sent[-1]["changes"], [{"entityType": "workItems", "entityId": "t1", "operation": "save", "clientId": "desk"}])
+        self.assertEqual(self.sent[-1]["serverRevision"], before + 1)
+
+    def test_snooze_and_tomorrow(self):
+        self.assertTrue(client.post("/api/items/t1/snooze", json={}).json()["snoozedUntil"])
+        self.assertEqual(self.item()["snoozeCount"], 1)
+        due = client.post("/api/items/t1/tomorrow", json={}).json()["dueDate"]
+        self.assertEqual(self.item()["dueDate"], due)
+        self.assertIsNone(self.item()["snoozedUntil"])
+        self.assertEqual(len(self.sent), 2)
+
+    def test_missing_item_is_404(self):
+        for action in ("done", "snooze", "tomorrow"):
+            self.assertEqual(client.post(f"/api/items/nope/{action}", json={}).status_code, 404)
+        self.assertEqual(self.sent, [])
+
