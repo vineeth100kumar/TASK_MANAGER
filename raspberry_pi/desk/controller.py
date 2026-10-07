@@ -7,11 +7,14 @@ decided here, from what the Pi last put on the screen:
 
 - A card with actions (a reminder, say) is showing: LEFT, OK and RIGHT do what
   the labels under the card say, for example Tomorrow, Done and Snooze.
-- Otherwise UP and DOWN step through the screens.
+- Otherwise the press becomes an action: `action_for` names it (the desk
+  reads it from the button map in desk/settings.py) and stepping between
+  screens is done here, anything else by `other_action`. Without a map, UP
+  and DOWN step through the screens.
 
 The desk (desk/desk.py) can claim a press before any of that with
-`before_button` (a ringing alarm takes every button) and gets what is left
-over with `other_button` (play, previous and next for the phone's music).
+`before_button` (a ringing alarm takes every button, and a locked clock
+ignores its own). Presses sent from Sage arrive with remote=True.
 
 The clock free-runs its seconds between CLOCK messages, so one a minute, on
 the minute, keeps it exact.
@@ -32,6 +35,8 @@ APP_LEN, TITLE_LEN, BODY_LEN = 19, 27, 63
 # An unanswered card stops claiming the buttons after this long.
 CARD_SECONDS = 120
 ACTION_BUTTONS = ("LEFT", "OK", "RIGHT")
+# Every screen the firmware can be told to show, in or out of the UP/DOWN loop.
+KNOWN_SCREENS = ("FACE", "CLOCK", "TASKS", "SPOTIFY", "SYSTEM")
 
 
 # The clock's font only has ASCII, so the usual typographic marks are swapped
@@ -67,11 +72,14 @@ class DeskController:
         self.next_alarm = next_alarm
         self.screens = screens or ["FACE", "CLOCK"]
         self.screen = self.screens[0]
+        self.lights = {"mode": "AUTO", "brightness": 40}
         self.card: Optional[Card] = None
         self._clock = clock
         # Hooks the desk fills in; see the module docstring.
-        self.before_button: Optional[Callable[[str], Awaitable[bool]]] = None
-        self.other_button: Optional[Callable[[str], Awaitable[None]]] = None
+        self.before_button: Optional[Callable[[str, bool], Awaitable[bool]]] = None
+        self.action_for: Optional[Callable[[str], str]] = None
+        self.other_action: Optional[Callable[[str], Awaitable[None]]] = None
+        self.clock_extra: Optional[Callable[[], dict]] = None
         self.after_redraw: Optional[Callable[[], Awaitable[None]]] = None
         self.on_screen: Optional[Callable[[str], Awaitable[None]]] = None
         link.on_ready = self.redraw
@@ -93,19 +101,24 @@ class DeskController:
         alarm = self.next_alarm()
         if alarm:
             command["alarm_h"], command["alarm_m"] = alarm
+        if self.clock_extra:
+            command.update(self.clock_extra())
         await self.link.send(command)
 
     async def redraw(self) -> None:
         """Everything the clock needs after it (re)connects."""
         await self.send_clock()
         await self.link.send({"cmd": "SCREEN", "mode": self.screen})
-        await self.link.send({"cmd": "LIGHTS", "mode": "AUTO", "brightness": 40, "hue": 0})
+        await self.send_lights()
         self.card = None
         if self.after_redraw:
             await self.after_redraw()
 
+    async def send_lights(self) -> None:
+        await self.link.send({"cmd": "LIGHTS", "mode": self.lights["mode"], "brightness": self.lights["brightness"], "hue": 0})
+
     async def show_screen(self, screen: str) -> None:
-        if screen not in self.screens:
+        if screen not in KNOWN_SCREENS:
             raise ValueError(f"Unknown screen {screen!r}")
         self.screen = screen
         await self.link.send({"cmd": "SCREEN", "mode": screen})
@@ -141,9 +154,9 @@ class DeskController:
 
     # --- Buttons ---
 
-    async def on_button(self, button: str) -> None:
+    async def on_button(self, button: str, remote: bool = False) -> None:
         button = button.upper()
-        if self.before_button and await self.before_button(button):
+        if self.before_button and await self.before_button(button, remote):
             return
         if self.card and self._clock() >= self.card.expires_at:
             await self.clear_card()
@@ -155,12 +168,24 @@ class DeskController:
                 return
             if button in ACTION_BUTTONS:
                 return  # a button with no action on this card does nothing
-        if button in ("UP", "DOWN"):
-            step = 1 if button == "DOWN" else -1
-            i = self.screens.index(self.screen) if self.screen in self.screens else 0
-            await self.show_screen(self.screens[(i + step) % len(self.screens)])
-        elif self.other_button:
-            await self.other_button(button)
+        if self.action_for:
+            action = self.action_for(button)
+        else:
+            action = {"UP": "prev_screen", "DOWN": "next_screen"}.get(button, "none")
+        await self.run_action(action)
+
+    async def run_action(self, action: str) -> None:
+        if action in ("next_screen", "prev_screen"):
+            step = 1 if action == "next_screen" else -1
+            if self.screen in self.screens:
+                i = (self.screens.index(self.screen) + step) % len(self.screens)
+            else:
+                i = 0  # off the loop (a card on the face): back to its start
+            await self.show_screen(self.screens[i])
+        elif action.startswith("screen:"):
+            await self.show_screen(action.split(":", 1)[1])
+        elif action != "none" and self.other_action:
+            await self.other_action(action)
 
     # --- Running ---
 

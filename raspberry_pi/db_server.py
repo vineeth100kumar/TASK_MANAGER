@@ -1225,6 +1225,61 @@ def desk_status():
     return {"success": True, **desk_run.status(desk.ENABLED)}
 
 
+def _desk_settings_response(saved: dict) -> dict:
+    from desk import settings as desk_settings
+    return {
+        "success": True,
+        "settings": saved,
+        "choices": {
+            "screens": list(desk_settings.SCREENS),
+            "buttons": list(desk_settings.BUTTONS),
+            "layers": list(desk_settings.LAYERS),
+            "actions": list(desk_settings.ACTIONS),
+            "clockStyles": list(desk_settings.CLOCK_STYLES),
+            "lightModes": list(desk_settings.LIGHT_MODES),
+        },
+    }
+
+
+@app.get("/api/desk/settings")
+async def desk_settings_get():
+    from desk import settings as desk_settings
+    return _desk_settings_response(await asyncio.to_thread(desk_settings.load))
+
+
+@app.put("/api/desk/settings")
+async def desk_settings_put(update: Dict[str, Any]):
+    from desk import run as desk_run
+    try:
+        saved = await desk_run.save_settings(update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return _desk_settings_response(saved)
+
+
+@app.post("/api/desk/settings/reset")
+async def desk_settings_reset():
+    from desk import run as desk_run
+    return _desk_settings_response(await desk_run.reset_settings())
+
+
+class DeskPress(BaseModel):
+    button: str
+
+
+@app.post("/api/desk/press")
+async def desk_press(req: DeskPress):
+    """Press one of the clock's buttons from Sage, as if on the clock."""
+    from desk import run as desk_run
+    from desk import settings as desk_settings
+    button = req.button.strip().upper()
+    if button not in desk_settings.BUTTONS:
+        raise HTTPException(status_code=400, detail=f"button must be one of: {', '.join(desk_settings.BUTTONS)}.")
+    if not desk.ENABLED or not await desk_run.press(button):
+        raise HTTPException(status_code=409, detail="The desk clock isn't running. Set SAGE_DESK=1 and restart Sage.")
+    return {"success": True, "button": button, **desk_run.status(desk.ENABLED)}
+
+
 if (DIST_DIR / "index.html").is_file():
     app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
 else:

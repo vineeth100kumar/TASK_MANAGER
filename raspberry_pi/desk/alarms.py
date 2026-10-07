@@ -99,10 +99,10 @@ class Alarms:
         return min(upcoming, key=lambda a: a.rings_at) if upcoming else None
 
     @staticmethod
-    def snoozed(now: datetime.datetime) -> dict:
-        """Fields for five more minutes. Only remindAt moves, so tomorrow's
+    def snoozed(now: datetime.datetime, minutes: int = SNOOZE_MINUTES) -> dict:
+        """Fields for a few more minutes. Only remindAt moves, so tomorrow's
         alarm is still set for the time it always was."""
-        return {"remindAt": sage_time(now + datetime.timedelta(minutes=SNOOZE_MINUTES))}
+        return {"remindAt": sage_time(now + datetime.timedelta(minutes=minutes))}
 
     @staticmethod
     def rolled(alarm: Alarm, now: datetime.datetime) -> dict:
