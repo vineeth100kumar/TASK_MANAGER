@@ -43,6 +43,12 @@ Install the following via the Arduino IDE Library Manager:
 4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**.
 5. Upload the sketch to your ESP32-C3.
 
+Or from a terminal with `arduino-cli` (same settings):
+
+```bash
+arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160 esp32_client
+```
+
 ---
 
 ## 3. Raspberry Pi 5 Server Setup
@@ -90,7 +96,7 @@ only file that knows Sage's field names.
 | "Jarvis, add a task" | Sage's `/api/parse-task`, so dates are understood, then saved through sync |
 | Task list on the display and dashboard | Sage's open tasks, soonest first |
 | Alarms | Sage reminders labelled `alarm` |
-| A Sage reminder falling due | A buzz and a notification card on the face |
+| A Sage reminder falling due | A buzz and a notification card on the clock |
 | A change made in the app | Arrives on Sage's `/ws` stream and updates the clock within a second |
 
 ### The key
@@ -126,19 +132,27 @@ and Lumo reconnects on its own.
 
 ---
 
-## 6. Screen Navigation (Physical Controls)
+## 6. Screens and buttons (firmware 2.0)
 
-- **From Face Screen**:
-  - `RIGHT` -> Desk Clock Screen
-  - `LEFT`  -> Tasks List Screen
-  - `OK`    -> Spotify Music Card Screen
-- **From Clock Screen**:
-  - `LEFT`  -> Tasks Screen
-  - `OK`    -> Face Screen
-  - `RIGHT` -> Spotify Screen
-- **From Spotify Screen**:
-  - `LEFT`  -> Clock Screen
-  - `OK`    -> Play / Pause toggle
-  - `RIGHT` -> Next Track
-- **During Alarm Ringing**:
-  - Pressing any button dismisses the alarm.
+The clock has no character any more. It starts on the Clock screen. UP and
+DOWN step through Clock, Tasks, Now playing and System. You can change what
+every button does from Sage (see the Pi's README, "Desk clock"). The clock
+sends each press to Sage, and Sage decides what it does:
+
+- **Clock** shows the time in the style set in Sage: digital (with a
+  greeting and the weather), minimal, or an analog dial. It can be 12- or
+  24-hour, with or without seconds, and can show a second time zone. The clock
+  keeps the style in flash, so it looks right before Sage connects.
+- **Cards** (reminders, phone notifications) show over whatever screen is up.
+  A card with actions shows what LEFT, OK and RIGHT do, and stays until you
+  answer it. A plain card goes after 4.5 s. Either way, the clock then returns
+  to the screen it was on.
+- **Hold OK** for about a second to send `HOLD_OK`, a sixth button you can map
+  in Sage. A short OK press is sent when you let go.
+- **Alarms** take the screen while they ring: RIGHT snoozes, any other button
+  stops (both can be changed in Sage).
+- **Offline alarms.** Sage sends the next day's alarms to the clock, and the
+  clock keeps them in flash. If the clock can't reach Sage at an alarm's
+  time, it rings the alarm itself. RIGHT snoozes for the length set in Sage,
+  any other button stops it, and it gives up after 10 minutes. It still needs
+  Wi-Fi to know the time (NTP), because the board has no clock battery.
