@@ -93,6 +93,12 @@ class Alarms:
                 return alarm
         return None
 
+    def upcoming(self, now: datetime.datetime, hours: int = 24, limit: int = 4) -> List[Alarm]:
+        """The alarms that ring within `hours`, soonest first."""
+        until = now + datetime.timedelta(hours=hours)
+        soon = sorted((a for a in self.alarms if a.rings_at and now < a.rings_at <= until), key=lambda a: a.rings_at)
+        return soon[:limit]
+
     def next(self, now: datetime.datetime) -> Optional[Alarm]:
         """The alarm that rings soonest, for the clock face."""
         upcoming = [a for a in self.alarms if a.rings_at and a.rings_at > now]

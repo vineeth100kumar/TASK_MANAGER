@@ -198,10 +198,16 @@ What it does:
 - **Phone.** Notifications show as cards. What's playing shows on the
   now-playing screen with its cover (from iTunes); there LEFT, OK and RIGHT are
   previous, play/pause and next.
-- **Weather** (open-meteo, every 30 min, `SAGE_DESK_LAT` / `SAGE_DESK_LON`), the
-  **Pi's vitals** on the System screen, and a face whose mood follows the hour
-  (asleep 00:00-08:00, drowsy from 22:00) and the music.
-- UP and DOWN step through Face, Clock, Tasks, Now playing and System.
+- **Weather** (open-meteo, every 30 min, `SAGE_DESK_LAT` / `SAGE_DESK_LON`) and
+  the **Pi's vitals** on the System screen.
+- UP and DOWN step through Clock, Tasks, Now playing and System.
+- **Offline alarms.** The alarms due in the next 24 hours (at most four) go to
+  the clock as `{"cmd":"ALARMS","list":[{"h":6,"m":30}],"snooze":5}` whenever
+  they change. Firmware 2.0 keeps them and rings them itself while it can't
+  reach Sage.
+- **No face.** Firmware 2.0 has none, and cards show over any screen. A
+  firmware 1.x clock (its HELLO says `"fw":"1.x"`) still has its face, and
+  Sage switches to it to show a card there.
 
 Settings, changed from Sage and applied to the clock at once (`desk/settings.py`,
 stored in the database under `deskSettings`):
@@ -213,9 +219,11 @@ stored in the database under `deskSettings`):
   `POST /api/desk/settings/reset` goes back to the defaults.
 - What's in them: which screens UP and DOWN step through and which one the
   clock starts on; the lights' mode and brightness; snooze and ring length; how
-  to show the time (style, 12/24 h, seconds, a second time zone: sent with
-  every CLOCK message for LUMO 2's clock screen, ignored by firmware 1.6); and
-  the button map.
+  to show the time (style `digital`/`minimal`/`analog`, 12/24 h, seconds, a
+  second time zone: sent with every CLOCK message, drawn by firmware 2.0 and
+  ignored by 1.x); and the button map.
+- The buttons are UP, DOWN, LEFT, OK, RIGHT and HOLD_OK (OK held for about a
+  second, firmware 2.0).
 - The button map gives every button an action (`next_screen`, `prev_screen`,
   `screen:CLOCK` and the like, `media_previous`/`media_toggle`/`media_next`,
   `snooze_alarm`, `stop_alarm`, `lights_toggle`, `none`) in layers: `alarm`

@@ -20,9 +20,11 @@ from typing import Any, Dict
 import notifier
 
 KEY = "deskSettings"
-BUTTONS = ("UP", "DOWN", "LEFT", "OK", "RIGHT")
-# The screens firmware 1.6 can draw that make sense to step through.
-SCREENS = ("FACE", "CLOCK", "TASKS", "SPOTIFY", "SYSTEM")
+# HOLD_OK is OK held for about a second (firmware 2.0 and later).
+BUTTONS = ("UP", "DOWN", "LEFT", "OK", "RIGHT", "HOLD_OK")
+# The screens UP and DOWN can step through. (Firmware 1.6 also has a face,
+# kept only as the place it draws cards; see controller.py.)
+SCREENS = ("CLOCK", "TASKS", "SPOTIFY", "SYSTEM")
 LAYERS = ("default", "alarm") + SCREENS
 ACTIONS = (
     "none",
@@ -36,14 +38,14 @@ LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
 
 DEFAULTS: Dict[str, Any] = {
     "screens": list(SCREENS),
-    "homeScreen": "FACE",
+    "homeScreen": "CLOCK",
     "clock": {"style": "digital", "hour24": True, "seconds": True, "secondZone": ""},
     "alarm": {"snoozeMinutes": 5, "ringMinutes": 10},
     "lights": {"mode": "AUTO", "brightness": 40},
     "buttons": {
         "locked": False,
         "map": {
-            "default": {"UP": "prev_screen", "DOWN": "next_screen", "LEFT": "none", "OK": "none", "RIGHT": "none"},
+            "default": {"UP": "prev_screen", "DOWN": "next_screen", "LEFT": "none", "OK": "none", "RIGHT": "none", "HOLD_OK": "none"},
             "SPOTIFY": {"LEFT": "media_previous", "OK": "media_toggle", "RIGHT": "media_next"},
             "alarm": {"UP": "stop_alarm", "DOWN": "stop_alarm", "LEFT": "stop_alarm", "OK": "stop_alarm", "RIGHT": "snooze_alarm"},
         },
@@ -170,6 +172,26 @@ def action_for(current: dict, button: str, screen: str, ringing: bool) -> str:
     return "none"
 
 
+def _without_face(saved: dict) -> dict:
+    """Settings saved before the face was retired, minus the face."""
+    saved = copy.deepcopy(saved) if isinstance(saved, dict) else {}
+    if isinstance(saved.get("screens"), list):
+        saved["screens"] = [s for s in saved["screens"] if s != "FACE"]
+        if not saved["screens"]:
+            del saved["screens"]
+    if saved.get("homeScreen") == "FACE":
+        del saved["homeScreen"]
+    layers = (saved.get("buttons") or {}).get("map")
+    if isinstance(layers, dict):
+        layers.pop("FACE", None)
+        for keys in layers.values():
+            if isinstance(keys, dict):
+                for button, action in list(keys.items()):
+                    if action == "screen:FACE":
+                        keys[button] = "none"
+    return saved
+
+
 # --- Storage ---
 
 def load() -> dict:
@@ -181,7 +203,7 @@ def load() -> dict:
         conn.close()
     try:
         saved = json.loads(row[0]) if row else {}
-        return merge(defaults(), saved)
+        return merge(defaults(), _without_face(saved))
     except ValueError:
         return defaults()  # a hand-edited row that no longer checks out
 

@@ -313,10 +313,13 @@ void neoTick() {
 // =====================================================================
 //  Button ladder
 // =====================================================================
+// OK reports on release, so a long hold can be told apart: held for
+// HOLD_OK_MS it is BTN_HOLD_OK (once), shorter it is BTN_OK.
 Button readButton() {
   static Button lastStable = BTN_NONE;
   static unsigned long pressStart = 0;
   static unsigned long lastRepeat = 0;
+  static bool holdSent = false;
 
   const unsigned long HOLD_START_MS  = 350;
   const unsigned long HOLD_REPEAT_MS = 120;
@@ -335,12 +338,19 @@ Button readButton() {
     lastStable = cur;
     pressStart = millis();
     lastRepeat = millis();
-    return cur;
+    holdSent = false;
+    return cur == BTN_OK ? BTN_NONE : cur;
   }
 
   if (cur == BTN_NONE && lastStable != BTN_NONE) {
+    Button released = lastStable;
     lastStable = BTN_NONE;
-    return BTN_NONE;
+    return (released == BTN_OK && !holdSent) ? BTN_OK : BTN_NONE;
+  }
+
+  if (cur == BTN_OK && lastStable == BTN_OK && !holdSent && millis() - pressStart >= HOLD_OK_MS) {
+    holdSent = true;
+    return BTN_HOLD_OK;
   }
 
   if ((cur == BTN_UP || cur == BTN_DOWN) && cur == lastStable) {

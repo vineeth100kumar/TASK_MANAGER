@@ -10,7 +10,6 @@ extern bool newArtReady;
 
 void displayInit();
 void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw);
-void drawTimeBar(const LumoState& s, bool force);
 void displayClockTick(const LumoState& s);
 void displayAlarmTick(const LumoState& s);
 void displayAlarmReset();

@@ -4,8 +4,8 @@ lock, presses sent from Sage, and settings applied to a running clock.
     cd raspberry_pi && python -m unittest discover -s tests
 """
 
+import json
 import os
-import random
 import sys
 import tempfile
 import unittest
@@ -27,7 +27,8 @@ class Merge(unittest.TestCase):
     def test_defaults_keep_todays_buttons(self):
         s = settings.defaults()
         self.assertEqual(settings.action_for(s, "DOWN", "CLOCK", False), "next_screen")
-        self.assertEqual(settings.action_for(s, "UP", "FACE", False), "prev_screen")
+        self.assertEqual(settings.action_for(s, "UP", "TASKS", False), "prev_screen")
+        self.assertEqual(settings.action_for(s, "HOLD_OK", "CLOCK", False), "none")
         self.assertEqual(settings.action_for(s, "OK", "CLOCK", False), "none")
         self.assertEqual(settings.action_for(s, "OK", "SPOTIFY", False), "media_toggle")
         self.assertEqual(settings.action_for(s, "RIGHT", "CLOCK", True), "snooze_alarm")
@@ -46,8 +47,12 @@ class Merge(unittest.TestCase):
         self.assertEqual(s["screens"], list(settings.SCREENS))
 
     def test_home_screen_follows_the_screens(self):
-        s = settings.merge(settings.defaults(), {"screens": ["CLOCK", "TASKS"]})
-        self.assertEqual(s["homeScreen"], "CLOCK")  # FACE was dropped
+        s = settings.merge(settings.defaults(), {"screens": ["TASKS", "SPOTIFY"]})
+        self.assertEqual(s["homeScreen"], "TASKS")  # CLOCK was dropped
+
+    def test_the_face_is_refused_now(self):
+        with self.assertRaises(ValueError):
+            settings.merge(settings.defaults(), {"screens": ["FACE", "CLOCK"]})
 
     def test_bad_values_are_refused_with_a_reason(self):
         bad = [
@@ -61,6 +66,7 @@ class Merge(unittest.TestCase):
             ({"clock": {"secondZone": "Mars/Olympus"}}, "not a time zone"),
             ({"buttons": {"map": {"default": None}}}, "can't be removed"),
             ({"buttons": {"map": {"CLOCK": {"HOLD": "none"}}}}, "button must be one of"),
+            ({"buttons": {"map": {"FACE": {"OK": "none"}}}}, "layer must be one of"),
             ({"buttons": {"map": {"CLOCK": {"OK": "launch"}}}}, "must be one of"),
             ({"buttons": {"locked": "yes"}}, "true or false"),
         ]
@@ -81,9 +87,25 @@ class Storage(unittest.TestCase):
             self.assertEqual(loaded["alarm"]["snoozeMinutes"], 7)
             with self.assertRaises(ValueError):
                 settings.save({"alarm": {"snoozeMinutes": 99}})
+            self.assertEqual(settings.load()["clock"]["hour24"], False)
             self.assertEqual(settings.load()["alarm"]["snoozeMinutes"], 7)  # a refused change saves nothing
             self.assertEqual(settings.reset(), settings.defaults())
             self.assertEqual(settings.load(), settings.defaults())
+
+    def test_settings_saved_with_the_face_load_without_it(self):
+        old = {"screens": ["FACE", "CLOCK", "TASKS"], "homeScreen": "FACE", "alarm": {"snoozeMinutes": 8},
+               "buttons": {"map": {"FACE": {"OK": "none"}, "default": {"OK": "screen:FACE"}}}}
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(notifier, "DB_PATH", str(Path(tmp) / "s.db")):
+            notifier.init_tables()
+            conn = notifier._connect()
+            conn.execute("INSERT INTO metadata (key, value) VALUES (?, ?)", (settings.KEY, json.dumps(old)))
+            conn.commit()
+            conn.close()
+            loaded = settings.load()
+        self.assertEqual((loaded["screens"], loaded["homeScreen"]), (["CLOCK", "TASKS"], "CLOCK"))
+        self.assertEqual(loaded["alarm"]["snoozeMinutes"], 8)  # the rest is kept
+        self.assertNotIn("FACE", loaded["buttons"]["map"])
+        self.assertEqual(loaded["buttons"]["map"]["default"]["OK"], "none")
 
 
 class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
@@ -106,7 +128,7 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         self.desk = Desk(
             self.link, lambda: self.clock, self.phone, broadcast,
             items=lambda: list(self.items), actions=self.actions, weather=weather, cover=cover,
-            rng=random.Random(0), settings=settings.merge(settings.defaults(), update or {}),
+            settings=settings.merge(settings.defaults(), update or {}),
         )
         return self.desk
 
@@ -134,16 +156,21 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
 
     async def test_a_card_on_the_face_steps_back_into_the_loop(self):
         desk = self.make({"screens": ["CLOCK", "TASKS"]})
-        await desk.controller.show_screen("FACE")  # firmware 1.6 draws cards there
+        await desk.controller.show_screen("FACE")  # firmware 1.x draws cards there
         await desk.controller.on_button("DOWN")
         self.assertEqual(desk.controller.screen, "CLOCK")
+
+    async def test_hold_ok_can_be_mapped(self):
+        desk = self.make({"buttons": {"map": {"default": {"HOLD_OK": "screen:SYSTEM"}}}})
+        await desk.controller.on_button("HOLD_OK")
+        self.assertEqual(desk.controller.screen, "SYSTEM")
 
     async def test_lock_ignores_the_clock_but_not_sage(self):
         desk = self.make({"buttons": {"locked": True}})
         await desk.controller.on_button("DOWN")
         self.assertEqual(self.link.sent, [])
         await desk.press("down")
-        self.assertEqual(self.link.last("SCREEN")["mode"], "CLOCK")
+        self.assertEqual(self.link.last("SCREEN")["mode"], "TASKS")
 
     async def test_a_ringing_alarm_still_answers_a_locked_clock(self):
         desk = self.make({"buttons": {"locked": True}, "alarm": {"snoozeMinutes": 9}}, items=[alarm(h=6, m=0)])
@@ -205,7 +232,7 @@ class RunHelpers(unittest.IsolatedAsyncioTestCase):
                 mock.patch.object(notifier, "DB_PATH", str(Path(tmp) / "s.db")), \
                 mock.patch.object(desk_run, "desk", desk):
             self.assertTrue(await desk_run.press("DOWN"))
-            self.assertEqual(link.last("SCREEN")["mode"], "CLOCK")
+            self.assertEqual(link.last("SCREEN")["mode"], "TASKS")
             saved = await desk_run.save_settings({"lights": {"mode": "OFF"}})
             self.assertEqual(saved["lights"]["mode"], "OFF")
             self.assertEqual(link.last("LIGHTS")["mode"], "OFF")

@@ -8,13 +8,15 @@ The clock only draws and reports button presses; this decides what it shows:
 - Alarms (Sage reminders labelled "alarm", see alarms.py) ring on the second.
   While one rings, RIGHT snoozes it and any other button stops it (both can
   be changed in Sage, like every button: see desk/settings.py).
-- Reminders you get while you're home appear as a card on the face with
-  Tomorrow, Done and Snooze under LEFT, OK and RIGHT. Away from home they go
+- Reminders you get while you're home appear as a card with Tomorrow, Done
+  and Snooze under LEFT, OK and RIGHT. Away from home they go
   to the phone as before (Sage's notifier asks clock_reminder first).
 - The phone's notifications appear as cards, and what it's playing shows on
   the now-playing screen with its cover, where LEFT, OK and RIGHT are
   previous, play/pause and next.
-- Weather, the Pi's vitals, and a face whose mood follows the hour and the music.
+- Weather and the Pi's vitals.
+- The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
+  ring them itself while it can't reach the Pi.
 - Settings changed in Sage (desk/settings.py) apply at once, and Sage can
   press the clock's buttons itself (press).
 """
@@ -22,7 +24,6 @@ The clock only draws and reports button presses; this decides what it shows:
 import asyncio
 import datetime
 import logging
-import random
 from typing import Any, Awaitable, Callable, List, Optional, Set
 
 import item_actions
@@ -34,7 +35,6 @@ from desk.controller import DeskController
 log = logging.getLogger("desk")
 
 SOURCE = "desk"
-EYE_COLOR = {"cmd": "EYE_COLOR", "name": "cyan", "rgb565": 0x073F}
 WEATHER_EVERY = 30 * 60
 REFRESH_EVERY = 60
 REMINDER_SNOOZE_MINUTES = 60
@@ -53,7 +53,6 @@ class Desk:
         weather: Callable[[], Awaitable[Optional[dict]]] = ambient.fetch_weather,
         cover: Callable[[str, str], Awaitable[Optional[bytes]]] = art.cover,
         vitals: Optional[ambient.Vitals] = None,
-        rng: Optional[random.Random] = None,
         settings: Optional[dict] = None,
     ) -> None:
         self.link = link
@@ -65,7 +64,6 @@ class Desk:
         self.fetch_weather = weather
         self.fetch_cover = cover
         self.vitals = vitals or ambient.Vitals()
-        self.rng = rng or random.Random()
 
         self.settings = settings or desk_settings.defaults()
         self.lights_off = False
@@ -83,8 +81,7 @@ class Desk:
         self.ringing_since = 0.0
         self.today: List[str] = []
         self.weather: Optional[dict] = None
-        self.mood = "NORMAL"
-        self.schedule = ""
+        self.sent_alarms: Optional[dict] = None
         self.track: Optional[tuple] = None
         self.cover: Optional[bytes] = None
         self.loop: Optional[asyncio.AbstractEventLoop] = None
@@ -92,6 +89,15 @@ class Desk:
         self._tasks: Set[asyncio.Task] = set()
 
     # --- Sage's items ---
+
+    @property
+    def legacy(self) -> bool:
+        """Firmware 1.x, which draws cards only on its face screen."""
+        return str(getattr(self.link, "fw", "") or "").startswith("1.")
+
+    async def _card_surface(self) -> None:
+        if self.legacy and self.controller.screen != "FACE":
+            await self.controller.show_screen("FACE")
 
     def next_alarm(self):
         alarm = self.alarms.next(self.now())
@@ -116,6 +122,16 @@ class Desk:
             await self.link.send({"cmd": "SHOW_TASKS", "items": lines})
         if self.next_alarm() != before:
             await self.controller.send_clock()
+        await self.send_alarms()
+
+    async def send_alarms(self, force: bool = False) -> None:
+        """The alarms due in the next day, for the clock to ring on its own
+        if it loses the Pi. Sent when they change."""
+        upcoming = [{"h": a.rings_at.hour, "m": a.rings_at.minute} for a in self.alarms.upcoming(self.now())]
+        command = {"cmd": "ALARMS", "list": upcoming, "snooze": self.settings["alarm"]["snoozeMinutes"]}
+        if force or command != self.sent_alarms:
+            if await self.link.send(command):
+                self.sent_alarms = command
 
     async def change(self, action, item_id: str, *args) -> bool:
         """Run an item_actions change off the event loop and announce it."""
@@ -170,7 +186,7 @@ class Desk:
         def act(*args):
             return lambda: self._guard(self.change(*args))
 
-        await self.controller.show_screen("FACE")
+        await self._card_surface()
         await self.link.send({"cmd": "HAPTIC", "ms": 300})
         await self.controller.show_card("Reminder", message.get("title") or item.get("title") or "", message.get("body") or "", {
             "LEFT": ("Tomorrow", act(self.actions.move_to_tomorrow, item_id, SOURCE, today_date)),
@@ -182,8 +198,7 @@ class Desk:
         # A reminder waiting for an answer, or a ringing alarm, comes first.
         if self.controller.card or self.alarms.ringing or not self.link.connected:
             return
-        if self.controller.screen != "FACE":
-            await self.controller.show_screen("FACE")
+        await self._card_surface()
         await self.controller.show_card(note.get("app") or "iPhone", note.get("title") or "", note.get("message") or "")
 
     async def show_media(self, media: dict) -> None:
@@ -197,7 +212,6 @@ class Desk:
             self.cover = await self.fetch_cover(*track)
             if self.cover and self.track == track:
                 await self.link.send_binary(self.cover)
-        await self.set_mood("HAPPY" if media.get("playing") else "NORMAL")
 
     # --- Alarms ---
 
@@ -223,8 +237,6 @@ class Desk:
         now = self.now()
         fields = Alarms.snoozed(now, self.settings["alarm"]["snoozeMinutes"]) if snooze else Alarms.rolled(alarm, now)
         await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
-        if not snooze:
-            await self.set_mood("HAPPY")
 
     # --- Buttons and screens ---
 
@@ -284,6 +296,7 @@ class Desk:
             return
         await self.controller.send_lights()
         await self.controller.send_clock()
+        await self.send_alarms()
         if self.controller.screen not in new["screens"] and not self.controller.card:
             await self.controller.show_screen(new["homeScreen"])
 
@@ -293,10 +306,8 @@ class Desk:
 
     async def after_redraw(self) -> None:
         """The rest of what a freshly connected clock needs."""
-        await self.link.send(EYE_COLOR)
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
-        self.schedule = ""
-        await self.set_mood(self.mood)
+        await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
         if self.track:
@@ -305,12 +316,6 @@ class Desk:
                 await self.link.send_binary(self.cover)
         if self.alarms.ringing:
             await self.link.send({"cmd": "ALARM_RING"})
-
-    async def set_mood(self, mood: str) -> None:
-        schedule = ambient.schedule_for(self.now().hour)
-        if (mood, schedule) != (self.mood, self.schedule):
-            self.mood, self.schedule = mood, schedule
-            await self.link.send({"cmd": "EMOTION", "mood": mood, "schedule": schedule})
 
     # --- Running ---
 
@@ -332,18 +337,9 @@ class Desk:
             await self.link.send(weather)
 
     async def ambient(self) -> None:
-        """Every two seconds: the face's mood for the hour, the vitals while
-        they're on screen, and a small movement while the face is idle."""
-        if not self.link.connected:
-            return
-        await self.set_mood(self.mood)
-        screen = self.controller.screen
-        if screen == "SYSTEM":
+        """Every two seconds: the vitals while they're on screen."""
+        if self.link.connected and self.controller.screen == "SYSTEM":
             await self.link.send(self.vitals.command())
-        elif screen == "FACE" and not self.controller.card and not self.alarms.ringing:
-            move = ambient.idle_animation(self.rng, bool(self.phone.media.get("playing")))
-            if move:
-                await self.link.send(move)
 
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()

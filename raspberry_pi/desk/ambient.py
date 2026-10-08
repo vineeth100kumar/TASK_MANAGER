@@ -1,10 +1,8 @@
 """
-ambient.py - the clock's quieter jobs: weather, the Pi's vitals, the face's
-mood for the time of day, and the small eye movements that keep it alive.
+ambient.py - the clock's quieter jobs: the weather and the Pi's vitals.
 """
 
 import os
-import random
 import shutil
 from typing import Optional, Tuple
 
@@ -13,9 +11,6 @@ import httpx
 # Bengaluru, where LUMO has always lived, unless the Pi's environment says otherwise.
 LAT = float(os.getenv("SAGE_DESK_LAT", "13.003648"))
 LON = float(os.getenv("SAGE_DESK_LON", "77.628993"))
-
-# Hours (in Sage's time zone) when the face sleeps and when it gets drowsy.
-SLEEP_FROM, SLEEP_UNTIL, DROWSY_FROM = 0, 8, 22
 
 
 def weather_icon(code: int) -> str:
@@ -46,14 +41,6 @@ async def fetch_weather(lat: float = LAT, lon: float = LON) -> Optional[dict]:
         }
     except Exception:
         return None
-
-
-def schedule_for(hour: int) -> str:
-    if SLEEP_FROM <= hour < SLEEP_UNTIL:
-        return "SLEEP"
-    if hour >= DROWSY_FROM:
-        return "DROWSY"
-    return "AWAKE"
 
 
 class Vitals:
@@ -110,20 +97,3 @@ class Vitals:
             "ram_pct": self.ram_pct(),
             "disk_pct": self.disk_pct(),
         }
-
-
-def idle_animation(rng: random.Random, music_playing: bool) -> Optional[dict]:
-    """A small movement for the face every couple of seconds, or None to keep
-    still: a bob in time while music plays, otherwise a glance now and then."""
-    if music_playing:
-        return {"cmd": "ANIM", "type": "dance", "gaze_x": rng.choice([-4, 4, 0]),
-                "gaze_y": rng.choice([-6, -10, -4, 0]), "duration_ms": 600}
-    dice = rng.random()
-    if dice < 0.35:
-        return {"cmd": "ANIM", "type": "look", "gaze_x": rng.choice([-16, -8, 0, 8, 16]),
-                "gaze_y": rng.choice([-6, 0, 6]), "duration_ms": 1400}
-    if dice < 0.45:
-        return {"cmd": "ANIM", "type": "focused", "duration_ms": 1600}
-    if dice < 0.52:
-        return {"cmd": "ANIM", "type": "curious", "duration_ms": 1400}
-    return None

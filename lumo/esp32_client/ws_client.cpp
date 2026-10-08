@@ -1,9 +1,9 @@
 #include <Arduino.h>
 #include "ws_client.h"
 #include "peripherals.h"
-#include "animator.h"
 #include "display.h"
 #include "clockkeeper.h"
+#include "store.h"
 
 #include <WiFi.h>
 #include <ArduinoWebsockets.h>
@@ -19,6 +19,41 @@ static bool isConnected = false;
 static unsigned long lastReconnectAttempt = 0;
 static unsigned long reconnectInterval    = 2000;
 static const unsigned long MAX_BACKOFF    = 30000;
+
+// CLOCK's display fields: style, hour24, show_seconds and the second zone.
+// Saved to flash only when one of them changed.
+static void applyClockStyle(LumoState& s, JsonDocument& doc) {
+  ClockStyle style = s.clock_style;
+  const char* st = doc["style"] | "";
+  if (strcmp(st, "digital") == 0)      style = CLOCK_DIGITAL;
+  else if (strcmp(st, "minimal") == 0) style = CLOCK_MINIMAL;
+  else if (strcmp(st, "analog") == 0)  style = CLOCK_ANALOG;
+  bool h24  = doc["hour24"].is<bool>() ? doc["hour24"].as<bool>() : s.hour24;
+  bool secs = doc["show_seconds"].is<bool>() ? doc["show_seconds"].as<bool>() : s.show_seconds;
+
+  char zone[sizeof(s.zone2)] = "";
+  int16_t offset = 0;
+  if (doc["zone2"].is<const char*>() && doc["zone2_h"].is<int>() && doc["zone2_m"].is<int>()) {
+    strlcpy(zone, doc["zone2"], sizeof(zone));
+    int there = doc["zone2_h"].as<int>() * 60 + doc["zone2_m"].as<int>();
+    int here  = s.h * 60 + s.m;
+    offset = (int16_t)(((there - here) % 1440 + 1440 + 720) % 1440 - 720);   // -12 h .. +12 h
+  } else if (!doc["style"].is<const char*>()) {
+    strlcpy(zone, s.zone2, sizeof(zone));   // an old Sage: leave it as it was
+    offset = s.zone2_offset;
+  }
+
+  bool changed = style != s.clock_style || h24 != s.hour24 || secs != s.show_seconds ||
+                 strcmp(zone, s.zone2) != 0 || offset != s.zone2_offset;
+  if (!changed) return;
+  s.clock_style = style;
+  s.hour24 = h24;
+  s.show_seconds = secs;
+  strlcpy(s.zone2, zone, sizeof(s.zone2));
+  s.zone2_offset = offset;
+  s.flag_clock_changed = true;
+  storeSaveClock(s);
+}
 
 static void handleTextMessage(const String& payload) {
   if (!statePtr) return;
@@ -46,13 +81,33 @@ static void handleTextMessage(const String& payload) {
     if (!s.act_left[0] && !s.act_ok[0] && !s.act_right[0]) {
       s.notif_active = false;   // the card was answered or timed out
     }
-    s.flag_anim_changed = true;
+    s.flag_card_changed = true;
+    return;
+  }
+  if (strcmp(cmd, "ALARMS") == 0) {
+    LocalAlarm list[MAX_LOCAL_ALARMS];
+    uint8_t n = 0;
+    for (JsonObject a : doc["list"].as<JsonArray>()) {
+      if (n >= MAX_LOCAL_ALARMS) break;
+      int h = a["h"] | -1, m = a["m"] | -1;
+      if (h < 0 || h > 23 || m < 0 || m > 59) continue;
+      list[n++] = { (uint8_t)h, (uint8_t)m };
+    }
+    uint8_t snooze = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
+    if (n != s.local_alarm_count || snooze != s.snooze_minutes ||
+        memcmp(list, s.local_alarms, sizeof(LocalAlarm) * n) != 0) {
+      memcpy(s.local_alarms, list, sizeof(LocalAlarm) * n);
+      s.local_alarm_count = n;
+      s.snooze_minutes = snooze;
+      storeSaveAlarms(s);
+      Serial.printf("[WS] %u alarm(s) saved for offline ringing\n", n);
+    }
     return;
   }
 
   if (strcmp(cmd, "SCREEN") == 0) {
-    const char* m = doc["mode"] | "FACE";
-    if (strcmp(m, "FACE") == 0)         s.next_screen = SCREEN_FACE;
+    const char* m = doc["mode"] | "CLOCK";
+    if (strcmp(m, "FACE") == 0)         s.next_screen = SCREEN_CLOCK;   // the face is gone
     else if (strcmp(m, "CLOCK") == 0)   s.next_screen = SCREEN_CLOCK;
     else if (strcmp(m, "SYSTEM") == 0)  s.next_screen = SCREEN_SYSTEM;
     else if (strcmp(m, "SPOTIFY") == 0) s.next_screen = SCREEN_SPOTIFY;
@@ -72,31 +127,6 @@ static void handleTextMessage(const String& payload) {
     s.flag_screen_switch = true;
     s.flag_memory_changed = true;
   }
-  else if (strcmp(cmd, "ANIM") == 0) {
-    const char* animTypeStr = doc["type"] | "normal";
-    int gx = doc["gaze_x"] | 0;
-    int gy = doc["gaze_y"] | 0;
-    unsigned long dur = doc["duration_ms"] | 2500;
-
-    AnimType at = ANIM_NORMAL;
-    if (strcmp(animTypeStr, "focused") == 0)       at = ANIM_FOCUSED;
-    else if (strcmp(animTypeStr, "smirk") == 0)    at = ANIM_SMIRK;
-    else if (strcmp(animTypeStr, "scan") == 0)     at = ANIM_SCAN;
-    else if (strcmp(animTypeStr, "dance") == 0 || strcmp(animTypeStr, "music_dance") == 0) at = ANIM_DANCE;
-    else if (strcmp(animTypeStr, "alert") == 0)    at = ANIM_ALERT;
-    else if (strcmp(animTypeStr, "curious") == 0)  at = ANIM_CURIOUS;
-    else if (strcmp(animTypeStr, "standby") == 0)  at = ANIM_STANDBY;
-    else if (strcmp(animTypeStr, "look") == 0)     at = ANIM_LOOK;
-
-    s.anim_type = at;
-    s.flag_anim_changed = true;
-    animatorSetAnim(at, gx, gy, dur);
-  }
-  else if (strcmp(cmd, "EYE_COLOR") == 0) {
-    uint16_t c565 = doc["rgb565"] | 0x073F;
-    s.eye_color = c565;
-    s.flag_anim_changed = true;
-  }
   else if (strcmp(cmd, "NOTIF") == 0) {
     const char* app = doc["app"] | "iPhone";
     const char* title = doc["title"] | "Alert";
@@ -106,7 +136,7 @@ static void handleTextMessage(const String& payload) {
     strncpy(s.notif_body, body, sizeof(s.notif_body) - 1);
     s.notif_active = true;
     s.notif_start = millis();
-    s.flag_anim_changed = true;
+    s.flag_card_changed = true;
     neoPing(90, 170, 255);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
@@ -133,6 +163,7 @@ static void handleTextMessage(const String& payload) {
     if (doc["date"].is<const char*>()) {
       strncpy(s.date, doc["date"], sizeof(s.date) - 1);
     }
+    applyClockStyle(s, doc);
   }
   else if (strcmp(cmd, "WEATHER") == 0) {
     s.temp_c = doc["temp_c"] | s.temp_c;
@@ -151,25 +182,6 @@ static void handleTextMessage(const String& payload) {
     s.sp_duration_ms = doc["duration_ms"] | s.sp_duration_ms;
     s.sp_playing     = doc["playing"]     | s.sp_playing;
     s.flag_spotify_changed = true;
-  }
-  else if (strcmp(cmd, "EMOTION") == 0) {
-    const char* mStr = doc["mood"]     | "NORMAL";
-    const char* sStr = doc["schedule"] | "AWAKE";
-
-    LumoMood mood = MOOD_NORMAL;
-    if (strcmp(mStr, "HAPPY")   == 0) mood = MOOD_HAPPY;
-    else if (strcmp(mStr, "BORED")   == 0) mood = MOOD_BORED;
-    else if (strcmp(mStr, "SAD")     == 0) mood = MOOD_SAD;
-    else if (strcmp(mStr, "EXCITED") == 0) mood = MOOD_EXCITED;
-
-    CharSchedule sched = SCHED_AWAKE;
-    if (strcmp(sStr, "DROWSY") == 0) sched = SCHED_DROWSY;
-    else if (strcmp(sStr, "SLEEP")  == 0) sched = SCHED_SLEEP;
-
-    s.mood     = mood;
-    s.schedule = sched;
-    animatorSetMood(mood, sched);
-    neoSetSleep(sched == SCHED_SLEEP);
   }
   else if (strcmp(cmd, "LIGHTS") == 0) {
     const char* modeStr = doc["mode"] | "WARM";
@@ -195,9 +207,11 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
     s.alarm_ringing = true;
+    s.local_ringing = false;   // Sage has it now
   }
   else if (strcmp(cmd, "ALARM_OFF") == 0) {
     s.alarm_ringing = false;
+    s.local_ringing = false;
   }
   else if (strcmp(cmd, "SHOW_TASKS") == 0) {
     JsonArray arr = doc["items"];
@@ -227,10 +241,8 @@ static void handleTextMessage(const String& payload) {
     s.flag_voice_changed = true;
 
     if (strcmp(st, "LISTENING") == 0) {
-      animatorSetAnim(ANIM_FOCUSED, 0, 0, 4000);
       neoSetVoice(VFX_LISTEN, 0.0f);
     } else if (strcmp(st, "THINKING") == 0) {
-      animatorSetAnim(ANIM_SMIRK, 3, -2, 4000);
       neoSetVoice(VFX_THINK, 0.0f);
     } else if (strcmp(st, "SPEAKING") == 0) {
       neoSetVoice(VFX_SPEAK, s.voice_volume);

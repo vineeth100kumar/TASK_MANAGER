@@ -36,6 +36,7 @@ APP_LEN, TITLE_LEN, BODY_LEN = 19, 27, 63
 CARD_SECONDS = 120
 ACTION_BUTTONS = ("LEFT", "OK", "RIGHT")
 # Every screen the firmware can be told to show, in or out of the UP/DOWN loop.
+# FACE is firmware 1.x's, where it draws cards; firmware 2 has no face.
 KNOWN_SCREENS = ("FACE", "CLOCK", "TASKS", "SPOTIFY", "SYSTEM")
 
 
@@ -70,7 +71,7 @@ class DeskController:
         self.link = link
         self.now = now
         self.next_alarm = next_alarm
-        self.screens = screens or ["FACE", "CLOCK"]
+        self.screens = screens or ["CLOCK"]
         self.screen = self.screens[0]
         self.lights = {"mode": "AUTO", "brightness": 40}
         self.card: Optional[Card] = None
