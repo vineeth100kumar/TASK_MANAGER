@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import claude_api
 import desk
 import item_actions
 import phone_link
@@ -86,6 +87,11 @@ async def require_api_key(request, call_next):
     install scripts and monitors can check the server is up.
     """
     path = request.url.path
+    if path.startswith("/api/claude/") and request.method != "OPTIONS":
+        # Claude's own routes take only Claude's token, and are off without one.
+        if not claude_api.token_matches(request_key(request)):
+            return JSONResponse({"success": False, "error": "Missing or wrong Claude token"}, status_code=401)
+        return await call_next(request)
     if (
         API_SECRET
         and path.startswith("/api/")
@@ -93,9 +99,14 @@ async def require_api_key(request, call_next):
         and request.method != "OPTIONS"
         and not logged_in(request)
     ):
-        if not key_matches(request_key(request)):
+        if not key_matches(request_key(request)) and not claude_may(request):
             return JSONResponse({"success": False, "error": "Missing or wrong Sage API key"}, status_code=401)
     return await call_next(request)
+
+
+def claude_may(request) -> bool:
+    """Claude's token (claude_api.py) opens the data and the web app, nothing else."""
+    return claude_api.token_matches(request_key(request)) and claude_api.allows(request.method, request.url.path)
 
 
 # --- Password gate (see access_gate.py) ---
@@ -120,8 +131,12 @@ async def require_login(request, call_next):
         not access_gate.enabled
         or request.method == "OPTIONS"
         or path in GATE_OPEN_PATHS
+        # The MCP address carries its own token and checks it (claude_api.py).
+        or path.startswith("/mcp/")
+        or path.startswith("/api/claude/")
         or logged_in(request)
         or (API_SECRET and key_matches(request_key(request)))
+        or claude_may(request)
     ):
         return await call_next(request)
     if path.startswith("/api/"):
@@ -485,7 +500,12 @@ async def process_operations(request: Request):
         req = ProcessOperationsRequest(**req_dict)
     except (ValueError, TypeError) as e:
         return JSONResponse({"success": False, "error": f"Bad sync request: {e}"}, status_code=400)
+    return await apply_operations(req, req_dict.get("clientId", ""))
 
+
+async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -> dict:
+    """Apply a batch of sync operations, queue them for the backup and tell
+    every client. The web app and Claude's API (claude_api.py) both write here."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     op_results = []
@@ -593,7 +613,7 @@ async def process_operations(request: Request):
                 "INSERT INTO unsynced_batches (payload) VALUES (?)",
                 (json.dumps({
                     "action": "processOperations",
-                    "clientId": req_dict.get("clientId", ""),
+                    "clientId": client_id,
                     "operations": [op.model_dump() for op in applied_ops],
                 }),),
             )
@@ -1223,6 +1243,24 @@ async def bluetooth_device(address: str, action: str):
 def desk_status():
     from desk import run as desk_run
     return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+# --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---
+def _claude_today() -> datetime.date:
+    return datetime.datetime.now(notifier._tz(notifier.get_prefs())).date()
+
+
+async def _claude_apply(operations: list) -> dict:
+    return await apply_operations(ProcessOperationsRequest(operations=operations), claude_api.CLIENT_ID)
+
+
+async def _claude_quick_add(text: str) -> dict:
+    return await quick_add_endpoint(QuickAddRequest(text=text, source=claude_api.CLIENT_ID))
+
+
+claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today)
+app.include_router(claude_api.router)
+app.include_router(claude_api.mcp_router)
 
 
 if (DIST_DIR / "index.html").is_file():
