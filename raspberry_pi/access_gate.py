@@ -82,6 +82,51 @@ def session_valid(token: Optional[str]) -> bool:
     return hmac.compare_digest(signature, expected) and expiry.isdigit() and int(expiry) > time.time()
 
 
+# --- One page load per password ---
+# The login cookie above keeps the open app's data calls working, but opening
+# or reloading the app itself needs the password again. A good password also
+# sets a short-lived ticket cookie, and loading a page spends it, so the next
+# visit (a new tab, a reload, reopening the home-screen app) goes to /login.
+OPEN_COOKIE = "sage_open"
+OPEN_SECONDS = 120
+_spent_tickets: Dict[str, float] = {}
+
+
+def new_open_ticket() -> str:
+    body = f"{int(time.time()) + OPEN_SECONDS}.{secrets.token_urlsafe(12)}"
+    signature = hmac.new(_session_key(), ("open:" + body).encode(), hashlib.sha256).hexdigest()
+    return f"{body}.{signature}"
+
+
+def spend_open_ticket(token: Optional[str]) -> bool:
+    """True once for each ticket from a good password, then never again."""
+    try:
+        expiry, nonce, signature = (token or "").split(".")
+    except ValueError:
+        return False
+    expected = hmac.new(_session_key(), f"open:{expiry}.{nonce}".encode(), hashlib.sha256).hexdigest()
+    now = time.time()
+    for spent, until in list(_spent_tickets.items()):
+        if until <= now:
+            del _spent_tickets[spent]
+    if not (hmac.compare_digest(signature, expected) and expiry.isdigit() and int(expiry) > now):
+        return False
+    if nonce in _spent_tickets:
+        return False
+    _spent_tickets[nonce] = int(expiry)
+    return True
+
+
+def is_page_load(request) -> bool:
+    """A browser opening the app itself, as opposed to its scripts, icons or
+    data. Browsers say so in Sec-Fetch-Dest; the path covers older ones."""
+    dest = request.headers.get("sec-fetch-dest", "")
+    if dest:
+        return dest in ("document", "iframe", "frame")
+    path = request.url.path
+    return path == "/" or path.endswith(".html")
+
+
 # --- Guess limits ---
 _failures: Dict[str, Deque[float]] = {}
 _all_failures: Deque[float] = deque()
