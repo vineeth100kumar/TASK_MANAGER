@@ -137,7 +137,12 @@ export interface Habit {
 export interface Note {
   id: string;
   title: string;
+  // Plain text of the note, kept for search, previews and older notes.
   content: string;
+  // The formatted note (HTML, images inline) split across body0..bodyN so each
+  // piece fits in one Google Sheets cell. Notes from before formatting have none.
+  bodyParts?: number;
+  [bodyPart: `body${number}`]: string;
   areaId?: string | null;
   projectId?: string | null;
   lifeContext?: LifeContext;   // unset on older notes, which show under both

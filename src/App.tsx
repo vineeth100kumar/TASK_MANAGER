@@ -185,7 +185,8 @@ function MainApp() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
+      const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select'
+        || !!(document.activeElement as HTMLElement | null)?.isContentEditable;
 
       // Ctrl/Cmd+C is copy and Cmd+N is a new window, not shortcuts of ours.
       if (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {

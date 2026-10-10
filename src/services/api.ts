@@ -779,6 +779,33 @@ export const api = {
       syncEngine.enqueueNoteDebounced(n.id, n);
       return n;
     },
+    // The formatted note as HTML. Older plain-text notes become paragraphs.
+    getBody: (note: Note): string => {
+      const parts = Number(note.bodyParts) || 0;
+      let html = '';
+      for (let i = 0; i < parts; i++) html += String(note[`body${i}`] ?? '').replace(/^~/, '');
+      if (parts > 0) return html;
+      const text = note.content || '';
+      if (!text) return '';
+      const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return text.split('\n').map(line => `<div>${line ? esc(line) : '<br>'}</div>`).join('');
+    },
+    saveBody: async (id: string, html: string, text: string): Promise<Note> => {
+      await initializeStore();
+      const n = state.notes.find(n => n && n.id === id);
+      if (!n) throw new Error('Note not found');
+      // Same split as board scenes: "~" keeps Sheets from reading a part as a
+      // number or formula, and parts past the count are ignored.
+      const size = 45000;
+      const parts = Math.max(1, Math.ceil(html.length / size));
+      for (let i = 0; i < parts; i++) n[`body${i}`] = '~' + html.slice(i * size, (i + 1) * size);
+      n.bodyParts = parts;
+      n.content = text.slice(0, 40000);
+      n.updatedAt = new Date().toISOString();
+      await putToStore('notes', n);
+      syncEngine.enqueueNoteDebounced(n.id, n);
+      return n;
+    },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
       await removeRecord('notes', id);
