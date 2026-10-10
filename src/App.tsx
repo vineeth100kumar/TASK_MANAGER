@@ -25,7 +25,7 @@ import { CalendarView } from './components/views/CalendarView';
 import { TimelineView } from './components/views/TimelineView';
 import { NotesView } from './components/views/NotesView';
 import { CanvasView } from './components/views/CanvasView';
-import { ProjectMapView } from './components/project-map/ProjectMapView';
+import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
 import { SettingsModal } from './components/modals/SettingsModal';
@@ -418,12 +418,13 @@ function MainApp() {
                       <LayoutGroup>
                         {presentationMode === 'list' && <ListView tasks={workItems} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'map' && (
-                          <ProjectMapView 
-                            items={workItems} 
-                            project={activeWorkspace !== 'all' ? api.sync.getState().projects.find(p => p.id === activeWorkspace) : null} 
-                            onSelectTask={setSelectedItemId} 
-                            onRefreshData={() => fetchWorkItems(false)} 
+                        {presentationMode === 'branches' && (
+                          <ProjectBranchesView
+                            items={workItems}
+                            lifeContext={lifeContext}
+                            activeWorkspace={activeWorkspace}
+                            onSelectTask={setSelectedItemId}
+                            onRefreshData={() => fetchWorkItems(false)}
                           />
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}

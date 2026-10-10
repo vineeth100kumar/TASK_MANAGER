@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
@@ -394,6 +394,7 @@ export const api = {
         status: payload.status || 'todo',
         priority: payload.priority || 'medium',
         projectId: payload.projectId || null,
+        branchId: payload.projectId ? payload.branchId || null : null,
         areaId: payload.areaId || null,
         estimated: payload.estimated || (estimatedMinutes ? `${estimatedMinutes}m` : null),
         estimatedMinutes: estimatedMinutes,
@@ -623,6 +624,35 @@ export const api = {
       state.projects[index] = updated;
       await persist('projects', updated);
       return updated;
+    },
+    addBranch: async (projectId: string, branch: Omit<ProjectBranch, 'id' | 'createdAt'>): Promise<ProjectBranch> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      const created: ProjectBranch = { ...branch, id: uuid(), createdAt: new Date().toISOString() };
+      await api.projects.update(projectId, { branches: [...(project.branches || []), created] });
+      return created;
+    },
+    updateBranch: async (projectId: string, branchId: string, updates: Partial<ProjectBranch>): Promise<void> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      await api.projects.update(projectId, {
+        branches: (project.branches || []).map(b => b.id === branchId ? { ...b, ...updates, id: b.id } : b)
+      });
+    },
+    // Removing a branch hands its items and sub-branches to the line it came from.
+    deleteBranch: async (projectId: string, branchId: string): Promise<void> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      const branch = (project.branches || []).find(b => b.id === branchId);
+      const parentId = branch?.parentId ?? null;
+      for (const item of state.workItems.filter(i => i && i.projectId === projectId && i.branchId === branchId)) {
+        await api.workItems.updateDetails(item.id, { branchId: parentId });
+      }
+      await api.projects.update(projectId, {
+        branches: (project.branches || [])
+          .filter(b => b.id !== branchId)
+          .map(b => b.parentId === branchId ? { ...b, parentId } : b)
+      });
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();

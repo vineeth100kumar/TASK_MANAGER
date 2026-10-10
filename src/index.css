@@ -624,3 +624,7 @@
     border-color: rgb(37 99 235);
   }
 }
+
+/* Hollow nodes in the project branches graph take the card's colour. */
+:root { --branch-bg: #ffffff; }
+.dark { --branch-bg: #1c1c1e; }
