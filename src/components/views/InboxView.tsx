@@ -1,6 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { useLook } from '../../utils/look';
-import { InboxTrayArt } from '../common/LineArt';
 import { withTime } from '../../utils/reminders';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
@@ -25,7 +23,6 @@ interface InboxViewProps {
 }
 
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
-  const look = useLook();
   const [items, setItems] = useState<WorkItem[]>([]);
   const [loaded, setLoaded] = useState(false);
   // Celebrate inbox zero only when it was reached during this visit.
@@ -172,9 +169,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       {/* Inbox Items List */}
       {!loaded ? null : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
-          {look === 'drafting' ? (
-            <InboxTrayArt className="mx-auto w-[150px]" />
-          ) : hadItems.current ? (
+          {hadItems.current ? (
             <Celebrate className="mx-auto">
               <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 flex items-center justify-center ring-8 ring-emerald-500/[0.06]">
                 <CheckCircle2 size={24} />

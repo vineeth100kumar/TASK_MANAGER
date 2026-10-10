@@ -1,5 +1,4 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { setLook, useLook } from '../../utils/look';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
@@ -49,7 +48,6 @@ export function Sidebar({
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
-  const look = useLook();
   const settingsMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -430,7 +428,6 @@ export function Sidebar({
                     className="absolute bottom-full left-0 right-0 mb-2 p-1 rounded-xl surface-float origin-bottom z-10">
                     {[
                       { label: 'Settings & Migration', icon: Settings, onClick: () => setIsSettingsOpen?.(true) },
-                      { label: look === 'drafting' ? 'Look: Drafting' : 'Look: Classic', icon: PenLine, onClick: () => { const next = look === 'drafting' ? 'classic' : 'drafting'; setLook(next); showToast(next === 'drafting' ? 'Drafting look on' : 'Classic look on'); } },
                       { label: 'Data & Sync', icon: Database, onClick: () => setIsDiagnosticsOpen?.(true) },
                       { label: 'Trash & Archive', icon: Trash2, onClick: () => setIsTrashOpen?.(true) },
                       { label: 'Export Backup (JSON)', icon: Download, onClick: () => { api.exportBackup(); showToast('Backup downloaded'); } },

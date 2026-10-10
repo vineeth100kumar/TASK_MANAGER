@@ -1,6 +1,4 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useLook } from '../../utils/look';
-import { ExplodedDay } from '../common/LineArt';
 import { withTime } from '../../utils/reminders';
 import { AnimatePresence } from 'framer-motion';
 import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
@@ -32,7 +30,6 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
-  const look = useLook();
   const [data, setData] = useState<any>(null);
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
@@ -180,18 +177,6 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
     return `You have ${parts.join(' and ')}. Start with the first one.`;
   })();
 
-  const drafting = look === 'drafting';
-  // A layer of the exploded figure was picked: bring its section into view and mark it.
-  const showSection = (layer: 'attention' | 'focus' | 'scheduled') => {
-    const el = document.getElementById(`today-${layer}`);
-    if (!el) return;
-    const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    el.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
-    el.classList.remove('is-pointed');
-    void el.offsetWidth; // restart the highlight if it's picked twice
-    el.classList.add('is-pointed');
-    window.setTimeout(() => el.classList.remove('is-pointed'), 1600);
-  };
   const accent = lifeContext === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-blue-600 dark:text-blue-400';
   const showBriefing = isAiLoading || !!aiBriefing;
 
@@ -213,8 +198,6 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
             {data.week?.length > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
           </div>
 
-          {drafting && <ExplodedDay onPick={showSection} className="hidden lg:block w-[340px] shrink-0 -my-2" attention={needsAttention.length} focus={focusCount} scheduled={scheduled.length} />}
-
           {total > 0 && (
             <div className="relative shrink-0 flex items-center justify-center">
               <div className="md:hidden"><ProgressRing done={doneToday} total={total} size={64} stroke={6} tone={lifeContext === 'personal' ? 'personal' : 'work'} /></div>
@@ -232,8 +215,6 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
             </div>
           )}
         </div>
-
-        {drafting && <ExplodedDay onPick={showSection} className="lg:hidden mt-4 w-full max-w-[360px] mx-auto" attention={needsAttention.length} focus={focusCount} scheduled={scheduled.length} />}
 
         {/* AI briefing: only takes space when there's something to read. */}
         {showBriefing && (
@@ -260,7 +241,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
 
       {/* 2. Needs Attention Ribbon (Overdue & Repeatedly Snoozed - Gentle & Actionable) */}
       {needsAttention.length > 0 && (
-        <div id="today-attention" className="scroll-mt-24 p-5 rounded-3xl bg-red-50/70 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/30 space-y-3">
+        <div className="p-5 rounded-3xl bg-red-50/70 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/30 space-y-3">
           <div className="flex items-center justify-between">
             <div className="eyebrow text-red-600 dark:text-red-400">
               <AlertTriangle size={14} />
@@ -302,8 +283,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           onDragOver={(e) => { if (e.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setIsFocusDropActive(true); } }}
           onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsFocusDropActive(false); }}
           onDrop={(e) => { e.preventDefault(); setIsFocusDropActive(false); const id = e.dataTransfer.getData(FOCUS_DRAG_TYPE); if (id) handleAddToFocus(id); }}
-          id="today-focus"
-          className={`${hasScheduled ? 'lg:col-span-7' : 'lg:col-span-12'} scroll-mt-24 surface p-4 md:p-6 rounded-3xl border space-y-4 transition-colors ${isFocusDropActive ? 'border-amber-400 ring-4 ring-amber-400/15 bg-amber-50/60 dark:bg-amber-950/20' : 'border-black/5 dark:border-white/5'}`}>
+          className={`${hasScheduled ? 'lg:col-span-7' : 'lg:col-span-12'} surface p-4 md:p-6 rounded-3xl border space-y-4 transition-colors ${isFocusDropActive ? 'border-amber-400 ring-4 ring-amber-400/15 bg-amber-50/60 dark:bg-amber-950/20' : 'border-black/5 dark:border-white/5'}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
               <Target size={18} className="text-amber-500" />
@@ -413,7 +393,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
 
         {/* Scheduled today that isn't already in Focus. Hidden when empty; see the summary strip below. */}
         {hasScheduled && (
-        <div id="today-scheduled" className="lg:col-span-5 scroll-mt-24 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
+        <div className="lg:col-span-5 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
           <div className="flex items-center gap-2">
             <CalendarIcon size={18} className="text-blue-500" />
             <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>

@@ -11,7 +11,6 @@ import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
 import { getPiApiKey, setPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
-import { Look, setLook, useLook } from '../../utils/look';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -21,7 +20,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'look' | 'attention' | 'capture' | 'bluetooth' | 'data' | 'system'>('attention');
+  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -170,14 +169,6 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         {/* Tab Navigation */}
         <div className="flex overflow-x-auto bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
           <button
-            onClick={() => setActiveTab('look')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'look' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Look
-          </button>
-          <button
             onClick={() => setActiveTab('attention')}
             className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
@@ -218,8 +209,6 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
             Server & Reset
           </button>
         </div>
-
-        {activeTab === 'look' && <LookPicker />}
 
         {/* Tab 1: Attention & Notifications */}
         {activeTab === 'attention' && (
@@ -530,48 +519,6 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         )}
 
       </motion.div>
-    </div>
-  );
-}
-
-const LOOKS: { id: Look; name: string; text: string }[] = [
-  { id: 'classic', name: 'Classic', text: 'Soft surfaces and shadows. The usual Sage.' },
-  { id: 'drafting', name: 'Drafting', text: 'Technical drawing: a grid paper, ink outlines, mono labels, line-art figures and a blueprint branches view.' },
-];
-
-/** Choose how Sage is drawn on this device. */
-function LookPicker() {
-  const look = useLook();
-  return (
-    <div className="grid sm:grid-cols-2 gap-3" role="radiogroup" aria-label="Look">
-      {LOOKS.map(l => (
-        <button key={l.id} role="radio" aria-checked={look === l.id} onClick={() => setLook(l.id)}
-          className={`text-left rounded-2xl p-3 border transition-colors ${look === l.id ? 'border-blue-500 ring-2 ring-blue-500/20' : 'border-black/10 dark:border-white/10 hover:border-black/20 dark:hover:border-white/20'}`}>
-          <LookPreview id={l.id} />
-          <div className="mt-3 text-[13.5px] font-semibold text-gray-900 dark:text-white">{l.name}</div>
-          <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5 leading-relaxed">{l.text}</p>
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function LookPreview({ id }: { id: Look }) {
-  if (id === 'classic') {
-    return (
-      <div className="h-24 rounded-xl bg-gradient-to-b from-[#fbfbfd] to-[#f1f2f6] dark:from-[#151518] dark:to-[#0f0f11] p-3 space-y-2">
-        <div className="h-2.5 w-20 rounded-full bg-gray-300 dark:bg-white/20" />
-        <div className="h-6 rounded-lg bg-white dark:bg-white/10 shadow-sm" />
-        <div className="h-6 rounded-lg bg-white dark:bg-white/10 shadow-sm" />
-      </div>
-    );
-  }
-  return (
-    <div className="h-24 rounded-xl p-3 space-y-2 border border-[#0f1b3d]/40 bg-[#f6f8fb] dark:bg-[#0b1f4a] dark:border-[#cfe0ff]/30"
-      style={{ backgroundImage: 'linear-gradient(rgb(100 116 139 / 0.15) 1px, transparent 1px), linear-gradient(90deg, rgb(100 116 139 / 0.15) 1px, transparent 1px)', backgroundSize: '12px 12px' }}>
-      <div className="font-tech text-[9px] font-bold text-blue-600 dark:text-blue-300">FIG. 1 · TODAY</div>
-      <div className="h-6 rounded-lg bg-white dark:bg-[#10265a] border border-[#0f1b3d]/30 dark:border-[#cfe0ff]/25" />
-      <div className="h-6 rounded-lg bg-white dark:bg-[#10265a] border border-[#0f1b3d]/30 dark:border-[#cfe0ff]/25" />
     </div>
   );
 }
