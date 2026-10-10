@@ -49,6 +49,10 @@
   60% { opacity: 1; transform: scale(1.08); }
   100% { transform: scale(1); }
 }
+@keyframes shake {
+  20%, 60% { transform: translateX(-6px); }
+  40%, 80% { transform: translateX(6px); }
+}
 @keyframes breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
