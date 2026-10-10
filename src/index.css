@@ -14,9 +14,6 @@
 @keyframes fade-in {
   from { opacity: 0; }
 }
-@keyframes fade-out {
-  to { opacity: 0; }
-}
 @keyframes shimmer {
   from { background-position: 150% 0; }
   to { background-position: -50% 0; }
@@ -55,18 +52,6 @@
 @keyframes shake {
   20%, 60% { transform: translateX(-6px); }
   40%, 80% { transform: translateX(6px); }
-}
-@keyframes la-settle {
-  from { opacity: 0; transform: translateY(-14px); }
-}
-@keyframes la-float {
-  0%, 100% { transform: translateY(0); }
-  50% { transform: translateY(-3px); }
-}
-@keyframes la-point {
-  0% { outline: 2px solid rgb(37 99 235 / 0); outline-offset: 12px; }
-  15%, 55% { outline: 2px solid rgb(37 99 235 / 0.75); outline-offset: 4px; }
-  100% { outline: 2px solid rgb(37 99 235 / 0); outline-offset: 4px; }
 }
 @keyframes breathe {
   0%, 100% { opacity: 0.55; }
@@ -119,12 +104,6 @@
     animation: none;
     mix-blend-mode: normal;
   }
-  /* Look switch (Settings > Look): a short cross-fade. */
-  html.look-switching *, html.look-switching *::before, html.look-switching *::after {
-    transition: none !important;
-  }
-  html.look-switching::view-transition-old(root) { animation: 280ms ease-out both fade-out; }
-  html.look-switching::view-transition-new(root) { animation: 280ms ease-out both fade-in; }
 
   /* Keyboard focus ring everywhere, without a ring on mouse click. */
   :where(button, a, [role="button"], summary, input[type="checkbox"], input[type="radio"]):focus-visible {
@@ -653,191 +632,3 @@
 /* Hollow nodes in the project branches graph take the card's colour. */
 :root { --branch-bg: #ffffff; }
 .dark { --branch-bg: #1c1c1e; }
-
-/* ---- Drafting look ------------------------------------------------------
-   The technical illustration look (Settings > Look). Paper with a drafting
-   grid, hairline ink outlines instead of soft shadows, mono labels, and the
-   line-art figures in LineArt.tsx. Dark mode becomes a blueprint. */
-:root {
-  --font-tech: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo, Consolas, monospace;
-  --ink: #0f1b3d;
-  --la-paper: #ffffff;
-  --la-side-l: #c9d2e4;
-  --la-side-r: #dfe5f1;
-  --la-bar: #e6ebf4;
-  --la-muted: #64748b;
-  --la-alert: #ea580c;
-  --la-alert-paper: #fff4ee;
-  --la-alert-side-l: #f8d9c8;
-  --la-alert-side-r: #fde8dc;
-  --la-alert-bar: #fde3d3;
-  --la-pick: #2563eb;
-  --la-pick-paper: #eef4ff;
-  --la-pick-bar: #d6e4ff;
-}
-.dark {
-  --ink: #cfe0ff;
-  --la-paper: #10265a;
-  --la-side-l: #0a1a40;
-  --la-side-r: #0d2050;
-  --la-bar: #1b3672;
-  --la-muted: #8fb0e6;
-  --la-alert: #fb923c;
-  --la-alert-paper: #3a2016;
-  --la-alert-side-l: #24140d;
-  --la-alert-side-r: #2e1911;
-  --la-alert-bar: #5a2f1c;
-  --la-pick: #93c5fd;
-  --la-pick-paper: #173a80;
-  --la-pick-bar: #24509f;
-}
-
-@layer components {
-  .font-tech { font-family: var(--font-tech); letter-spacing: 0.04em; }
-
-  /* Line-art strokes. */
-  .line-art { overflow: visible; }
-  .line-art .la-ink { --c: var(--ink); --top: var(--la-paper); --sl: var(--la-side-l); --sr: var(--la-side-r); --bar: var(--la-bar); }
-  .line-art .la-alert { --c: var(--la-alert); --top: var(--la-alert-paper); --sl: var(--la-alert-side-l); --sr: var(--la-alert-side-r); --bar: var(--la-alert-bar); }
-  .line-art polygon { stroke: var(--c); stroke-width: 1.1; stroke-linejoin: round; }
-  .line-art .la-top { fill: var(--top); }
-  .line-art .la-side-l { fill: var(--sl); }
-  .line-art .la-side-r { fill: var(--sr); }
-  .line-art .la-well { fill: var(--sl); opacity: 0.5; }
-  .line-art .la-bar { fill: var(--bar); }
-  .line-art .la-hatch { stroke: var(--ink); stroke-width: 0.6; opacity: 0.35; }
-  .line-art .la-guide { stroke: var(--la-muted); stroke-width: 0.7; stroke-dasharray: 3 3; }
-  .line-art .la-leader { stroke: var(--c); stroke-width: 0.8; }
-  .line-art .la-dot { fill: var(--c); }
-  .line-art .la-tick { fill: none; stroke: #10b981; stroke-width: 6; stroke-linecap: round; stroke-linejoin: round; }
-  .line-art .la-label { fill: var(--c); font-family: var(--font-tech); font-size: 10px; font-weight: 700; letter-spacing: 0.05em; }
-
-  /* Exploded day: layers drop into place one after another, then each one is
-     a button. Hover or keyboard focus lifts it, inks it blue and draws its
-     leader out; pressing pushes it down. */
-  .exploded-day .la-layer {
-    animation: la-settle 620ms var(--ease-out-expo) backwards;
-    transition: transform 260ms var(--ease-spring);
-    outline: none;
-  }
-  .exploded-day .la-guides { animation: fade-in 500ms ease-out backwards; }
-  .exploded-day .la-layer polygon, .exploded-day .la-layer .la-leader { transition: stroke 150ms, stroke-width 150ms, fill 150ms; }
-  .exploded-day [data-pickable] { cursor: pointer; }
-  .exploded-day [data-pickable]:hover, .exploded-day [data-pickable]:focus-visible { transform: translateY(-4px); }
-  .exploded-day [data-pickable]:active { transform: translateY(1px); transition-duration: 80ms; }
-  .exploded-day [data-pickable]:hover, .exploded-day [data-pickable]:focus-visible {
-    --c: var(--la-pick); --top: var(--la-pick-paper); --bar: var(--la-pick-bar);
-  }
-  .exploded-day [data-pickable]:hover polygon, .exploded-day [data-pickable]:focus-visible polygon { stroke-width: 1.6; }
-  .exploded-day [data-pickable]:focus-visible .la-label { text-decoration: underline; text-underline-offset: 3px; }
-  /* Layers you can't pick (nothing in them) stay pale. */
-  .exploded-day .la-layer:not([data-pickable]) { opacity: 0.55; }
-
-  /* Inbox tray: the sorted cards bob gently above it. */
-  .line-art .la-float { animation: la-float 3.2s ease-in-out infinite; }
-
-  /* A section picked from the figure gets a brief ink outline. */
-  .is-pointed { animation: la-point 1.5s var(--ease-out-expo); }
-
-  /* Paper: a fine 16px grid with a heavier line every 80px. */
-  [data-look="drafting"] .app-ambient {
-    background-color: #f6f8fb;
-    background-image:
-      linear-gradient(rgb(15 27 61 / 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(15 27 61 / 0.07) 1px, transparent 1px),
-      linear-gradient(rgb(15 27 61 / 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(15 27 61 / 0.035) 1px, transparent 1px);
-    background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
-  }
-  [data-look="drafting"] .app-ambient::after { display: none; }
-  [data-look="drafting"] .dark .app-ambient,
-  [data-look="drafting"].dark .app-ambient {
-    background-color: #081633;
-    background-image:
-      linear-gradient(rgb(207 224 255 / 0.08) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(207 224 255 / 0.08) 1px, transparent 1px),
-      linear-gradient(rgb(207 224 255 / 0.035) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(207 224 255 / 0.035) 1px, transparent 1px);
-  }
-
-  /* Hero: a sheet of paper with an ink outline and a flat offset shadow. */
-  [data-look="drafting"] .hero {
-    border: 1px solid rgb(15 27 61 / 0.45);
-    background: #ffffff;
-    box-shadow: 4px 4px 0 rgb(15 27 61 / 0.08);
-  }
-  [data-look="drafting"] .hero::before {
-    background-image:
-      linear-gradient(rgb(15 27 61 / 0.06) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(15 27 61 / 0.06) 1px, transparent 1px);
-    background-size: 16px 16px;
-    mask-image: radial-gradient(ellipse 60% 90% at 100% 0%, black, transparent 75%);
-  }
-  [data-look="drafting"].dark .hero {
-    border-color: rgb(207 224 255 / 0.35);
-    background: #0b1f4a;
-    box-shadow: 4px 4px 0 rgb(0 0 0 / 0.35);
-  }
-  [data-look="drafting"].dark .hero::before {
-    background-image:
-      linear-gradient(rgb(207 224 255 / 0.07) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(207 224 255 / 0.07) 1px, transparent 1px);
-  }
-
-  /* Panels are outlined with a dashed construction line; rows get ink hairlines. */
-  [data-look="drafting"] .surface {
-    background: rgb(255 255 255 / 0.55);
-    box-shadow: none;
-    outline: 1px dashed rgb(15 27 61 / 0.22);
-    outline-offset: -1px;
-  }
-  [data-look="drafting"].dark .surface {
-    background: rgb(11 31 74 / 0.45);
-    outline-color: rgb(207 224 255 / 0.2);
-  }
-  [data-look="drafting"] .surface-item {
-    border-color: rgb(15 27 61 / 0.2);
-    box-shadow: none;
-  }
-  [data-look="drafting"] .surface-item.is-interactive:hover {
-    transform: translate(-1px, -1px);
-    border-color: rgb(15 27 61 / 0.45);
-    box-shadow: 3px 3px 0 rgb(37 99 235 / 0.16);
-  }
-  [data-look="drafting"].dark .surface-item {
-    background-color: rgb(16 38 90 / 0.55);
-    border-color: rgb(207 224 255 / 0.16);
-  }
-  [data-look="drafting"].dark .surface-item.is-interactive:hover {
-    border-color: rgb(207 224 255 / 0.4);
-    box-shadow: 3px 3px 0 rgb(96 165 250 / 0.22);
-  }
-
-  /* Type: mono eyebrows, solid ink display headings. */
-  [data-look="drafting"] .eyebrow {
-    font-family: var(--font-tech);
-    font-weight: 700;
-    letter-spacing: 0.14em;
-  }
-  [data-look="drafting"] .text-display {
-    background: none;
-    color: var(--ink);
-    letter-spacing: -0.03em;
-  }
-  [data-look="drafting"].dark .text-display { color: #e6efff; }
-
-  /* Blueprint sheet: the branches graph, navy in both themes. */
-  .blueprint {
-    background-color: #0b1f4a;
-    background-image:
-      linear-gradient(rgb(207 224 255 / 0.10) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(207 224 255 / 0.10) 1px, transparent 1px),
-      linear-gradient(rgb(207 224 255 / 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgb(207 224 255 / 0.04) 1px, transparent 1px);
-    background-size: 112px 112px, 112px 112px, 22.4px 22.4px, 22.4px 22.4px;
-    border: 1px solid rgb(207 224 255 / 0.3);
-    color-scheme: dark;
-  }
-}
-
-.dark.blueprint, .blueprint { --branch-bg: #0b1f4a; }

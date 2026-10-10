@@ -7,12 +7,9 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { getTodayString } from '../../utils/dateUtils';
 import { formatShortDate } from '../../utils/quickAddParser';
 import { buildFlow, FlowRow } from './branchFlow';
-import { useLook } from '../../utils/look';
 
 const BRANCH_COLORS = ['#8b5cf6', '#f97316', '#10b981', '#ec4899', '#0ea5e9', '#eab308', '#ef4444', '#14b8a6'];
 const MAIN_COLOR = '#64748b';
-// On the blueprint sheet the main line is drawn in light ink.
-const BLUEPRINT_MAIN = '#cfe0ff';
 const LANE_W = 22;
 const ROW_H = 56;
 const PAD = 14;
@@ -38,8 +35,6 @@ export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSel
   const [isAdding, setIsAdding] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const today = getTodayString();
-  const blueprint = useLook() === 'drafting';
-  const mainColor = blueprint ? BLUEPRINT_MAIN : MAIN_COLOR;
 
   const loadProjects = async () => setProjects(await api.projects.list());
   useEffect(() => { loadProjects(); }, []);
@@ -61,10 +56,10 @@ export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSel
     () => (project ? items.filter(i => !i.deletedAt && i.projectId === project.id) : []),
     [items, project]
   );
-  const flow = useMemo(() => buildFlow(projectItems, branches, today, mainColor), [projectItems, branches, today, mainColor]);
+  const flow = useMemo(() => buildFlow(projectItems, branches, today, MAIN_COLOR), [projectItems, branches, today]);
   const branchById = new Map(branches.map(b => [b.id, b]));
   const lineName = (id: string | null | undefined) => (id && branchById.get(id)?.name) || 'Main';
-  const lineColor = (id: string | null | undefined) => (id && branchById.get(id)?.color) || mainColor;
+  const lineColor = (id: string | null | undefined) => (id && branchById.get(id)?.color) || MAIN_COLOR;
   const todayRow = flow.rows.findIndex(r => r.kind === 'today');
 
   const refresh = async () => { await loadProjects(); onRefreshData?.(); };
@@ -153,22 +148,20 @@ export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSel
         ))}
       </div>
 
-      <div className={blueprint ? 'dark blueprint rounded-3xl overflow-hidden' : 'rounded-3xl surface border border-black/5 dark:border-white/5 overflow-hidden'}>
+      <div className="rounded-3xl surface border border-black/5 dark:border-white/5 overflow-hidden">
         <ol aria-label={`${project?.name} timeline`}>
           {flow.rows.map((row, r) => (
-            <li key={rowKey(row)} className={`flex items-stretch ${blueprint ? 'transition-colors hover:bg-[#cfe0ff]/[0.06] focus-within:bg-[#cfe0ff]/[0.06]' : ''}`} style={{ height: ROW_H }}>
+            <li key={rowKey(row)} className="flex items-stretch" style={{ height: ROW_H }}>
               <svg width={PAD * 2 + (flow.laneCount - 1) * LANE_W} height={ROW_H} className="shrink-0" aria-hidden>
                 <RowGraph row={row} r={r} flow={flow} todayRow={todayRow} lineColor={lineColor} />
               </svg>
               <div className="flex-1 min-w-0 flex items-center pr-3 md:pr-5 border-b border-black/[0.04] dark:border-white/[0.04]">
-                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} today={blueprint ? today : null} />
+                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} />
               </div>
             </li>
           ))}
         </ol>
       </div>
-
-      {blueprint && project && <TitleBlock project={project} items={projectItems} today={today} />}
 
       {project && <AddItemBar project={project} branches={branches.filter(b => !b.mergedAt)} today={today} lifeContext={lifeContext}
         onAdded={(name) => { showToast(`Added to ${name}`); refresh(); }} />}
@@ -227,10 +220,8 @@ function RowGraph({ row, r, flow, todayRow, lineColor }: {
   return <>{parts}</>;
 }
 
-function RowContent({ row, lineName, branches, onSelectTask, onMove, today }: {
+function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
   row: FlowRow;
-  /** Set on the blueprint sheet: fork rows then show how long the branch ran. */
-  today: string | null;
   lineName: (id?: string | null) => string;
   branches: ProjectBranch[];
   onSelectTask: (id: string) => void;
@@ -255,7 +246,6 @@ function RowContent({ row, lineName, branches, onSelectTask, onMove, today }: {
           {row.kind === 'fork' ? ` branched from ${lineName(row.branch.parentId)}` : ` merged into ${lineName(row.branch.parentId)}`}
         </span>
         <span className="shrink-0 text-[12px] text-gray-400">{formatShortDate(row.date)}</span>
-        {today && row.kind === 'fork' && <Dimension branch={row.branch} today={today} />}
       </div>
     );
   }
@@ -383,45 +373,5 @@ function EmptyState({ text }: { text: string }) {
       <GitBranch size={36} className="mb-3 opacity-40" />
       <p className="text-[14px]">{text}</p>
     </div>
-  );
-}
-
-const DAY_MS = 86400000;
-const daysBetween = (a: string, b: string) => Math.max(0, Math.round((Date.parse(b) - Date.parse(a)) / DAY_MS));
-
-/** A dimension line: how long a branch ran, or has been open so far. */
-function Dimension({ branch, today }: { branch: ProjectBranch; today: string }) {
-  const days = daysBetween(branch.startDate, branch.mergedAt || today);
-  const open = !branch.mergedAt;
-  return (
-    <span className="hidden sm:flex shrink-0 items-center gap-1 ml-1 font-tech text-[10px] font-bold text-[#8fb0e6]" title={open ? 'Open so far' : 'From branch to merge'}>
-      <span aria-hidden>|&#8592;</span>
-      <span>{days} {days === 1 ? 'DAY' : 'DAYS'}{open ? ' · OPEN' : ''}</span>
-      <span aria-hidden>&#8594;|</span>
-    </span>
-  );
-}
-
-/** The drawing's title block: what this sheet is, with its counts and date. */
-function TitleBlock({ project, items, today }: { project: Project; items: WorkItem[]; today: string }) {
-  const branches = project.branches || [];
-  const merged = branches.filter(b => b.mergedAt).length;
-  const done = items.filter(i => i.status === 'done').length;
-  const rows: [string, string][] = [
-    ['Project', project.name],
-    ['Drawing', `SAGE-${(project.key || project.name.slice(0, 4)).toUpperCase()}-BR`],
-    ['Branches', `${branches.length} · ${merged} merged`],
-    ['Items', `${done} of ${items.length} done`],
-    ['Date', today],
-  ];
-  return (
-    <dl className="dark blueprint ml-auto w-full sm:w-[22rem] rounded-xl font-tech text-[11px] overflow-hidden">
-      {rows.map(([k, v]) => (
-        <div key={k} className="grid grid-cols-[6.5rem_1fr] border-b last:border-b-0 border-[#cfe0ff]/25">
-          <dt className="px-3 py-1.5 uppercase text-[9.5px] text-[#8fb0e6] border-r border-[#cfe0ff]/25">{k}</dt>
-          <dd className="px-3 py-1.5 font-bold text-[#e6efff] truncate uppercase">{v}</dd>
-        </div>
-      ))}
-    </dl>
   );
 }
