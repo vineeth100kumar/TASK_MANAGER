@@ -24,6 +24,7 @@ import { TableView } from './components/views/TableView';
 import { CalendarView } from './components/views/CalendarView';
 import { TimelineView } from './components/views/TimelineView';
 import { NotesView } from './components/views/NotesView';
+import { NotesLock } from './components/notes/NotesLock';
 import { CanvasView } from './components/views/CanvasView';
 import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
 import { TrashModal } from './components/modals/TrashModal';
@@ -380,7 +381,7 @@ function MainApp() {
                 <div className="skeleton h-16 !rounded-2xl" />
               </div>
             ) : activeView === 'notes' ? (
-              <NotesView lifeContext={lifeContext} />
+              <NotesLock><NotesView lifeContext={lifeContext} /></NotesLock>
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (

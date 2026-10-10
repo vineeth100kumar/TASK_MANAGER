@@ -134,11 +134,19 @@ async def require_login(request, call_next):
         # The MCP address carries its own token and checks it (claude_api.py).
         or path.startswith("/mcp/")
         or path.startswith("/api/claude/")
-        or logged_in(request)
         or (API_SECRET and key_matches(request_key(request)))
         or claude_may(request)
     ):
         return await call_next(request)
+    if logged_in(request) and not access_gate.is_page_load(request):
+        return await call_next(request)
+    if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
+        # Each opening of the app takes the password, so this page must not
+        # be kept for the back button or reused from the browser's cache.
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.delete_cookie(access_gate.OPEN_COOKIE)
+        return response
     if path.startswith("/api/"):
         return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
     target = path + (f"?{request.url.query}" if request.url.query else "")
@@ -188,7 +196,40 @@ async def login(request: Request):
         secure=access_gate.is_https(request),
         samesite="lax",
     )
+    response.set_cookie(
+        access_gate.OPEN_COOKIE,
+        access_gate.new_open_ticket(),
+        max_age=access_gate.OPEN_SECONDS,
+        httponly=True,
+        secure=access_gate.is_https(request),
+        samesite="lax",
+    )
     return response
+
+
+@app.post("/api/unlock", include_in_schema=False)
+async def unlock(request: Request):
+    """Checks the password again for a locked part of the app (Notes), with
+    the same wrong-try limits as /login."""
+    if not access_gate.enabled:
+        return {"success": True, "enabled": False}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    password = str(body.get("password", "")) if isinstance(body, dict) else ""
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    wait = access_gate.locked_for(ip, device)
+    if wait:
+        minutes = max(1, round(wait / 60))
+        return JSONResponse({"success": False, "error": f"Too many wrong tries. Try again in {minutes} min."}, status_code=429)
+    if not access_gate.verify_password(password):
+        access_gate.record_failure(ip, device)
+        print(f"Wrong Sage password (unlock) from {ip}")
+        return JSONResponse({"success": False, "error": "Wrong password."}, status_code=401)
+    access_gate.clear_failures(ip, device)
+    return {"success": True, "enabled": True}
 
 
 @app.get("/logout", include_in_schema=False)

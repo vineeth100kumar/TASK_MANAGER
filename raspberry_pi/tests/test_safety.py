@@ -135,6 +135,52 @@ class PinLimitTests(unittest.TestCase):
         self.assertGreater(access_gate.locked_for("8.8.8.8", "mine"), 0)
 
 
+class PasswordEveryVisitTests(unittest.TestCase):
+    def setUp(self):
+        access_gate._failures.clear()
+        access_gate._all_failures.clear()
+        stored = access_gate.hash_password("1234", iterations=1000)
+        for name, value in (("enabled", True), ("PASSWORD_HASH", stored)):
+            patcher = mock.patch.object(access_gate, name, value)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.browser = TestClient(db_server.app, follow_redirects=False)
+
+    def log_in(self):
+        resp = self.browser.post("/login", data={"password": "1234", "next": "/"})
+        self.assertEqual(resp.status_code, 303)
+        return resp
+
+    def test_each_page_load_needs_the_password(self):
+        self.assertEqual(self.browser.get("/").status_code, 303)
+        self.log_in()
+        self.assertNotEqual(self.browser.get("/").status_code, 303)
+        # A reload, or a second tab, goes back to the login page.
+        reload = self.browser.get("/")
+        self.assertEqual(reload.status_code, 303)
+        self.assertTrue(reload.headers["location"].startswith("/login"))
+
+    def test_open_app_keeps_working_after_the_page_loaded(self):
+        self.log_in()
+        self.browser.get("/")
+        self.assertEqual(self.browser.get("/api/sync/all").status_code, 200)
+        # Scripts and images of the open page are not page loads.
+        self.assertNotEqual(self.browser.get("/assets/app.js", headers={"Sec-Fetch-Dest": "script"}).status_code, 303)
+        self.assertEqual(self.browser.get("/notes", headers={"Sec-Fetch-Dest": "document"}).status_code, 303)
+
+    def test_a_ticket_works_once_even_if_copied(self):
+        ticket = self.log_in().cookies[access_gate.OPEN_COOKIE]
+        self.assertTrue(access_gate.spend_open_ticket(ticket))
+        self.assertFalse(access_gate.spend_open_ticket(ticket))
+        self.assertFalse(access_gate.spend_open_ticket(ticket[:-1] + "0"))
+
+    def test_notes_unlock_checks_the_password(self):
+        self.log_in()
+        self.assertEqual(self.browser.post("/api/unlock", json={"password": "0000"}).status_code, 401)
+        self.assertEqual(self.browser.post("/api/unlock", json={"password": "1234"}).status_code, 200)
+        self.assertEqual(TestClient(db_server.app).post("/api/unlock", json={"password": "1234"}).status_code, 401)
+
+
 class TimeZoneTests(unittest.TestCase):
     def setUp(self):
         notifier.init_tables()
