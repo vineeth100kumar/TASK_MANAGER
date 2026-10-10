@@ -6,7 +6,9 @@ import App from './App'
 import '@fontsource-variable/inter'
 import './index.css'
 import { registerServiceWorker } from './services/pushNotifications'
+import { applyLook } from './utils/look'
 
+applyLook()
 registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
