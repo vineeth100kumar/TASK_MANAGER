@@ -715,8 +715,8 @@ export const api = {
       const habit: Habit = {
         id: uuid(),
         name: payload.name || 'New Habit',
-        frequency: 'daily',
-        targetCount: payload.targetCount || 5,
+        targetCount: Math.min(7, Math.max(1, payload.targetCount || 7)),
+        frequency: (payload.targetCount || 7) >= 7 ? 'daily' : `${payload.targetCount}/week`,
         history: [],
         areaId: payload.areaId || null,
         streak: 0,
@@ -736,6 +736,17 @@ export const api = {
       const has = history.includes(day);
       h.history = has ? history.filter(d => d !== day) : [...history, day];
       h.streak = streakOf(h.history, localDateString());
+      h.updatedAt = new Date().toISOString();
+      await persist('habits', h);
+      return h;
+    },
+    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount'>): Promise<Habit> => {
+      await initializeStore();
+      const h = state.habits.find(h => h && h.id === id);
+      if (!h) throw new Error('Habit not found');
+      if (updates.name !== undefined) h.name = updates.name.trim() || h.name;
+      if (updates.targetCount !== undefined) h.targetCount = Math.min(7, Math.max(1, Math.round(updates.targetCount)));
+      h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
       return h;
