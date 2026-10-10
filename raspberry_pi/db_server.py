@@ -118,6 +118,7 @@ GATE_OPEN_PATHS = {
     "/login", "/logout", "/api/health",
     "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png",
     "/icon-192.png", "/icon-512.png", "/manifest.webmanifest",
+    "/logo-light.png", "/logo-dark.png",
     # The service worker that shows notifications. It holds no data, and
     # browsers fetch updates to it without always sending the login cookie.
     "/sw.js",
@@ -131,6 +132,8 @@ async def require_login(request, call_next):
         not access_gate.enabled
         or request.method == "OPTIONS"
         or path in GATE_OPEN_PATHS
+        # The app's own font files, so the login page can use them too.
+        or (path.startswith("/assets/inter-") and path.endswith(".woff2"))
         # The MCP address carries its own token and checks it (claude_api.py).
         or path.startswith("/mcp/")
         or path.startswith("/api/claude/")
@@ -153,9 +156,14 @@ async def require_login(request, call_next):
     return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
 
 
+def login_page(next_path: str, message: str = "") -> str:
+    fonts = sorted((DIST_DIR / "assets").glob("inter-latin-wght-normal-*.woff2"))
+    return access_gate.login_page(next_path, message, f"/assets/{fonts[0].name}" if fonts else "")
+
+
 @app.get("/login", include_in_schema=False)
 def login_form(next: str = "/"):
-    return HTMLResponse(access_gate.login_page(access_gate.safe_next(next)))
+    return HTMLResponse(login_page(access_gate.safe_next(next)))
 
 
 @app.post("/login", include_in_schema=False)
@@ -180,12 +188,12 @@ async def login(request: Request):
     wait = access_gate.locked_for(ip, device)
     if wait:
         minutes = max(1, round(wait / 60))
-        page = access_gate.login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
+        page = login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
         return with_device(HTMLResponse(page, status_code=429))
     if not access_gate.verify_password(password):
         access_gate.record_failure(ip, device)
         print(f"Wrong Sage password from {ip}")
-        return with_device(HTMLResponse(access_gate.login_page(next_path, "Wrong password."), status_code=401))
+        return with_device(HTMLResponse(login_page(next_path, "Wrong password."), status_code=401))
     access_gate.clear_failures(ip, device)
     response = with_device(RedirectResponse(next_path, status_code=303))
     response.set_cookie(

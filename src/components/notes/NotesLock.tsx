@@ -48,22 +48,24 @@ export function NotesLock({ children }: { children: React.ReactNode }) {
 
   return (
     <div className="h-[calc(100vh-8.5rem)] flex items-center justify-center bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 shadow-sm p-4">
-      <form onSubmit={unlock} className="w-full max-w-xs text-center space-y-4">
-        <div className="mx-auto w-12 h-12 rounded-2xl bg-blue-50 dark:bg-blue-500/10 flex items-center justify-center">
-          <Lock size={22} className="text-blue-500" />
+      <form onSubmit={unlock} key={error} className={`stagger w-full max-w-xs text-center ${error ? 'animate-[shake_400ms_cubic-bezier(.36,.07,.19,.97)_both]' : ''}`}>
+        <div className="mx-auto mb-4 w-14 h-14 rounded-2xl bg-gray-100 dark:bg-white/5 ring-1 ring-black/5 dark:ring-white/10 flex items-center justify-center">
+          <Lock size={22} className="text-gray-700 dark:text-gray-200" strokeWidth={2.2} />
+        </div>
+        <div className="mb-5">
+          <h2 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">Notes are locked</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Enter your password to open them.</p>
         </div>
         <div>
-          <h2 className="font-bold text-lg text-gray-900 dark:text-white">Notes are locked</h2>
-          <p className="text-sm text-gray-500 dark:text-gray-400">Enter your password to open them.</p>
+          <input type="password" inputMode="numeric" autoComplete="current-password" autoFocus required placeholder="••••"
+            aria-label="Password" value={password} onChange={e => setPassword(e.target.value)}
+            className="w-full h-14 text-center text-2xl tracking-[0.5em] indent-[0.5em] rounded-2xl bg-[#f5f5f7] dark:bg-white/5 border border-gray-200 dark:border-white/10 text-gray-900 dark:text-white placeholder:text-gray-300 dark:placeholder:text-gray-600 outline-none transition-shadow focus:bg-white dark:focus:bg-white/10 focus:border-transparent focus:ring-[3px] focus:ring-gray-900/10 dark:focus:ring-white/20" />
+          {error && <p className="mt-3 px-3 py-2 rounded-xl text-[13.5px] font-medium text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-400/10" role="alert">{error}</p>}
+          <button type="submit" disabled={busy || !password}
+            className="mt-4 w-full h-11 rounded-2xl text-[15px] font-semibold transition-all active:scale-[0.97] disabled:opacity-50 disabled:active:scale-100 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 dark:hover:from-white dark:hover:to-gray-100 text-white dark:text-black shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5">
+            {busy ? 'Checking…' : 'Unlock'}
+          </button>
         </div>
-        <input type="password" inputMode="numeric" autoComplete="current-password" autoFocus required
-          aria-label="Password" value={password} onChange={e => setPassword(e.target.value)}
-          className="w-full text-center text-2xl tracking-[0.4em] px-3 py-2.5 rounded-xl bg-white dark:bg-white/5 border border-gray-200 dark:border-white/10 dark:text-white outline-none focus:ring-2 focus:ring-blue-500" />
-        {error && <p className="text-sm text-red-600 dark:text-red-400" role="alert">{error}</p>}
-        <button type="submit" disabled={busy || !password}
-          className="w-full py-2.5 bg-blue-600 hover:bg-blue-700 disabled:opacity-60 text-white font-semibold rounded-xl transition-transform active:scale-95 shadow-sm">
-          {busy ? 'Checking…' : 'Unlock'}
-        </button>
       </form>
     </div>
   );

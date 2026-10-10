@@ -197,39 +197,120 @@ def safe_next(target: Optional[str]) -> str:
     return "/"
 
 
-def login_page(next_path: str = "/", message: str = "") -> str:
-    error = f'<p class="error">{html.escape(message)}</p>' if message else ""
+def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> str:
+    """The password page, drawn to match the app: Inter, the Sage logo, the
+    app's black/white buttons, and whichever theme the app was last left in
+    (it saves that as sage-theme in this browser)."""
+    error = f'<p class="error" role="alert">{html.escape(message)}</p>' if message else ""
+    font = (
+        f'@font-face {{ font-family: "Inter Variable"; font-style: normal; font-display: swap; '
+        f'font-weight: 100 900; src: url("{html.escape(font_url)}") format("woff2-variations"); }}'
+        if font_url else ""
+    )
     return f"""<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Sage">
 <title>Sage</title>
 <link rel="icon" href="/favicon.ico" sizes="48x48">
+<link rel="icon" href="/favicon-32.png" type="image/png" sizes="32x32">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/manifest.webmanifest" crossorigin="use-credentials">
+<script>
+  try {{
+    if (localStorage.getItem("sage-theme") === "dark") {{
+      document.documentElement.classList.add("dark");
+      document.querySelector('meta[name="theme-color"]').content = "#0a0a0b";
+    }}
+  }} catch (e) {{}}
+</script>
 <style>
-  :root {{ color-scheme: light dark; --bg: #f6f5f2; --card: #fff; --text: #1c1b19; --muted: #6b6860; --line: #d9d6cf; --accent: #3b5bdb; --error: #c92a2a; }}
-  @media (prefers-color-scheme: dark) {{ :root {{ --bg: #141413; --card: #1f1e1c; --text: #eceae4; --muted: #9c998f; --line: #3a3834; --accent: #748ffc; --error: #ff8787; }} }}
+  {font}
+  :root {{
+    color-scheme: light;
+    --bg: #ffffff; --card: #ffffff; --text: #111827; --muted: #6b7280; --faint: #9ca3af;
+    --line: rgba(0,0,0,0.06); --field: #f5f5f7; --field-line: #e5e7eb; --ring: rgba(17,24,39,0.12);
+    --btn-from: #1f2937; --btn-to: #030712; --btn-text: #ffffff; --error: #dc2626; --error-bg: #fef2f2;
+    --glow: radial-gradient(60rem 30rem at 50% -10%, rgba(99,102,241,0.08), transparent 60%);
+  }}
+  html.dark {{
+    color-scheme: dark;
+    --bg: #0a0a0b; --card: #1c1c1e; --text: #f3f4f6; --muted: #9ca3af; --faint: #6b7280;
+    --line: rgba(255,255,255,0.06); --field: rgba(255,255,255,0.05); --field-line: rgba(255,255,255,0.1); --ring: rgba(255,255,255,0.18);
+    --btn-from: #ffffff; --btn-to: #e5e7eb; --btn-text: #000000; --error: #f87171; --error-bg: rgba(248,113,113,0.1);
+    --glow: radial-gradient(60rem 30rem at 50% -10%, rgba(129,140,248,0.10), transparent 60%);
+  }}
   * {{ box-sizing: border-box; }}
-  body {{ margin: 0; min-height: 100vh; display: grid; place-items: center; background: var(--bg); color: var(--text); font: 16px/1.4 system-ui, -apple-system, sans-serif; padding: 16px; }}
-  form {{ width: 100%; max-width: 320px; background: var(--card); border: 1px solid var(--line); border-radius: 16px; padding: 28px 24px; text-align: center; }}
-  h1 {{ margin: 0 0 4px; font-size: 22px; }}
-  p {{ margin: 0 0 20px; color: var(--muted); font-size: 14px; }}
-  input {{ width: 100%; font-size: 28px; letter-spacing: 0.4em; text-align: center; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: transparent; color: inherit; }}
-  input:focus {{ outline: 2px solid var(--accent); border-color: transparent; }}
-  button {{ width: 100%; margin-top: 16px; padding: 12px; font-size: 16px; font-weight: 600; border: 0; border-radius: 10px; background: var(--accent); color: #fff; cursor: pointer; }}
-  .error {{ color: var(--error); margin: 12px 0 0; }}
+  html, body {{ height: 100%; }}
+  body {{
+    margin: 0; min-height: 100dvh; display: flex; flex-direction: column; align-items: center; justify-content: center;
+    padding: max(24px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+    background: var(--glow), var(--bg); color: var(--text);
+    font-family: "Inter Variable", "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    font-feature-settings: "cv11", "ss01", "ss03", "cv05";
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+  }}
+  .wrap {{ width: 100%; max-width: 360px; animation: rise .5s cubic-bezier(0.16, 1, 0.3, 1) both; }}
+  .logo {{ display: flex; justify-content: center; margin-bottom: 28px; }}
+  .logo img {{ height: 40px; width: auto; user-select: none; }}
+  .logo .dark-only {{ display: none; }}
+  html.dark .logo .light-only {{ display: none; }}
+  html.dark .logo .dark-only {{ display: block; }}
+  form {{
+    background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px 24px 24px;
+    box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 12px 32px -12px rgba(0,0,0,0.12); text-align: center;
+  }}
+  html.dark form {{ box-shadow: 0 12px 40px -16px rgba(0,0,0,0.6); }}
+  h1 {{ margin: 0; font-size: 20px; font-weight: 650; letter-spacing: -0.02em; }}
+  .sub {{ margin: 6px 0 22px; color: var(--muted); font-size: 14px; }}
+  input[type=password] {{
+    width: 100%; height: 56px; font: inherit; font-size: 26px; letter-spacing: 0.5em; text-indent: 0.5em; text-align: center;
+    border: 1px solid var(--field-line); border-radius: 14px; background: var(--field); color: inherit;
+    transition: box-shadow .2s, border-color .2s, background .2s;
+  }}
+  input[type=password]::placeholder {{ color: var(--faint); letter-spacing: 0.5em; }}
+  input[type=password]:focus {{ outline: none; border-color: transparent; box-shadow: 0 0 0 3px var(--ring); background: var(--card); }}
+  .error {{
+    margin: 12px 0 0; padding: 8px 12px; border-radius: 12px; font-size: 13.5px; font-weight: 500;
+    color: var(--error); background: var(--error-bg);
+  }}
+  button {{
+    width: 100%; height: 46px; margin-top: 16px; font: inherit; font-size: 15px; font-weight: 600; cursor: pointer;
+    border: 0; border-radius: 14px; color: var(--btn-text);
+    background: linear-gradient(to bottom, var(--btn-from), var(--btn-to));
+    box-shadow: 0 1px 2px rgba(0,0,0,0.2), inset 0 0 0 1px rgba(255,255,255,0.1);
+    transition: transform .15s, filter .15s;
+  }}
+  button:hover {{ filter: brightness(1.12); }}
+  html.dark button:hover {{ filter: brightness(1.04); }}
+  button:active {{ transform: scale(0.97); }}
+  .foot {{ margin-top: 18px; text-align: center; color: var(--faint); font-size: 12.5px; }}
+  .shake form {{ animation: shake .4s cubic-bezier(.36,.07,.19,.97) both; }}
+  @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: none; }} }}
+  @keyframes shake {{ 20%, 60% {{ transform: translateX(-6px); }} 40%, 80% {{ transform: translateX(6px); }} }}
+  @media (prefers-reduced-motion: reduce) {{ .wrap, .shake form {{ animation: none; }} }}
 </style>
 </head>
 <body>
-<form method="post" action="/login">
-  <h1>Sage</h1>
-  <p>Enter your password to continue.</p>
-  <input type="password" name="password" inputmode="numeric" autocomplete="current-password" autofocus required aria-label="Password">
-  <input type="hidden" name="next" value="{html.escape(next_path)}">
-  {error}
-  <button type="submit">Unlock</button>
-</form>
+<main class="wrap{' shake' if message else ''}">
+  <div class="logo">
+    <img class="light-only" src="/logo-light.png" alt="Sage" draggable="false">
+    <img class="dark-only" src="/logo-dark.png" alt="Sage" draggable="false">
+  </div>
+  <form method="post" action="/login">
+    <h1>Welcome back</h1>
+    <p class="sub">Enter your password to open Sage.</p>
+    <input type="password" name="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" autofocus required aria-label="Password">
+    <input type="hidden" name="next" value="{html.escape(next_path)}">
+    {error}
+    <button type="submit">Unlock</button>
+  </form>
+  <p class="foot">Sage asks for this each time it opens.</p>
+</main>
 </body>
 </html>"""
 
