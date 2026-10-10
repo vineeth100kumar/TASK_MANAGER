@@ -1,9 +1,9 @@
 // CaptureGuide.tsx - Settings > Shortcuts. Step-by-step setup for the ways to
-// add tasks without opening Sage: Siri, the Share Sheet, WhatsApp, Home
-// Screen shortcuts, and forwarding email to the Inbox (see /api/quick-add and
+// add tasks without opening Sage: Siri, the Share Sheet, Home Screen
+// shortcuts, and forwarding email to the Inbox (see /api/quick-add and
 // /api/email-capture on the Pi).
 import { useEffect, useState } from 'react';
-import { Mic, Share, MessageCircle, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
+import { Mic, Share, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
 import { getPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
 
@@ -442,26 +442,6 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
           {urlSteps(3, 'Shortcut Input', 'share-sheet')}
           <Step n={sendsKey ? 7 : 6} title={<>Tap <Ui>Done</Ui>. In Safari, Mail or Notes, tap <Ui>Share</Ui> and pick <Ui>Send to Sage</Ui>.</>}>
             <Note>Already made the Siri shortcut? Duplicate it and swap Ask for Input for Shortcut Input instead.</Note>
-          </Step>
-        </Steps>
-      </Section>
-
-      <Section
-        icon={<MessageCircle size={18} />} tint="bg-green-50 dark:bg-green-950/40 text-green-600"
-        title="WhatsApp: message to task" hint="Turn a plan or a work ask from a chat into an Inbox item"
-        open={open === 'whatsapp'} onToggle={() => toggle('whatsapp')}
-      >
-        <Steps>
-          <Step n={1} title={<>Make the <Ui>Send to Sage</Ui> shortcut above first.</>} />
-          <Step n={2} title={<>In <Ui>Shortcuts</Ui>, press and hold it, tap <Ui>Duplicate</Ui>, and rename the copy <Ui>WhatsApp to Sage</Ui>.</>} />
-          <Step n={3} title={<>Open the copy and change the <Ui>source</Ui> field to <Ui>whatsapp</Ui>.</>}>
-            <CopyField label="What Sage receives" value={JSON.stringify({ text: 'Shortcut Input', source: 'whatsapp' }, null, 2)} multiline />
-          </Step>
-          <Step n={4} title={<>In WhatsApp, press and hold a message, tap <Ui>Forward</Ui>, tick any others you want, then tap <Ui>Share</Ui> at the bottom right and pick <Ui>WhatsApp to Sage</Ui>.</>}>
-            <Note>
-              The first message becomes the title and the whole chat goes in the item's notes, tagged <code className="font-mono">#whatsapp</code>.
-              A day or time in that first message, like “friday 8pm”, sets the due date. Sage only sees what you send it.
-            </Note>
           </Step>
         </Steps>
       </Section>
