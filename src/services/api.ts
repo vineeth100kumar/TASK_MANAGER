@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
@@ -394,6 +394,7 @@ export const api = {
         status: payload.status || 'todo',
         priority: payload.priority || 'medium',
         projectId: payload.projectId || null,
+        branchId: payload.projectId ? payload.branchId || null : null,
         areaId: payload.areaId || null,
         estimated: payload.estimated || (estimatedMinutes ? `${estimatedMinutes}m` : null),
         estimatedMinutes: estimatedMinutes,
@@ -624,6 +625,35 @@ export const api = {
       await persist('projects', updated);
       return updated;
     },
+    addBranch: async (projectId: string, branch: Omit<ProjectBranch, 'id' | 'createdAt'>): Promise<ProjectBranch> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      const created: ProjectBranch = { ...branch, id: uuid(), createdAt: new Date().toISOString() };
+      await api.projects.update(projectId, { branches: [...(project.branches || []), created] });
+      return created;
+    },
+    updateBranch: async (projectId: string, branchId: string, updates: Partial<ProjectBranch>): Promise<void> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      await api.projects.update(projectId, {
+        branches: (project.branches || []).map(b => b.id === branchId ? { ...b, ...updates, id: b.id } : b)
+      });
+    },
+    // Removing a branch hands its items and sub-branches to the line it came from.
+    deleteBranch: async (projectId: string, branchId: string): Promise<void> => {
+      const project = state.projects.find(p => p && p.id === projectId);
+      if (!project) throw new Error('Project not found');
+      const branch = (project.branches || []).find(b => b.id === branchId);
+      const parentId = branch?.parentId ?? null;
+      for (const item of state.workItems.filter(i => i && i.projectId === projectId && i.branchId === branchId)) {
+        await api.workItems.updateDetails(item.id, { branchId: parentId });
+      }
+      await api.projects.update(projectId, {
+        branches: (project.branches || [])
+          .filter(b => b.id !== branchId)
+          .map(b => b.parentId === branchId ? { ...b, parentId } : b)
+      });
+    },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
       await removeRecord('projects', id);
@@ -715,8 +745,8 @@ export const api = {
       const habit: Habit = {
         id: uuid(),
         name: payload.name || 'New Habit',
-        frequency: 'daily',
-        targetCount: payload.targetCount || 5,
+        targetCount: Math.min(7, Math.max(1, payload.targetCount || 7)),
+        frequency: (payload.targetCount || 7) >= 7 ? 'daily' : `${payload.targetCount}/week`,
         history: [],
         areaId: payload.areaId || null,
         streak: 0,
@@ -736,6 +766,17 @@ export const api = {
       const has = history.includes(day);
       h.history = has ? history.filter(d => d !== day) : [...history, day];
       h.streak = streakOf(h.history, localDateString());
+      h.updatedAt = new Date().toISOString();
+      await persist('habits', h);
+      return h;
+    },
+    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount'>): Promise<Habit> => {
+      await initializeStore();
+      const h = state.habits.find(h => h && h.id === id);
+      if (!h) throw new Error('Habit not found');
+      if (updates.name !== undefined) h.name = updates.name.trim() || h.name;
+      if (updates.targetCount !== undefined) h.targetCount = Math.min(7, Math.max(1, Math.round(updates.targetCount)));
+      h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
       return h;
@@ -776,6 +817,33 @@ export const api = {
       n.updatedAt = new Date().toISOString();
       await putToStore('notes', n);
       // Debounce note sync to avoid keystroke network spam
+      syncEngine.enqueueNoteDebounced(n.id, n);
+      return n;
+    },
+    // The formatted note as HTML. Older plain-text notes become paragraphs.
+    getBody: (note: Note): string => {
+      const parts = Number(note.bodyParts) || 0;
+      let html = '';
+      for (let i = 0; i < parts; i++) html += String(note[`body${i}`] ?? '').replace(/^~/, '');
+      if (parts > 0) return html;
+      const text = note.content || '';
+      if (!text) return '';
+      const esc = (t: string) => t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+      return text.split('\n').map(line => `<div>${line ? esc(line) : '<br>'}</div>`).join('');
+    },
+    saveBody: async (id: string, html: string, text: string): Promise<Note> => {
+      await initializeStore();
+      const n = state.notes.find(n => n && n.id === id);
+      if (!n) throw new Error('Note not found');
+      // Same split as board scenes: "~" keeps Sheets from reading a part as a
+      // number or formula, and parts past the count are ignored.
+      const size = 45000;
+      const parts = Math.max(1, Math.ceil(html.length / size));
+      for (let i = 0; i < parts; i++) n[`body${i}`] = '~' + html.slice(i * size, (i + 1) * size);
+      n.bodyParts = parts;
+      n.content = text.slice(0, 40000);
+      n.updatedAt = new Date().toISOString();
+      await putToStore('notes', n);
       syncEngine.enqueueNoteDebounced(n.id, n);
       return n;
     },

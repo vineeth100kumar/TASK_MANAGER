@@ -1,13 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, AlertTriangle, WifiOff, Network } from 'lucide-react';
+import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, AlertTriangle, WifiOff, GitBranch } from 'lucide-react';
 import { api } from '../../services/api';
 import { SyncEngineStatus } from '../../services/syncEngine';
 
 const VIEWS = [
   { id: 'list', icon: LayoutList, label: 'List' },
   { id: 'board', icon: Columns, label: 'Board' },
-  { id: 'map', icon: Network, label: 'Map' },
+  { id: 'branches', icon: GitBranch, label: 'Branches' },
   { id: 'timeline', icon: GanttChartSquare, label: 'Timeline' },
   { id: 'table', icon: TableIcon, label: 'Table' },
   { id: 'calendar', icon: CalendarDays, label: 'Calendar' }

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { withTime } from '../../utils/reminders';
 import { AnimatePresence } from 'framer-motion';
-import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Activity, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
+import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
@@ -9,8 +9,7 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
-import { weekDates, dateEntries, streakOf } from '../../utils/habits';
-import { formatShortDate } from '../../utils/quickAddParser';
+import { HabitTodayCard } from '../habits/HabitViews';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
@@ -121,8 +120,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
     }
   };
 
-  const handleToggleHabit = async (habitId: string, day: string, e: React.MouseEvent) => {
-    e.stopPropagation();
+  const handleToggleHabit = async (habitId: string, day: string) => {
     try {
       await api.habits.toggleDay(habitId, day);
       loadAttentionData();
@@ -270,6 +268,11 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
             ))}
           </div>
         </div>
+      )}
+
+      {/* Habits: a fresh entry each day, so a missed day shows as missed instead of carrying over. */}
+      {lifeContext !== 'work' && data.habits?.length > 0 && (
+        <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} />
       )}
 
       {/* 3. Main Grid: Today's Focus & Scheduled Checkpoints */}
@@ -535,48 +538,9 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
         </div>
       )}
 
-      {/* 6. Habits & Goals (Life Space) */}
-      {lifeContext !== 'work' && (data.habits?.length > 0 || data.goals?.length > 0) && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
-          {/* Habits */}
-          <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Activity size={18} className="text-emerald-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Daily Habit Streaks</h3>
-            </div>
-            <div className="space-y-3">
-              {data.habits?.map((habit: any) => (
-                <div key={habit.id} className="p-4 rounded-2xl surface-item is-interactive space-y-2">
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <span className="text-gray-900 dark:text-white">{habit.name}</span>
-                    <span className="text-gray-400">{streakOf(habit.history, todayIso)} {streakOf(habit.history, todayIso) === 1 ? 'day' : 'days'} in a row</span>
-                  </div>
-                  <div className="flex gap-1">
-                    {weekDates(todayIso).map(({ date, label }) => {
-                      const isDone = dateEntries(habit.history).includes(date);
-                      const future = date > todayIso;
-                      return (
-                        <button
-                          key={date}
-                          disabled={future}
-                          aria-pressed={isDone}
-                          aria-label={`${habit.name}, ${formatShortDate(date)}`}
-                          title={formatShortDate(date)}
-                          onClick={(e) => handleToggleHabit(habit.id, date, e)}
-                          className={`flex-1 h-7 rounded-lg text-[10px] font-semibold uppercase transition-all ${
-                            isDone ? 'bg-emerald-500 text-white shadow-sm' : 'bg-gray-100 dark:bg-white/5 text-gray-400 hover:bg-gray-200'
-                          } ${date === todayIso ? 'ring-2 ring-emerald-400/60' : ''} ${future ? 'opacity-40 cursor-default' : ''}`}
-                        >
-                          {label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
+      {/* 6. Goals (Life Space) */}
+      {lifeContext !== 'work' && data.goals?.length > 0 && (
+        <div className="pt-2">
           {/* Goals */}
           <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">
             <div className="flex items-center gap-2">
