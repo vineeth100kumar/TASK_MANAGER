@@ -14,6 +14,7 @@ void storeLoad(LumoState& s) {
   p.getString("z2", s.zone2, sizeof(s.zone2));
   s.zone2_offset = p.getShort("z2off", 0);
   s.snooze_minutes = constrain(p.getUChar("snooze", 5), 1, 60);
+  s.haptic_strength = min((int)p.getUChar("hapt", HAPTIC_STRENGTH), 100);
   uint8_t n = p.getUChar("acount", 0);
   if (n > MAX_LOCAL_ALARMS) n = 0;
   if (n && p.getBytes("alarms", s.local_alarms, sizeof(LocalAlarm) * n) == sizeof(LocalAlarm) * n) {
@@ -39,5 +40,12 @@ void storeSaveAlarms(const LumoState& s) {
   p.putUChar("snooze", s.snooze_minutes);
   p.putUChar("acount", s.local_alarm_count);
   if (s.local_alarm_count) p.putBytes("alarms", s.local_alarms, sizeof(LocalAlarm) * s.local_alarm_count);
+  p.end();
+}
+
+void storeSaveHaptics(const LumoState& s) {
+  Preferences p;
+  if (!p.begin(NS, false)) return;
+  p.putUChar("hapt", s.haptic_strength);
   p.end();
 }

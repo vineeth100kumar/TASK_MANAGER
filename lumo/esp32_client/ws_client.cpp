@@ -233,15 +233,24 @@ static void handleTextMessage(const String& payload) {
     neoSetMode(nm, bri, hue);
   }
   else if (strcmp(cmd, "HAPTIC") == 0) {
-    // A named pattern, or a length: Sage sends 300 ms with a reminder.
+    // A named effect, or a length: Sage sends 300 ms with a reminder.
     const char* pattern = doc["pattern"] | "";
     uint16_t ms = doc["ms"] | 50;
-    if      (!strcmp(pattern, "tap"))      hapticPlay(HAP_TAP);
-    else if (!strcmp(pattern, "notify"))   hapticPlay(HAP_NOTIFY);
-    else if (!strcmp(pattern, "success"))  hapticPlay(HAP_SUCCESS);
-    else if (!strcmp(pattern, "reminder") || ms >= 250) hapticPlay(HAP_REMINDER);
+    if (pattern[0] && hapticPlayNamed(pattern)) {}
+    else if (ms >= 250) hapticPlay(HAP_REMINDER);
     else hapticPulse(ms);
     lastHapticCmd = millis();
+  }
+  else if (strcmp(cmd, "HAPTICS") == 0) {
+    // The strength set in Sage. A change plays one tick so you feel it.
+    int pct = doc["strength"] | (int)s.haptic_strength;
+    pct = constrain(pct, 0, 100);
+    if (pct != s.haptic_strength) {
+      s.haptic_strength = pct;
+      hapticSetStrength(pct);
+      storeSaveHaptics(s);
+      hapticPlay(HAP_TICK);
+    }
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
     s.alarm_ringing = true;

@@ -2,8 +2,8 @@
 settings.py - the desk clock's settings, changed from Sage.
 
 Which screens UP and DOWN step through, what every button does on each screen,
-the alarm's snooze and ring length, the lights, and how the clock shows the
-time. They live in Sage's metadata table (key `deskSettings`) next to the
+the alarm's snooze and ring length, the lights, how strong the haptics are,
+and how the clock shows the time. They live in Sage's metadata table (key `deskSettings`) next to the
 notification preferences, and reach the clock the moment they are saved.
 
 A button map is a set of layers. While an alarm rings the `alarm` layer
@@ -44,6 +44,9 @@ DEFAULTS: Dict[str, Any] = {
     "clock": {"style": "digital", "hour24": True, "seconds": True, "secondZone": ""},
     "alarm": {"snoozeMinutes": 5, "ringMinutes": 10},
     "lights": {"mode": "AUTO", "brightness": 100},
+    # How hard the motor knocks for presses and notifications, 0-100 (0 = off).
+    # The alarm always rings; it is the only sound LUMO makes (firmware 2.7+).
+    "haptics": {"strength": 70},
     "buttons": {
         "locked": False,
         "map": {
@@ -142,6 +145,11 @@ def merge(current: dict, update: dict) -> dict:
             out["lights"]["mode"] = _choice(lights["mode"], "lights.mode", LIGHT_MODES)
         if "brightness" in lights:
             out["lights"]["brightness"] = _int(lights["brightness"], "lights.brightness", 0, 255)
+
+    if "haptics" in update:
+        haptics = _section(update["haptics"], "haptics")
+        if "strength" in haptics:
+            out["haptics"]["strength"] = _int(haptics["strength"], "haptics.strength", 0, 100)
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")

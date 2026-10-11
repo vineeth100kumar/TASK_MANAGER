@@ -100,10 +100,8 @@ void setup() {
   delay(200);
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
-  ledcAttach(BUZZER_PIN, HAPTIC_FREQ, HAPTIC_RES);
-  ledcWrite(BUZZER_PIN, 255);
-
   storeLoad(lumoState);
+  hapticInit(lumoState.haptic_strength);
   initNeoPixels();
   displayInit();
 
@@ -155,7 +153,7 @@ void loop() {
 
   Button btn = readButton();
   if (btn != BTN_NONE) {
-    hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TAP);
+    hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
     if (lumoState.local_ringing) {
       localAlarmButton(btn);   // Sage isn't there to decide
     } else {

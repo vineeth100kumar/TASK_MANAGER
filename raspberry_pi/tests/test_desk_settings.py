@@ -68,6 +68,7 @@ class Merge(unittest.TestCase):
             ({"alarm": {"snoozeMinutes": 0}}, "1 to 60"),
             ({"alarm": {"ringMinutes": True}}, "whole number"),
             ({"lights": {"brightness": 300}}, "0 to 255"),
+            ({"haptics": {"strength": 101}}, "0 to 100"),
             ({"clock": {"secondZone": "Mars/Olympus"}}, "not a time zone"),
             ({"buttons": {"map": {"default": None}}}, "can't be removed"),
             ({"buttons": {"map": {"CLOCK": {"HOLD": "none"}}}}, "button must be one of"),
@@ -230,6 +231,13 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(desk.controller.screen, "CLOCK")
         self.assertEqual(self.link.last("LIGHTS")["brightness"], 5)
         self.assertEqual(desk.controller.screens, ["CLOCK", "TASKS"])
+
+    async def test_haptic_strength_reaches_the_clock(self):
+        desk = self.make({"haptics": {"strength": 35}})
+        await desk.after_redraw()
+        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 35})
+        await desk.apply_settings(settings.merge(desk.settings, {"haptics": {"strength": 0}}))
+        self.assertEqual(self.link.last("HAPTICS")["strength"], 0)
 
 
 class RunHelpers(unittest.IsolatedAsyncioTestCase):

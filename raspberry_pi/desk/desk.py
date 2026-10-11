@@ -356,6 +356,11 @@ class Desk:
             return {"mode": "OFF", "brightness": 0}
         return dict(self.settings["lights"])
 
+    async def send_haptics(self) -> None:
+        """The haptic strength (firmware before 2.7 ignores it). The clock
+        keeps it in flash and plays one tick when it changes."""
+        await self.link.send({"cmd": "HAPTICS", "strength": self.settings["haptics"]["strength"]})
+
     def clock_extra(self) -> dict:
         """How to show the time, sent with every CLOCK (firmware 1.6 ignores
         these; LUMO 2 draws the clock styles from them)."""
@@ -378,6 +383,7 @@ class Desk:
                 self.controller.screen = new["homeScreen"]
             return
         await self.controller.send_lights()
+        await self.send_haptics()
         await self.controller.send_clock()
         await self.send_alarms()
         if self.controller.screen not in new["screens"] and not self.controller.card:
@@ -390,6 +396,7 @@ class Desk:
     async def after_redraw(self) -> None:
         """The rest of what a freshly connected clock needs."""
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
+        await self.send_haptics()
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
