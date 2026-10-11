@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "display.h"
 #include "clockkeeper.h"
+#include "faces.h"
+#include "aa_text.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans24pt7b.h>
@@ -22,11 +24,8 @@ static const uint16_t COLOR_RED_DARK  = 0x7800;
 
 static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
 
-// The rows the case window shows (see SCREEN_HIDDEN_* in config.h). Layouts are
-// written for the full 240 rows; SY() maps such a row into the visible band.
-static constexpr int VIS_T = SCREEN_HIDDEN_TOP;
-static constexpr int VIS_B = 240 - SCREEN_HIDDEN_BOTTOM;
-static constexpr int VIS_H = VIS_B - VIS_T;
+// Layouts are written for the full 240 rows; SY() maps such a row into the
+// rows the case window shows (VIS_T..VIS_B, see display.h).
 static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
 static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
 static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
@@ -313,7 +312,7 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
 
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
-  uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.25f + 0.75f * pulse);
+  uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.45f + 0.55f * pulse);
 
   uint8_t dispH = c.h % 12; if (dispH == 0) dispH = 12;
   char hs[4], ms[4];
@@ -337,43 +336,57 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
   if (timeCanvas) timeCanvas->fillScreen(COLOR_BG_BLACK);
   else tft.fillRect(CLK_CANVAS_X, CLK_CANVAS_Y, CLK_CANVAS_W, CLK_CANVAS_H, COLOR_BG_BLACK);
 
-  int16_t x1, y1; uint16_t wh, wm, wc, hh;
+  // Each piece is placed by its ink, not its cursor: FreeSans digits carry
+  // wide side bearings at size 2, and placing by cursor let the colon touch
+  // the digits on either side.
+  int16_t hx1, hy1, mx1, my1, ax1 = 0, ay1;
+  uint16_t wh, hh, wm, hm, wap = 0, hap;
   g->setFont(&FreeSans24pt7b);
   g->setTextSize(2);
-  g->getTextBounds(hs, 0, baseline, &x1, &y1, &wh, &hh);
-  g->getTextBounds(ms, 0, baseline, &x1, &y1, &wm, &hh);
-  g->getTextBounds(":", 0, baseline, &x1, &y1, &wc, &hh);
+  g->getTextBounds(hs, 0, baseline, &hx1, &hy1, &wh, &hh);
+  g->getTextBounds(ms, 0, baseline, &mx1, &my1, &wm, &hm);
 
-  const int gap = 3;
-  g->setTextSize(1);
-  g->setFont(&FreeSans12pt7b);
-  uint16_t wap = 0, hap;
   const char* ap = s.hour24 ? "" : ((c.h >= 12) ? "PM" : "AM");
-  if (ap[0]) g->getTextBounds(ap, 0, baseline, &x1, &y1, &wap, &hap);
-  g->setFont(&FreeSans24pt7b);
-  g->setTextSize(2);
+  if (ap[0]) {
+    g->setTextSize(1);
+    g->setFont(&FreeSans12pt7b);
+    g->getTextBounds(ap, 0, baseline, &ax1, &ay1, &wap, &hap);
+  }
 
-  int total = wh + gap + wc + gap + wm + (ap[0] ? 8 + wap : 0);
+  const int dot = 7;                         // colon dot size
+  const int apGap = ap[0] ? 12 : 0;
+  int gap = 12;                              // between the digits and the colon
+  int total = wh + gap + dot + gap + wm + apGap + wap;
+  if (total > CLK_CANVAS_W - 4) {            // wide times ("12:58 PM") give up some air
+    gap = max(5, gap - (total - (CLK_CANVAS_W - 4) + 1) / 2);
+    total = wh + gap + dot + gap + wm + apGap + wap;
+  }
   int x = ox + (CLK_CANVAS_W - total) / 2;
 
+  g->setFont(&FreeSans24pt7b);
+  g->setTextSize(2);
   g->setTextColor(ink);
-  g->setCursor(x, baseline);
+  g->setCursor(x - hx1, baseline);
   g->print(hs);
   x += wh + gap;
-  g->setTextColor(colon);
-  g->setCursor(x, baseline);
-  g->print(":");
-  x += wc + gap;
-  g->setTextColor(ink);
-  g->setCursor(x, baseline);
-  g->print(ms);
-  x += wm + 8;
 
-  g->setTextSize(1);
-  g->setFont(&FreeSans12pt7b);
-  g->setTextColor(accent);
-  g->setCursor(x, baseline);
-  g->print(ap);
+  // The colon is two squares centred on the digits, so it reads at a glance.
+  int top = hy1, digitH = hh;            // bounds were taken at the baseline
+  g->fillRect(x, top + digitH * 30 / 100 - dot / 2, dot, dot, colon);
+  g->fillRect(x, top + digitH * 72 / 100 - dot / 2, dot, dot, colon);
+  x += dot + gap;
+
+  g->setCursor(x - mx1, baseline);
+  g->print(ms);
+  x += wm + apGap;
+
+  if (ap[0]) {
+    g->setTextSize(1);
+    g->setFont(&FreeSans12pt7b);
+    g->setTextColor(accent);
+    g->setCursor(x - ax1, baseline);
+    g->print(ap);
+  }
   g->setFont(NULL);
 
   if (timeCanvas) {
@@ -413,6 +426,12 @@ void displayClockTick(const LumoState& s) {
     c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
   }
 
+  if (faceIsPremium(s.clock_style)) {
+    faceTick(s, c);
+    clockNeedsStatic = false;
+    return;
+  }
+
   float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
   fade = fade * fade * (3.0f - 2.0f * fade);
 
@@ -444,6 +463,16 @@ static void drawClockScreen(const LumoState& s, bool full) {
     clockLastMinute = -1;
     clockLastColonStep = 255;
     dialLast[0] = dialLast[1] = dialLast[2] = -1;
+    faceReset();
+    // The classic time canvas and the smooth faces' buffer are big; keep only
+    // the one the current style uses.
+    if (faceIsPremium(s.clock_style)) {
+      delete timeCanvas;
+      timeCanvas = nullptr;
+      canvasTried = false;
+    } else {
+      aaRelease();
+    }
   }
   displayClockTick(s);
 }

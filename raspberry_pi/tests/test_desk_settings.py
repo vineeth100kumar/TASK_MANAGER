@@ -50,6 +50,11 @@ class Merge(unittest.TestCase):
         s = settings.merge(settings.defaults(), {"screens": ["TASKS", "SPOTIFY"]})
         self.assertEqual(s["homeScreen"], "TASKS")  # CLOCK was dropped
 
+    def test_every_clock_face_can_be_chosen(self):
+        for style in ("monolith", "stacked", "nightstand", "dial", "digital"):
+            s = settings.merge(settings.defaults(), {"clock": {"style": style}})
+            self.assertEqual(s["clock"]["style"], style)
+
     def test_the_face_is_refused_now(self):
         with self.assertRaises(ValueError):
             settings.merge(settings.defaults(), {"screens": ["FACE", "CLOCK"]})
