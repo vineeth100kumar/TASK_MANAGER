@@ -186,7 +186,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
         async def cover(title, artist):
             self.covers.append((title, artist))
-            return b"art"
+            return b"\xaa\xbb\x64\x64" + bytes(art.FRAME_LEN - 4)
 
         async def weather():
             return {"cmd": "WEATHER", "temp_c": 24.5, "icon": "rain"}
@@ -297,7 +297,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
         await self.desk.show_media(media)
         self.assertEqual(self.link.last("SPOTIFY")["title"], "Clocks")
-        self.assertEqual(self.link.binary, [b"art"])
+        self.assertEqual(self.link.binary, [])  # firmware before 2.2 restarts on a cover
         await self.desk.show_media({**media, "playing": False})
         self.assertEqual(self.covers, [("Clocks", "Coldplay")])  # same song: no second lookup
 
@@ -308,18 +308,26 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
             await self.desk.controller.on_button(button)
         self.assertEqual(self.phone.commands, ["previous", "toggle", "next"])
 
+    async def test_cover_goes_in_small_strips_to_new_firmware(self):
+        self.link.fw = "2.2.0"
+        await self.desk.show_media({"title": "Clocks", "artist": "Coldplay", "playing": True})
+        self.assertEqual(len(self.link.binary), 17)
+        self.assertTrue(all(len(b) <= 1204 and b[:2] == b"\xaa\xbd" for b in self.link.binary))
+        self.assertEqual(sum(b[3] for b in self.link.binary), 100)
+
     async def test_reconnected_clock_gets_everything_back(self):
         await self.desk.refresh()
         await self.desk.update_weather()
         await self.desk.show_media({"title": "Clocks", "artist": "Coldplay", "playing": True})
         self.link.sent.clear()
         self.link.binary.clear()
+        self.link.fw = "2.2.0"
         await self.desk.controller.redraw()
         for cmd in ("CLOCK", "SCREEN", "LIGHTS", "SHOW_TASKS", "ALARMS", "WEATHER", "SPOTIFY"):
             self.assertIn(cmd, self.link.cmds())
         for cmd in ("EYE_COLOR", "EMOTION", "ANIM"):
             self.assertNotIn(cmd, self.link.cmds())
-        self.assertEqual(self.link.binary[-1], b"art")
+        self.assertEqual(len(self.link.binary), 17)  # the cover, once, in strips
 
     async def test_firmware_1_gets_its_cards_on_the_face(self):
         self.link.fw = "1.6.0"
