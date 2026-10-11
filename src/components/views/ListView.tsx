@@ -79,6 +79,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                     </>
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />
+                  ) : task.entityType === 'milestone' ? (
+                    <Flag size={20} className={task.status === 'done' || task.status === 'achieved' ? 'text-emerald-500' : 'text-orange-500'} />
                   ) : (
                     <Bell size={20} className="text-emerald-500" />
                   )}
@@ -132,6 +134,12 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   </div>
                 )}
 
+                {task.entityType === 'milestone' && dateStr && (
+                  <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
+                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {dateStr}</span>
+                  </div>
+                )}
+
                 {task.entityType === 'reminder' && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
                     <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.remindAt ? formatWhen(task.remindAt) : 'No time set'}</span>
@@ -149,11 +157,15 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
   const eventTasks = tasks.filter(t => t.entityType === 'event');
   const reminderTasks = tasks.filter(t => t.entityType === 'reminder');
   const issueTasks = tasks.filter(t => t.entityType === 'task');
+  const milestoneTasks = tasks
+    .filter(t => t.entityType === 'milestone')
+    .sort((a, b) => (a.dueDate || a.startDate || '9999').localeCompare(b.dueDate || b.startDate || '9999'));
 
   return (
     <div className="max-w-5xl mx-auto pb-32">
       {renderGroup('Events', eventTasks, 'bg-purple-500')}
       {renderGroup('Reminders', reminderTasks, 'bg-emerald-500')}
+      {renderGroup('Milestones', milestoneTasks, 'bg-orange-500')}
       
       {Object.values(STATUSES).map(status => {
         const statusTasks = issueTasks.filter(t => t.status === status.id);

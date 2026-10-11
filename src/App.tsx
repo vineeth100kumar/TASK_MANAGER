@@ -24,8 +24,9 @@ import { TableView } from './components/views/TableView';
 import { CalendarView } from './components/views/CalendarView';
 import { TimelineView } from './components/views/TimelineView';
 import { NotesView } from './components/views/NotesView';
+import { NotesLock } from './components/notes/NotesLock';
 import { CanvasView } from './components/views/CanvasView';
-import { ProjectMapView } from './components/project-map/ProjectMapView';
+import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
 import { SettingsModal } from './components/modals/SettingsModal';
@@ -185,7 +186,8 @@ function MainApp() {
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const activeTag = (document.activeElement?.tagName || '').toLowerCase();
-      const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select';
+      const isInput = activeTag === 'input' || activeTag === 'textarea' || activeTag === 'select'
+        || !!(document.activeElement as HTMLElement | null)?.isContentEditable;
 
       // Ctrl/Cmd+C is copy and Cmd+N is a new window, not shortcuts of ours.
       if (!isInput && !e.ctrlKey && !e.metaKey && !e.altKey) {
@@ -379,7 +381,7 @@ function MainApp() {
                 <div className="skeleton h-16 !rounded-2xl" />
               </div>
             ) : activeView === 'notes' ? (
-              <NotesView lifeContext={lifeContext} />
+              <NotesLock><NotesView lifeContext={lifeContext} /></NotesLock>
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (
@@ -417,12 +419,13 @@ function MainApp() {
                       <LayoutGroup>
                         {presentationMode === 'list' && <ListView tasks={workItems} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'map' && (
-                          <ProjectMapView 
-                            items={workItems} 
-                            project={activeWorkspace !== 'all' ? api.sync.getState().projects.find(p => p.id === activeWorkspace) : null} 
-                            onSelectTask={setSelectedItemId} 
-                            onRefreshData={() => fetchWorkItems(false)} 
+                        {presentationMode === 'branches' && (
+                          <ProjectBranchesView
+                            items={workItems}
+                            lifeContext={lifeContext}
+                            activeWorkspace={activeWorkspace}
+                            onSelectTask={setSelectedItemId}
+                            onRefreshData={() => fetchWorkItems(false)}
                           />
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}

@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Search, FileText } from 'lucide-react';
+import { Plus, Trash2, Search, FileText, ChevronLeft } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { RichNoteEditor } from '../notes/RichNoteEditor';
 
 interface NotesViewProps {
   lifeContext?: 'work' | 'personal';
@@ -16,6 +17,8 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTitle, setActiveTitle] = useState('');
   const [activeContent, setActiveContent] = useState('');
+  // On a phone the list and the open note take turns on screen.
+  const [isEditorOpen, setIsEditorOpen] = useState(false);
   const { showToast } = useToast();
   // When this editor last changed the open note, so a sync arriving mid-typing
   // doesn't replace what is being typed.
@@ -29,7 +32,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
     if (!open && list.length > 0) {
       setSelectedNoteId(list[0].id);
       setActiveTitle(list[0].title);
-      setActiveContent(list[0].content || '');
+      setActiveContent(api.notes.getBody(list[0]));
     } else if (!open) {
       setSelectedNoteId(null);
       setActiveTitle('');
@@ -37,7 +40,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
     } else if (Date.now() - lastTypedAt.current > 2000) {
       // Show edits made to this note on another device.
       setActiveTitle(open.title);
-      setActiveContent(open.content || '');
+      setActiveContent(api.notes.getBody(open));
     }
   };
 
@@ -51,7 +54,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   useEffect(() => {
     if (selectedNote) {
       setActiveTitle(selectedNote.title);
-      setActiveContent(selectedNote.content || '');
+      setActiveContent(api.notes.getBody(selectedNote));
     }
   }, [selectedNoteId]);
 
@@ -65,6 +68,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
     setSelectedNoteId(newNote.id);
     setActiveTitle(newNote.title);
     setActiveContent('');
+    setIsEditorOpen(true);
     showToast('New note created');
   };
 
@@ -77,12 +81,12 @@ export function NotesView({ lifeContext }: NotesViewProps) {
     }
   };
 
-  const handleContentChange = (val: string) => {
-    setActiveContent(val);
+  const handleContentChange = (html: string, text: string) => {
+    setActiveContent(html);
     lastTypedAt.current = Date.now();
     if (selectedNoteId) {
-      setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, content: val } : n));
-      api.notes.update(selectedNoteId, { content: val });
+      setNotes(prev => prev.map(n => n.id === selectedNoteId ? { ...n, content: text } : n));
+      api.notes.saveBody(selectedNoteId, html, text);
     }
   };
 
@@ -96,7 +100,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
         if (remaining.length > 0) {
           setSelectedNoteId(remaining[0].id);
           setActiveTitle(remaining[0].title);
-          setActiveContent(remaining[0].content || '');
+          setActiveContent(api.notes.getBody(remaining[0]));
         } else {
           setSelectedNoteId(null);
           setActiveTitle('');
@@ -115,7 +119,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
   return (
     <div className="h-[calc(100vh-8.5rem)] flex bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden shadow-sm">
       {/* Notes Sidebar */}
-      <div className="w-80 border-r border-gray-100 dark:border-white/5 flex flex-col bg-[#f5f5f7]/60 dark:bg-black/20 shrink-0">
+      <div className={`w-full md:w-80 border-r border-gray-100 dark:border-white/5 flex-col bg-[#f5f5f7]/60 dark:bg-black/20 shrink-0 ${isEditorOpen ? 'hidden md:flex' : 'flex'}`}>
         
         {/* Header & Search */}
         <div className="p-4 border-b border-gray-100 dark:border-white/5 space-y-3">
@@ -141,7 +145,7 @@ export function NotesView({ lifeContext }: NotesViewProps) {
           {filteredNotes.map(note => {
             const isSelected = note.id === selectedNoteId;
             return (
-              <div key={note.id} onClick={() => setSelectedNoteId(note.id)}
+              <div key={note.id} onClick={() => { setSelectedNoteId(note.id); setIsEditorOpen(true); }}
                 className={`p-3.5 rounded-2xl cursor-pointer transition-all flex flex-col gap-1 group relative ${isSelected ? 'bg-white dark:bg-[#2c2c2e] shadow-sm border border-black/5 dark:border-white/5' : 'hover:bg-white/60 dark:hover:bg-white/5'}`}>
                 <div className="flex items-center justify-between">
                   <h4 className={`text-[14px] font-bold truncate pr-6 ${isSelected ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-white'}`}>
@@ -170,19 +174,18 @@ export function NotesView({ lifeContext }: NotesViewProps) {
       </div>
 
       {/* Note Editor Pane */}
-      <div className="flex-1 flex flex-col bg-white dark:bg-[#1c1c1e] min-w-0">
+      <div className={`flex-1 flex-col bg-white dark:bg-[#1c1c1e] min-w-0 ${isEditorOpen ? 'flex' : 'hidden md:flex'}`}>
         {selectedNoteId ? (
           <>
-            <div className="p-6 md:p-8 pb-4 border-b border-gray-100 dark:border-white/5 flex items-center justify-between">
+            <div className="p-4 md:p-8 pb-3 md:pb-4 border-b border-gray-100 dark:border-white/5 flex items-center gap-2">
+              <button onClick={() => setIsEditorOpen(false)} className="md:hidden -ml-1 p-1.5 rounded-lg text-gray-500 hover:bg-black/5 dark:hover:bg-white/10" aria-label="Back to notes">
+                <ChevronLeft size={20} />
+              </button>
               <input type="text" value={activeTitle} onChange={e => handleTitleChange(e.target.value)} placeholder="Note Title"
                 className="text-2xl md:text-3xl font-bold tracking-tight bg-transparent outline-none text-gray-900 dark:text-white w-full tracking-tight" />
             </div>
 
-            <div className="flex-1 p-6 md:p-8 overflow-y-auto custom-scrollbar">
-              <textarea value={activeContent} onChange={e => handleContentChange(e.target.value)}
-                placeholder="Start typing your note, meeting minutes, ideas, or markdown..."
-                className="w-full h-full bg-transparent outline-none resize-none text-[15px] leading-relaxed text-gray-800 dark:text-gray-200 placeholder-gray-400 dark:placeholder-gray-600 font-sans" />
-            </div>
+            <RichNoteEditor noteId={selectedNoteId} html={activeContent} onChange={handleContentChange} />
           </>
         ) : (
           <div className="flex-1 flex flex-col items-center justify-center text-gray-400 p-8">
