@@ -759,6 +759,7 @@ static void drawTasksScreen(const LumoState& s) {
 // Alarm: drawn once, then only a pulsing frame and the minute change. No more
 // full-screen strobing; it is urgent without being harsh.
 static bool alarmNeedsStatic = true;
+static unsigned long alarmShownMs = 0;
 
 static void drawAlarmFrame(float pulse) {
   uint16_t col = mix565(0x2000, COLOR_RED_PULSE, pulse);
@@ -782,6 +783,7 @@ void displayAlarmTick(const LumoState& s) {
   if (!c.synced) { c.h = s.h; c.m = s.m; }
 
   if (alarmNeedsStatic) {
+    alarmShownMs = now;
     tft.fillScreen(COLOR_BG_BLACK);
     centerText("ALARM", SY(52), COLOR_RED_PULSE, &FreeSans12pt7b);
     char hint[48];
@@ -808,7 +810,14 @@ void displayAlarmTick(const LumoState& s) {
     tft.setFont(NULL);
   }
 
-  float pulse = 0.5f + 0.5f * sinf(now / 1000.0f * 6.2831853f * 1.6f);
+  // The frame beats with the motor and the light: "bu-bump" every 1.3 s.
+  float u = fmodf((now - alarmShownMs) / 1000.0f, 1.3f);
+  auto swell = [](float x, float len) {
+    if (x < 0 || x >= len) return 0.0f;
+    float r = animClamp(x / 0.15f), f = 1 - x / len;
+    return r * r * (3 - 2 * r) * f * f;
+  };
+  float pulse = animClamp(swell(u, 0.5f) + 0.7f * swell(u - 0.26f, 0.6f));
   drawAlarmFrame(pulse);
 }
 

@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 
+static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
+
 using namespace websockets;
 
 static WebsocketsClient client;
@@ -142,6 +144,8 @@ static void handleTextMessage(const String& payload) {
     s.notif_start = millis();
     s.flag_card_changed = true;
     neoPing(90, 170, 255);
+    // A knock for a phone notification; a reminder already brought its own.
+    if (millis() - lastHapticCmd > 800) hapticPlay(HAP_NOTIFY);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
     s.cpu_temp = doc["cpu_temp"] | s.cpu_temp;
@@ -206,8 +210,15 @@ static void handleTextMessage(const String& payload) {
     neoSetMode(nm, bri, hue);
   }
   else if (strcmp(cmd, "HAPTIC") == 0) {
+    // A named pattern, or a length: Sage sends 300 ms with a reminder.
+    const char* pattern = doc["pattern"] | "";
     uint16_t ms = doc["ms"] | 50;
-    hapticPulse(ms);
+    if      (!strcmp(pattern, "tap"))      hapticPlay(HAP_TAP);
+    else if (!strcmp(pattern, "notify"))   hapticPlay(HAP_NOTIFY);
+    else if (!strcmp(pattern, "success"))  hapticPlay(HAP_SUCCESS);
+    else if (!strcmp(pattern, "reminder") || ms >= 250) hapticPlay(HAP_REMINDER);
+    else hapticPulse(ms);
+    lastHapticCmd = millis();
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
     s.alarm_ringing = true;

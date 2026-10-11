@@ -155,7 +155,7 @@ void loop() {
 
   Button btn = readButton();
   if (btn != BTN_NONE) {
-    hapticPulse(btn == BTN_HOLD_OK ? 120 : 45);
+    hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TAP);
     if (lumoState.local_ringing) {
       localAlarmButton(btn);   // Sage isn't there to decide
     } else {
@@ -207,6 +207,15 @@ void loop() {
     displayDrawScreen(SCREEN_CARD, lumoState, true);
   }
 
+  // A ringing alarm beats like a heart (the light beats with it); it stops
+  // the moment the alarm screen goes.
+  static bool alarmBuzzing = false;
+  if ((currentScreen == SCREEN_ALARM) != alarmBuzzing) {
+    alarmBuzzing = !alarmBuzzing;
+    if (alarmBuzzing) hapticPlay(HAP_ALARM);
+    else hapticOff();
+  }
+
   // Screen-specific updates
   if (currentScreen == SCREEN_CLOCK) {
     if (lumoState.flag_clock_changed) {   // a new style from Sage: start over
@@ -241,11 +250,6 @@ void loop() {
     }
   }
   else if (currentScreen == SCREEN_ALARM) {
-    static unsigned long lastAlarmTick = 0;
-    if (millis() - lastAlarmTick >= 500) {
-      lastAlarmTick = millis();
-      hapticPulse(80);
-    }
     displayAlarmTick(lumoState);
   }
   else if (currentScreen == SCREEN_CONNECTING) {

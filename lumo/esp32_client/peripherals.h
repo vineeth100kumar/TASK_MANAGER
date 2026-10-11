@@ -20,6 +20,9 @@ void     neoPing(uint8_t r, uint8_t g, uint8_t b);    // two soft pulses, e.g. a
 void     neoClear();
 
 Button   readButton();
+// Named patterns, played without blocking (see peripherals.cpp).
+enum Haptic { HAP_TAP, HAP_HOLD, HAP_NOTIFY, HAP_REMINDER, HAP_SUCCESS, HAP_ALARM };
+void     hapticPlay(Haptic h);                         // HAP_ALARM loops until hapticOff()
 void     hapticPulse(uint16_t ms);
 void     hapticOff();
 void     hapticUpdate();
