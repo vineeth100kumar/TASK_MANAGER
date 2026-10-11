@@ -37,7 +37,7 @@ USER_AGENT = "Sage desk clock (https://github.com/vineeth100kumar/TASK_MANAGER)"
 FACT_LEN = 96
 
 PROMPT = """You describe songs for a small desk clock's now-playing screen.
-Song: "{title}" by {artist}.
+Song: "{title}" by {artist}.{details}
 Reply with JSON only, in this shape:
 {{"genre": "one or two words", "bpm": 120, "energy": 0.6, "facts": ["...", "...", "..."]}}
 - bpm: the song's tempo as a whole number; your best estimate if unsure.
@@ -119,7 +119,20 @@ def clean_about(raw: dict) -> dict:
     }
 
 
-async def _ask_groq(title: str, artist: str) -> Optional[dict]:
+def details(album: str = "", duration: float = 0, app: str = "") -> str:
+    """What else the phone told us about the song, to help pin down which
+    recording it is (a live version, a remix, a radio edit)."""
+    lines = []
+    if album:
+        lines.append(f"Album: {album}.")
+    if duration and duration > 0:
+        lines.append(f"Length: {int(duration) // 60}:{int(duration) % 60:02d}.")
+    if app:
+        lines.append(f"Playing in: {app}.")
+    return "".join("\n" + line for line in lines)
+
+
+async def _ask_groq(title: str, artist: str, extra: str = "") -> Optional[dict]:
     import canvas_thinker  # the key saved in Sage's Settings, and its models
     key = canvas_thinker.groq_key()
     if not key:
@@ -132,7 +145,7 @@ async def _ask_groq(title: str, artist: str) -> Optional[dict]:
                 res = await client.post(canvas_thinker.GROQ_URL, headers={"Authorization": f"Bearer {key}"}, json={
                     "model": model, "temperature": 0.2, "max_tokens": 1024,
                     "response_format": {"type": "json_object"},
-                    "messages": [{"role": "user", "content": PROMPT.format(title=title, artist=artist or "an unknown artist")}],
+                    "messages": [{"role": "user", "content": PROMPT.format(title=title, artist=artist or "an unknown artist", details=extra)}],
                 })
                 if res.status_code != 200:
                     log.info("Groq couldn't describe %s (%s): %s", title, model, res.status_code)
@@ -146,12 +159,14 @@ async def _ask_groq(title: str, artist: str) -> Optional[dict]:
     return None
 
 
-async def about(title: str, artist: str) -> Optional[dict]:
+async def about(title: str, artist: str, album: str = "", duration: float = 0, app: str = "") -> Optional[dict]:
     """Genre, bpm (0 when unknown), energy 0..1 and up to three facts, or None
-    without a Groq key or when Groq can't be reached."""
+    without a Groq key or when Groq can't be reached. Groq gets the title and
+    artist, and the album, length and app when the phone has said them."""
     if not title:
         return None
-    return await _cached("about", title, artist, lambda: _ask_groq(title, artist))
+    extra = details(album, duration, app)
+    return await _cached("about", title, artist, lambda: _ask_groq(title, artist, extra))
 
 
 def parse_lrc(lrc: str) -> List[Tuple[float, str]]:

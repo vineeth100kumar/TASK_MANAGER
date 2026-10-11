@@ -193,8 +193,8 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
         self.lookups = []
 
-        async def about(title, artist):
-            self.lookups.append(title)
+        async def about(title, artist, **details):
+            self.lookups.append((title, details))
             return {"genre": "Alt rock", "bpm": 131, "energy": 0.7, "facts": ["Released in 2002 on A Rush of Blood to the Head."]}
 
         async def lyrics(title, artist, duration=0):
@@ -319,10 +319,10 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_song_info_and_lyrics_follow_the_song(self):
         import time
-        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True,
-                            "elapsed": 9.9, "rate": 1.0, "elapsedAt": time.time()}
+        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True, "album": "A Rush of Blood to the Head",
+                            "duration": 307.0, "app": "Spotify", "elapsed": 9.9, "rate": 1.0, "elapsedAt": time.time()}
         await self.desk.show_media(self.phone.media)
-        for _ in range(50):
+        for _ in range(200):
             await asyncio.sleep(0.01)
             if "LYRIC" in self.link.cmds():
                 break
@@ -340,13 +340,13 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.controller.redraw()
         self.assertIn("SONG_INFO", self.link.cmds())
         self.assertEqual(self.link.last("LYRIC")["line"], "Tides that I tried to swim against")
-        self.assertEqual(self.lookups, ["Clocks"])
+        self.assertEqual(self.lookups, [("Clocks", {"album": "A Rush of Blood to the Head", "duration": 307.0, "app": "Spotify"})])
         self.desk.track = None  # stops following
 
     async def test_no_lyrics_until_the_phone_says_where_it_is(self):
         self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
         await self.desk.show_media(self.phone.media)
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(1.1)
         self.assertIn("SONG_INFO", self.link.cmds())
         self.assertNotIn("LYRIC", self.link.cmds())
         self.desk.track = None

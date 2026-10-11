@@ -30,6 +30,13 @@ class SongTests(unittest.TestCase):
         self.assertEqual(song.usable([(1.0, "你好世界你好")]), [])
         self.assertEqual(song.usable([(1.0, "Café del Mar")]), [(1.0, "Cafe del Mar")])
 
+    def test_groq_gets_what_the_phone_said(self):
+        self.assertEqual(song.details("After Hours", 200.4, "Spotify"),
+                         "\nAlbum: After Hours.\nLength: 3:20.\nPlaying in: Spotify.")
+        self.assertEqual(song.details(), "")
+        self.assertIn("Length: 3:20.", song.PROMPT.format(title="Blinding Lights", artist="The Weeknd",
+                                                           details=song.details(duration=200)))
+
     def test_long_text_is_cut(self):
         self.assertTrue(song.ascii_text("x" * 200).endswith("..."))
         self.assertLessEqual(len(song.ascii_text("x" * 200)), song.FACT_LEN)
