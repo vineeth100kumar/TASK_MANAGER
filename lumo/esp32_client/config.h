@@ -45,8 +45,16 @@
 #define V_RIGHT 0.33f
 #define V_TOL   0.05f
 
+// ===================== SCREEN AREA =====================
+// Rows of the 320x240 panel that the case hides. Every screen fits its layout
+// into the rows that are left, so nothing ends up behind the bezel. Raise a
+// number if text is still clipped on that edge; set both to 0 if the whole
+// panel shows.
+#define SCREEN_HIDDEN_TOP     0
+#define SCREEN_HIDDEN_BOTTOM  24
+
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.0.0"
+#define FW_VERSION "2.0.1"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

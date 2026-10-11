@@ -22,6 +22,15 @@ static const uint16_t COLOR_RED_DARK  = 0x7800;
 
 static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
 
+// The rows the case window shows (see SCREEN_HIDDEN_* in config.h). Layouts are
+// written for the full 240 rows; SY() maps such a row into the visible band.
+static constexpr int VIS_T = SCREEN_HIDDEN_TOP;
+static constexpr int VIS_B = 240 - SCREEN_HIDDEN_BOTTOM;
+static constexpr int VIS_H = VIS_B - VIS_T;
+static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
+static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
+static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
+
 void displayInit() {
   tft.begin();
   tft.setRotation(1); // Landscape 320x240
@@ -62,21 +71,21 @@ void onNewMemoryStrip(const uint8_t* data, size_t len) {
   tft.drawRGBBitmap(0, y_off, stripBuf, strip_w, strip_h);
 
   // If this strip reaches the bottom, re-draw caption overlay if present
-  if (y_off + strip_h >= 240 && lastMemoryCaption[0] != '\0') {
-    tft.fillRect(0, 214, 320, 26, COLOR_BG_STEALTH);
-    tft.drawFastHLine(0, 214, 320, tft.color565(40, 50, 65));
+  if (y_off + strip_h > CAPTION_Y && lastMemoryCaption[0] != '\0') {
+    tft.fillRect(0, CAPTION_Y, 320, 26, COLOR_BG_STEALTH);
+    tft.drawFastHLine(0, CAPTION_Y, 320, tft.color565(40, 50, 65));
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_ACCENT);
-    tft.setCursor(10, 222);
+    tft.setCursor(10, CAPTION_Y + 8);
     tft.print("MEMORY //");
 
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(72, 222);
+    tft.setCursor(72, CAPTION_Y + 8);
     tft.print(lastMemoryCaption);
 
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(240, 222);
+    tft.setCursor(240, CAPTION_Y + 8);
     tft.print("<  OK  >");
   }
 }
@@ -104,8 +113,8 @@ void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, 
 static const int CLK_CANVAS_W = 280;
 static const int CLK_CANVAS_H = 80;
 static const int CLK_CANVAS_X = (320 - CLK_CANVAS_W) / 2;
-static const int CLK_CANVAS_Y = 38;
-static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = 134, CLK_BAR_H = 3;
+static const int CLK_CANVAS_Y = SY(38);
+static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = SY(134), CLK_BAR_H = 3;
 
 static GFXcanvas16* timeCanvas = nullptr;
 static bool          canvasTried = false;
@@ -211,19 +220,19 @@ static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) 
   clockPalette(c, accent, ink, muted, greeting, fade);
   char buf[40];
 
-  tft.fillRect(0, 6, 320, 26, COLOR_BG_BLACK);
-  if (zone2Text(s, c, buf, sizeof(buf))) centerText(buf, 24, accent, &FreeSans9pt7b);
-  else if (s.clock_style == CLOCK_DIGITAL) centerText(greeting, 24, accent, &FreeSans9pt7b);
+  tft.fillRect(0, SY(6), 320, SH(6, 26), COLOR_BG_BLACK);
+  if (zone2Text(s, c, buf, sizeof(buf))) centerText(buf, SY(24), accent, &FreeSans9pt7b);
+  else if (s.clock_style == CLOCK_DIGITAL) centerText(greeting, SY(24), accent, &FreeSans9pt7b);
 
-  tft.fillRect(0, 146, 320, 36, COLOR_BG_BLACK);
+  tft.fillRect(0, SY(146), 320, SH(146, 36), COLOR_BG_BLACK);
   snprintf(buf, sizeof(buf), "%s, %s", s.weekday, s.date);
-  centerText(buf, 172, ink, &FreeSans12pt7b);
+  centerText(buf, SY(172), ink, &FreeSans12pt7b);
 
-  tft.fillRect(0, 196, 320, 38, COLOR_BG_BLACK);
-  if (s.clock_style == CLOCK_DIGITAL) drawTempWithDegree(22, 224, s.temp_c, s.weather_icon, muted);
+  tft.fillRect(0, SY(196), 320, SH(196, 38), COLOR_BG_BLACK);
+  if (s.clock_style == CLOCK_DIGITAL) drawTempWithDegree(22, SY(224), s.temp_c, s.weather_icon, muted);
   if (s.alarm_set) {
     alarmText(s, buf, sizeof(buf));
-    rightText(buf, 224, s.alarm_ringing ? COLOR_RED_PULSE : (s.clock_style == CLOCK_MINIMAL ? muted : accent));
+    rightText(buf, SY(224), s.alarm_ringing ? COLOR_RED_PULSE : (s.clock_style == CLOCK_MINIMAL ? muted : accent));
   }
   tft.setFont(NULL);
 }
@@ -231,7 +240,8 @@ static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) 
 // =====================================================================
 //  ANALOG CLOCK: a dial above, the date and alarm (or second zone) below.
 // =====================================================================
-static const int DIAL_X = 160, DIAL_Y = 102, DIAL_R = 88;
+static const int DIAL_X = 160, DIAL_Y = SY(102), DIAL_R = 88 * VIS_H / 240;
+static const int HAND_H = DIAL_R * 50 / 88, HAND_M = DIAL_R * 74 / 88, HAND_S = DIAL_R * 80 / 88;
 static float dialLast[3] = { -1, -1, -1 };   // hour, minute, second hand angles drawn
 
 static void dialHand(float turns, int len, int width, uint16_t color) {
@@ -257,18 +267,18 @@ static void drawAnalogStatics(const LumoState& s, const ClockNow& c, float fade)
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
   char buf[40];
-  tft.fillRect(0, 200, 320, 40, COLOR_BG_BLACK);
+  tft.fillRect(0, SY(200), 320, VIS_B - SY(200), COLOR_BG_BLACK);
   snprintf(buf, sizeof(buf), "%s, %s", s.weekday, s.date);
   tft.setFont(&FreeSans9pt7b);
   tft.setTextSize(1);
   tft.setTextColor(ink);
-  tft.setCursor(22, 226);
+  tft.setCursor(22, SY(226));
   tft.print(buf);
   if (s.alarm_set) {
     alarmText(s, buf, sizeof(buf));
-    rightText(buf, 226, s.alarm_ringing ? COLOR_RED_PULSE : accent);
+    rightText(buf, SY(226), s.alarm_ringing ? COLOR_RED_PULSE : accent);
   } else if (zone2Text(s, c, buf, sizeof(buf))) {
-    rightText(buf, 226, muted);
+    rightText(buf, SY(226), muted);
   }
   tft.setFont(NULL);
 }
@@ -282,14 +292,14 @@ static void drawAnalogHands(const LumoState& s, const ClockNow& c, float fade, b
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
   if (!force) {   // wipe the hands where they were
-    if (dialLast[0] >= 0) dialHand(dialLast[0], 50, 5, COLOR_BG_BLACK);
-    if (dialLast[1] >= 0) dialHand(dialLast[1], 74, 3, COLOR_BG_BLACK);
-    if (dialLast[2] >= 0) dialHand(dialLast[2], 80, 1, COLOR_BG_BLACK);
+    if (dialLast[0] >= 0) dialHand(dialLast[0], HAND_H, 5, COLOR_BG_BLACK);
+    if (dialLast[1] >= 0) dialHand(dialLast[1], HAND_M, 3, COLOR_BG_BLACK);
+    if (dialLast[2] >= 0) dialHand(dialLast[2], HAND_S, 1, COLOR_BG_BLACK);
   }
   dialTicks(ink, mix565(COLOR_BG_BLACK, muted, 0.6f));
-  dialHand(hr, 50, 5, ink);
-  dialHand(mn, 74, 3, ink);
-  if (sec >= 0) dialHand(sec, 80, 1, accent);
+  dialHand(hr, HAND_H, 5, ink);
+  dialHand(mn, HAND_M, 3, ink);
+  if (sec >= 0) dialHand(sec, HAND_S, 1, accent);
   tft.fillCircle(DIAL_X, DIAL_Y, 4, accent);
   dialLast[0] = hr; dialLast[1] = mn; dialLast[2] = sec;
 }
@@ -451,31 +461,31 @@ static void drawSystemScreen(const LumoState& s, bool full) {
 
     tft.setTextSize(1);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(65, 220);
+    tft.setCursor(65, SY(220));
     tft.print("Controlled via Web Dashboard");
   }
 
-  tft.fillRect(14, 42, 292, 18, COLOR_BG_BLACK);
+  tft.fillRect(14, SY(42), 292, 18, COLOR_BG_BLACK);
   tft.setTextSize(2);
   tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(14, 42);
+  tft.setCursor(14, SY(42));
   tft.printf("CPU Temp: %.1f C", s.cpu_temp);
-  drawProgressBar(14, 64, 292, 8, s.cpu_temp / 85.0f, (s.cpu_temp > 70.0f ? COLOR_RED_PULSE : COLOR_ACCENT), tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(64), 292, 8, s.cpu_temp / 85.0f, (s.cpu_temp > 70.0f ? COLOR_RED_PULSE : COLOR_ACCENT), tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 82, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 82);
+  tft.fillRect(14, SY(82), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(82));
   tft.printf("CPU Load: %d%%", s.cpu_pct);
-  drawProgressBar(14, 104, 292, 8, s.cpu_pct / 100.0f, COLOR_GREEN, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(104), 292, 8, s.cpu_pct / 100.0f, COLOR_GREEN, tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 122, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 122);
+  tft.fillRect(14, SY(122), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(122));
   tft.printf("RAM:      %d%%", s.ram_pct);
-  drawProgressBar(14, 144, 292, 8, s.ram_pct / 100.0f, COLOR_ACCENT, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(144), 292, 8, s.ram_pct / 100.0f, COLOR_ACCENT, tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 162, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 162);
+  tft.fillRect(14, SY(162), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(162));
   tft.printf("Disk:     %d%%", s.disk_pct);
-  drawProgressBar(14, 184, 292, 8, s.disk_pct / 100.0f, COLOR_MUTED, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(184), 292, 8, s.disk_pct / 100.0f, COLOR_MUTED, tft.color565(40, 40, 50));
 }
 
 static void drawSpotifyScreen(const LumoState& s, bool full) {
@@ -495,7 +505,7 @@ static void drawSpotifyScreen(const LumoState& s, bool full) {
     tft.drawFastHLine(10, 32, 300, tft.color565(40, 40, 50));
 
     tft.setTextSize(1);
-    tft.setCursor(30, 218);
+    tft.setCursor(30, SY(218));
     tft.print("Controlled via Local Web Dashboard");
   }
 
@@ -536,10 +546,10 @@ static void drawSpotifyScreen(const LumoState& s, bool full) {
   tft.print(s.sp_playing ? "[PLAYING]" : "[PAUSED]");
 
   float pct = (s.sp_duration_ms > 0) ? ((float)s.sp_progress_ms / s.sp_duration_ms) : 0.0f;
-  drawProgressBar(12, 162, 296, 8, pct, COLOR_GREEN, tft.color565(40, 40, 40));
+  drawProgressBar(12, SY(166), 296, 8, pct, COLOR_GREEN, tft.color565(40, 40, 40));
 
   tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(12, 186);
+  tft.setCursor(12, SY(188));
   tft.print("< Prev        OK Play/Pause        Next >");
 }
 
@@ -572,7 +582,7 @@ static void drawTasksScreen(const LumoState& s) {
   if (s.task_count == 0) {
     tft.setTextSize(2);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(55, 100);
+    tft.setCursor(55, SY(100));
     tft.print("All tasks done!");
   } else {
     int y = 44;
@@ -580,7 +590,7 @@ static void drawTasksScreen(const LumoState& s) {
     const int maxCharsPerLine = 44; // At textSize 1, 44 chars * 6px = 264px (fits comfortably in 320-30=290px)
 
     for (int i = 0; i < s.task_count && i < 5; i++) {
-      if (y > 195) break;
+      if (y > SY(195)) break;
 
       // Draw bullet indicator
       tft.setTextSize(1);
@@ -650,7 +660,7 @@ static void drawTasksScreen(const LumoState& s) {
     }
 
     // If more tasks remain that could not fit
-    if (s.task_count > drawn && y <= 208) {
+    if (s.task_count > drawn && y <= SY(208)) {
       tft.setTextSize(1);
       tft.setTextColor(COLOR_MUTED);
       tft.setCursor(24, y);
@@ -662,7 +672,7 @@ static void drawTasksScreen(const LumoState& s) {
 
   tft.setTextSize(1);
   tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(65, 226);
+  tft.setCursor(65, VIS_B - 14);
   tft.print("Controlled via Web Dashboard");
 }
 
@@ -673,10 +683,10 @@ static bool alarmNeedsStatic = true;
 static void drawAlarmFrame(float pulse) {
   uint16_t col = mix565(0x2000, COLOR_RED_PULSE, pulse);
   const int t = 5;
-  tft.fillRect(0, 0, 320, t, col);
-  tft.fillRect(0, 240 - t, 320, t, col);
-  tft.fillRect(0, t, t, 240 - 2 * t, col);
-  tft.fillRect(320 - t, t, t, 240 - 2 * t, col);
+  tft.fillRect(0, VIS_T, 320, t, col);
+  tft.fillRect(0, VIS_B - t, 320, t, col);
+  tft.fillRect(0, VIS_T + t, t, VIS_H - 2 * t, col);
+  tft.fillRect(320 - t, VIS_T + t, t, VIS_H - 2 * t, col);
 }
 
 void displayAlarmReset() { alarmNeedsStatic = true; }
@@ -693,26 +703,26 @@ void displayAlarmTick(const LumoState& s) {
 
   if (alarmNeedsStatic) {
     tft.fillScreen(COLOR_BG_BLACK);
-    centerText("ALARM", 52, COLOR_RED_PULSE, &FreeSans12pt7b);
+    centerText("ALARM", SY(52), COLOR_RED_PULSE, &FreeSans12pt7b);
     char hint[48];
     snprintf(hint, sizeof(hint), s.local_ringing ? "RIGHT: %u more min    Other: stop" : "Press a button to stop", s.snooze_minutes);
-    centerText(hint, 214, COLOR_MUTED, &FreeSans9pt7b);
+    centerText(hint, SY(214), COLOR_MUTED, &FreeSans9pt7b);
     lastMin = -1;
     alarmNeedsStatic = false;
   }
 
   if (c.m != lastMin) {
     lastMin = c.m;
-    tft.fillRect(10, 70, 300, 90, COLOR_BG_BLACK);
+    tft.fillRect(10, SY(140) - 70, 300, 90, COLOR_BG_BLACK);
     uint8_t dh = c.h % 12; if (dh == 0) dh = 12;
     char tb[8];
     snprintf(tb, sizeof(tb), "%d:%02d", dh, c.m);
     int16_t x1, y1; uint16_t w, h;
     tft.setFont(&FreeSans24pt7b);
     tft.setTextSize(2);
-    tft.getTextBounds(tb, 0, 140, &x1, &y1, &w, &h);
+    tft.getTextBounds(tb, 0, SY(140), &x1, &y1, &w, &h);
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor((320 - (int)w) / 2 - x1, 140);
+    tft.setCursor((320 - (int)w) / 2 - x1, SY(140));
     tft.print(tb);
     tft.setTextSize(1);
     tft.setFont(NULL);
@@ -735,16 +745,16 @@ void displayConnectingTick(const LumoState& s) {
 
   if (connNeedsStatic) {
     tft.fillScreen(COLOR_BG_STEALTH);
-    centerText("LUMO", 108, COLOR_WHITE, &FreeSans24pt7b);
-    centerText("v" FW_VERSION, 132, COLOR_MUTED, &FreeSans9pt7b);
+    centerText("LUMO", SY(108), COLOR_WHITE, &FreeSans24pt7b);
+    centerText("v" FW_VERSION, SY(132), COLOR_MUTED, &FreeSans9pt7b);
     if (s.pair_refused) {
-      centerText("Not paired", 168, COLOR_RED_PULSE, &FreeSans12pt7b);
-      centerText("Check DESK_TOKEN in secrets.h", 222, COLOR_MUTED, &FreeSans9pt7b);
+      centerText("Not paired", SY(168), COLOR_RED_PULSE, &FreeSans12pt7b);
+      centerText("Check DESK_TOKEN in secrets.h", SY(222), COLOR_MUTED, &FreeSans9pt7b);
     } else {
-      centerText("Connecting", 168, COLOR_WHITE, &FreeSans12pt7b);
+      centerText("Connecting", SY(168), COLOR_WHITE, &FreeSans12pt7b);
       char ipBuf[40];
       snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
-      centerText(ipBuf, 222, COLOR_MUTED, &FreeSans9pt7b);
+      centerText(ipBuf, SY(222), COLOR_MUTED, &FreeSans9pt7b);
     }
     tft.setFont(NULL);
     connNeedsStatic = false;
@@ -753,7 +763,7 @@ void displayConnectingTick(const LumoState& s) {
   for (int i = 0; i < 3; i++) {
     float phase = now / 1000.0f * 3.2f - i * 0.7f;
     float k = 0.5f + 0.5f * sinf(phase);
-    tft.fillCircle(144 + i * 16, 190, 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
+    tft.fillCircle(144 + i * 16, SY(190), 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
   }
 }
 
@@ -764,25 +774,26 @@ static void drawCardScreen(const LumoState& s) {
   const uint16_t panel = tft.color565(21, 26, 34);
   bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
   tft.fillScreen(COLOR_BG_BLACK);
-  tft.fillRoundRect(12, 18, 296, hasActions ? 164 : 204, 10, panel);
-  tft.drawRoundRect(12, 18, 296, hasActions ? 164 : 204, 10, COLOR_ACCENT);
+  const int panelH = hasActions ? SH(18, 164) : SH(18, 204);
+  tft.fillRoundRect(12, SY(18), 296, panelH, 10, panel);
+  tft.drawRoundRect(12, SY(18), 296, panelH, 10, COLOR_ACCENT);
 
   tft.setFont(NULL);
   tft.setTextSize(1);
   tft.setTextColor(COLOR_ACCENT);
-  tft.setCursor(28, 32);
+  tft.setCursor(28, SY(32));
   tft.print(s.notif_app);
 
   tft.setFont(&FreeSans12pt7b);
   tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(28, 72);
+  tft.setCursor(28, SY(72));
   tft.print(s.notif_title);
 
   // The body wraps on spaces, about 30 characters to a line, three lines.
   tft.setFont(&FreeSans9pt7b);
   tft.setTextColor(tft.color565(170, 178, 192));
   const char* p = s.notif_body;
-  int y = 104;
+  int y = SY(104);
   for (int line = 0; line < 3 && *p; line++) {
     while (*p == ' ') p++;
     int len = strlen(p), take = len;
@@ -796,18 +807,19 @@ static void drawCardScreen(const LumoState& s) {
     tft.setCursor(28, y);
     tft.print(row);
     p += take;
-    y += 24;
+    y += SH(104, 24);
   }
 
   if (hasActions) {
     const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
     const char* keys[3]   = { "<", "OK", ">" };
+    const int btnY = SY(196);
     for (int i = 0; i < 3; i++) {
       int x = 12 + i * 102;
       if (!labels[i][0]) continue;
       bool primary = (i == 1);
-      if (primary) tft.fillRoundRect(x, 196, 92, 32, 6, COLOR_ACCENT);
-      else tft.drawRoundRect(x, 196, 92, 32, 6, COLOR_MUTED);
+      if (primary) tft.fillRoundRect(x, btnY, 92, 32, 6, COLOR_ACCENT);
+      else tft.drawRoundRect(x, btnY, 92, 32, 6, COLOR_MUTED);
       char text[20];
       if (i == 2) snprintf(text, sizeof(text), "%s %s", labels[i], keys[i]);   // "Snooze >"
       else snprintf(text, sizeof(text), "%s %s", keys[i], labels[i]);         // "< Tomorrow", "OK Done"
@@ -816,7 +828,7 @@ static void drawCardScreen(const LumoState& s) {
       tft.setTextSize(1);
       tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
       tft.setTextColor(primary ? COLOR_BG_BLACK : COLOR_WHITE);
-      tft.setCursor(x + (92 - (int)w) / 2, 208);
+      tft.setCursor(x + (92 - (int)w) / 2, btnY + 12);
       tft.print(text);
     }
   }
@@ -833,25 +845,25 @@ static void drawMemoryScreen(const LumoState& s, bool full) {
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(85, 115);
+    tft.setCursor(85, SY(115));
     tft.print("Receiving Memory Photo...");
   }
 
   if (s.mem_caption[0] != '\0') {
-    tft.fillRect(0, 214, 320, 26, COLOR_BG_STEALTH);
-    tft.drawFastHLine(0, 214, 320, tft.color565(40, 50, 65));
+    tft.fillRect(0, CAPTION_Y, 320, 26, COLOR_BG_STEALTH);
+    tft.drawFastHLine(0, CAPTION_Y, 320, tft.color565(40, 50, 65));
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_ACCENT);
-    tft.setCursor(10, 222);
+    tft.setCursor(10, CAPTION_Y + 8);
     tft.print("MEMORY //");
 
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(72, 222);
+    tft.setCursor(72, CAPTION_Y + 8);
     tft.print(s.mem_caption);
 
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(240, 222);
+    tft.setCursor(240, CAPTION_Y + 8);
     tft.print("<  OK  >");
   }
 }
