@@ -18,7 +18,7 @@ A distributed IoT smart desk clock and companion system featuring:
 | **TFT Display GND** | GND | Common Ground |
 | **Button Ladder** | GPIO 1 (ADC) | 5-way resistor ladder: OK (~0.15V), UP (~0.60V), DOWN (~0.22V), LEFT (~3.30V), RIGHT (~0.33V) |
 | **NeoPixel Ring** | GPIO 10 | 6x WS2812B RGB LEDs |
-| **Haptic Buzzer** | GPIO 9 | Active-low PWM (50 kHz silent haptic click or audio alarm) |
+| **Haptic Buzzer** | GPIO 9 | Active-low PWM: silent 50 kHz knocks for button presses and a double knock for notifications; an audible 2.7 kHz tone only for alarms |
 
 *Note: Battery monitoring has been completely omitted. Power the ESP32 directly via USB-C.*
 

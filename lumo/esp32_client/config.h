@@ -5,7 +5,7 @@
 #define TFT_CS        8
 #define TFT_DC        7
 #define BUTTON_PIN    1
-#define BUZZER_PIN    9    // Active-LOW haptic/buzzer
+#define BUZZER_PIN    9    // Active-LOW buzzer: silent knocks at 50 kHz, a tone for the alarm
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
 
@@ -36,6 +36,7 @@
 // ===================== HAPTICS =====================
 #define HAPTIC_FREQ  50000
 #define HAPTIC_RES   8
+#define ALARM_TONE_HZ 2700   // the buzzer's loudest pitch; only the alarm uses it
 
 // ===================== BUTTON VOLTAGE THRESHOLDS =====================
 #define V_OK    0.15f
@@ -54,7 +55,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.6.3"
+#define FW_VERSION "2.6.4"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
