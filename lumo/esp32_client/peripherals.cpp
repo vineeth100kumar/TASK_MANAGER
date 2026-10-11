@@ -203,7 +203,10 @@ void hapticInit(uint8_t strength) {
   esp_timer_create_args_t args = {};
   args.callback = &hapTick;
   args.name = "haptics";
-  esp_timer_create(&args, &hapTimer);
+  esp_err_t err = esp_timer_create(&args, &hapTimer);
+  if (err != ESP_OK) hapTimer = nullptr;     // hapticUpdate() drives it instead
+  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, timer %s, strength %u%%\n", BUZZER_PIN,
+                (unsigned)HAPTIC_FREQ, res, hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
 }
 
 void hapticPlay(Haptic h) {
@@ -215,9 +218,10 @@ void hapticPlay(Haptic h) {
     return;
   }
   float scale = hapTop(hapStrength);
-  if (scale <= 0) return;                    // haptics off in Sage
+  if (scale <= 0) { Serial.println("[HAPTIC] off (strength 0 in Sage)"); return; }
   bool press = (h == HAP_TICK || h == HAP_HOLD);
   if (!press && nightTime()) scale *= HAPTIC_NIGHT_PCT / 100.0f;
+  Serial.printf("[HAPTIC] effect %d at %d%% duty\n", (int)h, (int)(scale * 100));
   hapAskFor(FX_LIB[h].f, FX_LIB[h].n, false, false, scale);
 }
 
@@ -255,6 +259,14 @@ void hapticOff() {
 // (coarser, but still glides).
 void hapticUpdate() {
   if (!hapTimer) hapTick(nullptr);
+}
+
+// Serial "buzz" plays a plain full-power 300 ms buzz with no shaping, to tell
+// a wiring problem from a tuning one.
+void hapticSelfTest() {
+  static const HapFrame TEST[] = { {255, 1}, {255, 300}, {0, 1} };
+  Serial.println("[HAPTIC] self test: 300 ms at full power");
+  hapAskFor(TEST, 3, false, false, 1);
 }
 
 #undef EDGE

@@ -139,6 +139,12 @@ void setup() {
 void loop() {
   wsPoll();
   hapticUpdate();
+  // Type "buzz" in the serial monitor to test the motor with no shaping.
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line == "buzz") hapticSelfTest();
+  }
   neoSetContext(currentScreen, lumoState);   // the ring's AUTO scene follows the screen and face
   neoTick();
 

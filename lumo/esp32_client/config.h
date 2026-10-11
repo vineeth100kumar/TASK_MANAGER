@@ -46,21 +46,21 @@
 #define HAPTIC_TICK_US     100    // how often a silent envelope moves (10 kHz: its steps are too fine to hear)
 #define HAPTIC_EDGE_MS     5      // shortest rise or fall; shorter edges tick in the buzzer
 #define HAPTIC_FALL_MS     10     // how a knock lets go
-#define HAPTIC_MIN_DUTY    28     // % on-time where the motor starts to turn (strength 1)
+#define HAPTIC_MIN_DUTY    60     // % on-time at strength 1 (below ~60% the motor may not start)
 #define HAPTIC_MAX_DUTY    100    // % on-time at strength 100
-#define HAPTIC_STRENGTH    70     // default strength 0-100 until Sage sends one (0 = off)
+#define HAPTIC_STRENGTH    100    // default strength 0-100 until Sage sends one (0 = off)
 #define HAPTIC_NIGHT_PCT   60     // notifications at night run at this % (presses don't)
 
 // Per-effect tuning. Peaks are 0-255 of the strength above; lengths in ms.
-#define HFX_TICK_PEAK      190    // every button press: one crisp tick
-#define HFX_TICK_HOLD_MS   14
-#define HFX_KICK_MS        5      // a tick opens at full power for this long to spin up
+#define HFX_TICK_PEAK      235    // every button press: one crisp tick
+#define HFX_TICK_HOLD_MS   28
+#define HFX_KICK_MS        12     // a tick opens at full power for this long to spin up
 #define HFX_HOLD_PEAK      230    // OK held: a soft tick, then a firm one
-#define HFX_KNOCK_PEAK     220    // a notification: two knocks
-#define HFX_KNOCK_HOLD_MS  30
+#define HFX_KNOCK_PEAK     245    // a notification: two knocks
+#define HFX_KNOCK_HOLD_MS  45
 #define HFX_KNOCK_GAP_MS   120
 #define HFX_REMIND_PEAK    255    // a reminder: two longer, firmer knocks
-#define HFX_REMIND_HOLD_MS 55
+#define HFX_REMIND_HOLD_MS 70
 #define HFX_REMIND_GAP_MS  150
 #define HFX_PULSE_PEAK     200    // a soft swell (breath)
 #define HFX_PULSE_MS       700
@@ -91,7 +91,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.7.0"
+#define FW_VERSION "2.7.1"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
