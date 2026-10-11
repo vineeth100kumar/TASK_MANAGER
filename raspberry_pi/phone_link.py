@@ -126,6 +126,10 @@ class PhoneLink:
         self._data_buffer = b""
         self._bus = None
         self._chars: Dict[str, Any] = {}
+        # Value watchers by characteristic path. They outlive a failed
+        # subscribe so a retry doesn't add a second one, and go when the
+        # phone does.
+        self._watching: Dict[str, tuple] = {}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -227,7 +231,7 @@ class PhoneLink:
                 await self._tick()
             except Exception as e:
                 log.warning("Phone link error: %s", e)
-                self._chars.clear()
+                self._chars.clear()  # subscribe again on the next tick
             # Poll faster while scanning, pairing or connecting so the page keeps up.
             await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") else 5)
 
@@ -252,6 +256,7 @@ class PhoneLink:
         await self.set_presence(phone_path is not None, phone_name)
         if phone_path is None:
             self._chars.clear()
+            self._unwatch()
             return
         if not self._chars:
             await self._subscribe(objects, phone_path)
@@ -269,6 +274,7 @@ class PhoneLink:
         return self._bus.get_proxy_object(BLUEZ, path, intro)
 
     async def _subscribe(self, objects: dict, device_path: str) -> None:
+        notifying: Dict[str, bool] = {}
         for path, ifaces in objects.items():
             char = ifaces.get("org.bluez.GattCharacteristic1")
             if not char or not path.startswith(device_path + "/"):
@@ -278,17 +284,44 @@ class PhoneLink:
                 continue
             obj = await self._char(path)
             self._chars[uuid] = obj.get_interface("org.bluez.GattCharacteristic1")
-            if uuid in {ANCS_NOTIFICATION_SOURCE, ANCS_DATA_SOURCE, AMS_ENTITY_UPDATE}:
+            notifying[uuid] = bool(char.get("Notifying") and char["Notifying"].value)
+            if uuid in {ANCS_NOTIFICATION_SOURCE, ANCS_DATA_SOURCE, AMS_ENTITY_UPDATE} and path not in self._watching:
                 props = obj.get_interface("org.freedesktop.DBus.Properties")
-                props.on_properties_changed(self._value_handler(uuid))
+                handler = self._value_handler(uuid)
+                props.on_properties_changed(handler)
+                self._watching[path] = (props, handler)
+        # Each step is tried on its own: a phone that refuses one (an ANCS
+        # error, say) still gets the others, and a notify BlueZ already has
+        # running or starting ("In Progress") counts as on. Before this, the
+        # first failure after a restart made every retry fail the same way and
+        # the clock stopped getting songs.
         # Data Source must be listening before Notification Source starts.
         for uuid in (ANCS_DATA_SOURCE, ANCS_NOTIFICATION_SOURCE, AMS_ENTITY_UPDATE):
-            if uuid in self._chars:
-                await self._chars[uuid].call_start_notify()
+            if uuid in self._chars and not notifying.get(uuid):
+                await self._try(f"notify {uuid[:8]}", self._chars[uuid].call_start_notify())
         if AMS_ENTITY_UPDATE in self._chars:
-            await self._chars[AMS_ENTITY_UPDATE].call_write_value(bytes([AMS_PLAYER, 0, 1, 2]), {})
-            await self._chars[AMS_ENTITY_UPDATE].call_write_value(bytes([AMS_TRACK, 0, 1, 2]), {})
+            for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2])):
+                await self._try("now playing", self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {}))
         log.info("Phone link subscribed: %s", ", ".join(sorted(self._chars)))
+
+    @staticmethod
+    async def _try(step: str, call) -> bool:
+        try:
+            await call
+            return True
+        except Exception as e:
+            if "progress" in str(e).lower() or "already" in str(e).lower():
+                return True
+            log.warning("Phone link: %s failed: %s", step, e)
+            return False
+
+    def _unwatch(self) -> None:
+        for props, handler in self._watching.values():
+            try:
+                props.off_properties_changed(handler)
+            except Exception:
+                pass
+        self._watching.clear()
 
     def _value_handler(self, uuid: str):
         def handler(_iface, changed, _invalidated):
