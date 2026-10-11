@@ -61,6 +61,14 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   storeSaveClock(s);
 }
 
+static AlarmTone toneNamed(const char* name, AlarmTone fallback) {
+  if (!strcmp(name, "pulse"))   return TONE_PULSE;
+  if (!strcmp(name, "classic")) return TONE_CLASSIC;
+  if (!strcmp(name, "rising"))  return TONE_RISING;
+  if (!strcmp(name, "chirp"))   return TONE_CHIRP;
+  return fallback;
+}
+
 static void handleTextMessage(const String& payload) {
   if (!statePtr) return;
   LumoState& s = *statePtr;
@@ -119,6 +127,9 @@ static void handleTextMessage(const String& payload) {
     else if (strcmp(m, "SPOTIFY") == 0) s.next_screen = SCREEN_SPOTIFY;
     else if (strcmp(m, "TASKS") == 0)   s.next_screen = SCREEN_TASKS;
     else if (strcmp(m, "MEMORY") == 0)  s.next_screen = SCREEN_MEMORY;
+    else if (strcmp(m, "TIMER") == 0)   s.next_screen = SCREEN_TIMER;
+    else if (strcmp(m, "STOPWATCH") == 0) s.next_screen = SCREEN_STOPWATCH;
+    else if (strcmp(m, "WORLD") == 0)   s.next_screen = SCREEN_WORLD;
     s.flag_screen_switch = true;
     Serial.printf("[WS] Remote screen switch: %s\n", m);
   }
@@ -145,7 +156,7 @@ static void handleTextMessage(const String& payload) {
     s.flag_card_changed = true;
     neoPing(90, 170, 255);
     // A knock for a phone notification; a reminder already brought its own.
-    if (millis() - lastHapticCmd > 800) hapticPlay(HAP_NOTIFY);
+    if (s.hap_notify && millis() - lastHapticCmd > 800) hapticPlay(HAP_NOTIFY);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
     s.cpu_temp = doc["cpu_temp"] | s.cpu_temp;
@@ -236,16 +247,79 @@ static void handleTextMessage(const String& payload) {
     // A named pattern, or a length: Sage sends 300 ms with a reminder.
     const char* pattern = doc["pattern"] | "";
     uint16_t ms = doc["ms"] | 50;
+    lastHapticCmd = millis();
+    if (!s.hap_notify) return;   // knocks for notifications are off in Sage
     if      (!strcmp(pattern, "tap"))      hapticPlay(HAP_TAP);
     else if (!strcmp(pattern, "notify"))   hapticPlay(HAP_NOTIFY);
     else if (!strcmp(pattern, "success"))  hapticPlay(HAP_SUCCESS);
     else if (!strcmp(pattern, "reminder") || ms >= 250) hapticPlay(HAP_REMINDER);
     else hapticPulse(ms);
-    lastHapticCmd = millis();
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
+    strlcpy(s.alarm_label, doc["label"] | "", sizeof(s.alarm_label));
+    s.alarm_tone   = toneNamed(doc["tone"] | "", s.alarm_tone);
+    s.alarm_volume = constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100);
+    s.snooze_minutes = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     s.alarm_ringing = true;
     s.local_ringing = false;   // Sage has it now
+  }
+  else if (strcmp(cmd, "TONE") == 0) {
+    // A few seconds of an alarm sound, to choose one in Sage.
+    hapticPreview(toneNamed(doc["tone"] | "", s.alarm_tone),
+                  constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100),
+                  constrain((int)(doc["seconds"] | 4), 1, 15));
+  }
+  else if (strcmp(cmd, "TIMER") == 0) {
+    const char* st = doc["state"] | "idle";
+    ToolState next = !strcmp(st, "running") ? TOOL_RUNNING : !strcmp(st, "paused") ? TOOL_PAUSED
+                   : !strcmp(st, "done") ? TOOL_DONE : TOOL_IDLE;
+    uint32_t left = doc["left_ms"] | 0;
+    s.tm_left_ms  = left;
+    s.tm_end      = millis() + left;
+    s.tm_total_ms = doc["total_ms"] | 0;
+    strlcpy(s.tm_label, doc["label"] | "", sizeof(s.tm_label));
+    s.tm_state = next;
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "STOPWATCH") == 0) {
+    s.sw_running = doc["running"] | false;
+    s.sw_base_ms = doc["elapsed_ms"] | 0;
+    s.sw_mark    = millis();
+    s.sw_lap_count = doc["lap_count"] | 0;
+    s.sw_lap_shown = 0;
+    for (uint32_t lap : doc["laps"].as<JsonArray>()) {
+      if (s.sw_lap_shown < STOPWATCH_LAPS) s.sw_laps[s.sw_lap_shown++] = lap;
+    }
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "WORLD") == 0) {
+    s.wc_count = 0;
+    for (JsonObject z : doc["zones"].as<JsonArray>()) {
+      if (s.wc_count >= MAX_WORLD_CLOCKS) break;
+      strlcpy(s.wc_name[s.wc_count], z["name"] | "", sizeof(s.wc_name[0]));
+      s.wc_offset[s.wc_count] = constrain((int)(z["offset"] | 0), -1440, 1440);
+      s.wc_count++;
+    }
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "HAPTICS") == 0) {
+    s.hap_buttons = doc["buttons"] | true;
+    s.hap_notify  = doc["notify"]  | true;
+  }
+  else if (strcmp(cmd, "NIGHT") == 0) {
+    s.night = doc["on"] | false;
+    neoSetSleep(s.night);
+  }
+  else if (strcmp(cmd, "IDENTIFY") == 0) {
+    // "This one": a bright white double flash and a knock.
+    neoPing(255, 255, 255);
+    hapticPlay(HAP_SUCCESS);
+  }
+  else if (strcmp(cmd, "REBOOT") == 0) {
+    Serial.println("[WS] Restarting, as Sage asked");
+    client.close();
+    delay(300);
+    ESP.restart();
   }
   else if (strcmp(cmd, "ALARM_OFF") == 0) {
     s.alarm_ringing = false;
@@ -350,8 +424,23 @@ void wsConnect() {
   client.connect(hostStr, PI_WS_PORT, PI_WS_PATH);
 }
 
+// Every 30 s, how the clock is doing, for the LUMO page in Sage.
+static void sendStatus() {
+  static unsigned long lastStatus = 0;
+  if (!isConnected || !statePtr || !statePtr->paired) return;
+  if (lastStatus && millis() - lastStatus < 30000) return;
+  lastStatus = millis();
+  char json[200];
+  snprintf(json, sizeof(json),
+           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\"}",
+           WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), millis() / 1000UL,
+           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str());
+  client.send(json);
+}
+
 void wsPoll() {
   client.poll();
+  sendStatus();
 
   if (!isConnected && WiFi.status() == WL_CONNECTED) {
     unsigned long now = millis();

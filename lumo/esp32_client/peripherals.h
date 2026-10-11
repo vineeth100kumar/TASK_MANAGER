@@ -23,6 +23,9 @@ Button   readButton();
 // Named patterns, played without blocking (see peripherals.cpp).
 enum Haptic { HAP_TAP, HAP_HOLD, HAP_NOTIFY, HAP_REMINDER, HAP_SUCCESS, HAP_ALARM };
 void     hapticPlay(Haptic h);                         // HAP_ALARM loops until hapticOff()
+void     hapticRing(AlarmTone tone, uint8_t volume);   // an alarm's sound, looped until hapticOff()
+void     hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds);   // a few seconds of it
+bool     hapticRinging();                              // an alarm or timer is sounding
 void     hapticPulse(uint16_t ms);
 void     hapticOff();
 void     hapticUpdate();

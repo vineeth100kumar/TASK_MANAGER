@@ -55,7 +55,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.6.4"
+#define FW_VERSION "2.7.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -63,7 +63,9 @@
 enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_HOLD_OK };
 // SCREEN_CARD shows a reminder or notification over whatever was on screen,
 // and goes back to it when the card is answered or times out.
-enum ScreenMode   { SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY, SCREEN_CARD };
+// The timer, stopwatch and world clock screens (2.7) are drawn in faces.cpp.
+enum ScreenMode   { SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY, SCREEN_CARD,
+                    SCREEN_TIMER, SCREEN_STOPWATCH, SCREEN_WORLD };
 enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM, NEO_AUTO, NEO_AURORA, NEO_COMET };
 // How the clock screen shows the time (set in Sage, kept in flash). The first
 // three are the classic styles; the rest are the smooth faces in faces.cpp.
@@ -74,6 +76,13 @@ enum ClockStyle   { CLOCK_DIGITAL, CLOCK_MINIMAL, CLOCK_ANALOG,
 #define MAX_LOCAL_ALARMS 4
 #define LOCAL_RING_MINUTES 10
 struct LocalAlarm { uint8_t h, m; };
+
+// The alarm's sound, chosen per alarm in Sage (ALARM_RING's "tone").
+enum AlarmTone    { TONE_PULSE, TONE_CLASSIC, TONE_RISING, TONE_CHIRP };
+// The timer kept by Sage (TIMER's "state").
+enum ToolState    { TOOL_IDLE, TOOL_RUNNING, TOOL_PAUSED, TOOL_DONE };
+#define MAX_WORLD_CLOCKS 3
+#define STOPWATCH_LAPS   4
 
 // ===================== CENTRAL STATE STRUCT =====================
 struct LumoState {
@@ -119,6 +128,31 @@ struct LumoState {
   char       zone2[16]     = "";     // a second time zone's name, "" for none
   int16_t    zone2_offset  = 0;      // its minutes ahead of local time
 
+  // What the ringing alarm is called and how it sounds (ALARM_RING).
+  char       alarm_label[28] = "";
+  AlarmTone  alarm_tone      = TONE_PULSE;
+  uint8_t    alarm_volume    = 80;     // 0..100
+  // The timer and stopwatch run in Sage (TIMER, STOPWATCH); the clock counts
+  // between messages from the millis() they arrived at.
+  ToolState  tm_state    = TOOL_IDLE;
+  uint32_t   tm_end      = 0;          // millis() when it runs out, while running
+  uint32_t   tm_left_ms  = 0;          // while paused
+  uint32_t   tm_total_ms = 0;
+  char       tm_label[25] = "";
+  bool       sw_running  = false;
+  uint32_t   sw_base_ms  = 0;          // elapsed when sw_mark was taken
+  uint32_t   sw_mark     = 0;
+  uint32_t   sw_laps[STOPWATCH_LAPS];  // the last few laps' lengths, oldest first
+  uint8_t    sw_lap_shown = 0;
+  uint16_t   sw_lap_count = 0;
+  // The World screen's places, as minutes ahead of the time here (WORLD).
+  uint8_t    wc_count = 0;
+  char       wc_name[MAX_WORLD_CLOCKS][16];
+  int16_t    wc_offset[MAX_WORLD_CLOCKS];
+  // Knocks for button presses and for notifications (HAPTICS), and night.
+  bool       hap_buttons = true;
+  bool       hap_notify  = true;
+  bool       night       = false;
   // Pi 5 System Vitals
   float   cpu_temp = 0.0f;
   uint8_t cpu_pct  = 0;
@@ -158,5 +192,6 @@ struct LumoState {
   bool       flag_screen_switch   = false;
   bool       flag_voice_changed   = false;
   bool       flag_memory_changed  = false;
+  bool       flag_tools_changed   = false;
   ScreenMode next_screen          = SCREEN_CLOCK;
 };

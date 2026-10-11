@@ -991,5 +991,14 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
     case SCREEN_MEMORY:
       drawMemoryScreen(s, modeChanged);
       break;
+    case SCREEN_TIMER:
+    case SCREEN_STOPWATCH:
+    case SCREEN_WORLD:
+      if (modeChanged) {
+        tft.fillScreen(0x0841);
+        toolScreenReset();
+      }
+      toolScreenTick(mode, s);
+      break;
   }
 }

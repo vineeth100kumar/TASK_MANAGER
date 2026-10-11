@@ -1318,6 +1318,7 @@ def _desk_settings_response(saved: dict) -> dict:
             "actions": list(desk_settings.ACTIONS),
             "clockStyles": list(desk_settings.CLOCK_STYLES),
             "lightModes": list(desk_settings.LIGHT_MODES),
+            "alarmTones": list(desk_settings.ALARM_TONES),
         },
     }
 
@@ -1359,6 +1360,122 @@ async def desk_press(req: DeskPress):
     if not desk.ENABLED or not await desk_run.press(button):
         raise HTTPException(status_code=409, detail="The desk clock isn't running. Set SAGE_DESK=1 and restart Sage.")
     return {"success": True, "button": button, **desk_run.status(desk.ENABLED)}
+
+
+# The LUMO page in Sage: alarms, the timer and stopwatch, and the clock itself.
+def _desk_now() -> datetime.datetime:
+    return datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+
+
+def _desk_running():
+    from desk import run as desk_run
+    if not desk.ENABLED or not desk_run.running():
+        raise HTTPException(status_code=409, detail="The desk clock isn't running. Set SAGE_DESK=1 and restart Sage.")
+    return desk_run
+
+
+@app.get("/api/desk/alarms")
+async def desk_alarms():
+    from desk import alarm_store
+    from desk.alarms import is_alarm
+    now = _desk_now()
+    items = await asyncio.to_thread(notifier.open_items)
+    alarms = [alarm_store.describe(i, now.tzinfo) for i in items if is_alarm(i)]
+    alarms.sort(key=lambda a: (a["time"], a["label"]))
+    return {"success": True, "alarms": alarms}
+
+
+@app.post("/api/desk/alarms")
+async def desk_alarm_create(spec: Dict[str, Any]):
+    from desk import alarm_store
+    now = _desk_now()
+    try:
+        item, rev = await asyncio.to_thread(alarm_store.create, spec, now)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await events.broadcast(item_actions.change_event(rev, item["id"], alarm_store.SOURCE))
+    return {"success": True, "alarm": alarm_store.describe(item, now.tzinfo)}
+
+
+@app.put("/api/desk/alarms/{alarm_id}")
+async def desk_alarm_update(alarm_id: str, spec: Dict[str, Any]):
+    from desk import alarm_store
+    now = _desk_now()
+    try:
+        saved = await asyncio.to_thread(alarm_store.update, alarm_id, spec, now, now.tzinfo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not saved:
+        raise HTTPException(status_code=404, detail="No such alarm.")
+    await events.broadcast(item_actions.change_event(saved[1], alarm_id, alarm_store.SOURCE))
+    return {"success": True, "alarm": alarm_store.describe(saved[0], now.tzinfo)}
+
+
+@app.delete("/api/desk/alarms/{alarm_id}")
+async def desk_alarm_delete(alarm_id: str):
+    from desk import alarm_store
+    saved = await asyncio.to_thread(alarm_store.remove, alarm_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No such alarm.")
+    await events.broadcast(item_actions.change_event(saved[1], alarm_id, alarm_store.SOURCE))
+    return {"success": True, "id": alarm_id}
+
+
+class DeskAction(BaseModel):
+    action: str
+    seconds: int = 0
+    label: str = ""
+    tone: str = ""
+    volume: int = 0
+
+
+@app.post("/api/desk/ringing")
+async def desk_ringing(req: DeskAction):
+    """Snooze or stop the alarm ringing on the clock."""
+    desk_run = _desk_running()
+    if req.action not in ("snooze", "stop"):
+        raise HTTPException(status_code=400, detail="action must be snooze or stop.")
+    if not await desk_run.ringing(req.action):
+        raise HTTPException(status_code=409, detail="No alarm is ringing.")
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/timer")
+async def desk_timer(req: DeskAction):
+    """start (seconds, label), pause, resume, add (seconds) or cancel."""
+    desk_run = _desk_running()
+    try:
+        await desk_run.timer(req.action, req.seconds, req.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/stopwatch")
+async def desk_stopwatch(req: DeskAction):
+    """start, pause, lap or reset."""
+    desk_run = _desk_running()
+    try:
+        await desk_run.stopwatch(req.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/device")
+async def desk_device(req: DeskAction):
+    """identify (flash and knock), restart, or tone (hear an alarm sound)."""
+    from desk.alarms import TONES
+    desk_run = _desk_running()
+    if req.action == "tone" and req.tone and req.tone not in TONES:
+        raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(TONES)}.")
+    try:
+        sent = await desk_run.device(req.action, req.tone, max(0, min(100, req.volume)))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not sent:
+        raise HTTPException(status_code=409, detail="The clock isn't connected.")
+    return {"success": True, **desk_run.status(desk.ENABLED)}
 
 
 # --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---

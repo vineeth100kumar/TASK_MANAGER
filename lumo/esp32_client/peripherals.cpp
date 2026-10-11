@@ -29,8 +29,14 @@ static const HapStep HP_HOLD[]     = { {180, 18}, {0, 80}, {255, 34} };
 static const HapStep HP_NOTIFY[]   = { {210, 40}, {0, 130}, {230, 40} };
 static const HapStep HP_REMINDER[] = { {240, 55}, {0, 150}, {255, 55} };
 static const HapStep HP_SUCCESS[]  = { {150, 16}, {0, 60}, {230, 22} };
-// "beep-beep ... beep-beep", the same rhythm the light beats to.
+// The alarm's tones, all on the audible voice. Pulse is "beep-beep ...
+// beep-beep", the same rhythm the light beats to.
 static const HapStep HP_ALARM[]    = { {255, 130}, {0, 130}, {255, 130}, {0, 910} };
+static const HapStep HP_CLASSIC[]  = { {255, 90}, {0, 90}, {255, 90}, {0, 90}, {255, 90}, {0, 90}, {255, 90}, {0, 680} };
+static const HapStep HP_RISING[]   = { {255, 420}, {0, 1080} };
+static const HapStep HP_CHIRP[]    = { {255, 35}, {0, 55}, {255, 35}, {0, 55}, {255, 35}, {0, 900} };
+// How long each tone takes to build from a quarter to the chosen volume.
+static const uint16_t TONE_RAMP_S[] = { 20, 8, 60, 6 };
 
 #define HAP_LEN(p) (sizeof(p) / sizeof((p)[0]))
 
@@ -39,6 +45,9 @@ static uint8_t  hapCount = 0, hapIndex = 0;
 static bool     hapLoop = false, hapNight = false;
 static bool     hapTone = false;          // true while the buzzer is on the alarm's audible tone
 static unsigned long hapStepAt = 0, hapLoopStart = 0;
+static unsigned long hapStopAt = 0;       // a preview's end (0: rings until hapticOff)
+static float    hapPeak = 0.5f;           // the tone's loudest duty, from its volume
+static uint16_t hapRampMs = 20000;
 static int      hapLevel = -1;            // what the pin is set to, -1 = unknown
 
 static void hapWrite(int strength) {
@@ -56,6 +65,7 @@ static void hapVoice(bool tone) {
 }
 
 void hapticOff() {
+  hapStopAt = 0;
   hapSteps = nullptr;
   hapCount = 0;
   hapLoop = false;
@@ -71,15 +81,51 @@ void hapticPlay(Haptic h) {
     case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = HAP_LEN(HP_NOTIFY); break;
     case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = HAP_LEN(HP_REMINDER); break;
     case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = HAP_LEN(HP_SUCCESS); break;
-    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = HAP_LEN(HP_ALARM); break;
+    case HAP_ALARM:    hapticRing(TONE_PULSE, 100); return;
   }
-  hapLoop = (h == HAP_ALARM);
+  hapLoop = false;
   hapVoice(hapLoop);
   hapNight = nightTime() && h != HAP_TAP && h != HAP_HOLD && h != HAP_ALARM;
   hapIndex = 0;
   hapStepAt = hapLoopStart = millis();
   hapLevel = -1;
 }
+
+// Volume 0..100 to the square wave's duty: a square wave is loudest at half
+// duty and its loudness falls about 20 dB for every tenfold drop below that,
+// so 100 is 50%, 50 is 5% and 0 is silent.
+static float toneDuty(uint8_t volume) {
+  if (volume == 0) return 0.0f;
+  return 0.5f * powf(10.0f, (min((int)volume, 100) - 100) / 50.0f);
+}
+
+void hapticRing(AlarmTone tone, uint8_t volume) {
+  switch (tone) {
+    case TONE_CLASSIC: hapSteps = HP_CLASSIC; hapCount = HAP_LEN(HP_CLASSIC); break;
+    case TONE_RISING:  hapSteps = HP_RISING;  hapCount = HAP_LEN(HP_RISING); break;
+    case TONE_CHIRP:   hapSteps = HP_CHIRP;   hapCount = HAP_LEN(HP_CHIRP); break;
+    default:           hapSteps = HP_ALARM;   hapCount = HAP_LEN(HP_ALARM); tone = TONE_PULSE; break;
+  }
+  hapPeak = toneDuty(volume);
+  hapRampMs = TONE_RAMP_S[tone] * 1000;
+  hapLoop = true;
+  hapStopAt = 0;
+  hapVoice(true);
+  hapNight = false;
+  hapIndex = 0;
+  hapStepAt = hapLoopStart = millis();
+  hapLevel = -1;
+}
+
+void hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds) {
+  if (hapLoop && !hapStopAt) return;   // a real alarm is ringing
+  hapticRing(tone, volume);
+  hapRampMs = 1;                       // a preview plays at the volume chosen
+  hapStopAt = millis() + seconds * 1000UL;
+  if (!hapStopAt) hapStopAt = 1;
+}
+
+bool hapticRinging() { return hapLoop && !hapStopAt; }
 
 // A single pulse of `ms`, for the Pi's HAPTIC command without a pattern.
 void hapticPulse(uint16_t ms) {
@@ -99,6 +145,7 @@ void hapticPulse(uint16_t ms) {
 void hapticUpdate() {
   if (!hapSteps) return;
   unsigned long now = millis();
+  if (hapStopAt && (long)(now - hapStopAt) >= 0) { hapticOff(); return; }
   while (now - hapStepAt >= hapSteps[hapIndex].ms) {
     hapStepAt += hapSteps[hapIndex].ms;
     if (++hapIndex >= hapCount) {
@@ -109,10 +156,10 @@ void hapticUpdate() {
   int strength = hapSteps[hapIndex].strength;
   if (strength > 0) {
     if (hapTone) {
-      // The alarm starts quieter and builds to full over 20 s. A square
-      // wave is loudest at half duty, so 255 maps to 50%.
-      float k = (now - hapLoopStart) / 20000.0f;
-      strength = (int)(strength * (0.25f + 0.75f * (k > 1 ? 1 : k))) / 2;
+      // The alarm starts quieter and builds to its volume (hapPeak, at
+      // most half duty, the loudest a square wave gets) over its ramp.
+      float k = (now - hapLoopStart) / (float)hapRampMs;
+      strength = (int)(strength * hapPeak * (0.25f + 0.75f * (k > 1 ? 1 : k)));
     } else {
       if (hapNight) strength = strength * 6 / 10;
       if (now - hapStepAt < 6) strength = 255;   // the kick
@@ -497,9 +544,39 @@ static void renderFace(ClockStyle style, const LumoState& s, const ClockNow& c, 
 
 // One screen's light, whatever the screen: the clock faces above, the
 // rest from their Look.
+// The timer's ring is what's left of it: amber, emptying as it runs down
+// (still while paused). The stopwatch's is a teal dot going round once a
+// minute, like a second hand, standing still when it's stopped.
+static void renderTool(ScreenMode screen, const LumoState& s, float t, float day, Rgb* out) {
+  const float N = (float)NUMPIXELS;
+  float b = 1.0f - BREATH * breathe(t, BREATH_S);
+  if (screen == SCREEN_TIMER) {
+    Rgb amber = rgb8(255, 160, 50);
+    float left = 0;
+    if (s.tm_state == TOOL_RUNNING) left = (float)(int32_t)(s.tm_end - millis());
+    else if (s.tm_state == TOOL_PAUSED) left = s.tm_left_ms;
+    float frac = s.tm_total_ms ? clamp01(left / s.tm_total_ms) : 0;
+    bool idle = s.tm_state == TOOL_IDLE;
+    for (int i = 0; i < NUMPIXELS; i++) {
+      float lit = idle ? 0.35f : fillAt(frac * N, i, 0.06f);
+      out[i] = scalec(amber, (GLOW + 0.15f) * day * (s.tm_state == TOOL_PAUSED ? 1.0f : b) * lit);
+    }
+    return;
+  }
+  Rgb teal = rgb8(60, 220, 190);
+  uint32_t ms = s.sw_base_ms + (s.sw_running ? millis() - s.sw_mark : 0);
+  float pos = fmodf(ms / 60000.0f, 1.0f) * N;
+  for (int i = 0; i < NUMPIXELS; i++) {
+    Rgb o = scalec(teal, GLOW * 0.6f * day * b);
+    if (ms) o = addc(o, scalec(teal, MARK_GAIN * day * blobAt(pos, i, MARK_W)));
+    out[i] = o;
+  }
+}
+
 static void renderScreen(ScreenMode screen, const LumoState& s, const ClockNow& c, float t, float since,
                          Rgb dayColor, float day, Rgb* out) {
   if (screen == SCREEN_CLOCK) renderFace(s.clock_style, s, c, t, since, dayColor, day, out);
+  else if (screen == SCREEN_TIMER || screen == SCREEN_STOPWATCH) renderTool(screen, s, t, day, out);
   else renderLook(lookFor(screen, s, c, dayColor, day), t, c, out);
 }
 

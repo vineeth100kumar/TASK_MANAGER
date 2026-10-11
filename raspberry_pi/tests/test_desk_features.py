@@ -90,6 +90,9 @@ class FakeActions:
         return self._save("tomorrow", item_id, lambda i: i.update(dueDate=str(day + datetime.timedelta(days=1))))
 
 
+RING = {"cmd": "ALARM_RING", "label": "Wake up", "tone": "pulse", "volume": 80, "snooze": 5}
+
+
 def alarm(item_id="wake", h=7, m=0, day=7, remind=None):
     when = f"2026-10-{day:02d}T{h:02d}:{m:02d}"
     return {"id": item_id, "title": "Wake up", "labels": ["Alarm"], "entityType": "reminder",
@@ -236,7 +239,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.refresh()
         self.clock = at(7, 0, 0)
         await self.desk.ring()
-        self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_RING"})
+        self.assertEqual(self.link.sent[-1], RING)
         await self.desk.controller.on_button("RIGHT")
         self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_OFF"})
         self.assertEqual(self.items[1]["remindAt"], "2026-10-07T07:05")
@@ -245,7 +248,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.refresh()
         self.clock = at(7, 5, 0)
         await self.desk.ring()
-        self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_RING"})
+        self.assertEqual(self.link.sent[-1], RING)
         await self.desk.controller.on_button("OK")
         self.assertIn({"cmd": "ALARM_OFF"}, self.link.sent[-3:])
         self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")

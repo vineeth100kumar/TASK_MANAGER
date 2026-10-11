@@ -23,8 +23,9 @@ KEY = "deskSettings"
 # HOLD_OK is OK held for about a second (firmware 2.0 and later).
 BUTTONS = ("UP", "DOWN", "LEFT", "OK", "RIGHT", "HOLD_OK")
 # The screens UP and DOWN can step through. (Firmware 1.6 also has a face,
-# kept only as the place it draws cards; see controller.py.)
-SCREENS = ("CLOCK", "TASKS", "SPOTIFY", "SYSTEM")
+# kept only as the place it draws cards; see controller.py.) The timer,
+# stopwatch and world clock screens need firmware 2.7.
+SCREENS = ("CLOCK", "TASKS", "SPOTIFY", "SYSTEM", "TIMER", "STOPWATCH", "WORLD")
 LAYERS = ("default", "alarm") + SCREENS
 ACTIONS = (
     "none",
@@ -32,23 +33,41 @@ ACTIONS = (
     "media_previous", "media_toggle", "media_next",
     "snooze_alarm", "stop_alarm",
     "lights_toggle",
+    "timer_toggle", "timer_cancel", "timer_add_minute",
+    "stopwatch_toggle", "stopwatch_lap", "stopwatch_reset",
 ) + tuple(f"screen:{s}" for s in SCREENS)
 # The first three are LUMO's classic styles; the rest are the smooth faces
 # added in firmware 2.1 (an older clock keeps its style if sent one of those).
 CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial")
 LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
+# The buzzer's alarm patterns (firmware 2.7; older firmware always pulses).
+ALARM_TONES = ("pulse", "classic", "rising", "chirp")
+MAX_WORLD_CLOCKS = 3
 
 DEFAULTS: Dict[str, Any] = {
-    "screens": list(SCREENS),
+    # The timer, stopwatch and world screens are added from the LUMO page, as
+    # older firmware can't show them.
+    "screens": ["CLOCK", "TASKS", "SPOTIFY", "SYSTEM"],
     "homeScreen": "CLOCK",
     "clock": {"style": "digital", "hour24": True, "seconds": True, "secondZone": ""},
-    "alarm": {"snoozeMinutes": 5, "ringMinutes": 10},
+    "alarm": {"snoozeMinutes": 5, "ringMinutes": 10, "tone": "pulse", "volume": 80},
     "lights": {"mode": "AUTO", "brightness": 100},
+    # Up to three places for the World screen, as time zone names.
+    "world": {"zones": []},
+    # Between start and end the ring dims, the clock shows `face` ("" keeps
+    # the usual one) and knocks are softer.
+    "night": {"enabled": False, "start": "22:30", "end": "07:00", "face": "nightstand",
+              "lightsMode": "WARM", "brightness": 12},
+    # The silent knocks (firmware 2.7): on each button press, and twice for a
+    # notification or reminder. The alarm always sounds.
+    "haptics": {"buttons": True, "notifications": True},
     "buttons": {
         "locked": False,
         "map": {
             "default": {"UP": "prev_screen", "DOWN": "next_screen", "LEFT": "none", "OK": "none", "RIGHT": "none", "HOLD_OK": "none"},
             "SPOTIFY": {"LEFT": "media_previous", "OK": "media_toggle", "RIGHT": "media_next"},
+            "TIMER": {"LEFT": "timer_cancel", "OK": "timer_toggle", "RIGHT": "timer_add_minute"},
+            "STOPWATCH": {"LEFT": "stopwatch_reset", "OK": "stopwatch_toggle", "RIGHT": "stopwatch_lap"},
             "alarm": {"UP": "stop_alarm", "DOWN": "stop_alarm", "LEFT": "stop_alarm", "OK": "stop_alarm", "RIGHT": "snooze_alarm"},
         },
     },
@@ -83,6 +102,14 @@ def _section(update: Any, name: str) -> dict:
     return update
 
 
+def _hhmm(value: Any, name: str) -> str:
+    text = str(value or "")
+    parts = text.split(":")
+    if len(parts) != 2 or not all(p.isdigit() for p in parts) or not (0 <= int(parts[0]) <= 23 and 0 <= int(parts[1]) <= 59):
+        raise ValueError(f"{name} must look like 22:30.")
+    return f"{int(parts[0]):02d}:{int(parts[1]):02d}"
+
+
 def _zone(value: Any) -> str:
     if value in ("", None):
         return ""
@@ -90,7 +117,7 @@ def _zone(value: Any) -> str:
     try:
         ZoneInfo(str(value))
     except Exception:
-        raise ValueError(f"clock.secondZone {value!r} is not a time zone (try Europe/London).")
+        raise ValueError(f"{value!r} is not a time zone (try Europe/London).")
     return str(value)
 
 
@@ -135,6 +162,41 @@ def merge(current: dict, update: dict) -> dict:
             out["alarm"]["snoozeMinutes"] = _int(alarm["snoozeMinutes"], "alarm.snoozeMinutes", 1, 60)
         if "ringMinutes" in alarm:
             out["alarm"]["ringMinutes"] = _int(alarm["ringMinutes"], "alarm.ringMinutes", 1, 60)
+        if "tone" in alarm:
+            out["alarm"]["tone"] = _choice(alarm["tone"], "alarm.tone", ALARM_TONES)
+        if "volume" in alarm:
+            out["alarm"]["volume"] = _int(alarm["volume"], "alarm.volume", 0, 100)
+
+    if "world" in update:
+        world = _section(update["world"], "world")
+        if "zones" in world:
+            zones = world["zones"]
+            if not isinstance(zones, list) or len(zones) > MAX_WORLD_CLOCKS:
+                raise ValueError(f"world.zones must be a list of up to {MAX_WORLD_CLOCKS} time zones.")
+            checked = [_zone(z) for z in zones]
+            if "" in checked or len(set(checked)) != len(checked):
+                raise ValueError("world.zones has an empty or repeated time zone.")
+            out["world"]["zones"] = checked
+
+    if "night" in update:
+        night = _section(update["night"], "night")
+        if "enabled" in night:
+            out["night"]["enabled"] = _bool(night["enabled"], "night.enabled")
+        for name in ("start", "end"):
+            if name in night:
+                out["night"][name] = _hhmm(night[name], f"night.{name}")
+        if "face" in night:
+            out["night"]["face"] = "" if night["face"] in ("", None) else _choice(night["face"], "night.face", CLOCK_STYLES)
+        if "lightsMode" in night:
+            out["night"]["lightsMode"] = _choice(night["lightsMode"], "night.lightsMode", LIGHT_MODES)
+        if "brightness" in night:
+            out["night"]["brightness"] = _int(night["brightness"], "night.brightness", 0, 255)
+
+    if "haptics" in update:
+        haptics = _section(update["haptics"], "haptics")
+        for name in ("buttons", "notifications"):
+            if name in haptics:
+                out["haptics"][name] = _bool(haptics[name], f"haptics.{name}")
 
     if "lights" in update:
         lights = _section(update["lights"], "lights")
@@ -160,6 +222,19 @@ def merge(current: dict, update: dict) -> dict:
                     _choice(button, f"buttons.map.{layer} button", BUTTONS)
                     target[button] = _choice(action, f"buttons.map.{layer}.{button}", ACTIONS)
     return out
+
+
+def in_night(current: dict, hour: int, minute: int) -> bool:
+    """Whether hour:minute falls in the night window (which may cross midnight)."""
+    night = current["night"]
+    if not night["enabled"]:
+        return False
+    now = hour * 60 + minute
+    start = int(night["start"][:2]) * 60 + int(night["start"][3:])
+    end = int(night["end"][:2]) * 60 + int(night["end"][3:])
+    if start == end:
+        return False
+    return start <= now < end if start < end else now >= start or now < end
 
 
 def action_for(current: dict, button: str, screen: str, ringing: bool) -> str:
