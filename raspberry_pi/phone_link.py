@@ -301,7 +301,12 @@ class PhoneLink:
                 await self._try(f"notify {uuid[:8]}", self._chars[uuid].call_start_notify())
         if AMS_ENTITY_UPDATE in self._chars:
             for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2])):
-                await self._try("now playing", self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {}))
+                if not await self._try("now playing", self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
+                    # Without this request the phone never sends songs, so
+                    # forget the subscription and ask again on the next tick
+                    # (the watchers stay, so nothing is added twice).
+                    self._chars.clear()
+                    return
         log.info("Phone link subscribed: %s", ", ".join(sorted(self._chars)))
 
     @staticmethod

@@ -181,3 +181,12 @@ class Subscribing(unittest.TestCase):
         self.assertTrue(all(len(p.handlers) == 1 for p in props.values()))
         link._unwatch()
         self.assertTrue(all(not p.handlers for p in props.values()))
+
+        # The phone wasn't ready for the now-playing request: ask again next tick.
+        ams = chars[phone_link.AMS_ENTITY_UPDATE]
+        ams.fail_write = "Not connected"
+        asyncio.run(link._subscribe(objects, dev))
+        self.assertEqual(link._chars, {})
+        ams.fail_write = None
+        asyncio.run(link._subscribe(objects, dev))
+        self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
