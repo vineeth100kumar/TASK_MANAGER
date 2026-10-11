@@ -10,7 +10,7 @@
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
 
-uint8_t artBuf[20004];
+alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
 
 static const uint16_t COLOR_BG_BLACK  = 0x0000;
@@ -37,8 +37,18 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
+// The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that
+// each fit in one network packet. A whole 20 KB frame could arrive in pieces,
+// and the websocket library then misread the stream and the clock restarted.
+// Whole frames (0xAA 0xBB) are still taken if they get through.
 void onNewArt(const uint8_t* data, size_t len) {
-  if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
+  static const size_t ROW_BYTES = 100 * 2;
+  if (len >= 4 && data[0] == 0xAA && data[1] == 0xBD) {
+    size_t row = data[2], rows = data[3];
+    if (row + rows > 100 || len - 4 < rows * ROW_BYTES) return;
+    memcpy(artBuf + row * ROW_BYTES, data + 4, rows * ROW_BYTES);
+    if (row + rows == 100) newArtReady = true;   // the last strip completes the cover
+  } else if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
     size_t copyLen = min(len - 4, (size_t)20000);
     memcpy(artBuf, data + 4, copyLen);
     newArtReady = true;

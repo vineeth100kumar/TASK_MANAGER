@@ -95,6 +95,22 @@ class Desk:
         """Firmware 1.x, which draws cards only on its face screen."""
         return str(getattr(self.link, "fw", "") or "").startswith("1.")
 
+    def takes_cover_strips(self) -> bool:
+        """Firmware 2.2 and later take the cover in strips. Older firmware
+        restarts on a whole cover (see art.py), so it gets none."""
+        try:
+            major, minor = (int(x) for x in str(getattr(self.link, "fw", "") or "").split(".")[:2])
+        except ValueError:
+            return False
+        return (major, minor) >= (2, 2)
+
+    async def send_cover(self) -> None:
+        if not self.cover or len(self.cover) != art.FRAME_LEN or not self.takes_cover_strips():
+            return
+        for strip in art.strips(self.cover):
+            if not await self.link.send_binary(strip):
+                return
+
     async def _card_surface(self) -> None:
         if self.legacy and self.controller.screen != "FACE":
             await self.controller.show_screen("FACE")
@@ -210,8 +226,8 @@ class Desk:
         if track != self.track and track[0]:
             self.track = track
             self.cover = await self.fetch_cover(*track)
-            if self.cover and self.track == track:
-                await self.link.send_binary(self.cover)
+            if self.track == track:
+                await self.send_cover()
 
     # --- Alarms ---
 
@@ -312,8 +328,7 @@ class Desk:
             await self.link.send(self.weather)
         if self.track:
             await self.show_media(self.phone.media)
-            if self.cover:
-                await self.link.send_binary(self.cover)
+            await self.send_cover()
         if self.alarms.ringing:
             await self.link.send({"cmd": "ALARM_RING"})
 
