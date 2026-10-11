@@ -230,3 +230,12 @@ class OpeningBle(unittest.TestCase):
             asyncio.run(link._open_ble("/dev", "VK's spot", "60:0F"))  # within 30 s: not again
         self.assertEqual(calls, [("bearer", "le"), "connect"])
         self.assertIn("over BLE (PreferredBearer=le)", logs.output[0])
+
+
+class Advertising(unittest.TestCase):
+    def test_advertisement_fits_in_31_bytes(self):
+        fields = phone_link.PhoneLink.advert_fields("Sage Companion")
+        size = 3 + (2 + 16 * len(fields["SolicitUUIDs"])) + (2 + len(fields["LocalName"]))
+        self.assertLessEqual(size, 31)
+        self.assertEqual(fields["LocalName"], "Sage")
+        self.assertEqual(phone_link.PhoneLink.advert_fields("Lumo")["LocalName"], "Lumo")

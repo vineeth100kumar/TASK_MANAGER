@@ -161,6 +161,9 @@ class PhoneLink:
         # The link's state as the Pi sees it, for the log and /api/phone.
         self._ble_last_try = 0.0
         self._ble_tries = 0
+        self._advertising = False
+        self._adv_exported = False
+        self._adv_last_try = 0.0
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
@@ -259,7 +262,6 @@ class PhoneLink:
             await self.control.register_agent()
         except Exception as e:
             log.warning("Could not register the pairing agent (pairing from Sage may not work): %s", e)
-        await self._advertise()
         while True:
             try:
                 await self._tick()
@@ -278,6 +280,8 @@ class PhoneLink:
         return await manager.call_get_managed_objects()
 
     async def _tick(self) -> None:
+        if not self._advertising and time.time() - self._adv_last_try >= 30:
+            await self._advertise()
         objects = await self._objects()
         if self.control:
             await self.control.refresh(objects)
@@ -475,14 +479,28 @@ class PhoneLink:
                 self.media[("artist", "album", "title")[attr]] = value
             await self._emit({"type": "PHONE_MEDIA", "media": self.media})
 
+    @staticmethod
+    def advert_fields(name: str) -> dict:
+        """What goes in the advertisement. A legacy BLE advertisement holds 31
+        bytes: flags (3) and the ANCS solicitation (2 + 16) leave 10 for the
+        name (2 + 8), so a longer name is cut to its first word. AMS is not
+        solicited: ANCS alone makes the iPhone connect, and AMS comes with the
+        same link. Both UUIDs and the full name came to 53 bytes, which BlueZ
+        refuses ("Failed to register advertisement") on most Pi adapters."""
+        short = name if len(name) <= 8 else (name.split()[0][:8] if name.split() else name[:8])
+        return {"LocalName": short, "SolicitUUIDs": [ANCS_SERVICE]}
+
     async def _advertise(self) -> None:
-        """Advertise as a connectable BLE device that asks for ANCS, which is
-        what makes it show up in the iPhone's Bluetooth settings."""
+        """Advertise as a connectable BLE device that asks for ANCS. This is
+        what makes the iPhone find the Pi, and reconnect over BLE after the
+        link drops. Retried from the tick every 30 s until BlueZ takes it."""
+        self._adv_last_try = time.time()
         try:
             from dbus_next.service import ServiceInterface, method, dbus_property
-            from dbus_next import PropertyAccess, Variant
+            from dbus_next import PropertyAccess
         except Exception:
             return
+        fields = self.advert_fields(DEVICE_NAME)
 
         class Advertisement(ServiceInterface):
             def __init__(self):
@@ -498,25 +516,38 @@ class PhoneLink:
 
             @dbus_property(access=PropertyAccess.READ)
             def LocalName(self) -> "s":  # noqa: F821,N802
-                return DEVICE_NAME
+                return fields["LocalName"]
 
             @dbus_property(access=PropertyAccess.READ)
             def SolicitUUIDs(self) -> "as":  # noqa: F821,N802
-                return [ANCS_SERVICE, AMS_SERVICE]
+                return fields["SolicitUUIDs"]
 
             @dbus_property(access=PropertyAccess.READ)
             def Includes(self) -> "as":  # noqa: F821,N802
                 return []
 
+        path = "/sage/phone/advertisement0"
+        slots = ""
         try:
-            path = "/sage/phone/advertisement0"
-            self._bus.export(path, Advertisement())
+            if not self._adv_exported:
+                self._bus.export(path, Advertisement())
+                self._adv_exported = True
             adapter = await self._char("/org/bluez/hci0")
-            await adapter.get_interface("org.bluez.LEAdvertisingManager1").call_register_advertisement(path, {})
-            self.say("advertise", f"advertising as {DEVICE_NAME}, so the iPhone can find and reconnect to the Pi over BLE")
+            manager = adapter.get_interface("org.bluez.LEAdvertisingManager1")
+            try:
+                active = await manager.get_active_instances()
+                free = await manager.get_supported_instances()
+                slots = f" (advertising slots in use: {active} of {active + free})"
+            except Exception:
+                pass
+            await manager.call_register_advertisement(path, {})
+            self._advertising = True
+            self.say("advertise", f"advertising as {fields['LocalName']}{slots}, so the iPhone can find and "
+                                  f"reconnect to the Pi over BLE")
         except Exception as e:
-            self.say("advertise", f"could not advertise as {DEVICE_NAME}, so the iPhone may not find or reconnect "
-                                  f"to the Pi over BLE: {getattr(e, 'type', None) or type(e).__name__}: {e}")
-
+            self.say("advertise", f"could not advertise as {fields['LocalName']}{slots}, so the iPhone can't "
+                                  f"reconnect to the Pi over BLE: {getattr(e, 'type', None) or type(e).__name__}: "
+                                  f"{e}. Trying again every 30 s. If it keeps failing, run "
+                                  f"'sudo systemctl restart bluetooth'.")
 
 link = PhoneLink()
