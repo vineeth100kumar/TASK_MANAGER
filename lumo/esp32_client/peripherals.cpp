@@ -15,12 +15,12 @@ Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 //  of them hear (see HAPTICS in config.h):
 //
 //   - Silent effects (every button press, notifications, reminders, the Pi's
-//     patterns) run on a 50 kHz carrier. The motor follows the duty; the
-//     buzzer can't follow 50 kHz. What the buzzer *can* hear is the duty
-//     jumping, so nothing ever jumps: each effect is a short list of frames,
-//     and the engine glides from one level to the next along an S-curve,
-//     never faster than HAPTIC_EDGE_MS, updated 10000 times a second so even
-//     the glide's own steps are too fine for the buzzer.
+//     patterns) hold the motor fully on, then fully off (HAPTIC_MOTOR_DC):
+//     on this board, with no flyback diode, PWM starves the motor and its
+//     off-times leak brush noise into the buzzer (see config.h). A steady
+//     pin is silent, so strength sets how long each knock runs. Each effect
+//     is a short list of frames; with HAPTIC_MOTOR_DC 0 (a diode fitted)
+//     the same frames glide smoothly in strength on a 50 kHz carrier.
 //   - The alarm switches the carrier to ALARM_TONE_HZ, the buzzer's own
 //     pitch, and is the only thing LUMO ever lets you hear. Nothing else
 //     plays over a ringing alarm.
@@ -116,6 +116,14 @@ static void hapCarrier(bool tone) {
   ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
 }
 
+// How long a frame lasts. With on/off drive, strength (hScale) stretches the
+// parts where the motor runs; rests keep their length.
+static int64_t hapSegUs(const HapFrame& f) {
+  int64_t us = (int64_t)f.ms * 1000;
+  if (HAPTIC_MOTOR_DC && !hTone && f.level > 0) us = (int64_t)(us * hScale);
+  return us;
+}
+
 static void hapTick(void*) {
   int64_t now = esp_timer_get_time();
   if (hapAsk) {
@@ -126,7 +134,8 @@ static void hapTick(void*) {
     hi = 0;
     hSegAt = hStartAt = now;
     // Glide on from wherever the motor is now, so a new effect never jumps.
-    hFrom = (hOnTone || hDuty <= 0) ? 0 : 255.0f * hDuty / hapMaxDuty / (hScale > 0 ? hScale : 1);
+    if (HAPTIC_MOTOR_DC) hFrom = (!hOnTone && hDuty > 0) ? 255 : 0;
+    else hFrom = (hOnTone || hDuty <= 0) ? 0 : 255.0f * hDuty / hapMaxDuty / (hScale > 0 ? hScale : 1);
     if (hFrom > 255) hFrom = 255;
     if (hOnTone != hTone) { hapWrite(0); hapCarrier(hTone); hFrom = 0; }
   }
@@ -138,8 +147,8 @@ static void hapTick(void*) {
   }
 
   // Walk past every frame that has finished.
-  while (now - hSegAt >= (int64_t)hf[hi].ms * 1000) {
-    hSegAt += (int64_t)hf[hi].ms * 1000;
+  while (now - hSegAt >= hapSegUs(hf[hi])) {
+    hSegAt += hapSegUs(hf[hi]);
     hFrom = hf[hi].level;
     if (++hi >= hn) {
       if (!hLoop) { hf = nullptr; hapWrite(0); return; }   // the next tick goes idle
@@ -147,7 +156,8 @@ static void hapTick(void*) {
     }
   }
   const HapFrame& f = hf[hi];
-  float t = f.ms ? (float)(now - hSegAt) / (f.ms * 1000.0f) : 1;
+  int64_t len = hapSegUs(f);
+  float t = len ? (float)(now - hSegAt) / len : 1;
   t = t * t * (3 - 2 * t);                   // S-curve: no corners to click
   float level = (hFrom + (f.level - hFrom) * t) / 255.0f;
 
@@ -158,16 +168,20 @@ static void hapTick(void*) {
     if (k > 1) k = 1;
     float vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
     on = level * vol * (ALARM_TONE_DUTY / 100.0f);
+  } else if (HAPTIC_MOTOR_DC) {
+    on = level >= 0.5f ? 1 : 0;              // held fully on or fully off: see config.h
   } else {
     on = level * hScale;
   }
   hapWrite((uint32_t)(on * hapMaxDuty + 0.5f));
 }
 
-// The share of full power that strength `pct` gives (0 = off).
+// What strength `pct` does (0 = off): with on/off drive, how much longer or
+// shorter each knock runs; with PWM, the share of full power.
 static float hapTop(uint8_t pct) {
   if (pct == 0) return 0;
   if (pct > 100) pct = 100;
+  if (HAPTIC_MOTOR_DC) return (HAPTIC_MIN_LEN_PCT + (HAPTIC_MAX_LEN_PCT - HAPTIC_MIN_LEN_PCT) * (pct - 1) / 99.0f) / 100.0f;
   return (HAPTIC_MIN_DUTY + (HAPTIC_MAX_DUTY - HAPTIC_MIN_DUTY) * (pct - 1) / 99.0f) / 100.0f;
 }
 
@@ -179,9 +193,9 @@ static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float 
   // The timer task outranks loop() on the C3's one core, so it can't be
   // stopping itself halfway through this; an already running timer just
   // picks the request up on its next tick. The alarm is audible anyway, so
-  // it moves 1000 times a second instead of 10000.
+  // it, like on/off drive, moves 1000 times a second; PWM glides 10000.
   if (!hapTimer) return;
-  uint32_t period = tone ? 1000 : HAPTIC_TICK_US;
+  uint32_t period = (tone || HAPTIC_MOTOR_DC) ? 1000 : HAPTIC_TICK_US;
   if (esp_timer_is_active(hapTimer)) {
     if (period == hapPeriod) return;
     esp_timer_stop(hapTimer);
@@ -222,7 +236,8 @@ void hapticPlay(Haptic h) {
   if (scale <= 0) { Serial.println("[HAPTIC] off (strength 0 in Sage)"); return; }
   bool press = (h == HAP_TICK || h == HAP_HOLD);
   if (!press && nightTime()) scale *= HAPTIC_NIGHT_PCT / 100.0f;
-  Serial.printf("[HAPTIC] effect %d at %d%% duty\n", (int)h, (int)(scale * 100));
+  Serial.printf(HAPTIC_MOTOR_DC ? "[HAPTIC] effect %d, on/off, length %d%%\n" : "[HAPTIC] effect %d at %d%% duty\n",
+                (int)h, (int)(scale * 100));
   hapAskFor(FX_LIB[h].f, FX_LIB[h].n, false, false, scale);
 }
 

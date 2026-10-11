@@ -34,33 +34,46 @@
 #define NTP_SERVER2     "time.nist.gov"
 
 // ===================== HAPTICS =====================
-// BUZZER_PIN drives a BC557 (PNP, so active low) that feeds the buzzer and the
-// vibration motor in parallel. They listen to the same PWM differently:
-//  - the motor follows the average, so the duty sets how hard it spins;
-//  - the buzzer only sounds when the drive moves at an audible rate.
-// Every silent effect therefore rides an ultrasonic carrier and changes its
-// duty only along smooth curves, never in a step (a step is a click). The
-// alarm alone switches to ALARM_TONE_HZ, where the buzzer sings.
-#define HAPTIC_FREQ        50000  // silent carrier; keep it above ~25 kHz
+// BUZZER_PIN (GPIO9) drives a BC557 through R1. The BC557 is a PNP: emitter on
+// 3V3, so pin LOW = on. Its collector feeds the vibration motor directly and
+// the buzzer through C1 (1 nF), both returning to GND. There is no flyback
+// diode across the motor.
+//
+// What that means:
+//  - The motor needs the transistor held fully on. PWM at any duty below 100%
+//    cuts the motor's current on every off edge (nowhere for it to flow
+//    without a diode), so even 87% at 50 kHz barely moves it. That is why
+//    2.7.0/2.7.1 went quiet AND still.
+//  - The buzzer only hears changes (C1 blocks DC). A pin held steady, on or
+//    off, is silent. The audible part was the PWM off-time, when the
+//    floating collector passes the motor's brush noise through C1.
+// So with this board every silent effect is the motor held fully on (DC) for
+// a while, never PWM; strength sets how long. Only the alarm uses a tone.
+// If you fit a diode (1N4148 or SS14) across the motor, set HAPTIC_MOTOR_DC
+// to 0 to get smooth PWM strength instead.
+#define HAPTIC_MOTOR_DC    1      // 1 = on/off drive (this board); 0 = smooth PWM (needs a flyback diode)
+#define HAPTIC_FREQ        50000  // PWM carrier when HAPTIC_MOTOR_DC is 0
 #define HAPTIC_RES         10     // duty bits (drops to 8 if the timer can't do 10)
-#define HAPTIC_TICK_US     100    // how often a silent envelope moves (10 kHz: its steps are too fine to hear)
-#define HAPTIC_EDGE_MS     5      // shortest rise or fall; shorter edges tick in the buzzer
+#define HAPTIC_TICK_US     100    // how often a PWM envelope moves (on/off drive uses 1 ms)
+#define HAPTIC_EDGE_MS     5      // shortest rise or fall in PWM mode
 #define HAPTIC_FALL_MS     10     // how a knock lets go
-#define HAPTIC_MIN_DUTY    60     // % on-time at strength 1 (below ~60% the motor may not start)
-#define HAPTIC_MAX_DUTY    100    // % on-time at strength 100
+#define HAPTIC_MIN_DUTY    60     // PWM mode: % on-time at strength 1
+#define HAPTIC_MAX_DUTY    100    // PWM mode: % on-time at strength 100
+#define HAPTIC_MIN_LEN_PCT 50     // on/off mode: knock length at strength 1, % of the base length
+#define HAPTIC_MAX_LEN_PCT 160    // on/off mode: knock length at strength 100
 #define HAPTIC_STRENGTH    100    // default strength 0-100 until Sage sends one (0 = off)
 #define HAPTIC_NIGHT_PCT   60     // notifications at night run at this % (presses don't)
 
 // Per-effect tuning. Peaks are 0-255 of the strength above; lengths in ms.
 #define HFX_TICK_PEAK      235    // every button press: one crisp tick
-#define HFX_TICK_HOLD_MS   28
-#define HFX_KICK_MS        12     // a tick opens at full power for this long to spin up
+#define HFX_TICK_HOLD_MS   12
+#define HFX_KICK_MS        6      // a tick opens at full power for this long to spin up
 #define HFX_HOLD_PEAK      230    // OK held: a soft tick, then a firm one
 #define HFX_KNOCK_PEAK     245    // a notification: two knocks
-#define HFX_KNOCK_HOLD_MS  45
+#define HFX_KNOCK_HOLD_MS  30
 #define HFX_KNOCK_GAP_MS   120
 #define HFX_REMIND_PEAK    255    // a reminder: two longer, firmer knocks
-#define HFX_REMIND_HOLD_MS 70
+#define HFX_REMIND_HOLD_MS 55
 #define HFX_REMIND_GAP_MS  150
 #define HFX_PULSE_PEAK     200    // a soft swell (breath)
 #define HFX_PULSE_MS       700
@@ -91,7 +104,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.7.1"
+#define FW_VERSION "2.7.2"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
