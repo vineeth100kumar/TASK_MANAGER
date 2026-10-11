@@ -216,7 +216,7 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "LIGHTS") == 0) {
     const char* modeStr = doc["mode"] | "WARM";
-    uint8_t bri         = doc["brightness"] | 40;
+    uint8_t bri         = doc["brightness"] | 100;
     uint16_t hue        = doc["hue"] | 0;
 
     NeoMode nm = NEO_AUTO;

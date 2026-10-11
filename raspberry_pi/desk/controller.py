@@ -73,7 +73,7 @@ class DeskController:
         self.next_alarm = next_alarm
         self.screens = screens or ["CLOCK"]
         self.screen = self.screens[0]
-        self.lights = {"mode": "AUTO", "brightness": 40}
+        self.lights = {"mode": "AUTO", "brightness": 100}
         self.card: Optional[Card] = None
         self._clock = clock
         # Hooks the desk fills in; see the module docstring.

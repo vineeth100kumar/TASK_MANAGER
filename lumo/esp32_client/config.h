@@ -54,7 +54,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.6.0"
+#define FW_VERSION "2.6.1"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -96,7 +96,7 @@ struct LumoState {
   bool     sp_lyrics = false;     // the song has timed lyrics
   char     sp_lyric[100] = "";    // the line being sung ("" between lines)
   NeoMode  neo_mode       = NEO_AUTO;
-  uint8_t  neo_brightness = 40;
+  uint8_t  neo_brightness = 100;
   uint16_t neo_hue        = 0;
   char    tasks[5][96];
   uint8_t task_count = 0;

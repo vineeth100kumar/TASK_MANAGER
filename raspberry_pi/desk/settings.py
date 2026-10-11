@@ -43,7 +43,7 @@ DEFAULTS: Dict[str, Any] = {
     "homeScreen": "CLOCK",
     "clock": {"style": "digital", "hour24": True, "seconds": True, "secondZone": ""},
     "alarm": {"snoozeMinutes": 5, "ringMinutes": 10},
-    "lights": {"mode": "AUTO", "brightness": 40},
+    "lights": {"mode": "AUTO", "brightness": 100},
     "buttons": {
         "locked": False,
         "map": {
@@ -205,6 +205,10 @@ def load() -> dict:
         conn.close()
     try:
         saved = json.loads(row[0]) if row else {}
+        # 40 was the old default, saved along with any other change; the
+        # light now runs at full brightness unless you choose otherwise.
+        if (saved.get("lights") or {}).get("brightness") == 40:
+            saved["lights"]["brightness"] = 100
         return merge(defaults(), _without_face(saved))
     except ValueError:
         return defaults()  # a hand-edited row that no longer checks out
