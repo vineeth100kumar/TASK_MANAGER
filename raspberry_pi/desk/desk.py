@@ -26,7 +26,7 @@ import item_actions
 import notifier
 from desk import ambient, art, today
 from desk.alarms import Alarms, is_alarm
-from desk.controller import DeskController
+from desk.controller import DeskController, fit
 
 log = logging.getLogger("desk")
 
@@ -54,6 +54,7 @@ class Desk:
         cover: Callable[[str, str], Awaitable[Optional[bytes]]] = art.cover,
         vitals: Optional[ambient.Vitals] = None,
         rng: Optional[random.Random] = None,
+        morning_line: Callable[[], Optional[str]] = lambda: None,
     ) -> None:
         self.link = link
         self.now = now
@@ -65,6 +66,7 @@ class Desk:
         self.fetch_cover = cover
         self.vitals = vitals or ambient.Vitals()
         self.rng = rng or random.Random()
+        self.morning_line = morning_line
 
         self.controller = DeskController(link, now, next_alarm=self.next_alarm, screens=SCREENS)
         self.controller.before_button = self.before_button
@@ -104,6 +106,12 @@ class Desk:
         if missed:
             self.alarms.load(await asyncio.to_thread(self.items))
         lines = today.lines(items, now, now.tzinfo)
+        # Radar's line (one trend, one market move) in the morning, when it's
+        # switched on in Settings > Radar and there's room under the tasks.
+        if now.hour < 12 and len(lines) < today.MAX_ITEMS:
+            extra = await asyncio.to_thread(self.morning_line)
+            if extra:
+                lines.append(fit(extra, today.LINE_LEN))
         if lines != self.today:
             self.today = lines
             await self.link.send({"cmd": "SHOW_TASKS", "items": lines})
@@ -126,7 +134,7 @@ class Desk:
     def on_event(self, event: dict) -> None:
         """Every event Sage sends its web clients (EventHub.listeners)."""
         kind = event.get("type")
-        if kind in ("SYNC_APPLIED", "SYNC_CLEARED"):
+        if kind in ("SYNC_APPLIED", "SYNC_CLEARED", "RADAR_UPDATED"):
             if not self._refresh_soon:
                 self._refresh_soon = True
                 self._spawn(self._refresh_after_burst())

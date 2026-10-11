@@ -202,3 +202,78 @@ export interface Board {
   createdAt: string;
   updatedAt: string;
 }
+
+// Radar research (raspberry_pi/radar_research.py). The Pi writes these; the app
+// only stars them and links an idea to the project made from it.
+export interface RadarSourceRef {
+  title: string;
+  url: string;
+  kind: 'news' | 'web' | 'hn';
+  site: string;
+}
+
+export interface Dossier {
+  id: string;
+  theme: string;
+  depth: 'brief' | 'memo';
+  engine: string | null;
+  status: 'done' | 'needs_review' | 'failed';
+  error?: string;
+  summary: string;
+  macro: string;
+  whyNow: string;
+  valueChain: { layer: string; players: string; gap: string }[];
+  claims: { text: string; source: number | null }[];
+  painPoints: { text: string; url: string }[];
+  sources: RadarSourceRef[];   // claims and ideas cite these by number, from 1
+  steps: { name: string; detail: string; seconds: number | null }[];
+  ideaIds: string[];
+  noteId: string | null;
+  starred: boolean;
+  raw?: string;                // the AI's answer when it couldn't be read
+  lifeContext?: LifeContext;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface IdeaRisk {
+  kind: string;
+  detail: string;
+  severity: 'High' | 'Medium' | 'Low';
+  mitigation: string;
+}
+
+export interface IdeaPhase {
+  name: string;
+  startWeek: number;
+  endWeek: number;
+  steps: string[];
+}
+
+export interface Idea {
+  id: string;
+  dossierId: string;
+  name: string;
+  oneLiner: string;
+  icp: string;
+  pain: string;
+  whyNow: string;
+  // Estimates from the AI; the app labels them so.
+  acvUsd: number | null;
+  grossMarginPct: number | null;
+  paybackMonths: number | null;
+  salesCycleWeeks: number | null;
+  moat: { network: number; switching: number; data: number; cost: number; regulatory: number };
+  ratings: { whyNow: number; pain: number; money: number };
+  score: number;
+  scoreParts: { whyNow: number; pain: number; money: number; moat: number; safety: number };
+  risks: IdeaRisk[];
+  playbook: IdeaPhase[];
+  tags: string[];
+  sources: number[];
+  starred: boolean;
+  projectId: string | null;
+  lifeContext?: LifeContext;
+  createdAt: string;
+  updatedAt: string;
+}

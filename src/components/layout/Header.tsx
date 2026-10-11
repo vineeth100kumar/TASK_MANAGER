@@ -102,6 +102,8 @@ export function Header({
       setActiveTitle('Notes & Docs');
     } else if (activeView === 'canvas') {
       setActiveTitle('Canvas');
+    } else if (activeView === 'radar') {
+      setActiveTitle('Radar');
     } else if (activeWorkspace === 'all') {
       setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : lifeContext === 'work' ? 'All Work Items' : 'All Items');
     } else {

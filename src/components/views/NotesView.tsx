@@ -9,16 +9,17 @@ import { RichNoteEditor } from '../notes/RichNoteEditor';
 
 interface NotesViewProps {
   lifeContext?: 'work' | 'personal';
+  openNoteId?: string | null;  // open this note first (from Radar's Vault)
 }
 
-export function NotesView({ lifeContext }: NotesViewProps) {
+export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
   const [notes, setNotes] = useState<Note[]>([]);
-  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(null);
+  const [selectedNoteId, setSelectedNoteId] = useState<string | null>(openNoteId || null);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTitle, setActiveTitle] = useState('');
   const [activeContent, setActiveContent] = useState('');
   // On a phone the list and the open note take turns on screen.
-  const [isEditorOpen, setIsEditorOpen] = useState(false);
+  const [isEditorOpen, setIsEditorOpen] = useState(!!openNoteId);
   const { showToast } = useToast();
   // When this editor last changed the open note, so a sync arriving mid-typing
   // doesn't replace what is being typed.

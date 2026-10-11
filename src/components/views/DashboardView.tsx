@@ -19,6 +19,7 @@ import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
 import { ContextTag } from '../common/ContextTag';
 import { ReminderPrompt } from '../common/ReminderPrompt';
+import { RadarBriefCard } from '../radar/RadarBriefCard';
 
 const FOCUS_DRAG_TYPE = 'application/x-sage-item';
 
@@ -274,6 +275,9 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
       {lifeContext !== 'work' && data.habits?.length > 0 && (
         <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} />
       )}
+
+      {/* Radar brief: opt-in in Settings > Radar, and work only. */}
+      {lifeContext !== 'personal' && onNavigateView && <RadarBriefCard onOpen={() => onNavigateView('radar')} />}
 
       {/* 3. Main Grid: Today's Focus & Scheduled Checkpoints */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">

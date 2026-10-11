@@ -20,7 +20,7 @@ async def run(now: Callable[[], datetime.datetime], events, phone) -> None:
     phone_link.link that knows whether you're home and what's playing."""
     global link, desk
     link = ClockLink(load_token())
-    desk = Desk(link, now, phone, events.broadcast)
+    desk = Desk(link, now, phone, events.broadcast, morning_line=_radar_line)
     events.listeners.append(desk.on_event)
     notifier.clock_reminder = desk.clock_reminder
     jobs = asyncio.create_task(desk.run())
@@ -32,6 +32,15 @@ async def run(now: Callable[[], datetime.datetime], events, phone) -> None:
     finally:
         notifier.clock_reminder = None
         jobs.cancel()
+
+
+def _radar_line():
+    import radar
+    try:
+        return radar.lumo_line()
+    except Exception as e:  # the clock's tasks matter more than Radar's line
+        log.warning("Radar line skipped: %s", e)
+        return None
 
 
 def status(enabled: bool) -> dict:
