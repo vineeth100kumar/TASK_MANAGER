@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import claude_api
 import desk
 import item_actions
 import phone_link
@@ -86,6 +87,11 @@ async def require_api_key(request, call_next):
     install scripts and monitors can check the server is up.
     """
     path = request.url.path
+    if path.startswith("/api/claude/") and request.method != "OPTIONS":
+        # Claude's own routes take only Claude's token, and are off without one.
+        if not claude_api.token_matches(request_key(request)):
+            return JSONResponse({"success": False, "error": "Missing or wrong Claude token"}, status_code=401)
+        return await call_next(request)
     if (
         API_SECRET
         and path.startswith("/api/")
@@ -93,9 +99,14 @@ async def require_api_key(request, call_next):
         and request.method != "OPTIONS"
         and not logged_in(request)
     ):
-        if not key_matches(request_key(request)):
+        if not key_matches(request_key(request)) and not claude_may(request):
             return JSONResponse({"success": False, "error": "Missing or wrong Sage API key"}, status_code=401)
     return await call_next(request)
+
+
+def claude_may(request) -> bool:
+    """Claude's token (claude_api.py) opens the data and the web app, nothing else."""
+    return claude_api.token_matches(request_key(request)) and claude_api.allows(request.method, request.url.path)
 
 
 # --- Password gate (see access_gate.py) ---
@@ -107,6 +118,7 @@ GATE_OPEN_PATHS = {
     "/login", "/logout", "/api/health",
     "/favicon.ico", "/favicon-32.png", "/apple-touch-icon.png",
     "/icon-192.png", "/icon-512.png", "/manifest.webmanifest",
+    "/logo-light.png", "/logo-dark.png",
     # The service worker that shows notifications. It holds no data, and
     # browsers fetch updates to it without always sending the login cookie.
     "/sw.js",
@@ -120,19 +132,38 @@ async def require_login(request, call_next):
         not access_gate.enabled
         or request.method == "OPTIONS"
         or path in GATE_OPEN_PATHS
-        or logged_in(request)
+        # The app's own font files, so the login page can use them too.
+        or (path.startswith("/assets/inter-") and path.endswith(".woff2"))
+        # The MCP address carries its own token and checks it (claude_api.py).
+        or path.startswith("/mcp/")
+        or path.startswith("/api/claude/")
         or (API_SECRET and key_matches(request_key(request)))
+        or claude_may(request)
     ):
         return await call_next(request)
+    if logged_in(request) and not access_gate.is_page_load(request):
+        return await call_next(request)
+    if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
+        # Each opening of the app takes the password, so this page must not
+        # be kept for the back button or reused from the browser's cache.
+        response = await call_next(request)
+        response.headers["Cache-Control"] = "no-store"
+        response.delete_cookie(access_gate.OPEN_COOKIE)
+        return response
     if path.startswith("/api/"):
         return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
     target = path + (f"?{request.url.query}" if request.url.query else "")
     return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
 
 
+def login_page(next_path: str, message: str = "") -> str:
+    fonts = sorted((DIST_DIR / "assets").glob("inter-latin-wght-normal-*.woff2"))
+    return access_gate.login_page(next_path, message, f"/assets/{fonts[0].name}" if fonts else "")
+
+
 @app.get("/login", include_in_schema=False)
 def login_form(next: str = "/"):
-    return HTMLResponse(access_gate.login_page(access_gate.safe_next(next)))
+    return HTMLResponse(login_page(access_gate.safe_next(next)))
 
 
 @app.post("/login", include_in_schema=False)
@@ -157,12 +188,12 @@ async def login(request: Request):
     wait = access_gate.locked_for(ip, device)
     if wait:
         minutes = max(1, round(wait / 60))
-        page = access_gate.login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
+        page = login_page(next_path, f"Too many wrong tries. Try again in {minutes} min.")
         return with_device(HTMLResponse(page, status_code=429))
     if not access_gate.verify_password(password):
         access_gate.record_failure(ip, device)
         print(f"Wrong Sage password from {ip}")
-        return with_device(HTMLResponse(access_gate.login_page(next_path, "Wrong password."), status_code=401))
+        return with_device(HTMLResponse(login_page(next_path, "Wrong password."), status_code=401))
     access_gate.clear_failures(ip, device)
     response = with_device(RedirectResponse(next_path, status_code=303))
     response.set_cookie(
@@ -173,7 +204,40 @@ async def login(request: Request):
         secure=access_gate.is_https(request),
         samesite="lax",
     )
+    response.set_cookie(
+        access_gate.OPEN_COOKIE,
+        access_gate.new_open_ticket(),
+        max_age=access_gate.OPEN_SECONDS,
+        httponly=True,
+        secure=access_gate.is_https(request),
+        samesite="lax",
+    )
     return response
+
+
+@app.post("/api/unlock", include_in_schema=False)
+async def unlock(request: Request):
+    """Checks the password again for a locked part of the app (Notes), with
+    the same wrong-try limits as /login."""
+    if not access_gate.enabled:
+        return {"success": True, "enabled": False}
+    try:
+        body = await request.json()
+    except Exception:
+        body = {}
+    password = str(body.get("password", "")) if isinstance(body, dict) else ""
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    wait = access_gate.locked_for(ip, device)
+    if wait:
+        minutes = max(1, round(wait / 60))
+        return JSONResponse({"success": False, "error": f"Too many wrong tries. Try again in {minutes} min."}, status_code=429)
+    if not access_gate.verify_password(password):
+        access_gate.record_failure(ip, device)
+        print(f"Wrong Sage password (unlock) from {ip}")
+        return JSONResponse({"success": False, "error": "Wrong password."}, status_code=401)
+    access_gate.clear_failures(ip, device)
+    return {"success": True, "enabled": True}
 
 
 @app.get("/logout", include_in_schema=False)
@@ -485,7 +549,12 @@ async def process_operations(request: Request):
         req = ProcessOperationsRequest(**req_dict)
     except (ValueError, TypeError) as e:
         return JSONResponse({"success": False, "error": f"Bad sync request: {e}"}, status_code=400)
+    return await apply_operations(req, req_dict.get("clientId", ""))
 
+
+async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -> dict:
+    """Apply a batch of sync operations, queue them for the backup and tell
+    every client. The web app and Claude's API (claude_api.py) both write here."""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     op_results = []
@@ -593,7 +662,7 @@ async def process_operations(request: Request):
                 "INSERT INTO unsynced_batches (payload) VALUES (?)",
                 (json.dumps({
                     "action": "processOperations",
-                    "clientId": req_dict.get("clientId", ""),
+                    "clientId": client_id,
                     "operations": [op.model_dump() for op in applied_ops],
                 }),),
             )
@@ -722,6 +791,12 @@ async def quick_add_endpoint(req: QuickAddRequest):
     conn = sqlite3.connect(DB_PATH)
     try:
         cursor = conn.cursor()
+        # The web app expects every item to have a key like TASK-12.
+        task_keys = sum(
+            1 for (raw,) in cursor.execute("SELECT payload FROM entities WHERE table_name = 'workItems'")
+            if str((json.loads(raw) or {}).get("key") or "").startswith("TASK")
+        )
+        payload["key"] = f"TASK-{task_keys + 1}"
         next_rev = increment_server_revision(cursor)
         cursor.execute(
             "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
@@ -1278,6 +1353,24 @@ async def desk_press(req: DeskPress):
     if not desk.ENABLED or not await desk_run.press(button):
         raise HTTPException(status_code=409, detail="The desk clock isn't running. Set SAGE_DESK=1 and restart Sage.")
     return {"success": True, "button": button, **desk_run.status(desk.ENABLED)}
+
+
+# --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---
+def _claude_today() -> datetime.date:
+    return datetime.datetime.now(notifier._tz(notifier.get_prefs())).date()
+
+
+async def _claude_apply(operations: list) -> dict:
+    return await apply_operations(ProcessOperationsRequest(operations=operations), claude_api.CLIENT_ID)
+
+
+async def _claude_quick_add(text: str) -> dict:
+    return await quick_add_endpoint(QuickAddRequest(text=text, source=claude_api.CLIENT_ID))
+
+
+claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today)
+app.include_router(claude_api.router)
+app.include_router(claude_api.mcp_router)
 
 
 if (DIST_DIR / "index.html").is_file():

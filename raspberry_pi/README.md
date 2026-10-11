@@ -24,6 +24,7 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `SAGE_BACKUP_TIME` | `03:00` | Local time of the nightly copy (in the time zone chosen in Settings > Notifications). |
 | `SAGE_ACCESS_PASSWORD_HASH` | empty | Turns on the password page (below). Set it with `deploy/set_access_password.sh`. |
 | `SAGE_SESSION_DAYS` | `30` | How long a browser stays logged in after typing the password. |
+| `SAGE_CLAUDE_TOKEN` | empty | Claude's own key to your data (at least 32 characters). Set it with `deploy/claude_access.sh`; see [docs/claude-access.md](../docs/claude-access.md). |
 | `GROQ_API_KEY` | empty | Canvas's "Think with me" panel uses Groq when this is set, here or in `lumo/rpi_server/.env` (LUMO's key works). Easier: paste it in the app under Settings > Server & Reset, which saves it to `sage_secrets.json` next to the database and takes priority. |
 | `SAGE_CANVAS_GROQ_MODEL` | LUMO's `GROQ_LLM_MODEL`, else `qwen/qwen3.8-27b` | Groq model for the Canvas panel. Falls back to `openai/gpt-oss-20b` when it's busy. |
 | `ANTHROPIC_API_KEY` | empty | Without a Groq key, lets the Canvas panel use Claude, which reads both the board's text and a picture of it. With neither, the panel uses the local Ollama model, which is slow. |
@@ -98,6 +99,12 @@ journalctl -u sage | grep "Wrong Sage password"
 ```
 
 To take Sage off the internet: `sudo systemctl disable --now sage-tunnel`.
+
+### Let Claude in
+
+`sudo deploy/claude_access.sh` gives Claude its own token, which reaches your
+Sage data and the web app but not settings or passwords. See
+[docs/claude-access.md](../docs/claude-access.md).
 
 ## Notifications
 

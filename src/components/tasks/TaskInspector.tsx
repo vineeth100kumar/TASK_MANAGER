@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag } from 'lucide-react';
+import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch } from 'lucide-react';
 import { api } from '../../services/api';
 import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
@@ -255,13 +255,28 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                           value={task.projectId || task.areaId || ''} onChange={async (e) => {
                             const val = e.target.value;
                             const isP = projects.some(p => p.id === val);
-                            await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null });
+                            await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null, branchId: null });
                             loadData();
                           }}>
                           {projects.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.name}</option>)}
                           {areas.map(a => <option key={a.id} value={a.id} className="text-gray-900">{a.name} (Area)</option>)}
                         </select>
                       </PropertyRow>
+
+                      {(() => {
+                        const branches = projects.find(p => p.id === task.projectId)?.branches || [];
+                        if (!branches.length) return null;
+                        return (
+                          <PropertyRow icon={GitBranch} label="Branch">
+                            <select aria-label="Branch" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                              value={task.branchId && branches.some(b => b.id === task.branchId) ? task.branchId : ''}
+                              onChange={async (e) => { await onUpdateDetails(task, { branchId: e.target.value || null }); loadData(); }}>
+                              <option value="" className="text-gray-900">Main</option>
+                              {branches.map(b => <option key={b.id} value={b.id} className="text-gray-900">{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
+                            </select>
+                          </PropertyRow>
+                        );
+                      })()}
 
                       <PropertyRow icon={CalendarIcon} label="Dates">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 justify-end">
@@ -394,12 +409,26 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                             loadData(); 
                           }} />
                       </PropertyRow>
+                      {(() => {
+                        const branches = projects.find(p => p.id === task.projectId)?.branches || [];
+                        if (!branches.length) return null;
+                        return (
+                          <PropertyRow icon={GitBranch} label="Branch">
+                            <select aria-label="Branch" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                              value={task.branchId && branches.some(b => b.id === task.branchId) ? task.branchId : ''}
+                              onChange={async (e) => { await onUpdateDetails(task, { branchId: e.target.value || null }); loadData(); }}>
+                              <option value="" className="text-gray-900">Main</option>
+                              {branches.map(b => <option key={b.id} value={b.id} className="text-gray-900">{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
+                            </select>
+                          </PropertyRow>
+                        );
+                      })()}
                       <PropertyRow icon={Folder} label="Space / Project" isLast>
                         <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
                           value={task.projectId || task.areaId || ''} onChange={async (e) => {
                             const val = e.target.value;
                             const isP = projects.some(p => p.id === val);
-                            await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null });
+                            await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null, branchId: null });
                             loadData();
                           }}>
                           {projects.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.name}</option>)}

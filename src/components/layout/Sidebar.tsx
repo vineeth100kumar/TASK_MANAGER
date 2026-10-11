@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
-import { weekDates, dateEntries } from '../../utils/habits';
+import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
 import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine } from 'lucide-react';
 import { api } from '../../services/api';
@@ -89,7 +89,7 @@ export function Sidebar({
 
   // Growth Data
   const [growthTitle, setGrowthTitle] = useState('');
-  const [growthTarget, setGrowthTarget] = useState(5);
+  const [growthTarget, setGrowthTarget] = useState(7);
   const [growthDate, setGrowthDate] = useState('');
 
   const scope = lifeContext === 'all' ? undefined : lifeContext;
@@ -177,7 +177,7 @@ export function Sidebar({
         await api.goals.create({ title: growthTitle, targetDate: growthDate || new Date().toISOString() });
         showToast('Goal added!');
       } else if (activeGrowthTab === 'habits') {
-        await api.habits.create({ name: growthTitle, targetCount: Number(growthTarget) || 5 });
+        await api.habits.create({ name: growthTitle, targetCount: Number(growthTarget) || 7 });
         showToast('Habit added!');
       } else if (activeGrowthTab === 'notes') {
         await api.notes.create({ title: growthTitle });
@@ -561,7 +561,9 @@ export function Sidebar({
               <form onSubmit={handleAddGrowthItem} className="flex gap-2">
                 <input type="text" placeholder={`Add new ${activeGrowthTab.slice(0, -1)}...`} value={growthTitle} onChange={e => setGrowthTitle(e.target.value)} className="flex-1 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2 text-sm font-semibold outline-none focus:border-blue-500" required />
                 {activeGrowthTab === 'habits' && (
-                  <input type="number" min={1} max={7} value={growthTarget} onChange={e => setGrowthTarget(Number(e.target.value))} className="w-20 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-sm font-semibold text-center outline-none" title="Days per week" />
+                  <select value={growthTarget} onChange={e => setGrowthTarget(Number(e.target.value))} aria-label="How often" className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-2 py-2 text-xs font-semibold outline-none dark:[color-scheme:dark]">
+                    {[7, 6, 5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n === 7 ? 'Every day' : `${n}× a week`}</option>)}
+                  </select>
                 )}
                 {activeGrowthTab === 'goals' && (
                   <input type="date" value={growthDate} onChange={e => setGrowthDate(e.target.value)} className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold outline-none" />
@@ -595,27 +597,10 @@ export function Sidebar({
 
                 {activeGrowthTab === 'habits' && (
                   habits.map(h => (
-                    <div key={h.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/hitem">
-                      <div>
-                        <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{h.name}</h4>
-                        <span className="text-xs text-gray-400">{weekDates(getTodayString()).filter(d => dateEntries(h.history).includes(d.date)).length} / {h.targetCount || 5} days this week</span>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <div className="flex gap-1">
-                          {weekDates(getTodayString()).map(({ date, label }) => (
-                            <button key={date} disabled={date > getTodayString()} aria-pressed={dateEntries(h.history).includes(date)} onClick={async () => {
-                              await api.habits.toggleDay(h.id, date);
-                              loadNavData();
-                            }} className={`w-7 h-7 rounded-lg text-[10px] font-semibold uppercase transition-colors ${dateEntries(h.history).includes(date) ? 'bg-emerald-500 text-white' : 'bg-gray-200 dark:bg-white/10 text-gray-400'} ${date > getTodayString() ? 'opacity-40' : ''}`}>
-                              {label}
-                            </button>
-                          ))}
-                        </div>
-                        <button onClick={(e) => handleDeleteGrowth('habits', h.id, e)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="Delete Habit">
-                          <Trash2 size={15} />
-                        </button>
-                      </div>
-                    </div>
+                    <HabitHistory key={h.id} habit={h} today={getTodayString()}
+                      onToggle={async (date) => { await api.habits.toggleDay(h.id, date); loadNavData(); }}
+                      onUpdate={async (updates) => { await api.habits.update(h.id, updates); loadNavData(); }}
+                      onDelete={(e) => handleDeleteGrowth('habits', h.id, e)} />
                   ))
                 )}
 

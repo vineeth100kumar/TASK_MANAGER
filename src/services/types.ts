@@ -21,9 +21,22 @@ export interface Project {
   description?: string;
   flowLayout?: {
     [nodeId: string]: { x: number; y: number };
-  };
+  }; // left by the old Map view; no longer read
+  branches?: ProjectBranch[];
   createdAt: string;
   updatedAt?: string;
+}
+
+// A line of work that splits off a project's main line (or another branch) on a
+// day, and may later be merged back. Items join one with WorkItem.branchId.
+export interface ProjectBranch {
+  id: string;
+  name: string;
+  color: string;
+  parentId: string | null;   // null = branched from the main line
+  startDate: string;         // YYYY-MM-DD, where it splits off
+  mergedAt?: string | null;  // YYYY-MM-DD, where it joined back
+  createdAt: string;
 }
 
 export interface Area {
@@ -49,6 +62,7 @@ export interface WorkItem {
   
   // Categorization
   projectId?: string | null;
+  branchId?: string | null; // a branch of the project; unset = its main line
   areaId?: string | null;
   
   // Solo Execution metrics
@@ -137,7 +151,12 @@ export interface Habit {
 export interface Note {
   id: string;
   title: string;
+  // Plain text of the note, kept for search, previews and older notes.
   content: string;
+  // The formatted note (HTML, images inline) split across body0..bodyN so each
+  // piece fits in one Google Sheets cell. Notes from before formatting have none.
+  bodyParts?: number;
+  [bodyPart: `body${number}`]: string;
   areaId?: string | null;
   projectId?: string | null;
   lifeContext?: LifeContext;   // unset on older notes, which show under both
