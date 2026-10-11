@@ -57,6 +57,31 @@ COMMANDS = {"play": 0, "pause": 1, "toggle": 2, "next": 3, "previous": 4}
 
 Broadcast = Callable[[dict], Awaitable[None]]
 
+# Names for the log, so a line says what failed rather than a UUID.
+CHAR_NAMES = {
+    ANCS_NOTIFICATION_SOURCE: "notifications (ANCS Notification Source)",
+    ANCS_CONTROL_POINT: "notification details request (ANCS Control Point)",
+    ANCS_DATA_SOURCE: "notification details (ANCS Data Source)",
+    AMS_REMOTE_COMMAND: "media buttons (AMS Remote Command)",
+    AMS_ENTITY_UPDATE: "now playing (AMS Entity Update)",
+}
+# What a BlueZ or ATT error usually means here, for the log.
+HINTS = {
+    "not connected": "the phone's Bluetooth Low Energy link to the Pi is down (classic Bluetooth audio can still be up); "
+                     "the phone has to reconnect to the Pi's 'Sage Companion' over BLE",
+    "0x0e": "the phone refused the request (ATT 'Unlikely Error'); usually the phone is still setting up "
+            "encryption or hasn't allowed the Pi to see notifications and media",
+    "0x05": "the phone wants the Pi paired again (insufficient authentication)",
+    "0x0f": "the link isn't encrypted yet (insufficient encryption)",
+    "in progress": "BlueZ is still starting this from an earlier try",
+    "not permitted": "BlueZ refused it for this characteristic",
+}
+
+
+def hint_for(error: str) -> str:
+    low = error.lower()
+    return next((h for key, h in HINTS.items() if key in low), "")
+
 
 # --- Pure decoding, kept free of D-Bus so it can be tested anywhere ---
 
@@ -130,6 +155,12 @@ class PhoneLink:
         # subscribe so a retry doesn't add a second one, and go when the
         # phone does.
         self._watching: Dict[str, tuple] = {}
+        # What the log last said, so a line repeated every few seconds is
+        # written once and then summarised once a minute.
+        self._said: Dict[str, list] = {}
+        # The link's state as the Pi sees it, for the log and /api/phone.
+        self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
+                                     "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -143,6 +174,7 @@ class PhoneLink:
             "lastSeen": int(self.last_seen * 1000) if self.last_seen else None,
             "media": self.media,
             "notifications": list(reversed(self.notifications)),
+            "link": self.link,
         }
 
     async def _emit(self, event: dict) -> None:
@@ -230,7 +262,7 @@ class PhoneLink:
             try:
                 await self._tick()
             except Exception as e:
-                log.warning("Phone link error: %s", e)
+                self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
                 self._chars.clear()  # subscribe again on the next tick
             # Poll faster while scanning, pairing or connecting so the page keeps up.
             await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") else 5)
@@ -244,19 +276,32 @@ class PhoneLink:
         objects = await self._objects()
         if self.control:
             await self.control.refresh(objects)
-        phone_path, phone_name = None, ""
+        phone_path, phone_name, dev = None, "", None
         for path, ifaces in objects.items():
-            dev = ifaces.get("org.bluez.Device1")
-            if dev and dev["Paired"].value and dev["Connected"].value:
-                uuids = {u.lower() for u in dev.get("UUIDs").value} if dev.get("UUIDs") else set()
+            d = ifaces.get("org.bluez.Device1")
+            if d and d["Paired"].value and d["Connected"].value:
+                uuids = {u.lower() for u in d.get("UUIDs").value} if d.get("UUIDs") else set()
                 services = self._services_under(objects, path)
                 if ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids:
-                    phone_path, phone_name = path, dev.get("Alias").value if dev.get("Alias") else ""
+                    phone_path, phone_name, dev = path, d.get("Alias").value if d.get("Alias") else "", d
                     break
         await self.set_presence(phone_path is not None, phone_name)
         if phone_path is None:
+            self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
+            self.say("state", "no paired phone is connected to the Pi; waiting")
             self._chars.clear()
             self._unwatch()
+            return
+        # ServicesResolved is BlueZ's word for "the BLE (GATT) link is up and
+        # its services are read". Connected alone can be just classic audio.
+        ble = bool(dev.get("ServicesResolved") and dev["ServicesResolved"].value)
+        address = dev["Address"].value if dev.get("Address") else phone_path.rsplit("dev_", 1)[-1].replace("_", ":")
+        self._set_link(phone=phone_name, address=address, classic=True, ble=ble)
+        if not ble:
+            self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
+                              f"(ServicesResolved=no), so notifications and now playing can't be read. "
+                              f"Waiting for the phone to reconnect over BLE.")
+            self._chars.clear()
             return
         if not self._chars:
             await self._subscribe(objects, phone_path)
@@ -298,27 +343,52 @@ class PhoneLink:
         # Data Source must be listening before Notification Source starts.
         for uuid in (ANCS_DATA_SOURCE, ANCS_NOTIFICATION_SOURCE, AMS_ENTITY_UPDATE):
             if uuid in self._chars and not notifying.get(uuid):
-                await self._try(f"notify {uuid[:8]}", self._chars[uuid].call_start_notify())
+                await self._try(f"turning on {CHAR_NAMES.get(uuid, uuid)}", self._chars[uuid].call_start_notify())
         if AMS_ENTITY_UPDATE in self._chars:
             for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2])):
-                if not await self._try("now playing", self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
+                what = "asking for the player" if entity[0] == AMS_PLAYER else "asking for the track"
+                if not await self._try(f"{what} on {CHAR_NAMES[AMS_ENTITY_UPDATE]}",
+                                       self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
+                    self._set_link(nowPlaying="failed, retrying in 5 s")
                     # Without this request the phone never sends songs, so
                     # forget the subscription and ask again on the next tick
                     # (the watchers stay, so nothing is added twice).
                     self._chars.clear()
                     return
-        log.info("Phone link subscribed: %s", ", ".join(sorted(self._chars)))
+        self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
+        self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
+                          + ", ".join(self.link["subscribed"]) + ". Now playing will update on the next song change.")
 
-    @staticmethod
-    async def _try(step: str, call) -> bool:
+    async def _try(self, step: str, call) -> bool:
         try:
             await call
             return True
         except Exception as e:
+            error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"  # D-Bus errors carry a name
             if "progress" in str(e).lower() or "already" in str(e).lower():
                 return True
-            log.warning("Phone link: %s failed: %s", step, e)
+            hint = hint_for(str(e))
+            self._set_link(lastError={"step": step, "error": error, "at": int(time.time())})
+            self.say(step, f"{step} failed on {self.link['phone']} ({self.link['address']}, "
+                           f"BLE {'up' if self.link['ble'] else 'down'}): {error}" + (f". Likely: {hint}" if hint else ""))
             return False
+
+    def _set_link(self, **fields) -> None:
+        self.link.update(fields)
+
+    def say(self, key: str, message: str) -> None:
+        """Log a phone-link line. The same line for the same key is written
+        once, then at most once a minute with how often it happened."""
+        now = time.time()
+        last = self._said.get(key)
+        if last and last[0] == message:
+            last[2] += 1
+            if now - last[1] >= 60:
+                log.warning("Phone link: %s (repeated %d times in the last minute)", message, last[2])
+                last[1], last[2] = now, 0
+            return
+        self._said[key] = [message, now, 0]
+        log.warning("Phone link: %s", message)
 
     def _unwatch(self) -> None:
         for props, handler in self._watching.values():

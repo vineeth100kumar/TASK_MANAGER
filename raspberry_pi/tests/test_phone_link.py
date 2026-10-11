@@ -190,3 +190,16 @@ class Subscribing(unittest.TestCase):
         ams.fail_write = None
         asyncio.run(link._subscribe(objects, dev))
         self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
+
+
+class Logging(unittest.TestCase):
+    def test_lines_say_what_failed_and_repeat_once_a_minute(self):
+        link = phone_link.PhoneLink()
+        self.assertIn("BLE", phone_link.hint_for("Not connected"))
+        with self.assertLogs("phone_link", "WARNING") as logs, mock.patch.object(phone_link.time, "time", return_value=1000):
+            for _ in range(5):
+                link.say("x", "same thing")
+        self.assertEqual(len(logs.output), 1)
+        with self.assertLogs("phone_link", "WARNING") as logs, mock.patch.object(phone_link.time, "time", return_value=1061):
+            link.say("x", "same thing")
+        self.assertIn("repeated 5 times", logs.output[0])
