@@ -6,7 +6,7 @@
 
 
 const DB_NAME = 'sage_local_db';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 export interface SyncOpRecord {
   operationId: string;       // Unique UUID/ULID
@@ -110,6 +110,14 @@ export async function getDB(): Promise<IDBDatabase> {
       if (!db.objectStoreNames.contains('boards')) {
         db.createObjectStore('boards', { keyPath: 'id' });
       }
+
+      // 13-14. Radar research: dossiers and the ideas drawn from them
+      if (!db.objectStoreNames.contains('dossiers')) {
+        db.createObjectStore('dossiers', { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains('ideas')) {
+        db.createObjectStore('ideas', { keyPath: 'id' });
+      }
     };
 
     request.onsuccess = (event) => {
@@ -124,6 +132,13 @@ export async function getDB(): Promise<IDBDatabase> {
 }
 
 /** Generic Helpers **/
+// Whether this device's database has a table, so a pull carrying a table from a
+// newer server can skip it instead of failing the whole pull.
+export async function hasStore(storeName: string): Promise<boolean> {
+  const db = await getDB();
+  return db.objectStoreNames.contains(storeName);
+}
+
 export async function getAllFromStore<T>(storeName: string): Promise<T[]> {
   const db = await getDB();
   return new Promise((resolve, reject) => {
@@ -290,7 +305,7 @@ export async function migrateFromLocalStorage(): Promise<boolean> {
 export async function clearAllStores(): Promise<void> {
   const stores = [
     'workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 
-    'comments', 'subtasks', 'activities', 'boards', 'syncOperations', 'meta'
+    'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas', 'syncOperations', 'meta'
   ];
   for (const s of stores) {
     try {

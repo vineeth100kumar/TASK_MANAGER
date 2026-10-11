@@ -6,6 +6,7 @@
 // to the Pi; Apps Script has no equivalent.
 
 import { getPiApiKey } from './piBackend';
+import { RADAR_EVENT } from './radar';
 
 export type LiveEvent =
   | { type: 'SYNC_APPLIED'; serverRevision: number }
@@ -64,6 +65,9 @@ export class LiveStream {
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
         // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
         window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
+      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS') {
+        // New headlines or prices, or a research run moving on (see RadarView).
+        window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
       } else if (event?.type === 'BT_STATE') {
         // The Bluetooth settings page (see BluetoothSettings) shows the device list live.
         window.dispatchEvent(new CustomEvent(BLUETOOTH_EVENT, { detail: event }));
