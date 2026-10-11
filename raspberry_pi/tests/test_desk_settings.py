@@ -130,9 +130,16 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         async def cover(title, artist):
             return None
 
+        async def about(title, artist):
+            return None
+
+        async def lyrics(title, artist, duration=0):
+            return []
+
         self.desk = Desk(
             self.link, lambda: self.clock, self.phone, broadcast,
             items=lambda: list(self.items), actions=self.actions, weather=weather, cover=cover,
+            song_about=about, song_lyrics=lyrics,
             settings=settings.merge(settings.defaults(), update or {}),
         )
         return self.desk

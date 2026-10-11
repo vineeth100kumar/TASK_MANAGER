@@ -483,7 +483,10 @@ void faceTick(const LumoState& s, const ClockNow& c) {
 //    and lies down to a slow ripple when it's paused.
 //  The phone sends no audio, so the bars are made up: layered waves with a
 //  beat on the low bars, through a fast-attack, slow-release spring, which
-//  reads like a real spectrum.
+//  reads like a real spectrum. Sage looks the song up (SONG_INFO), so the
+//  beat runs at the song's tempo and the bars at its energy, the label
+//  names its genre, and a line under the controls shows the lyrics as
+//  they're sung (LYRIC), or a few facts about the song in turn.
 // =====================================================================
 
 static const int NP_ART_X = 16, NP_ART = 100;
@@ -497,6 +500,12 @@ static bool  npPlaying = false;
 static char  npTitle[64] = "", npArtist[64] = "", npOldTitle[64] = "", npOldArtist[64] = "";
 static float npBar[NP_BARS];
 static unsigned long npLastBars = 0, npLastText = 0;
+static char  npLabelShown[40] = "";
+// The line under the controls: a lyric, or a fact about the song.
+static char  npLine[100] = "", npOldLine[100] = "";
+static bool  npLineLyric = false, npOldLyric = false, npLineMoving = false;
+static unsigned long npLineMs = 0, npLastLine = 0, npFactMs = 0;
+static uint8_t npFact = 0;
 
 void nowPlayingReset() {
   npNeedAll = true;
@@ -504,7 +513,16 @@ void nowPlayingReset() {
   npEntered = false;
   npArtWiping = npTitleMoving = npPlayMoving = false;
   npOldTitle[0] = npOldArtist[0] = '\0';
+  npLine[0] = npOldLine[0] = npLabelShown[0] = '\0';
+  npLineMoving = false;
   for (int i = 0; i < NP_BARS; i++) npBar[i] = 0;
+}
+
+// The song's beat, shared with the light ring so the two move together:
+// a soft pulse at the song's tempo (118 bpm when Sage hasn't said).
+float nowPlayingBeat(const LumoState& s, float t) {
+  float f = (s.sp_bpm ? s.sp_bpm : 118) / 60.0f;
+  return powf(0.5f + 0.5f * cosf(t * 6.2831853f * f), 6.0f);
 }
 
 static uint16_t npBg() {
@@ -664,27 +682,116 @@ static void npText(float k, float tr, unsigned long now) {
   }
 }
 
-// The small label over the title, with four tiny bars when playing.
-static void npLabel(float k) {
+// The small label over the title: the genre and tempo once Sage knows them.
+static void npLabelText(const LumoState& s, char* out, size_t n) {
+  if (!npPlaying) { strlcpy(out, "PAUSED", n); return; }
+  if (!s.sp_genre[0]) { strlcpy(out, "NOW PLAYING", n); return; }
+  char raw[40];
+  if (s.sp_bpm) snprintf(raw, sizeof(raw), "%s  %u BPM", s.sp_genre, s.sp_bpm);
+  else snprintf(raw, sizeof(raw), "%s", s.sp_genre);
+  size_t j = 0;                                   // the caps font: A-Z, 0-9 and spaces
+  for (size_t i = 0; raw[i] && j + 1 < n; i++) {
+    char c = toupper((unsigned char)raw[i]);
+    out[j++] = (isalnum((unsigned char)c) ? c : ' ');
+  }
+  out[j] = '\0';
+  while (j > 1 && aaTextWidth(AA_CAPS9, out, 2) > NP_COL_R - NP_COL_X) out[--j] = '\0';
+}
+
+static void npLabel(float k, const char* text) {
   AASurface sf;
   uint16_t bg = npBg();
   int base = VY(30);
   if (!aaBegin(sf, NP_COL_X, base - 12, NP_COL_R - NP_COL_X, 15, bg)) return;
-  aaText(sf, NP_COL_X, base, npPlaying ? "NOW PLAYING" : "PAUSED", AA_CAPS9, npTint(k), 2);
+  aaText(sf, NP_COL_X, base, text, AA_CAPS9, npTint(k), 2);
   aaEnd(sf);
 }
 
-static void npBars(float k, float t, float dt) {
+// The line under the controls. Lyrics are bright and centred, the size
+// stepping down for a long line; facts are quieter. A line too long for the
+// screen glides along after a moment. A new line rises in as the old one
+// lifts away, like lyrics in a music app.
+static const int NP_LINE_X0 = 16, NP_LINE_X1 = 304;
+static inline int npLineBase() { return VY(156); }
+
+static const AAFont& npLineFont(const char* t, bool lyric) {
+  if (lyric && aaTextWidth(AA_DISP14, t) <= NP_LINE_X1 - NP_LINE_X0) return AA_DISP14;
+  return lyric ? AA_SEMI11 : AA_BODY11;
+}
+
+static void npLineDraw(AASurface& sf, const char* t, bool lyric, int dy, float kk, float k, unsigned long since) {
+  if (!t[0]) return;
+  const AAFont& f = npLineFont(t, lyric);
+  const int w = aaTextWidth(f, t), colW = NP_LINE_X1 - NP_LINE_X0;
+  int x = NP_LINE_X0 + (colW - w) / 2;
+  if (w > colW) {                                 // wait, then glide to the end and stay
+    float u = since / 1000.0f - 1.2f;
+    int off = u > 0 ? (int)fminf(u * (lyric ? 40.0f : 26.0f), (float)(w - colW)) : 0;
+    x = NP_LINE_X0 - off;
+  }
+  uint16_t col = lyric ? aaRGB(244, 242, 236, k * kk) : aaMix(npBg(), npTint(1), (uint8_t)(200 * k * kk));
+  aaText(sf, x, npLineBase() + dy, t, f, col);
+}
+
+static void npLineTick(const LumoState& s, float k, bool all, unsigned long now) {
+  // What the line should say now.
+  const char* want = "";
+  bool lyric = false;
+  if (s.sp_lyrics && s.sp_lyric[0]) {
+    want = s.sp_lyric; lyric = true;
+  } else if (s.sp_fact_count) {
+    if (npFact >= s.sp_fact_count) npFact = 0;
+    const char* f = s.sp_facts[npFact];
+    int over = aaTextWidth(AA_BODY11, f) - (NP_LINE_X1 - NP_LINE_X0);
+    float hold = 9.0f + (over > 0 ? over / 26.0f : 0);
+    if (!npLineLyric && !strcmp(npLine, f) && now - npFactMs > hold * 1000) {
+      npFact = (npFact + 1) % s.sp_fact_count;
+      f = s.sp_facts[npFact];
+    }
+    want = f;
+  }
+  if (strcmp(want, npLine) || lyric != npLineLyric) {
+    strlcpy(npOldLine, npLine, sizeof(npOldLine));
+    npOldLyric = npLineLyric;
+    strlcpy(npLine, want, sizeof(npLine));
+    npLineLyric = lyric;
+    npLineMs = npFactMs = now;
+    npLineMoving = !all;
+  }
+
+  float tr = npLineMoving ? animProgress(npLineMs, now, 420) : 1.0f;
+  bool scrolling = aaTextWidth(npLineFont(npLine, npLineLyric), npLine) > NP_LINE_X1 - NP_LINE_X0
+                   && now - npLineMs < 30000;
+  if (!(all || npLineMoving || (scrolling && now - npLastLine >= 40))) return;
+  npLastLine = now;
+
+  AASurface sf;
+  int top = npLineBase() - AA_DISP14.ascent - 3, bottom = npLineBase() + AA_DISP14.descent + 2;
+  if (!aaBegin(sf, NP_LINE_X0, top, NP_LINE_X1 - NP_LINE_X0, bottom - top, npBg())) return;
+  if (tr >= 1) {
+    npLineDraw(sf, npLine, npLineLyric, 0, 1, k, now - npLineMs);
+    npLineMoving = false;
+  } else {
+    float e = easeInOutCubic(tr);
+    int travel = bottom - top;
+    npLineDraw(sf, npOldLine, npOldLyric, -(int)(e * travel * 0.6f), 1 - e, k, 0);
+    npLineDraw(sf, npLine, npLineLyric, (int)((1 - e) * travel * 0.6f), e, k, 0);
+  }
+  aaEnd(sf);
+}
+
+static void npBars(const LumoState& s, float k, float t, float dt) {
   AASurface sf;
   uint16_t bg = npBg();
-  const int x0 = 16, x1 = 304, top = VY(146), base = VY(198), refl = 8;
+  const int x0 = 16, x1 = 304, top = VY(166), base = VY(198), refl = 8;
   if (!aaBegin(sf, x0 - 1, top - 2, x1 - x0 + 2, base - top + refl + 3, bg)) return;
   uint8_t r, g, b;
   displayArtTint(r, g, b);
   uint16_t lo = aaRGB(r, g, b, k * 0.75f);
   uint16_t hi = aaRGB(min(255, r / 2 + 128), min(255, g / 2 + 128), min(255, b / 2 + 128), k);
   const float pitch = (x1 - x0) / (float)NP_BARS, bw = pitch * 0.58f, maxH = base - top;
-  float beat = powf(0.5f + 0.5f * cosf(t * 6.2831853f * 1.97f), 6.0f);   // ~118 bpm
+  float beat = nowPlayingBeat(s, t);
+  float drive = 0.75f + 0.5f * s.sp_energy;          // a calm song moves less
   for (int i = 0; i < NP_BARS; i++) {
     float u = (float)i / (NP_BARS - 1);
     float target;
@@ -693,7 +800,7 @@ static void npBars(float k, float t, float dt) {
                          + 0.16f * sinf(t * (5.7f - u * 2.0f) + i * 1.93f)
                          + 0.10f * sinf(t * 11.0f + i * 2.71f);
       float tilt = 1.0f - 0.45f * u;                // more energy in the lows
-      target = animClamp(body * tilt + beat * (1 - u) * 0.45f);
+      target = animClamp((body * tilt + beat * (1 - u) * 0.45f) * drive);
     } else {
       target = 0.05f + 0.05f * (0.5f + 0.5f * sinf(t * 1.4f - u * 6.0f));   // a slow ripple
     }
@@ -775,7 +882,14 @@ void nowPlayingTick(const LumoState& s) {
     if (tr >= 1) npTitleMoving = false;
   }
 
-  if (all) npLabel(k);
+  char label[40];
+  npLabelText(s, label, sizeof(label));
+  if (all || strcmp(label, npLabelShown)) {
+    npLabel(k, label);
+    strlcpy(npLabelShown, label, sizeof(npLabelShown));
+  }
+
+  npLineTick(s, k, all, now);
 
   float pm = npPlayMoving ? animProgress(npPlayMs, now, 240) : 1.0f;
   if (all || npPlayMoving) {
@@ -786,6 +900,6 @@ void nowPlayingTick(const LumoState& s) {
   float bdt = npLastBars ? (now - npLastBars) / 1000.0f : dt;
   if (bdt > 0.2f) bdt = 0.2f;
   npLastBars = now;
-  npBars(k, t, bdt);
+  npBars(s, k, t, bdt);
   npNeedAll = false;
 }

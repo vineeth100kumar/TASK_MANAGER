@@ -191,10 +191,19 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         async def weather():
             return {"cmd": "WEATHER", "temp_c": 24.5, "icon": "rain"}
 
+        self.lookups = []
+
+        async def about(title, artist):
+            self.lookups.append(title)
+            return {"genre": "Alt rock", "bpm": 131, "energy": 0.7, "facts": ["Released in 2002 on A Rush of Blood to the Head."]}
+
+        async def lyrics(title, artist, duration=0):
+            return [(0.0, ""), (10.0, "The lights go out and I can't be saved"), (16.0, "Tides that I tried to swim against")]
+
         self.desk = Desk(
             self.link, lambda: self.clock, self.phone, broadcast,
             items=lambda: [i for i in self.items if i.get("status") != "done"],
-            actions=self.actions, weather=weather, cover=cover,
+            actions=self.actions, weather=weather, cover=cover, song_about=about, song_lyrics=lyrics,
         )
         self.desk.loop = asyncio.get_running_loop()
 
@@ -307,6 +316,40 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         for button in ("LEFT", "OK", "RIGHT"):
             await self.desk.controller.on_button(button)
         self.assertEqual(self.phone.commands, ["previous", "toggle", "next"])
+
+    async def test_song_info_and_lyrics_follow_the_song(self):
+        import time
+        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True,
+                            "elapsed": 9.9, "rate": 1.0, "elapsedAt": time.time()}
+        await self.desk.show_media(self.phone.media)
+        for _ in range(50):
+            await asyncio.sleep(0.01)
+            if "LYRIC" in self.link.cmds():
+                break
+        info = self.link.last("SONG_INFO")
+        self.assertEqual((info["title"], info["genre"], info["bpm"], info["lyrics"]), ("Clocks", "Alt rock", 131, True))
+        self.assertEqual(self.link.last("LYRIC")["line"], "The lights go out and I can't be saved")
+
+        # The phone seeks on: the line follows.
+        self.phone.media = {**self.phone.media, "elapsed": 17.0, "elapsedAt": time.time()}
+        await self.desk.follow_lyrics(("Clocks", "Coldplay"))
+        self.assertEqual(self.link.last("LYRIC")["line"], "Tides that I tried to swim against")
+
+        # A reconnecting clock gets the song and the line back; the song isn't looked up again.
+        self.link.sent.clear()
+        await self.desk.controller.redraw()
+        self.assertIn("SONG_INFO", self.link.cmds())
+        self.assertEqual(self.link.last("LYRIC")["line"], "Tides that I tried to swim against")
+        self.assertEqual(self.lookups, ["Clocks"])
+        self.desk.track = None  # stops following
+
+    async def test_no_lyrics_until_the_phone_says_where_it_is(self):
+        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
+        await self.desk.show_media(self.phone.media)
+        await asyncio.sleep(0.05)
+        self.assertIn("SONG_INFO", self.link.cmds())
+        self.assertNotIn("LYRIC", self.link.cmds())
+        self.desk.track = None
 
     async def test_cover_goes_in_small_strips_to_new_firmware(self):
         self.link.fw = "2.2.0"

@@ -146,7 +146,9 @@ class PhoneLink:
         self.last_seen = 0.0
         self.home = False
         self.notifications: Deque[dict] = deque(maxlen=KEEP)
-        self.media: Dict[str, Any] = {"title": "", "artist": "", "album": "", "playing": False, "app": ""}
+        self.media: Dict[str, Any] = {"title": "", "artist": "", "album": "", "playing": False, "app": "",
+                                      # where the song was (s), at what rate, and when we heard (epoch s)
+                                      "duration": 0.0, "elapsed": None, "rate": 1.0, "elapsedAt": 0.0}
         self._pending: Dict[int, dict] = {}
         self._data_buffer = b""
         self._bus = None
@@ -385,7 +387,7 @@ class PhoneLink:
             if uuid in self._chars and not notifying.get(uuid):
                 await self._try(f"turning on {CHAR_NAMES.get(uuid, uuid)}", self._chars[uuid].call_start_notify())
         if AMS_ENTITY_UPDATE in self._chars:
-            for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2])):
+            for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2, 3])):
                 what = "asking for the player" if entity[0] == AMS_PLAYER else "asking for the track"
                 if not await self._try(f"{what} on {CHAR_NAMES[AMS_ENTITY_UPDATE]}",
                                        self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
@@ -474,9 +476,23 @@ class PhoneLink:
             if entity == AMS_PLAYER and attr == 0:
                 self.media["app"] = value
             elif entity == AMS_PLAYER and attr == 1:
-                self.media["playing"] = value.split(",")[0] == "1"
+                # PlaybackInfo: "state,rate,elapsed seconds", sent on play,
+                # pause and seek; the desk carries the position on from there.
+                parts = value.split(",")
+                self.media["playing"] = parts[0] == "1"
+                try:
+                    self.media["rate"] = float(parts[1]) if len(parts) > 1 and parts[1] else 1.0
+                    self.media["elapsed"] = float(parts[2]) if len(parts) > 2 and parts[2] else None
+                except ValueError:
+                    self.media["elapsed"] = None
+                self.media["elapsedAt"] = time.time()
             elif entity == AMS_TRACK and attr in (0, 1, 2):
                 self.media[("artist", "album", "title")[attr]] = value
+            elif entity == AMS_TRACK and attr == 3:
+                try:
+                    self.media["duration"] = float(value or 0)
+                except ValueError:
+                    self.media["duration"] = 0.0
             await self._emit({"type": "PHONE_MEDIA", "media": self.media})
 
     @staticmethod

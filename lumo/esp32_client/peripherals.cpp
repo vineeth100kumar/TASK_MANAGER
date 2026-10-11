@@ -3,6 +3,7 @@
 #include "anim.h"
 #include "clockkeeper.h"
 #include "display.h"
+#include "faces.h"
 #include <math.h>
 
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
@@ -289,7 +290,8 @@ static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rg
       uint8_t r, g, b;
       displayArtTint(r, g, b);
       k.color = rgb8(r, g, b);
-      if (!s.sp_playing) { k.level = day * 0.5f; k.breathe = false; }
+      k.breathe = false;                          // the song's pulse is its motion (sceneAuto)
+      if (!s.sp_playing) k.level = day * 0.5f;
       break;
     }
     case SCREEN_SYSTEM: {
@@ -518,7 +520,10 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
       tintSeen[0] = r; tintSeen[1] = g; tintSeen[2] = b;
     }
     float sw = tintSwellAt ? swellAt((millis() - tintSwellAt) / 1000.0f, SWELL_S) : 0;
-    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], 1 + SWELL_GAIN * 1.5f * sw);
+    // While it plays, the light pulses softly at the song's tempo, in step
+    // with the level bars on screen; a more energetic song pulses deeper.
+    float beat = s.sp_playing ? (0.10f + 0.20f * s.sp_energy) * nowPlayingBeat(s, t) : 0;
+    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], (1 + SWELL_GAIN * 1.5f * sw) * (1 + beat));
   }
 }
 

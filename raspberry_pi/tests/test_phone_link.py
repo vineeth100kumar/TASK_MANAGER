@@ -105,6 +105,7 @@ class State(unittest.TestCase):
         self.run_async(go())
         media = self.sent[-1]["media"]
         self.assertEqual((media["title"], media["artist"], media["playing"]), ("Yellow", "Coldplay", True))
+        self.assertEqual((media["elapsed"], media["rate"]), (12.5, 1.0))  # where the song is, for the lyrics
 
 
 if __name__ == "__main__":

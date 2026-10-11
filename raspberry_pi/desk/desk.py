@@ -13,7 +13,9 @@ The clock only draws and reports button presses; this decides what it shows:
   to the phone as before (Sage's notifier asks clock_reminder first).
 - The phone's notifications appear as cards, and what it's playing shows on
   the now-playing screen with its cover, where LEFT, OK and RIGHT are
-  previous, play/pause and next.
+  previous, play/pause and next. Each song is looked up once (song.py): its
+  genre, tempo and a few facts (SONG_INFO), and its lyrics, sent a line at
+  a time as the song reaches them (LYRIC).
 - Weather and the Pi's vitals.
 - The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
   ring them itself while it can't reach the Pi.
@@ -24,11 +26,12 @@ The clock only draws and reports button presses; this decides what it shows:
 import asyncio
 import datetime
 import logging
+import time
 from typing import Any, Awaitable, Callable, List, Optional, Set
 
 import item_actions
 import notifier
-from desk import ambient, art, settings as desk_settings, today
+from desk import ambient, art, settings as desk_settings, song, today
 from desk.alarms import Alarms, is_alarm
 from desk.controller import DeskController
 
@@ -52,6 +55,8 @@ class Desk:
         actions=item_actions,
         weather: Callable[[], Awaitable[Optional[dict]]] = ambient.fetch_weather,
         cover: Callable[[str, str], Awaitable[Optional[bytes]]] = art.cover,
+        song_about: Callable[[str, str], Awaitable[Optional[dict]]] = song.about,
+        song_lyrics: Callable[..., Awaitable[list]] = song.lyrics,
         vitals: Optional[ambient.Vitals] = None,
         settings: Optional[dict] = None,
     ) -> None:
@@ -63,6 +68,8 @@ class Desk:
         self.actions = actions
         self.fetch_weather = weather
         self.fetch_cover = cover
+        self.song_about = song_about
+        self.song_lyrics = song_lyrics
         self.vitals = vitals or ambient.Vitals()
 
         self.settings = settings or desk_settings.defaults()
@@ -84,6 +91,10 @@ class Desk:
         self.sent_alarms: Optional[dict] = None
         self.track: Optional[tuple] = None
         self.cover: Optional[bytes] = None
+        self.song_info: Optional[dict] = None   # the last SONG_INFO, for a clock that reconnects
+        self.lyric_lines: list = []
+        self.lyric: str = ""
+        self.track_started = 0.0
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._refresh_soon = False
         self._tasks: Set[asyncio.Task] = set()
@@ -225,9 +236,50 @@ class Desk:
         })
         if track != self.track and track[0]:
             self.track = track
+            self.track_started = time.time()
+            self.song_info, self.lyric_lines, self.lyric = None, [], ""
+            self._spawn(self._guard(self.learn_song(track, media.get("duration") or 0)))
             self.cover = await self.fetch_cover(*track)
             if self.track == track:
                 await self.send_cover()
+
+    async def learn_song(self, track: tuple, duration: float) -> None:
+        """Look the song up (genre, tempo, facts, lyrics) and, while it's
+        still playing, tell the clock and follow the lyrics."""
+        about, lines = await asyncio.gather(self._guard(self.song_about(*track)),
+                                            self._guard(self.song_lyrics(*track, duration)))
+        if self.track != track:
+            return
+        about = about or {}
+        self.lyric_lines = lines or []
+        self.song_info = {
+            "cmd": "SONG_INFO", "title": track[0], "genre": about.get("genre", ""),
+            "bpm": about.get("bpm", 0), "energy": about.get("energy", 0.5),
+            "facts": about.get("facts", []), "lyrics": bool(self.lyric_lines),
+        }
+        await self.link.send(self.song_info)
+        while self.lyric_lines and self.track == track:
+            await self._guard(self.follow_lyrics(track))
+            await asyncio.sleep(0.2)
+
+    def song_position(self) -> Optional[float]:
+        """Seconds into the song, from the phone's last report, or None when
+        it hasn't said since this song started."""
+        media = self.phone.media
+        elapsed, heard = media.get("elapsed"), media.get("elapsedAt") or 0
+        if elapsed is None or heard < self.track_started - 2:
+            return None
+        moving = (time.time() - heard) * (media.get("rate") or 0) if media.get("playing") else 0
+        return elapsed + moving
+
+    async def follow_lyrics(self, track: tuple) -> None:
+        position = self.song_position()
+        # A touch early, so the line lands on the clock as it's sung.
+        index = song.line_at(self.lyric_lines, position + 0.25) if position is not None else -1
+        line = self.lyric_lines[index][1] if index >= 0 else ""
+        if line != self.lyric and self.track == track:
+            self.lyric = line
+            await self.link.send({"cmd": "LYRIC", "title": track[0], "line": line})
 
     # --- Alarms ---
 
@@ -329,6 +381,10 @@ class Desk:
         if self.track:
             await self.show_media(self.phone.media)
             await self.send_cover()
+            if self.song_info:
+                await self.link.send(self.song_info)
+                if self.lyric:
+                    await self.link.send({"cmd": "LYRIC", "title": self.track[0], "line": self.lyric})
         if self.alarms.ringing:
             await self.link.send({"cmd": "ALARM_RING"})
 
