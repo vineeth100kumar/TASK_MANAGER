@@ -139,7 +139,7 @@ static Rgb hsv(float h, float s, float v) {
 
 // Engine state
 static NeoMode  baseMode   = NEO_AUTO;
-static uint8_t  baseBri    = 40;
+static uint8_t  baseBri    = 100;
 static uint16_t baseHue    = 0;
 static bool     onClock    = false;
 static bool     sleeping   = false;
@@ -611,11 +611,11 @@ void neoTick() {
 
   Rgb target[NUMPIXELS];
   float tau = 0.2f;
-  float master = (baseBri / 100.0f) * 0.60f;   // linear-light ceiling, 100% ~= 60% duty
+  float master = (baseBri > 100 ? 100 : baseBri) / 100.0f;   // 100% is the LEDs' full power
 
   if (alarmOn) {
     sceneAlarm(t, target, tau);
-    master = 0.55f;
+    master = 1.0f;
   } else if (voiceFx != VFX_NONE) {
     sceneVoice(t, target, tau);
   } else {
