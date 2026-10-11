@@ -43,8 +43,8 @@ class Merge(unittest.TestCase):
 
     def test_untouched_fields_stay(self):
         s = settings.merge(settings.defaults(), {"alarm": {"snoozeMinutes": 9}})
-        self.assertEqual(s["alarm"], {"snoozeMinutes": 9, "ringMinutes": 10})
-        self.assertEqual(s["screens"], list(settings.SCREENS))
+        self.assertEqual(s["alarm"], {"snoozeMinutes": 9, "ringMinutes": 10, "tone": "pulse", "volume": 80})
+        self.assertEqual(s["screens"], ["CLOCK", "TASKS", "SPOTIFY", "SYSTEM"])
 
     def test_home_screen_follows_the_screens(self):
         s = settings.merge(settings.defaults(), {"screens": ["TASKS", "SPOTIFY"]})
@@ -235,7 +235,7 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
     async def test_haptic_strength_reaches_the_clock(self):
         desk = self.make({"haptics": {"strength": 35}})
         await desk.after_redraw()
-        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 35})
+        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 35, "buttons": True, "notify": True})
         await desk.apply_settings(settings.merge(desk.settings, {"haptics": {"strength": 0}}))
         self.assertEqual(self.link.last("HAPTICS")["strength"], 0)
 

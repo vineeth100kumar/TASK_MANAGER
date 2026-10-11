@@ -7,6 +7,7 @@
 
 import { getPiApiKey } from './piBackend';
 import { RADAR_EVENT } from './radar';
+import { LUMO_EVENT } from './lumo';
 
 export type LiveEvent =
   | { type: 'SYNC_APPLIED'; serverRevision: number }
@@ -68,6 +69,9 @@ export class LiveStream {
       } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS') {
         // New headlines or prices, or a research run moving on (see RadarView).
         window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
+      } else if (event?.type === 'DESK_STATE') {
+        // The desk clock's timer, stopwatch or ringing alarm changed (see LumoView).
+        window.dispatchEvent(new CustomEvent(LUMO_EVENT, { detail: event }));
       } else if (event?.type === 'BT_STATE') {
         // The Bluetooth settings page (see BluetoothSettings) shows the device list live.
         window.dispatchEvent(new CustomEvent(BLUETOOTH_EVENT, { detail: event }));

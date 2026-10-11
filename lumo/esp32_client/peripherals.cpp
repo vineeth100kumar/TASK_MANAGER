@@ -66,6 +66,13 @@ static const HapFrame FX_HEARTBEAT[]= { KNOCK(HFX_BEAT_PEAK, 26), REST(90), KNOC
 // "beep-beep ... beep-beep" on the tone, the rhythm the light beats to.
 // Short glides keep the beeps round instead of clicky.
 static const HapFrame FX_ALARM[]    = { {255, 3}, {255, 124}, {0, 3}, REST(127), {255, 3}, {255, 124}, {0, 3}, REST(913) };
+// The other alarm sounds picked in Sage: four quick beeps, one long rising
+// beep, and three chirps (also a finished timer).
+#define BEEP(ms)  {255, 3}, {255, (ms) - 6}, {0, 3}
+static const HapFrame FX_CLASSIC[]  = { BEEP(90), REST(90), BEEP(90), REST(90), BEEP(90), REST(90), BEEP(90), REST(680) };
+static const HapFrame FX_RISING[]   = { BEEP(420), REST(1080) };
+static const HapFrame FX_CHIRP[]    = { BEEP(35), REST(55), BEEP(35), REST(55), BEEP(35), REST(900) };
+#undef BEEP
 
 #define FX(p) { p, (uint8_t)(sizeof(p) / sizeof((p)[0])) }
 static const struct { const HapFrame* f; uint8_t n; } FX_LIB[HAP_COUNT] = {
@@ -87,6 +94,7 @@ static const HapFrame* askFrames = nullptr;
 static uint8_t  askCount = 0;
 static bool     askLoop = false, askTone = false;
 static float    askScale = 1;
+static uint32_t askBuildMs = 0, askStopMs = 0;
 static HapFrame pulseOne[3];                 // the Pi's plain HAPTIC {ms}
 
 // --- The engine (only the timer touches these) ---
@@ -96,7 +104,8 @@ static uint32_t hapMaxDuty = 255;            // (1 << resolution) - 1
 static const HapFrame* hf = nullptr;
 static uint8_t  hn = 0, hi = 0;
 static bool     hLoop = false, hTone = false, hOnTone = false;
-static float    hScale = 1, hFrom = 0;
+static float    hScale = 1, hFrom = 0;      // on a tone, hScale is the loudest duty
+static uint32_t hBuildMs = 0, hStopMs = 0;   // a tone's build-up, and a preview's length (0: until off)
 static int64_t  hSegAt = 0, hStartAt = 0;
 static int32_t  hDuty = -1;                  // the on-time last written, -1 = unknown
 
@@ -129,6 +138,7 @@ static void hapTick(void*) {
   if (hapAsk) {
     portENTER_CRITICAL(&hapMux);
     hf = askFrames; hn = askCount; hLoop = askLoop; hTone = askTone; hScale = askScale;
+    hBuildMs = askBuildMs; hStopMs = askStopMs;
     hapAsk = false;
     portEXIT_CRITICAL(&hapMux);
     hi = 0;
@@ -139,6 +149,7 @@ static void hapTick(void*) {
     if (hFrom > 255) hFrom = 255;
     if (hOnTone != hTone) { hapWrite(0); hapCarrier(hTone); hFrom = 0; }
   }
+  if (hf && hStopMs && now - hStartAt >= (int64_t)hStopMs * 1000) hf = nullptr;   // a preview is over
   if (!hf) {
     hapCarrier(false);
     hapWrite(0);
@@ -163,11 +174,11 @@ static void hapTick(void*) {
 
   float on;
   if (hTone) {
-    // The alarm starts quieter and builds to full volume.
-    float k = (float)(now - hStartAt) / (ALARM_BUILD_MS * 1000.0f);
+    // The alarm starts quieter and builds to its volume.
+    float k = hBuildMs ? (float)(now - hStartAt) / (hBuildMs * 1000.0f) : 1;
     if (k > 1) k = 1;
     float vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
-    on = level * vol * (ALARM_TONE_DUTY / 100.0f);
+    on = level * vol * hScale;
   } else if (HAPTIC_MOTOR_DC) {
     on = level >= 0.5f ? 1 : 0;              // held fully on or fully off: see config.h
   } else {
@@ -185,9 +196,11 @@ static float hapTop(uint8_t pct) {
   return (HAPTIC_MIN_DUTY + (HAPTIC_MAX_DUTY - HAPTIC_MIN_DUTY) * (pct - 1) / 99.0f) / 100.0f;
 }
 
-static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float scale) {
+static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float scale,
+                      uint32_t buildMs = 0, uint32_t stopMs = 0) {
   portENTER_CRITICAL(&hapMux);
   askFrames = f; askCount = n; askLoop = loop; askTone = tone; askScale = scale;
+  askBuildMs = buildMs; askStopMs = stopMs;
   hapAsk = true;
   portEXIT_CRITICAL(&hapMux);
   // The timer task outranks loop() on the C3's one core, so it can't be
@@ -227,11 +240,7 @@ void hapticInit(uint8_t strength) {
 void hapticPlay(Haptic h) {
   if (h >= HAP_COUNT) return;
   if (hapAlarm && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
-  if (h == HAP_ALARM) {
-    hapAlarm = true;
-    hapAskFor(FX_ALARM, FX_LIB[h].n, true, true, 1);
-    return;
-  }
+  if (h == HAP_ALARM) { hapticRing(TONE_PULSE, 100); return; }
   float scale = hapTop(hapStrength);
   if (scale <= 0) { Serial.println("[HAPTIC] off (strength 0 in Sage)"); return; }
   bool press = (h == HAP_TICK || h == HAP_HOLD);
@@ -258,6 +267,43 @@ void hapticPulse(uint16_t ms) {
   pulseOne[1] = {HFX_KNOCK_PEAK, ms};
   pulseOne[2] = {0, FALL};
   hapAskFor(pulseOne, 3, false, false, scale);
+}
+
+// Volume 0..100 to the tone's duty: a square wave is loudest at half duty
+// (ALARM_TONE_DUTY) and gets about 20 dB quieter for every tenfold drop below
+// that, so 100 is full, 50 a tenth of that and 0 silent.
+static float toneDuty(uint8_t volume) {
+  if (volume == 0) return 0;
+  if (volume > 100) volume = 100;
+  return ALARM_TONE_DUTY / 100.0f * powf(10.0f, (volume - 100) / 50.0f);
+}
+
+static const HapFrame* toneFrames(AlarmTone tone, uint8_t& n, uint32_t& buildMs) {
+  // How long each sound takes to build from ALARM_START_PCT to its volume.
+  switch (tone) {
+    case TONE_CLASSIC: n = sizeof(FX_CLASSIC) / sizeof(HapFrame); buildMs = 8000;  return FX_CLASSIC;
+    case TONE_RISING:  n = sizeof(FX_RISING)  / sizeof(HapFrame); buildMs = 60000; return FX_RISING;
+    case TONE_CHIRP:   n = sizeof(FX_CHIRP)   / sizeof(HapFrame); buildMs = 6000;  return FX_CHIRP;
+    default:           n = sizeof(FX_ALARM)   / sizeof(HapFrame); buildMs = ALARM_BUILD_MS; return FX_ALARM;
+  }
+}
+
+void hapticRing(AlarmTone tone, uint8_t volume) {
+  uint8_t n;
+  uint32_t buildMs;
+  const HapFrame* f = toneFrames(tone, n, buildMs);
+  hapAlarm = true;
+  hapAskFor(f, n, true, true, toneDuty(volume), buildMs);
+}
+
+// A few seconds of a sound at its chosen volume, to pick one in Sage. A
+// button press cuts it short; a ringing alarm isn't interrupted.
+void hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds) {
+  if (hapAlarm) return;
+  uint8_t n;
+  uint32_t buildMs;
+  const HapFrame* f = toneFrames(tone, n, buildMs);
+  hapAskFor(f, n, true, true, toneDuty(volume), 0, seconds * 1000UL);
 }
 
 void hapticSetStrength(uint8_t pct) {
@@ -669,9 +715,39 @@ static void renderFace(ClockStyle style, const LumoState& s, const ClockNow& c, 
 
 // One screen's light, whatever the screen: the clock faces above, the
 // rest from their Look.
+// The timer's ring is what's left of it: amber, emptying as it runs down
+// (still while paused). The stopwatch's is a teal dot going round once a
+// minute, like a second hand, standing still when it's stopped.
+static void renderTool(ScreenMode screen, const LumoState& s, float t, float day, Rgb* out) {
+  const float N = (float)NUMPIXELS;
+  float b = 1.0f - BREATH * breathe(t, BREATH_S);
+  if (screen == SCREEN_TIMER) {
+    Rgb amber = rgb8(255, 160, 50);
+    float left = 0;
+    if (s.tm_state == TOOL_RUNNING) left = (float)(int32_t)(s.tm_end - millis());
+    else if (s.tm_state == TOOL_PAUSED) left = s.tm_left_ms;
+    float frac = s.tm_total_ms ? clamp01(left / s.tm_total_ms) : 0;
+    bool idle = s.tm_state == TOOL_IDLE;
+    for (int i = 0; i < NUMPIXELS; i++) {
+      float lit = idle ? 0.35f : fillAt(frac * N, i, 0.06f);
+      out[i] = scalec(amber, (GLOW + 0.15f) * day * (s.tm_state == TOOL_PAUSED ? 1.0f : b) * lit);
+    }
+    return;
+  }
+  Rgb teal = rgb8(60, 220, 190);
+  uint32_t ms = s.sw_base_ms + (s.sw_running ? millis() - s.sw_mark : 0);
+  float pos = fmodf(ms / 60000.0f, 1.0f) * N;
+  for (int i = 0; i < NUMPIXELS; i++) {
+    Rgb o = scalec(teal, GLOW * 0.6f * day * b);
+    if (ms) o = addc(o, scalec(teal, MARK_GAIN * day * blobAt(pos, i, MARK_W)));
+    out[i] = o;
+  }
+}
+
 static void renderScreen(ScreenMode screen, const LumoState& s, const ClockNow& c, float t, float since,
                          Rgb dayColor, float day, Rgb* out) {
   if (screen == SCREEN_CLOCK) renderFace(s.clock_style, s, c, t, since, dayColor, day, out);
+  else if (screen == SCREEN_TIMER || screen == SCREEN_STOPWATCH) renderTool(screen, s, t, day, out);
   else renderLook(lookFor(screen, s, c, dayColor, day), t, c, out);
 }
 

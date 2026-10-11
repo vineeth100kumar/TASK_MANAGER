@@ -7,6 +7,7 @@
 #include "ws_client.h"
 #include "clockkeeper.h"
 #include "store.h"
+#include "faces.h"
 
 static LumoState lumoState;
 static ScreenMode currentScreen = SCREEN_CONNECTING;
@@ -95,6 +96,31 @@ static void localAlarmButton(Button b) {
   }
 }
 
+// ---------------------------------------------------------------------
+//  The timer runs out here, on the millisecond, even if Sage's word that
+//  it's done is late or never comes. It takes the screen (an alarm still
+//  comes first) and chirps until a button, Sage or a minute stops it.
+// ---------------------------------------------------------------------
+static bool timerTookScreen = false;
+static unsigned long timerDoneAt = 0;
+
+static void timerTick() {
+  LumoState& s = lumoState;
+  if (s.tm_state == TOOL_RUNNING && (int32_t)(millis() - s.tm_end) >= 0) {
+    s.tm_state = TOOL_DONE;
+    s.flag_tools_changed = true;
+  }
+  if (s.tm_state == TOOL_DONE) {
+    if (!timerDoneAt) timerDoneAt = millis();
+    if (millis() - timerDoneAt > 60000UL) {   // nobody answered
+      s.tm_state = TOOL_IDLE;
+      s.flag_tools_changed = true;
+    }
+  } else {
+    timerDoneAt = 0;
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(200);
@@ -156,10 +182,16 @@ void loop() {
   }
 
   localAlarmTick();
+  timerTick();
 
   Button btn = readButton();
   if (btn != BTN_NONE) {
-    hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
+    if (lumoState.hap_buttons) hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
+    if (lumoState.tm_state == TOOL_DONE && !lumoState.alarm_ringing) {
+      // Any button stops a finished timer; Sage hears it too and agrees.
+      lumoState.tm_state = TOOL_IDLE;
+      lumoState.flag_tools_changed = true;
+    }
     if (lumoState.local_ringing) {
       localAlarmButton(btn);   // Sage isn't there to decide
     } else {
@@ -182,13 +214,26 @@ void loop() {
 
   // A ringing alarm (Sage's or the clock's own) takes the screen; afterwards,
   // back to what was there.
-  neoSetAlarm(lumoState.alarm_ringing);
+  bool timerDone = lumoState.tm_state == TOOL_DONE;
+  neoSetAlarm(lumoState.alarm_ringing || timerDone);
   if (lumoState.alarm_ringing && currentScreen != SCREEN_ALARM) {
     if (currentScreen != SCREEN_CARD && currentScreen != SCREEN_CONNECTING) returnScreen = currentScreen;
     switchScreen(SCREEN_ALARM);
   } else if (!lumoState.alarm_ringing && currentScreen == SCREEN_ALARM) {
     switchScreen(returnScreen);
   }
+
+  // A finished timer shows itself; when it's answered, back to what was there.
+  if (timerDone && !lumoState.alarm_ringing && currentScreen != SCREEN_TIMER &&
+      currentScreen != SCREEN_ALARM && currentScreen != SCREEN_CONNECTING) {
+    if (currentScreen != SCREEN_CARD) returnScreen = currentScreen;
+    timerTookScreen = true;
+    switchScreen(SCREEN_TIMER);
+  } else if (!timerDone && timerTookScreen && currentScreen == SCREEN_TIMER) {
+    timerTookScreen = false;
+    switchScreen(returnScreen);
+  }
+  if (currentScreen != SCREEN_TIMER) timerTookScreen = false;
 
   // Sage asked for a screen. Under a card or an alarm, it's where they return to.
   if (lumoState.flag_screen_switch) {
@@ -211,12 +256,15 @@ void loop() {
     displayDrawScreen(SCREEN_CARD, lumoState, true);
   }
 
-  // A ringing alarm beats like a heart (the light beats with it); it stops
-  // the moment the alarm screen goes.
-  static bool alarmBuzzing = false;
-  if ((currentScreen == SCREEN_ALARM) != alarmBuzzing) {
-    alarmBuzzing = !alarmBuzzing;
-    if (alarmBuzzing) hapticPlay(HAP_ALARM);
+  // A ringing alarm sounds the tone chosen for it in Sage (the light beats
+  // with it) and stops the moment the alarm screen goes; a finished timer
+  // chirps. 0 nothing, 1 the alarm, 2 the timer.
+  static uint8_t sounding = 0;
+  uint8_t want = currentScreen == SCREEN_ALARM ? 1 : (timerDone && currentScreen == SCREEN_TIMER) ? 2 : 0;
+  if (want != sounding) {
+    sounding = want;
+    if (want == 1) hapticRing(lumoState.alarm_tone, lumoState.alarm_volume);
+    else if (want == 2) hapticRing(TONE_CHIRP, lumoState.alarm_volume);
     else hapticOff();
   }
 
@@ -258,6 +306,15 @@ void loop() {
   }
   else if (currentScreen == SCREEN_CONNECTING) {
     displayConnectingTick(lumoState);
+  }
+  else if (currentScreen == SCREEN_TIMER || currentScreen == SCREEN_STOPWATCH || currentScreen == SCREEN_WORLD) {
+    if (lumoState.flag_tools_changed) {
+      lumoState.flag_tools_changed = false;
+      // The World screen's rows move when places come or go: start afresh.
+      if (currentScreen == SCREEN_WORLD) displayDrawScreen(SCREEN_WORLD, lumoState, true);
+      else toolScreenReset();
+    }
+    toolScreenTick(currentScreen, lumoState);
   }
   else if (currentScreen == SCREEN_MEMORY) {
     if (lumoState.flag_memory_changed) {
