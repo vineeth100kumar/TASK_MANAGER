@@ -203,3 +203,30 @@ class Logging(unittest.TestCase):
         with self.assertLogs("phone_link", "WARNING") as logs, mock.patch.object(phone_link.time, "time", return_value=1061):
             link.say("x", "same thing")
         self.assertIn("repeated 5 times", logs.output[0])
+
+
+class OpeningBle(unittest.TestCase):
+    def test_asks_bluez_for_le_and_waits_between_tries(self):
+        calls = []
+
+        class Dev:
+            async def set_preferred_bearer(self, value):
+                calls.append(("bearer", value))
+
+            async def call_connect(self):
+                calls.append("connect")
+
+        link = phone_link.PhoneLink()
+
+        class Obj:
+            def get_interface(self, name):
+                return Dev()
+
+        async def char(path):
+            return Obj()
+        link._char = char
+        with self.assertLogs("phone_link", "WARNING") as logs:
+            asyncio.run(link._open_ble("/dev", "VK's spot", "60:0F"))
+            asyncio.run(link._open_ble("/dev", "VK's spot", "60:0F"))  # within 30 s: not again
+        self.assertEqual(calls, [("bearer", "le"), "connect"])
+        self.assertIn("over BLE (PreferredBearer=le)", logs.output[0])
