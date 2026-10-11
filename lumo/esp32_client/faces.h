@@ -12,3 +12,4 @@ void faceTick(const LumoState& s, const ClockNow& c);      // called every loop 
 // The music screen (Now Playing), drawn the same way.
 void nowPlayingReset();                                    // start over (fade in) next tick
 void nowPlayingTick(const LumoState& s);                   // every loop on that screen; ~30 fps
+float nowPlayingBeat(const LumoState& s, float t);         // 0..1, a soft pulse at the song's tempo

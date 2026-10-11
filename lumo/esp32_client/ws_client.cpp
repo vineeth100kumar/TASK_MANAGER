@@ -181,6 +181,11 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "SPOTIFY") == 0) {
     if (doc["title"].is<const char*>()) {
+      if (strncmp(s.sp_title, doc["title"], sizeof(s.sp_title) - 1)) {
+        // A new song: what we knew about the last one goes.
+        s.sp_genre[0] = s.sp_lyric[0] = '\0';
+        s.sp_bpm = 0; s.sp_energy = 0.5f; s.sp_fact_count = 0; s.sp_lyrics = false;
+      }
       strncpy(s.sp_title, doc["title"], sizeof(s.sp_title) - 1);
     }
     if (doc["artist"].is<const char*>()) {
@@ -190,6 +195,24 @@ static void handleTextMessage(const String& payload) {
     s.sp_duration_ms = doc["duration_ms"] | s.sp_duration_ms;
     s.sp_playing     = doc["playing"]     | s.sp_playing;
     s.flag_spotify_changed = true;
+  }
+  else if (strcmp(cmd, "SONG_INFO") == 0) {
+    // Only for the song on screen: a late answer about the last one is dropped.
+    if (strncmp(s.sp_title, doc["title"] | "", sizeof(s.sp_title) - 1) == 0) {
+      strlcpy(s.sp_genre, doc["genre"] | "", sizeof(s.sp_genre));
+      s.sp_bpm    = doc["bpm"] | 0;
+      s.sp_energy = doc["energy"] | 0.5f;
+      s.sp_lyrics = doc["lyrics"] | false;
+      s.sp_fact_count = 0;
+      for (const char* f : doc["facts"].as<JsonArray>()) {
+        if (f && s.sp_fact_count < 3) strlcpy(s.sp_facts[s.sp_fact_count++], f, sizeof(s.sp_facts[0]));
+      }
+    }
+  }
+  else if (strcmp(cmd, "LYRIC") == 0) {
+    if (strncmp(s.sp_title, doc["title"] | "", sizeof(s.sp_title) - 1) == 0) {
+      strlcpy(s.sp_lyric, doc["line"] | "", sizeof(s.sp_lyric));
+    }
   }
   else if (strcmp(cmd, "LIGHTS") == 0) {
     const char* modeStr = doc["mode"] | "WARM";

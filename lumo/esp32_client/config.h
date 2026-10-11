@@ -54,7 +54,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.5.0"
+#define FW_VERSION "2.6.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -86,6 +86,15 @@ struct LumoState {
   uint32_t sp_progress_ms = 0;
   uint32_t sp_duration_ms = 0;
   bool     sp_playing = false;
+  // About the song, from Sage (SONG_INFO, LYRIC). Looked up, not heard: the
+  // tempo is an estimate, so the light keeps the song's pace, not its beat.
+  char     sp_genre[24] = "";
+  uint16_t sp_bpm = 0;
+  float    sp_energy = 0.5f;
+  char     sp_facts[3][100];
+  uint8_t  sp_fact_count = 0;
+  bool     sp_lyrics = false;     // the song has timed lyrics
+  char     sp_lyric[100] = "";    // the line being sung ("" between lines)
   NeoMode  neo_mode       = NEO_AUTO;
   uint8_t  neo_brightness = 40;
   uint16_t neo_hue        = 0;
