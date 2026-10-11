@@ -375,7 +375,10 @@ INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, priority low|medium|high|urgent,
 dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
 projects (name, key, color), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
-notes (title, content), comments and subtasks (workItemId), activities, boards (drawings).
+notes (title, content), comments and subtasks (workItemId), activities, boards (drawings),
+dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
+sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
+acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
 Start with sage_overview. Changes appear in the open web app straight away. Prefer updating
 over deleting, and say what you changed."""
 

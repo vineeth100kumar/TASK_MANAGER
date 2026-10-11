@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, LifeContext } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
@@ -28,6 +28,8 @@ export interface LocalState {
   subtasks: Subtask[];
   activities: Activity[];
   boards: Board[];
+  dossiers: Dossier[];
+  ideas: Idea[];
 }
 
 let state: LocalState = {
@@ -40,7 +42,9 @@ let state: LocalState = {
   comments: [],
   subtasks: [],
   activities: [],
-  boards: []
+  boards: [],
+  dossiers: [],
+  ideas: []
 };
 
 let isInitialized = false;
@@ -56,7 +60,7 @@ async function initializeStore(): Promise<void> {
 
     // 2. Load all entities instantly from IndexedDB
     const [
-      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards
+      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards, dossiers, ideas
     ] = await Promise.all([
       getAllFromStore<WorkItem>('workItems'),
       getAllFromStore<Project>('projects'),
@@ -67,7 +71,9 @@ async function initializeStore(): Promise<void> {
       getAllFromStore<Comment>('comments'),
       getAllFromStore<Subtask>('subtasks'),
       getAllFromStore<Activity>('activities'),
-      getAllFromStore<Board>('boards')
+      getAllFromStore<Board>('boards'),
+      getAllFromStore<Dossier>('dossiers'),
+      getAllFromStore<Idea>('ideas')
     ]);
 
     // Sample data for local testing only (`npm run dev`). A real install starts
@@ -97,7 +103,9 @@ async function initializeStore(): Promise<void> {
         comments,
         subtasks,
         activities,
-        boards
+        boards,
+        dossiers,
+        ideas
       };
     }
 
@@ -250,7 +258,7 @@ export const api = {
           if (json.success && json.data) {
             const data = json.data;
             const unsynced = await syncEngine.getUnsyncedKeys();
-            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards'] as const;
+            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas'] as const;
             for (const table of tables) {
               const rows = data[table];
               if (!Array.isArray(rows) || rows.length === 0) continue;
@@ -1168,6 +1176,44 @@ export const api = {
     }
   },
 
+  // Radar research. The Pi creates these; here they're only read, starred, and
+  // (ideas) linked to the project made from them.
+  dossiers: {
+    list: async (): Promise<Dossier[]> => {
+      await initializeStore();
+      return state.dossiers.filter(d => d).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    },
+    update: async (id: string, updates: Partial<Dossier>): Promise<Dossier> => {
+      await initializeStore();
+      const d = state.dossiers.find(d => d && d.id === id);
+      if (!d) throw new Error('Research not found');
+      Object.assign(d, updates, { updatedAt: new Date().toISOString() });
+      await persist('dossiers', d);
+      return d;
+    },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      const d = state.dossiers.find(d => d && d.id === id);
+      for (const ideaId of d?.ideaIds || []) await removeRecord('ideas', ideaId);
+      await removeRecord('dossiers', id);
+    }
+  },
+
+  ideas: {
+    list: async (): Promise<Idea[]> => {
+      await initializeStore();
+      return state.ideas.filter(i => i).sort((a, b) => (b.score || 0) - (a.score || 0));
+    },
+    update: async (id: string, updates: Partial<Idea>): Promise<Idea> => {
+      await initializeStore();
+      const idea = state.ideas.find(i => i && i.id === id);
+      if (!idea) throw new Error('Idea not found');
+      Object.assign(idea, updates, { updatedAt: new Date().toISOString() });
+      await persist('ideas', idea);
+      return idea;
+    }
+  },
+
   exportBackup: async (): Promise<void> => {
     await initializeStore();
     const backupData = {
@@ -1204,7 +1250,9 @@ export const api = {
         comments: Array.isArray(parsed.data.comments) ? parsed.data.comments : [],
         subtasks: Array.isArray(parsed.data.subtasks) ? parsed.data.subtasks : [],
         activities: Array.isArray(parsed.data.activities) ? parsed.data.activities : [],
-        boards: Array.isArray(parsed.data.boards) ? parsed.data.boards : []
+        boards: Array.isArray(parsed.data.boards) ? parsed.data.boards : [],
+        dossiers: Array.isArray(parsed.data.dossiers) ? parsed.data.dossiers : [],
+        ideas: Array.isArray(parsed.data.ideas) ? parsed.data.ideas : []
       };
 
       await Promise.all([
@@ -1217,7 +1265,9 @@ export const api = {
         putBatchToStore('comments', state.comments),
         putBatchToStore('subtasks', state.subtasks),
         putBatchToStore('activities', state.activities),
-        putBatchToStore('boards', state.boards)
+        putBatchToStore('boards', state.boards),
+        putBatchToStore('dossiers', state.dossiers),
+        putBatchToStore('ideas', state.ideas)
       ]);
 
       // Upload everything restored, not just tasks, so other devices get it too.
@@ -1260,7 +1310,7 @@ export const api = {
 
     await clearAllStores();
     state = {
-      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: []
+      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: [], dossiers: [], ideas: []
     };
     try {
       localStorage.removeItem('sage_solo_v5');

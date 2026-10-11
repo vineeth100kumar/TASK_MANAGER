@@ -10,7 +10,7 @@
  * - Debounced Note Autosave
  */
 
-import { getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, SyncOpRecord } from './db';
+import { getAllFromStore, putToStore, deleteFromStore, getMeta, setMeta, getOrCreateClientId, hasStore, SyncOpRecord } from './db';
 import { tabCoordinator } from './tabSync';
 import { piBackendUrl, piHeaders } from './piBackend';
 import { LiveStream } from './liveStream';
@@ -517,6 +517,7 @@ class SyncEngine {
         const changes = json.changes;
         const unsynced = await this.getUnsyncedKeys();
         for (const table in changes) {
+          if (!(await hasStore(table))) continue;
           const rows = changes[table];
           if (Array.isArray(rows) && rows.length > 0) {
             // A row saved here after this pull set off may come back as its older copy.
@@ -535,6 +536,7 @@ class SyncEngine {
         // is left for the upload, which the server answers with "deleted".
         const deleted: Record<string, string[]> = json.deleted || {};
         for (const table in deleted) {
+          if (!(await hasStore(table))) continue;
           const ids = (deleted[table] || []).filter(id => !unsynced.has(`${table}:${id}`));
           for (const id of ids) {
             await deleteFromStore(table, id);
