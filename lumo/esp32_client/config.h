@@ -5,7 +5,7 @@
 #define TFT_CS        8
 #define TFT_DC        7
 #define BUTTON_PIN    1
-#define BUZZER_PIN    9    // Active-LOW buzzer: silent knocks at 50 kHz, a tone for the alarm
+#define BUZZER_PIN    9    // Active LOW (BC557): buzzer + vibration motor in parallel, see HAPTICS
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
 
@@ -34,9 +34,45 @@
 #define NTP_SERVER2     "time.nist.gov"
 
 // ===================== HAPTICS =====================
-#define HAPTIC_FREQ  50000
-#define HAPTIC_RES   8
-#define ALARM_TONE_HZ 2700   // the buzzer's loudest pitch; only the alarm uses it
+// BUZZER_PIN drives a BC557 (PNP, so active low) that feeds the buzzer and the
+// vibration motor in parallel. They listen to the same PWM differently:
+//  - the motor follows the average, so the duty sets how hard it spins;
+//  - the buzzer only sounds when the drive moves at an audible rate.
+// Every silent effect therefore rides an ultrasonic carrier and changes its
+// duty only along smooth curves, never in a step (a step is a click). The
+// alarm alone switches to ALARM_TONE_HZ, where the buzzer sings.
+#define HAPTIC_FREQ        50000  // silent carrier; keep it above ~25 kHz
+#define HAPTIC_RES         10     // duty bits (drops to 8 if the timer can't do 10)
+#define HAPTIC_TICK_US     100    // how often a silent envelope moves (10 kHz: its steps are too fine to hear)
+#define HAPTIC_EDGE_MS     5      // shortest rise or fall; shorter edges tick in the buzzer
+#define HAPTIC_FALL_MS     10     // how a knock lets go
+#define HAPTIC_MIN_DUTY    28     // % on-time where the motor starts to turn (strength 1)
+#define HAPTIC_MAX_DUTY    100    // % on-time at strength 100
+#define HAPTIC_STRENGTH    70     // default strength 0-100 until Sage sends one (0 = off)
+#define HAPTIC_NIGHT_PCT   60     // notifications at night run at this % (presses don't)
+
+// Per-effect tuning. Peaks are 0-255 of the strength above; lengths in ms.
+#define HFX_TICK_PEAK      190    // every button press: one crisp tick
+#define HFX_TICK_HOLD_MS   14
+#define HFX_KICK_MS        5      // a tick opens at full power for this long to spin up
+#define HFX_HOLD_PEAK      230    // OK held: a soft tick, then a firm one
+#define HFX_KNOCK_PEAK     220    // a notification: two knocks
+#define HFX_KNOCK_HOLD_MS  30
+#define HFX_KNOCK_GAP_MS   120
+#define HFX_REMIND_PEAK    255    // a reminder: two longer, firmer knocks
+#define HFX_REMIND_HOLD_MS 55
+#define HFX_REMIND_GAP_MS  150
+#define HFX_PULSE_PEAK     200    // a soft swell (breath)
+#define HFX_PULSE_MS       700
+#define HFX_RAMP_PEAK      230    // ramp up / ramp down
+#define HFX_RAMP_MS        450
+#define HFX_BEAT_PEAK      230    // heartbeat "bu-bump"
+
+// The alarm: the one sound LUMO makes.
+#define ALARM_TONE_HZ      2700   // the buzzer's loudest pitch
+#define ALARM_TONE_DUTY    50     // % on-time at full volume (a square wave is loudest at 50)
+#define ALARM_START_PCT    25     // first beeps at this % of full volume...
+#define ALARM_BUILD_MS     20000  // ...building to full over this long
 
 // ===================== BUTTON VOLTAGE THRESHOLDS =====================
 #define V_OK    0.15f
@@ -55,7 +91,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.6.4"
+#define FW_VERSION "2.7.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -110,6 +146,7 @@ struct LumoState {
   LocalAlarm local_alarms[MAX_LOCAL_ALARMS];
   uint8_t    local_alarm_count = 0;
   uint8_t    snooze_minutes    = 5;
+  uint8_t    haptic_strength   = HAPTIC_STRENGTH;   // 0-100, set in Sage
   bool       local_ringing     = false;
 
   // How to show the time (from CLOCK).

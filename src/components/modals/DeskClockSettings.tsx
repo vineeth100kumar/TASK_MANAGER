@@ -1,11 +1,12 @@
-// DeskClockSettings - Pick how the LUMO desk clock shows the time.
+// DeskClockSettings - Pick how the LUMO desk clock shows the time, and how
+// hard it knocks.
 //
 // The Pi keeps the clock's settings (raspberry_pi/desk/settings.py) and sends
 // the chosen face to the clock straight away. The pictures are the clock's
 // own drawing code rendered off the device, so what you pick is what you get.
 
-import { useEffect, useState } from 'react';
-import { Check, Clock, Loader2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { Check, Clock, Loader2, Vibrate } from 'lucide-react';
 import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
 
@@ -69,6 +70,9 @@ export function DeskClockSettings() {
   const [load, setLoad] = useState<Load>('loading');
   const [style, setStyle] = useState<string>('');
   const [saving, setSaving] = useState(false);
+  const [strength, setStrength] = useState<number>(70);
+  const savedStrength = useRef<number>(70);
+  const strengthTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
   useEffect(() => {
     let alive = true;
@@ -77,6 +81,8 @@ export function DeskClockSettings() {
       .then(data => {
         if (!alive) return;
         setStyle(data?.settings?.clock?.style || 'digital');
+        const s = data?.settings?.haptics?.strength;
+        if (typeof s === 'number') { setStrength(s); savedStrength.current = s; }
         setLoad('ready');
       })
       .catch(() => alive && setLoad('offline'));
@@ -104,6 +110,30 @@ export function DeskClockSettings() {
       setSaving(false);
     }
   };
+
+  // Saved a moment after the slider stops, so the clock ticks once at the
+  // new strength rather than for every step of the drag.
+  const changeStrength = (value: number) => {
+    setStrength(value);
+    clearTimeout(strengthTimer.current);
+    strengthTimer.current = setTimeout(async () => {
+      try {
+        const res = await fetch(`${piBackendUrl()}/api/desk/settings`, {
+          method: 'PUT',
+          headers: piHeaders({ 'Content-Type': 'application/json' }),
+          body: JSON.stringify({ haptics: { strength: value } }),
+        });
+        if (!res.ok) throw new Error((await res.json().catch(() => null))?.detail || `HTTP ${res.status}`);
+        savedStrength.current = value;
+      } catch (err: any) {
+        setStrength(savedStrength.current);
+        showToast(`Couldn't change the haptic strength: ${err.message}`, 'error');
+      }
+    }, 400);
+  };
+  useEffect(() => () => clearTimeout(strengthTimer.current), []);
+
+  const strengthLabel = strength === 0 ? 'Off' : strength < 35 ? 'Light' : strength < 75 ? 'Medium' : 'Strong';
 
   return (
     <div className="space-y-6">
@@ -140,6 +170,34 @@ export function DeskClockSettings() {
           </>
         )}
       </div>
+
+      {load === 'ready' && (
+        <div className={card}>
+          <div className="flex items-center gap-2">
+            <Vibrate size={16} className="text-blue-600" />
+            <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Haptics</h4>
+            <span className="ml-auto text-xs font-medium text-gray-500 dark:text-gray-400 tabular-nums">
+              {strengthLabel}{strength > 0 ? ` · ${strength}` : ''}
+            </span>
+          </div>
+          <p className="text-xs text-gray-400">
+            How hard LUMO's motor knocks for button presses and notifications. They are silent; only the alarm makes a sound, and it always rings. Needs LUMO firmware 2.7 or later.
+          </p>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={5}
+            value={strength}
+            onChange={e => changeStrength(Number(e.target.value))}
+            aria-label="Haptic strength"
+            className="w-full accent-blue-600"
+          />
+          <div className="flex justify-between text-[11px] text-gray-400">
+            <span>Off</span><span>Strong</span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

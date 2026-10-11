@@ -10,116 +10,255 @@ Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // =====================================================================
 //  Haptics
 //
-//  The buzzer on BUZZER_PIN (active low) has two voices. On a 50 kHz PWM
-//  it is silent and only knocks, which is the haptic: every button press, and
-//  a double knock for a notification or reminder. Only the alarm switches it
-//  to an audible tone (ALARM_TONE_HZ), so the alarm is the one thing that
-//  makes a sound. A pattern is a short list of steps, each a strength
-//  (0 = rest) and a length, played without blocking. Every knock starts with
-//  a 6 ms kick at full power so it spins up crisply. At night everything but
-//  a button press and the alarm is softer.
+//  One pin (BUZZER_PIN, active low through a BC557) feeds the buzzer and the
+//  vibration motor in parallel, so every effect is a choice of what the two
+//  of them hear (see HAPTICS in config.h):
+//
+//   - Silent effects (every button press, notifications, reminders, the Pi's
+//     patterns) run on a 50 kHz carrier. The motor follows the duty; the
+//     buzzer can't follow 50 kHz. What the buzzer *can* hear is the duty
+//     jumping, so nothing ever jumps: each effect is a short list of frames,
+//     and the engine glides from one level to the next along an S-curve,
+//     never faster than HAPTIC_EDGE_MS, updated 10000 times a second so even
+//     the glide's own steps are too fine for the buzzer.
+//   - The alarm switches the carrier to ALARM_TONE_HZ, the buzzer's own
+//     pitch, and is the only thing LUMO ever lets you hear. Nothing else
+//     plays over a ringing alarm.
+//
+//  The envelope runs on an esp_timer, not in loop(), so a slow screen redraw
+//  can't stretch a glide into a step (which you would hear). The timer only
+//  runs while an effect plays. Strength (0-100, from Sage) scales every
+//  silent effect; 0 turns them off. At night notifications are softer.
 // =====================================================================
 
-struct HapStep { uint8_t strength; uint16_t ms; };
-static bool nightTime();                  // the sleep schedule, set from Sage
+#include <esp_timer.h>
 
-static const HapStep HP_TAP[]      = { {255, 24} };
-static const HapStep HP_HOLD[]     = { {180, 18}, {0, 80}, {255, 34} };
-// Notifications and reminders knock twice; a reminder a little harder.
-static const HapStep HP_NOTIFY[]   = { {210, 40}, {0, 130}, {230, 40} };
-static const HapStep HP_REMINDER[] = { {240, 55}, {0, 150}, {255, 55} };
-static const HapStep HP_SUCCESS[]  = { {150, 16}, {0, 60}, {230, 22} };
-// "beep-beep ... beep-beep", the same rhythm the light beats to.
-static const HapStep HP_ALARM[]    = { {255, 130}, {0, 130}, {255, 130}, {0, 910} };
+struct HapFrame { uint8_t level; uint16_t ms; };   // glide to `level` (0-255) over `ms`
+static bool nightTime();                            // the sleep schedule, set from Sage
 
-#define HAP_LEN(p) (sizeof(p) / sizeof((p)[0]))
+#define EDGE  HAPTIC_EDGE_MS
+#define FALL  HAPTIC_FALL_MS
+// A knock: rise, hold, let go.
+#define KNOCK(peak, hold)  {peak, EDGE}, {peak, hold}, {0, FALL}
+#define REST(ms)           {0, ms}
 
-static const HapStep* hapSteps = nullptr;
-static uint8_t  hapCount = 0, hapIndex = 0;
-static bool     hapLoop = false, hapNight = false;
-static bool     hapTone = false;          // true while the buzzer is on the alarm's audible tone
-static unsigned long hapStepAt = 0, hapLoopStart = 0;
-static int      hapLevel = -1;            // what the pin is set to, -1 = unknown
+// A tick opens at full power for a few ms to spin the motor up (an ERM is
+// slow to start), eases down to its peak, and lets go.
+static const HapFrame FX_TICK[]     = { {255, EDGE}, {255, HFX_KICK_MS}, {HFX_TICK_PEAK, EDGE},
+                                        {HFX_TICK_PEAK, HFX_TICK_HOLD_MS}, {0, FALL} };
+static const HapFrame FX_TAP[]      = { {255, EDGE}, {HFX_KNOCK_PEAK, EDGE}, {HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS}, {0, FALL} };
+static const HapFrame FX_HOLD[]     = { KNOCK(HFX_HOLD_PEAK * 2 / 3, 16), REST(70),
+                                        {255, EDGE}, {HFX_HOLD_PEAK, EDGE}, {HFX_HOLD_PEAK, 30}, {0, FALL} };
+// Notifications and reminders knock exactly twice; a reminder harder and longer.
+static const HapFrame FX_NOTIFY[]   = { KNOCK(HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS), REST(HFX_KNOCK_GAP_MS),
+                                        KNOCK(HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS) };
+static const HapFrame FX_REMINDER[] = { KNOCK(HFX_REMIND_PEAK, HFX_REMIND_HOLD_MS), REST(HFX_REMIND_GAP_MS),
+                                        KNOCK(HFX_REMIND_PEAK, HFX_REMIND_HOLD_MS) };
+// Soft, then firm: something went through.
+static const HapFrame FX_SUCCESS[]  = { KNOCK(HFX_KNOCK_PEAK / 2, 14), REST(60), KNOCK(HFX_KNOCK_PEAK, 24) };
+// Three short knocks: something didn't.
+static const HapFrame FX_WARNING[]  = { KNOCK(HFX_KNOCK_PEAK, 18), REST(70), KNOCK(HFX_KNOCK_PEAK, 18), REST(70),
+                                        KNOCK(HFX_KNOCK_PEAK, 18) };
+static const HapFrame FX_PULSE[]    = { {HFX_PULSE_PEAK, HFX_PULSE_MS * 2 / 5}, {0, HFX_PULSE_MS * 3 / 5} };
+static const HapFrame FX_RAMP_UP[]  = { {HFX_RAMP_PEAK, HFX_RAMP_MS}, {0, FALL} };
+static const HapFrame FX_RAMP_DOWN[]= { {HFX_RAMP_PEAK, EDGE * 2}, {0, HFX_RAMP_MS} };
+static const HapFrame FX_HEARTBEAT[]= { KNOCK(HFX_BEAT_PEAK, 26), REST(90), KNOCK(HFX_BEAT_PEAK * 3 / 4, 20) };
+// "beep-beep ... beep-beep" on the tone, the rhythm the light beats to.
+// Short glides keep the beeps round instead of clicky.
+static const HapFrame FX_ALARM[]    = { {255, 3}, {255, 124}, {0, 3}, REST(127), {255, 3}, {255, 124}, {0, 3}, REST(913) };
 
-static void hapWrite(int strength) {
-  if (strength == hapLevel) return;
-  hapLevel = strength;
-  ledcWrite(BUZZER_PIN, 255 - strength);  // active low
+#define FX(p) { p, (uint8_t)(sizeof(p) / sizeof((p)[0])) }
+static const struct { const HapFrame* f; uint8_t n; } FX_LIB[HAP_COUNT] = {
+  FX(FX_TICK), FX(FX_HOLD), FX(FX_TAP), FX(FX_NOTIFY), FX(FX_REMINDER), FX(FX_SUCCESS),
+  FX(FX_WARNING), FX(FX_PULSE), FX(FX_RAMP_UP), FX(FX_RAMP_DOWN), FX(FX_HEARTBEAT), FX(FX_ALARM),
+};
+
+static const struct { const char* name; Haptic h; } FX_NAMES[] = {
+  {"tick", HAP_TICK}, {"hold", HAP_HOLD}, {"tap", HAP_TAP}, {"notify", HAP_NOTIFY},
+  {"double", HAP_NOTIFY}, {"reminder", HAP_REMINDER}, {"success", HAP_SUCCESS},
+  {"warning", HAP_WARNING}, {"error", HAP_WARNING}, {"pulse", HAP_PULSE},
+  {"ramp_up", HAP_RAMP_UP}, {"ramp_down", HAP_RAMP_DOWN}, {"heartbeat", HAP_HEARTBEAT},
+};
+
+// --- What loop() asks for (guarded by hapMux) ---
+static portMUX_TYPE hapMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool hapAsk = false;
+static const HapFrame* askFrames = nullptr;
+static uint8_t  askCount = 0;
+static bool     askLoop = false, askTone = false;
+static float    askScale = 1;
+static HapFrame pulseOne[3];                 // the Pi's plain HAPTIC {ms}
+
+// --- The engine (only the timer touches these) ---
+static esp_timer_handle_t hapTimer = nullptr;
+static uint32_t hapPeriod = 0;               // the timer's period while it runs
+static uint32_t hapMaxDuty = 255;            // (1 << resolution) - 1
+static const HapFrame* hf = nullptr;
+static uint8_t  hn = 0, hi = 0;
+static bool     hLoop = false, hTone = false, hOnTone = false;
+static float    hScale = 1, hFrom = 0;
+static int64_t  hSegAt = 0, hStartAt = 0;
+static int32_t  hDuty = -1;                  // the on-time last written, -1 = unknown
+
+static uint8_t  hapStrength = HAPTIC_STRENGTH;
+static bool     hapAlarm = false;            // loop()'s view: an alarm is ringing
+
+static void hapWrite(uint32_t on) {          // on-time, 0..hapMaxDuty
+  if ((int32_t)on == hDuty) return;
+  hDuty = on;
+  ledcWrite(BUZZER_PIN, hapMaxDuty - on);    // active low
 }
 
-// Silent knocks or the alarm's audible tone.
-static void hapVoice(bool tone) {
-  if (tone == hapTone) return;
-  hapTone = tone;
-  hapLevel = -1;
+static void hapCarrier(bool tone) {
+  if (tone == hOnTone) return;
+  hOnTone = tone;
+  hDuty = -1;
   ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
 }
 
-void hapticOff() {
-  hapSteps = nullptr;
-  hapCount = 0;
-  hapLoop = false;
-  hapWrite(0);
-  hapVoice(false);
+static void hapTick(void*) {
+  int64_t now = esp_timer_get_time();
+  if (hapAsk) {
+    portENTER_CRITICAL(&hapMux);
+    hf = askFrames; hn = askCount; hLoop = askLoop; hTone = askTone; hScale = askScale;
+    hapAsk = false;
+    portEXIT_CRITICAL(&hapMux);
+    hi = 0;
+    hSegAt = hStartAt = now;
+    // Glide on from wherever the motor is now, so a new effect never jumps.
+    hFrom = (hOnTone || hDuty <= 0) ? 0 : 255.0f * hDuty / hapMaxDuty / (hScale > 0 ? hScale : 1);
+    if (hFrom > 255) hFrom = 255;
+    if (hOnTone != hTone) { hapWrite(0); hapCarrier(hTone); hFrom = 0; }
+  }
+  if (!hf) {
+    hapCarrier(false);
+    hapWrite(0);
+    esp_timer_stop(hapTimer);                // idle: no ticks until the next effect
+    return;
+  }
+
+  // Walk past every frame that has finished.
+  while (now - hSegAt >= (int64_t)hf[hi].ms * 1000) {
+    hSegAt += (int64_t)hf[hi].ms * 1000;
+    hFrom = hf[hi].level;
+    if (++hi >= hn) {
+      if (!hLoop) { hf = nullptr; hapWrite(0); return; }   // the next tick goes idle
+      hi = 0;
+    }
+  }
+  const HapFrame& f = hf[hi];
+  float t = f.ms ? (float)(now - hSegAt) / (f.ms * 1000.0f) : 1;
+  t = t * t * (3 - 2 * t);                   // S-curve: no corners to click
+  float level = (hFrom + (f.level - hFrom) * t) / 255.0f;
+
+  float on;
+  if (hTone) {
+    // The alarm starts quieter and builds to full volume.
+    float k = (float)(now - hStartAt) / (ALARM_BUILD_MS * 1000.0f);
+    if (k > 1) k = 1;
+    float vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
+    on = level * vol * (ALARM_TONE_DUTY / 100.0f);
+  } else {
+    on = level * hScale;
+  }
+  hapWrite((uint32_t)(on * hapMaxDuty + 0.5f));
+}
+
+// The share of full power that strength `pct` gives (0 = off).
+static float hapTop(uint8_t pct) {
+  if (pct == 0) return 0;
+  if (pct > 100) pct = 100;
+  return (HAPTIC_MIN_DUTY + (HAPTIC_MAX_DUTY - HAPTIC_MIN_DUTY) * (pct - 1) / 99.0f) / 100.0f;
+}
+
+static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float scale) {
+  portENTER_CRITICAL(&hapMux);
+  askFrames = f; askCount = n; askLoop = loop; askTone = tone; askScale = scale;
+  hapAsk = true;
+  portEXIT_CRITICAL(&hapMux);
+  // The timer task outranks loop() on the C3's one core, so it can't be
+  // stopping itself halfway through this; an already running timer just
+  // picks the request up on its next tick. The alarm is audible anyway, so
+  // it moves 1000 times a second instead of 10000.
+  if (!hapTimer) return;
+  uint32_t period = tone ? 1000 : HAPTIC_TICK_US;
+  if (esp_timer_is_active(hapTimer)) {
+    if (period == hapPeriod) return;
+    esp_timer_stop(hapTimer);
+  }
+  hapPeriod = period;
+  esp_timer_start_periodic(hapTimer, period);
+}
+
+void hapticInit(uint8_t strength) {
+  hapStrength = strength > 100 ? 100 : strength;
+  uint8_t res = HAPTIC_RES;
+  if (!ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res)) {
+    res = 8;
+    ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res);
+  }
+  hapMaxDuty = (1u << res) - 1;
+  ledcWrite(BUZZER_PIN, hapMaxDuty);         // off (active low)
+  hDuty = 0;
+  esp_timer_create_args_t args = {};
+  args.callback = &hapTick;
+  args.name = "haptics";
+  esp_timer_create(&args, &hapTimer);
 }
 
 void hapticPlay(Haptic h) {
-  if (hapLoop && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
-  switch (h) {
-    case HAP_TAP:      hapSteps = HP_TAP;      hapCount = HAP_LEN(HP_TAP); break;
-    case HAP_HOLD:     hapSteps = HP_HOLD;     hapCount = HAP_LEN(HP_HOLD); break;
-    case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = HAP_LEN(HP_NOTIFY); break;
-    case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = HAP_LEN(HP_REMINDER); break;
-    case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = HAP_LEN(HP_SUCCESS); break;
-    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = HAP_LEN(HP_ALARM); break;
+  if (h >= HAP_COUNT) return;
+  if (hapAlarm && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
+  if (h == HAP_ALARM) {
+    hapAlarm = true;
+    hapAskFor(FX_ALARM, FX_LIB[h].n, true, true, 1);
+    return;
   }
-  hapLoop = (h == HAP_ALARM);
-  hapVoice(hapLoop);
-  hapNight = nightTime() && h != HAP_TAP && h != HAP_HOLD && h != HAP_ALARM;
-  hapIndex = 0;
-  hapStepAt = hapLoopStart = millis();
-  hapLevel = -1;
+  float scale = hapTop(hapStrength);
+  if (scale <= 0) return;                    // haptics off in Sage
+  bool press = (h == HAP_TICK || h == HAP_HOLD);
+  if (!press && nightTime()) scale *= HAPTIC_NIGHT_PCT / 100.0f;
+  hapAskFor(FX_LIB[h].f, FX_LIB[h].n, false, false, scale);
 }
 
-// A single pulse of `ms`, for the Pi's HAPTIC command without a pattern.
+bool hapticPlayNamed(const char* name) {
+  for (const auto& e : FX_NAMES) {
+    if (!strcmp(name, e.name)) { hapticPlay(e.h); return true; }
+  }
+  return false;
+}
+
+// A single knock of `ms`, for the Pi's HAPTIC command without a pattern.
 void hapticPulse(uint16_t ms) {
-  if (hapLoop) return;
-  static HapStep one[1];
-  one[0].strength = 220;
-  one[0].ms = ms;
-  hapSteps = one;
-  hapCount = 1;
-  hapLoop = false;
-  hapNight = false;
-  hapIndex = 0;
-  hapStepAt = millis();
-  hapLevel = -1;
+  if (hapAlarm) return;
+  float scale = hapTop(hapStrength);
+  if (scale <= 0) return;
+  if (ms < EDGE) ms = EDGE;
+  pulseOne[0] = {HFX_KNOCK_PEAK, EDGE};
+  pulseOne[1] = {HFX_KNOCK_PEAK, ms};
+  pulseOne[2] = {0, FALL};
+  hapAskFor(pulseOne, 3, false, false, scale);
 }
 
-void hapticUpdate() {
-  if (!hapSteps) return;
-  unsigned long now = millis();
-  while (now - hapStepAt >= hapSteps[hapIndex].ms) {
-    hapStepAt += hapSteps[hapIndex].ms;
-    if (++hapIndex >= hapCount) {
-      if (!hapLoop) { hapticOff(); return; }
-      hapIndex = 0;
-    }
-  }
-  int strength = hapSteps[hapIndex].strength;
-  if (strength > 0) {
-    if (hapTone) {
-      // The alarm starts quieter and builds to full over 20 s. A square
-      // wave is loudest at half duty, so 255 maps to 50%.
-      float k = (now - hapLoopStart) / 20000.0f;
-      strength = (int)(strength * (0.25f + 0.75f * (k > 1 ? 1 : k))) / 2;
-    } else {
-      if (hapNight) strength = strength * 6 / 10;
-      if (now - hapStepAt < 6) strength = 255;   // the kick
-    }
-  }
-  hapWrite(strength);
+void hapticSetStrength(uint8_t pct) {
+  hapStrength = pct > 100 ? 100 : pct;
 }
+
+uint8_t hapticStrength() { return hapStrength; }
+
+void hapticOff() {
+  hapAlarm = false;
+  hapAskFor(nullptr, 0, false, false, 1);
+}
+
+// Only needed if the timer couldn't be made: then loop() drives the engine
+// (coarser, but still glides).
+void hapticUpdate() {
+  if (!hapTimer) hapTick(nullptr);
+}
+
+#undef EDGE
+#undef FALL
 
 // =====================================================================
 //  NeoPixel scene engine
