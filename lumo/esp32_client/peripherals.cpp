@@ -1,29 +1,102 @@
 #include <Arduino.h>
 #include "peripherals.h"
+#include "anim.h"
 #include "clockkeeper.h"
 #include "display.h"
 #include <math.h>
 
 Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
-static unsigned long hapticEndTime = 0;
-static bool hapticActive = false;
+// =====================================================================
+//  Haptics
+//
+//  The motor sits on BUZZER_PIN, active low, on a 50 kHz PWM so it is
+//  silent (the old clock's settings). A pattern is a short list of steps,
+//  each a strength (0 = rest) and a length, played without blocking. Every
+//  pulse starts with a 6 ms kick at full power so a small motor spins up
+//  crisply, then holds its own strength. At night everything but a
+//  button press is softer.
+// =====================================================================
 
-void hapticPulse(uint16_t ms) {
-  ledcWrite(BUZZER_PIN, 5);
-  hapticEndTime = millis() + ms;
-  hapticActive = true;
+struct HapStep { uint8_t strength; uint16_t ms; };
+static bool nightTime();                  // the sleep schedule, set from Sage
+
+static const HapStep HP_TAP[]      = { {200, 18} };
+static const HapStep HP_HOLD[]     = { {160, 14}, {0, 70}, {255, 26} };
+static const HapStep HP_NOTIFY[]   = { {140, 20}, {0, 110}, {210, 28} };
+static const HapStep HP_REMINDER[] = { {140, 20}, {0, 110}, {210, 28}, {0, 420}, {140, 20}, {0, 110}, {230, 34} };
+static const HapStep HP_SUCCESS[]  = { {150, 16}, {0, 60}, {230, 22} };
+// A heartbeat, "bu-bump ... bu-bump", the same rhythm the light beats to.
+static const HapStep HP_ALARM[]    = { {255, 130}, {0, 130}, {255, 130}, {0, 910} };
+
+static const HapStep* hapSteps = nullptr;
+static uint8_t  hapCount = 0, hapIndex = 0;
+static bool     hapLoop = false, hapNight = false;
+static unsigned long hapStepAt = 0, hapLoopStart = 0;
+static int      hapLevel = -1;            // what the pin is set to, -1 = unknown
+
+static void hapWrite(int strength) {
+  if (strength == hapLevel) return;
+  hapLevel = strength;
+  ledcWrite(BUZZER_PIN, 255 - strength);  // active low
 }
 
 void hapticOff() {
-  ledcWrite(BUZZER_PIN, 255);
-  hapticActive = false;
+  hapSteps = nullptr;
+  hapCount = 0;
+  hapWrite(0);
+}
+
+void hapticPlay(Haptic h) {
+  switch (h) {
+    case HAP_TAP:      hapSteps = HP_TAP;      hapCount = 1; break;
+    case HAP_HOLD:     hapSteps = HP_HOLD;     hapCount = 3; break;
+    case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = 3; break;
+    case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = 7; break;
+    case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = 3; break;
+    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = 4; break;
+  }
+  hapLoop = (h == HAP_ALARM);
+  hapNight = nightTime() && h != HAP_TAP && h != HAP_HOLD && h != HAP_ALARM;
+  hapIndex = 0;
+  hapStepAt = hapLoopStart = millis();
+  hapLevel = -1;
+}
+
+// A single pulse of `ms`, for the Pi's HAPTIC command without a pattern.
+void hapticPulse(uint16_t ms) {
+  static HapStep one[1];
+  one[0].strength = 220;
+  one[0].ms = ms;
+  hapSteps = one;
+  hapCount = 1;
+  hapLoop = false;
+  hapNight = false;
+  hapIndex = 0;
+  hapStepAt = millis();
+  hapLevel = -1;
 }
 
 void hapticUpdate() {
-  if (hapticActive && millis() >= hapticEndTime) {
-    hapticOff();
+  if (!hapSteps) return;
+  unsigned long now = millis();
+  while (now - hapStepAt >= hapSteps[hapIndex].ms) {
+    hapStepAt += hapSteps[hapIndex].ms;
+    if (++hapIndex >= hapCount) {
+      if (!hapLoop) { hapticOff(); return; }
+      hapIndex = 0;
+    }
   }
+  int strength = hapSteps[hapIndex].strength;
+  if (strength > 0) {
+    if (hapLoop) {                          // the alarm starts gently and builds over 20 s
+      float k = (now - hapLoopStart) / 20000.0f;
+      strength = (int)(strength * (0.55f + 0.45f * (k > 1 ? 1 : k)));
+    }
+    if (hapNight) strength = strength * 6 / 10;
+    if (now - hapStepAt < 6) strength = 255;   // the kick
+  }
+  hapWrite(strength);
 }
 
 // =====================================================================
@@ -31,8 +104,8 @@ void hapticUpdate() {
 //
 //  Every scene is a pure function of time that fills a float RGB frame in
 //  *perceptual* space (0..1). A final stage smooths the frame, applies gamma,
-//  scales by the master brightness and error-diffuses to 8 bits, so slow fades
-//  stay silky even at the very low levels a bedside light lives at.
+//  scales by the master brightness and rounds to 8 bits with hysteresis, so a
+//  still light never shimmers.
 // =====================================================================
 
 struct Rgb { float r, g, b; };
@@ -69,15 +142,16 @@ static uint8_t  baseBri    = 40;
 static uint16_t baseHue    = 0;
 static bool     onClock    = false;
 static bool     sleeping   = false;
+static bool nightTime() { return sleeping; }
 static bool     alarmOn    = false;
 static VoiceFx  voiceFx    = VFX_NONE;
 static float    voiceLevel = 0.0f;
+static unsigned long alarmSince;
 static unsigned long pingStart = 0;
 static Rgb      pingColor  = {1, 1, 1};
 static bool     pingActive = false;
 
 static Rgb      frameCur[NUMPIXELS];            // smoothed, perceptual
-static float    ditherErr[NUMPIXELS][3];
 static uint8_t  lastOut[NUMPIXELS][3];
 static unsigned long lastFrameMs = 0;
 static bool     forceShow = true;
@@ -103,13 +177,24 @@ void neoSetMode(NeoMode mode, uint8_t brightness, uint16_t hue) {
 }
 void applyNeoPixels(NeoMode mode, uint8_t brightness, uint16_t hue) { neoSetMode(mode, brightness, hue); }
 void neoSetClockScreen(bool c)  { onClock = c; }
+static ScreenMode prevScreen;
+static ClockStyle prevStyle;
+static ClockStyle ctxStyle = CLOCK_DIGITAL;
 void neoSetContext(ScreenMode screen, const LumoState& s) {
-  if (screen != ctxScreen || (ctx && ctx->clock_style != s.clock_style)) ctxSince = millis();
+  if (screen != ctxScreen || s.clock_style != ctxStyle) {
+    prevScreen = ctxScreen;
+    prevStyle  = ctxStyle;
+    ctxSince   = millis();
+  }
   ctxScreen = screen;
+  ctxStyle  = s.clock_style;
   ctx = &s;
 }
 void neoSetSleep(bool s)        { sleeping = s; }
-void neoSetAlarm(bool r)        { alarmOn = r; }
+void neoSetAlarm(bool r) {
+  if (r && !alarmOn) alarmSince = millis();
+  alarmOn = r;
+}
 void neoSetVoice(VoiceFx fx, float level) { voiceFx = fx; voiceLevel = constrain(level, 0.0f, 1.0f); }
 void neoPing(uint8_t r, uint8_t g, uint8_t b) {
   pingColor  = rgb(r / 255.0f, g / 255.0f, b / 255.0f);
@@ -139,57 +224,42 @@ static const float TWO_PI_F = 6.2831853f;
 
 // ---- scenes ---------------------------------------------------------
 
-static void sceneDigital(float t, Rgb* out, float& tau) {
-  ClockNow now = clockNow();
-  PhaseStyle ph = clockPhase(now.minuteOfDay);
-  Rgb pc = rgb(ph.r / 255.0f, ph.g / 255.0f, ph.b / 255.0f);
+// ---- AUTO: one light, one motion language ---------------------------
+//
+// Every face and screen is described the same way: a colour, how bright it
+// glows, whether it breathes, and at most one moving mark. They all share
+// the same few numbers below, so the ring feels like one object whatever is
+// on screen:
+//  - a glow in a single colour, following the day's brightness;
+//  - a slow breath (7 s, about a tenth deep), never a flicker;
+//  - one soft mark, the same width everywhere, that glides between LEDs;
+//  - events (a new minute, a notification, a new song) are one swell:
+//    a quick rise and a long, gentle fall;
+//  - changing face or screen cross-fades over 0.8 s.
 
-  float breath = 0.5f - 0.5f * cosf(t * TWO_PI_F / 9.0f);
-  float dayGain = 0.40f + 0.60f * ph.level;
-  float glow = (0.50f + 0.14f * breath) * dayGain;
-  if (sleeping) glow *= 0.30f;
+static const float GLOW        = 0.45f;   // the resting glow, before the day's level
+static const float BREATH_S    = 7.0f;
+static const float BREATH      = 0.10f;
+static const float MARK_W      = 1.5f;    // LEDs either side the mark reaches
+static const float MARK_GAIN   = 0.55f;
+static const float SWELL_S     = 1.2f;
+static const float SWELL_GAIN  = 0.30f;
+static const float FADE_S      = 0.8f;
 
-  tau = 0.22f;
+enum MarkKind { MARK_NONE, MARK_SECONDS, MARK_SPIN, MARK_COUNT };
 
-  float sec = now.s + now.secFrac;
-  for (int i = 0; i < NUMPIXELS; i++) {
-    // A slow, phase-offset shimmer keeps the base from looking like a flat fill.
-    float shimmer = 0.94f + 0.06f * sinf(t * 0.7f + i * 1.05f);
-    out[i] = scalec(pc, glow * shimmer);
-  }
+struct Look {
+  Rgb      color;
+  float    level;      // 0..1, the day's brightness and the face's own
+  bool     breathe;
+  MarkKind mark;
+  Rgb      markColor;
+  int      count;      // MARK_COUNT: how many LEDs are lit
+  bool     minuteSwell;
+};
 
-  if (!onClock) return;
-
-  // Seconds comet: one lap a minute, brighter by day, a whisper at night.
-  float cometGain = sleeping ? 0.30f : (0.35f + 0.65f * ph.level);
-  Rgb cometCol = mixc(pc, rgb(1, 1, 1), 0.55f);
-  float pos = sec / 60.0f * NUMPIXELS;
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float k = cometAt(pos, i, 1.15f);
-    out[i] = addc(out[i], scalec(cometCol, k * cometGain * 0.85f));
-  }
-  tau = 0.07f;
-
-  // Top of the minute: the whole ring swells once.
-  if (sec < 1.4f) {
-    float env = sinf(3.14159f * sec / 1.4f);
-    for (int i = 0; i < NUMPIXELS; i++) out[i] = addc(out[i], scalec(pc, env * 0.35f * cometGain));
-  }
-
-  // Top of the hour: a rainbow ripple turns once around the ring.
-  if (now.m == 0 && sec < 4.0f && !sleeping) {
-    float env = sinf(3.14159f * sec / 4.0f);
-    for (int i = 0; i < NUMPIXELS; i++) {
-      Rgb rb = hsv((float)i / NUMPIXELS + t * 0.35f, 0.75f, 0.9f);
-      out[i] = mixc(out[i], rb, env * 0.85f);
-    }
-  }
-}
-
-// ---- AUTO: a light for every face and screen ----------------------
-
-// A soft blob of light centred at `pos` (in pixels, wrapping round the ring)
-// and `width` pixels wide, so a "hand" glides between LEDs.
+// A soft blob of light centred at `pos` (in pixels, wrapping round the ring),
+// so the mark glides between LEDs instead of hopping.
 static float blobAt(float pos, int i, float width) {
   float d = fabsf(pos - i);
   d = fmodf(d, (float)NUMPIXELS);
@@ -200,200 +270,255 @@ static float blobAt(float pos, int i, float width) {
 static inline Rgb rgb8(uint8_t r, uint8_t g, uint8_t b) { return rgb(r / 255.0f, g / 255.0f, b / 255.0f); }
 static inline float breathe(float t, float period) { return 0.5f - 0.5f * cosf(t * TWO_PI_F / period); }
 
-// Minimal: the colour of the day, breathing slowly. Nothing moves.
-static void sceneMinimal(float t, Rgb* out, float& tau, Rgb pc, float level) {
-  tau = 0.3f;
-  float g = (0.30f + 0.10f * breathe(t, 11.0f)) * level;
-  for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(pc, g);
+// The one event shape: a 150 ms rise, then a long fall. u is seconds since.
+static float swellAt(float u, float len) {
+  if (u < 0 || u >= len) return 0;
+  float rise = clamp01(u / 0.15f);
+  rise = rise * rise * (3 - 2 * rise);
+  float fall = 1 - u / len;
+  return rise * fall * fall;
 }
 
-// Analog: the ring is a second dial. The hour is a warm blob in the day's
-// colour, the minute a white one, and the seconds a faint glint going round.
-static void sceneAnalog(const ClockNow& c, Rgb* out, float& tau, Rgb pc, float level) {
-  tau = 0.08f;
+static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rgb dayColor, float day) {
+  Look k;
+  k.color = dayColor; k.level = day; k.breathe = true;
+  k.mark = MARK_NONE; k.markColor = rgb(1, 1, 1); k.count = 0; k.minuteSwell = false;
+  switch (screen) {    // the clock faces have their own lights: renderFace
+
+    case SCREEN_SPOTIFY: {
+      uint8_t r, g, b;
+      displayArtTint(r, g, b);
+      k.color = rgb8(r, g, b);
+      if (!s.sp_playing) { k.level = day * 0.5f; k.breathe = false; }
+      break;
+    }
+    case SCREEN_SYSTEM: {
+      float heat = clamp01((s.cpu_temp - 45.0f) / 30.0f);
+      k.color = heat < 0.5f ? mixc(rgb8(60, 220, 190), rgb8(255, 176, 50), heat * 2)
+                            : mixc(rgb8(255, 176, 50), rgb8(255, 60, 40), heat * 2 - 1);
+      break;
+    }
+    case SCREEN_TASKS:
+      if (s.task_count == 0) {
+        k.color = rgb8(70, 225, 140);             // all done: a calm green
+      } else {
+        k.color = rgb8(80, 200, 255);
+        k.mark = MARK_COUNT;
+        k.count = s.task_count < NUMPIXELS ? s.task_count : NUMPIXELS;
+      }
+      break;
+    case SCREEN_CONNECTING:
+      if (s.pair_refused) { k.color = rgb8(255, 70, 50); break; }
+      k.color = rgb8(80, 200, 255);
+      k.level = day * 0.5f;
+      k.mark = MARK_SPIN;
+      k.markColor = rgb8(150, 225, 255);
+      break;
+    case SCREEN_MEMORY:
+      k.color = rgb8(255, 170, 120);
+      break;
+    case SCREEN_CARD:
+      k.color = rgb8(80, 200, 255);
+      break;
+    default:
+      break;
+  }
+  return k;
+}
+
+static void renderLook(const Look& k, float t, const ClockNow& c, Rgb* out) {
   float sec = c.s + c.secFrac;
-  float hr = ((c.h % 12) + c.m / 60.0f) / 12.0f * NUMPIXELS;
-  float mn = (c.m + sec / 60.0f) / 60.0f * NUMPIXELS;
-  float sc = sec / 60.0f * NUMPIXELS;
+  float b = k.breathe ? 1.0f - BREATH * breathe(t, BREATH_S) : 1.0f;
+  float swell = k.minuteSwell ? swellAt(sec, SWELL_S) : 0.0f;
+  float glow = GLOW * k.level * b * (1 + SWELL_GAIN * swell);
   for (int i = 0; i < NUMPIXELS; i++) {
-    Rgb o = scalec(pc, 0.10f * level);
-    o = addc(o, scalec(pc, 0.85f * level * blobAt(hr, i, 1.6f)));
-    o = addc(o, scalec(rgb(1, 1, 1), 0.60f * level * blobAt(mn, i, 1.2f)));
-    o = addc(o, scalec(mixc(pc, rgb(1, 1, 1), 0.5f), 0.25f * level * cometAt(sc, i, 1.6f)));
+    Rgb o = scalec(k.color, glow);
+    switch (k.mark) {
+      case MARK_SECONDS:
+        o = addc(o, scalec(k.markColor, MARK_GAIN * k.level * blobAt(sec / 60.0f * NUMPIXELS, i, MARK_W)));
+        break;
+      case MARK_SPIN:                              // one turn every 1.6 s, like a spinner
+        o = addc(o, scalec(k.markColor, MARK_GAIN * k.level * 1.6f * cometAt(fmodf(t / 1.6f, 1.0f) * NUMPIXELS, i, 1.2f)));
+        break;
+      case MARK_COUNT:
+        o = i < k.count ? scalec(k.color, (GLOW + 0.22f) * k.level * b) : scalec(k.color, 0.05f * k.level);
+        break;
+      default:
+        break;
+    }
     out[i] = o;
   }
 }
 
-// Monolith: gallery light. A still, warm-white wash with the face's gold dot
-// travelling round once a minute, and a soft dip as the minute cross-fades.
-static void sceneMonolith(const ClockNow& c, Rgb* out, float& tau, float level) {
-  tau = 0.10f;
-  float sec = c.s + c.secFrac;
-  float dip = sec < 0.6f ? 0.55f + 0.45f * fabsf(sec / 0.3f - 1.0f) : 1.0f;
-  Rgb wash = rgb8(238, 232, 220), gold = rgb8(214, 160, 90);
-  float pos = sec / 60.0f * NUMPIXELS;
-  for (int i = 0; i < NUMPIXELS; i++) {
-    Rgb o = scalec(wash, 0.22f * level * dip);
-    out[i] = addc(o, scalec(gold, 0.75f * level * blobAt(pos, i, 1.3f)));
-  }
+
+// ---- Clock faces: each light belongs to its face ----------------------
+//
+// Every face opens with its own short entrance, in step with the screen's,
+// then settles into one ambient motion that means something on that face.
+// All of them share the glow, breath, mark width and swell above.
+
+static inline float smooth01(float x) { x = clamp01(x); return x * x * (3 - 2 * x); }
+
+// The ring filled to `pos` LEDs: lit behind, a soft front, faint ahead.
+static float fillAt(float pos, int i, float ahead) {
+  return ahead + (1 - ahead) * clamp01(pos - i);
 }
 
-// Stacked: the hour fills up in the face's orange, a sixth of the ring every
-// ten minutes, over a dim warm white. The leading edge breathes.
-static void sceneStacked(float t, const ClockNow& c, Rgb* out, float& tau, float level) {
-  tau = 0.25f;
-  Rgb base = rgb8(245, 235, 220), orange = rgb8(255, 140, 50);
-  float fill = (c.m + (c.s + c.secFrac) / 60.0f) / 60.0f * NUMPIXELS;
-  float edge = 0.55f + 0.45f * breathe(t, 2.4f);
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float f = clamp01(fill - i);                 // 1 full, 0 empty, between: the edge
-    float k = f >= 1 ? 0.70f : f * 0.70f * edge;
-    out[i] = mixc(scalec(base, 0.22f * level), scalec(orange, level), k);
-  }
-}
+static void renderFace(ClockStyle style, const LumoState& s, const ClockNow& c, float t, float since,
+                       Rgb dayColor, float day, Rgb* out) {
+  const float N = (float)NUMPIXELS;
+  float sec  = c.s + c.secFrac;
+  float b    = 1.0f - BREATH * breathe(t, BREATH_S);
+  float glow = GLOW * day * b;
+  float swell = swellAt(sec, SWELL_S);
+  bool  secs = s.show_seconds;
 
-// Nightstand: an ember. Deep amber, very low, flickering like a filament,
-// and sinking and warming back up with the minute like the digits do.
-static void sceneNightstand(float t, const ClockNow& c, Rgb* out, float& tau, float level) {
-  tau = 0.35f;
-  float sec = c.s + c.secFrac;
-  float turn = sec < 1.2f ? 0.45f + 0.55f * fabsf(sec / 0.6f - 1.0f) : 1.0f;
-  Rgb ember = rgb8(255, 120, 30);
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float flick = 0.86f + 0.07f * sinf(t * 0.9f + i * 2.3f) + 0.05f * sinf(t * 2.3f + i * 0.8f)
-                        + 0.02f * sinf(t * 5.1f + i * 1.7f);
-    out[i] = scalec(ember, 0.20f * (0.6f + 0.4f * level) * flick * turn);
-  }
-}
-
-// Dial: brushed steel with the dial's orange second hand sweeping round, and
-// the hour picked out in white.
-static void sceneDial(const ClockNow& c, Rgb* out, float& tau, float level) {
-  tau = 0.05f;
-  float sec = c.s + c.secFrac;
-  float hr = ((c.h % 12) + c.m / 60.0f) / 12.0f * NUMPIXELS;
-  Rgb steel = rgb8(150, 165, 185), orange = rgb8(255, 110, 45);
-  for (int i = 0; i < NUMPIXELS; i++) {
-    Rgb o = scalec(steel, 0.10f * level);
-    o = addc(o, scalec(rgb(1, 1, 1), 0.30f * level * blobAt(hr, i, 1.0f)));
-    out[i] = addc(o, scalec(orange, 0.95f * level * cometAt(sec / 60.0f * NUMPIXELS, i, 1.3f)));
-  }
-}
-
-// Now playing: the cover's own colour. Playing, it breathes on a slow beat
-// with a brighter swell travelling round; paused, it rests at a low glow.
-static void sceneMusic(float t, Rgb* out, float& tau, bool playing) {
-  uint8_t r, g, b;
-  displayArtTint(r, g, b);
-  Rgb tint = rgb8(r, g, b);
-  if (!playing) {
-    tau = 0.6f;
-    float k = 0.14f + 0.06f * breathe(t, 6.0f);
-    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(tint, k);
-    return;
-  }
-  tau = 0.07f;
-  float beat = powf(breathe(t, 0.92f), 3.0f);
-  float pos = fmodf(t / 3.2f, 1.0f) * NUMPIXELS;
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float k = 0.30f + 0.20f * beat + 0.50f * blobAt(pos, i, 2.2f);
-    out[i] = scalec(mixc(tint, rgb(1, 1, 1), 0.15f * beat), k);
-  }
-}
-
-// System: colour from the CPU temperature (cool teal, amber, then red) with a
-// comet that runs faster the busier the Pi is.
-static void sceneSystem(float t, Rgb* out, float& tau, const LumoState& s) {
-  tau = 0.06f;
-  float heat = clamp01((s.cpu_temp - 45.0f) / 30.0f);
-  Rgb col = heat < 0.5f ? mixc(rgb8(0, 220, 170), rgb8(255, 170, 30), heat * 2)
-                        : mixc(rgb8(255, 170, 30), rgb8(255, 40, 20), heat * 2 - 1);
-  static float phase = 0, lastT = 0;
-  float dt = t - lastT; lastT = t;
-  if (dt > 0 && dt < 0.2f) phase += dt / (3.5f - 2.8f * clamp01(s.cpu_pct / 100.0f));
-  float pos = fmodf(phase, 1.0f) * NUMPIXELS;
-  for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(col, 0.10f + 0.80f * cometAt(pos, i, 1.0f));
-}
-
-// Tasks: one light for each open task (up to six), breathing in turn. None
-// left: a calm green.
-static void sceneTasks(float t, Rgb* out, float& tau, const LumoState& s) {
-  tau = 0.2f;
-  int n = s.task_count < NUMPIXELS ? s.task_count : NUMPIXELS;
-  if (n == 0) {
-    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(rgb8(40, 230, 120), 0.20f + 0.10f * breathe(t, 7.0f));
-    return;
-  }
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float k = i < n ? 0.35f + 0.45f * breathe(t - i * 0.35f, 3.0f) : 0.03f;
-    out[i] = scalec(rgb8(0, 200, 255), k);
-  }
-}
-
-// Connecting: a cyan light searching round the ring; refused, a slow red.
-static void sceneConnecting(float t, Rgb* out, float& tau, const LumoState& s) {
-  if (s.pair_refused) {
-    tau = 0.3f;
-    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(rgb8(255, 40, 30), 0.15f + 0.35f * breathe(t, 3.0f));
-    return;
-  }
-  tau = 0.05f;
-  float pos = fmodf(t / 1.6f, 1.0f) * NUMPIXELS;
-  for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(rgb8(0, 229, 255), 0.04f + 0.86f * cometAt(pos, i, 1.0f));
-}
-
-// Memories: slow warm drifts of peach, rose and gold, like late sun.
-static void sceneMemory(float t, Rgb* out, float& tau) {
-  tau = 0.4f;
-  const Rgb peach = rgb8(255, 150, 90), rose = rgb8(255, 90, 120), gold = rgb8(255, 190, 70);
-  for (int i = 0; i < NUMPIXELS; i++) {
-    float u = 0.5f + 0.5f * sinf(t * 0.21f + i * 1.1f);
-    float v = 0.5f + 0.5f * sinf(t * 0.13f - i * 0.8f + 2.0f);
-    out[i] = scalec(mixc(mixc(peach, rose, u), gold, v * 0.5f), 0.35f + 0.15f * sinf(t * 0.4f + i));
-  }
-}
-
-static void sceneAuto(float t, Rgb* out, float& tau) {
-  if (!ctx) { sceneDigital(t, out, tau); return; }
-  const LumoState& s = *ctx;
-  ClockNow c = clockNow();
-  PhaseStyle ph = clockPhase(c.minuteOfDay);
-  Rgb pc = rgb8(ph.r, ph.g, ph.b);
-  float level = (0.40f + 0.60f * ph.level) * (sleeping ? 0.30f : 1.0f);
-
-  switch (ctxScreen) {
-    case SCREEN_CLOCK:
-      switch (s.clock_style) {
-        case CLOCK_MINIMAL:    sceneMinimal(t, out, tau, pc, level); break;
-        case CLOCK_ANALOG:     sceneAnalog(c, out, tau, pc, level); break;
-        case CLOCK_MONOLITH:   sceneMonolith(c, out, tau, level); break;
-        case CLOCK_STACKED:    sceneStacked(t, c, out, tau, level); break;
-        case CLOCK_NIGHTSTAND: sceneNightstand(t, c, out, tau, level); break;
-        case CLOCK_DIAL:       sceneDial(c, out, tau, level); break;
-        default:               sceneDigital(t, out, tau); break;
+  switch (style) {
+    case CLOCK_MINIMAL: {
+      // The hour filling up: one LED every ten minutes, the front easing on
+      // as the minutes pass. It only swells on the hour. Opens from the
+      // middle outwards.
+      float hour = (c.m + sec / 60.0f) / 60.0f * N;
+      float sw = (c.m == 0) ? swell : 0;
+      for (int i = 0; i < NUMPIXELS; i++) {
+        float open = smooth01((since - fabsf(i - (N - 1) / 2) * 0.12f) / 0.6f);
+        out[i] = scalec(dayColor, glow * fillAt(hour, i, 0.35f) * open * (1 + SWELL_GAIN * sw));
       }
       break;
-    case SCREEN_SPOTIFY:    sceneMusic(t, out, tau, s.sp_playing); break;
-    case SCREEN_SYSTEM:     sceneSystem(t, out, tau, s); break;
-    case SCREEN_TASKS:      sceneTasks(t, out, tau, s); break;
-    case SCREEN_CONNECTING: sceneConnecting(t, out, tau, s); break;
-    case SCREEN_MEMORY:     sceneMemory(t, out, tau); break;
-    case SCREEN_CARD:
-      tau = 0.2f;
-      for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(rgb8(0, 229, 255), 0.25f);
+    }
+    case CLOCK_MONOLITH: {
+      // Gallery white rising out of the dark, then the gold dot: the seconds,
+      // or the minute when seconds are hidden.
+      float rise = smooth01(since / 1.2f);
+      float dot  = smooth01((since - 0.9f) / 0.5f);
+      float pos  = secs ? sec / 60.0f * N : (c.m + sec / 60.0f) / 60.0f * N;
+      Rgb white = rgb8(236, 228, 214), gold = rgb8(222, 168, 96);
+      for (int i = 0; i < NUMPIXELS; i++)
+        out[i] = addc(scalec(white, glow * rise * (1 + SWELL_GAIN * swell)),
+                      scalec(gold, MARK_GAIN * day * dot * blobAt(pos, i, MARK_W)));
       break;
-    default:                sceneDigital(t, out, tau); break;
+    }
+    case CLOCK_STACKED: {
+      // The minute as an odometer: the ring fills an LED every ten seconds,
+      // and on the minute it rolls away as the digits roll, then fills again.
+      // Opens with the LEDs rolling on one after another.
+      Rgb orange = rgb8(255, 140, 56);
+      float fill = sec / 60.0f * N;
+      float roll = clamp01(sec / 0.52f);              // the digits' roll, 520 ms
+      for (int i = 0; i < NUMPIXELS; i++) {
+        float v = fillAt(fill, i, 0.35f);
+        if (roll < 1) {                                // the full ring rolls off, LED by LED
+          float off = smooth01(roll * (N + 1) - i);
+          v = 1 - (1 - 0.35f) * off;
+          if (fill > i) v = fmaxf(v, fillAt(fill, i, 0.35f));
+        }
+        float open = smooth01((since - i * 0.09f) / 0.35f);
+        out[i] = scalec(orange, glow * v * open);
+      }
+      break;
+    }
+    case CLOCK_NIGHTSTAND: {
+      // An ember: low amber, a very slow breath, nothing moving. It wakes
+      // gently, over two and a half seconds.
+      float ember = 1.0f - 0.16f * breathe(t, 12.0f);
+      float rise = smooth01(since / 2.5f);
+      for (int i = 0; i < NUMPIXELS; i++)
+        out[i] = scalec(rgb8(255, 112, 28), GLOW * day * 0.8f * ember * rise);
+      break;
+    }
+    case CLOCK_DIAL: {
+      // The dial's hands on the ring: a bright steel minute hand, and the
+      // orange second hand sweeping round. Both spin in from twelve with the
+      // hands on screen.
+      float e = easeOutBack(since / 0.65f);
+      float mn = (c.m + sec / 60.0f) / 60.0f * N * e;
+      float sc = sec / 60.0f * N * e;
+      Rgb steel = rgb8(196, 204, 214), orange = rgb8(255, 110, 45);
+      float base = smooth01(since / 0.5f);
+      for (int i = 0; i < NUMPIXELS; i++) {
+        Rgb o = scalec(steel, glow * 0.6f * base * (1 + SWELL_GAIN * swell));
+        o = addc(o, scalec(steel, 0.35f * day * blobAt(mn, i, MARK_W)));
+        if (secs) o = addc(o, scalec(orange, MARK_GAIN * day * blobAt(sc, i, MARK_W)));
+        out[i] = o;
+      }
+      break;
+    }
+    case CLOCK_ANALOG: {
+      // The second hand on the ring, ticking like the quartz hand on screen,
+      // and spinning in from twelve with it when the clock opens.
+      Rgb mark = mixc(dayColor, rgb(1, 1, 1), 0.5f);
+      float tick = (c.s - 1) + easeTick(c.secFrac / 0.22f);
+      if (tick < 0) tick += 60;
+      float pos = (secs ? tick : c.m + sec / 60.0f) / 60.0f * N * easeOutBack(since / 0.9f);
+      float base = smooth01(since / 0.5f);
+      for (int i = 0; i < NUMPIXELS; i++)
+        out[i] = addc(scalec(dayColor, glow * base * (1 + SWELL_GAIN * swell)),
+                      scalec(mark, MARK_GAIN * day * blobAt(pos, i, MARK_W)));
+      break;
+    }
+    case CLOCK_DIGITAL:
+    default: {
+      // The light comes on round the ring as the digits fade in, then the
+      // seconds glide round it and every minute swells once.
+      Rgb mark = mixc(dayColor, rgb(1, 1, 1), 0.5f);
+      float pos = (secs ? sec : c.m + sec / 60.0f) / 60.0f * N;
+      float on = since / 0.6f * (N + 1);
+      float dot = smooth01((since - 0.5f) / 0.4f);
+      for (int i = 0; i < NUMPIXELS; i++)
+        out[i] = addc(scalec(dayColor, glow * smooth01(on - i) * (1 + SWELL_GAIN * swell)),
+                      scalec(mark, MARK_GAIN * day * dot * blobAt(pos, i, MARK_W)));
+      break;
+    }
   }
-  if (sleeping && ctxScreen != SCREEN_CLOCK) for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], 0.30f);
+}
 
-  // A new screen or face: one soft white sweep round the ring.
+// One screen's light, whatever the screen: the clock faces above, the
+// rest from their Look.
+static void renderScreen(ScreenMode screen, const LumoState& s, const ClockNow& c, float t, float since,
+                         Rgb dayColor, float day, Rgb* out) {
+  if (screen == SCREEN_CLOCK) renderFace(s.clock_style, s, c, t, since, dayColor, day, out);
+  else renderLook(lookFor(screen, s, c, dayColor, day), t, c, out);
+}
+
+static uint8_t       tintSeen[3] = { 0, 0, 0 };
+static unsigned long tintSwellAt = 0;
+
+static void sceneAuto(float t, Rgb* out, float& tau) {
+  tau = 0.06f;
+  ClockNow c = clockNow();
+  PhaseStyle ph = clockPhase(c.minuteOfDay);
+  Rgb dayColor = rgb8(ph.r, ph.g, ph.b);
+  float day = (0.40f + 0.60f * ph.level) * (sleeping ? 0.30f : 1.0f);
+  if (!ctx) {
+    Look k = { dayColor, day, true, MARK_NONE, rgb(1, 1, 1), 0, false };
+    renderLook(k, t, c, out);
+    return;
+  }
+  const LumoState& s = *ctx;
   float since = (millis() - ctxSince) / 1000.0f;
-  if (since < 0.7f) {
-    float env = sinf(3.14159f * since / 0.7f);
-    float pos = since / 0.7f * NUMPIXELS;
-    for (int i = 0; i < NUMPIXELS; i++)
-      out[i] = addc(out[i], scalec(rgb(1, 1, 1), 0.45f * env * cometAt(pos, i, 1.4f) * (sleeping ? 0.3f : 1.0f)));
-    if (tau > 0.06f) tau = 0.06f;
+  renderScreen(ctxScreen, s, c, t, since, dayColor, day, out);
+
+  // A new face or screen cross-fades from the last one.
+  if (since < FADE_S) {
+    LumoState was = s;
+    was.clock_style = prevStyle;
+    Rgb from[NUMPIXELS];
+    renderScreen(prevScreen, was, c, t, 10.0f, dayColor, day, from);
+    float e = clamp01(since / FADE_S);
+    e = e * e * (3 - 2 * e);
+    for (int i = 0; i < NUMPIXELS; i++) out[i] = mixc(from[i], out[i], e);
+  }
+
+  // A new song (the cover's colour changed) swells once, like a new minute.
+  if (ctxScreen == SCREEN_SPOTIFY) {
+    uint8_t r, g, b;
+    displayArtTint(r, g, b);
+    if (r != tintSeen[0] || g != tintSeen[1] || b != tintSeen[2]) {
+      if (tintSeen[0] | tintSeen[1] | tintSeen[2]) tintSwellAt = millis();
+      tintSeen[0] = r; tintSeen[1] = g; tintSeen[2] = b;
+    }
+    float sw = tintSwellAt ? swellAt((millis() - tintSwellAt) / 1000.0f, SWELL_S) : 0;
+    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], 1 + SWELL_GAIN * 1.5f * sw);
   }
 }
 
@@ -441,11 +566,19 @@ static void sceneComet(float t, Rgb* out, float& tau) {
   }
 }
 
+// A sunrise that beats with the haptic heartbeat: over the first 30 s the
+// light climbs from a low ember to warm white, and each "bu-bump" of the
+// motor is a double swell of light at the same moment (see HAP_ALARM).
 static void sceneAlarm(float t, Rgb* out, float& tau) {
-  tau = 0.04f;
-  float p = 0.5f + 0.5f * sinf(t * TWO_PI_F * 1.6f);
-  Rgb c = mixc(rgb(1.0f, 0.10f, 0.05f), rgb(1.0f, 0.55f, 0.10f), p * 0.5f);
-  for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(c, 0.25f + 0.75f * p);
+  tau = 0.03f;
+  float since = (millis() - alarmSince) / 1000.0f;
+  float rise = clamp01(since / 30.0f);
+  rise = rise * rise * (3 - 2 * rise);
+  Rgb c = mixc(rgb8(255, 80, 20), rgb8(255, 214, 170), rise);
+  float u = fmodf(since, 1.3f);
+  float beat = swellAt(u, 0.5f) + 0.7f * swellAt(u - 0.26f, 0.6f);
+  float k = (0.25f + 0.55f * rise) * (1 + 0.6f * beat);
+  for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(c, k);
 }
 
 static void sceneVoice(float t, Rgb* out, float& tau) {
@@ -503,26 +636,29 @@ void neoTick() {
     if (el > 1.2f) {
       pingActive = false;
     } else {
-      float e = sinf(TWO_PI_F * el / 0.6f);
-      if (e > 0) for (int i = 0; i < NUMPIXELS; i++) target[i] = mixc(target[i], pingColor, e * 0.9f);
+      float e = swellAt(el, 1.2f);                 // the same swell as every other event
+      for (int i = 0; i < NUMPIXELS; i++) target[i] = mixc(target[i], pingColor, e * 0.85f);
     }
   }
 
+  // No dithering: on six LEDs at bedside levels, toggling a channel between
+  // two neighbouring values every frame reads as a shimmer of colour. Each
+  // channel instead holds its value until the target has moved well past it
+  // (hysteresis), so a still light is perfectly still and a fade steps once.
   float a = 1.0f - expf(-dt / tau);
   bool changed = forceShow;
   for (int i = 0; i < NUMPIXELS; i++) {
     float* cur = &frameCur[i].r;
     const float* tg = &target[i].r;
-    float* er = ditherErr[i];
     for (int c = 0; c < 3; c++) {
       cur[c] += (tg[c] - cur[c]) * a;
-      float v = clamp01(cur[c]);
-      float f = 255.0f * master * powf(v, 2.2f) + er[c];
-      int q = (int)f;
-      if (q > 255) q = 255;
-      er[c] = f - q;
-      if (er[c] > 1.0f) er[c] = 1.0f;
-      if (lastOut[i][c] != (uint8_t)q) { lastOut[i][c] = (uint8_t)q; changed = true; }
+      float f = 255.0f * master * powf(clamp01(cur[c]), 2.2f);
+      int last = lastOut[i][c];
+      if (fabsf(f - last) > 0.65f || (f < 0.35f && last != 0)) {
+        int q = (int)(f + 0.5f);
+        if (q > 255) q = 255;
+        if (q != last) { lastOut[i][c] = (uint8_t)q; changed = true; }
+      }
     }
     pixels.setPixelColor(i, lastOut[i][0], lastOut[i][1], lastOut[i][2]);
   }
