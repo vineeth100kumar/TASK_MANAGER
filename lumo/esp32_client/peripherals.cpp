@@ -187,7 +187,8 @@ static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float 
     esp_timer_stop(hapTimer);
   }
   hapPeriod = period;
-  esp_timer_start_periodic(hapTimer, period);
+  esp_err_t err = esp_timer_start_periodic(hapTimer, period);
+  if (err != ESP_OK) Serial.printf("[HAPTIC] timer didn't start (error %d)\n", (int)err);
 }
 
 void hapticInit(uint8_t strength) {
@@ -263,10 +264,15 @@ void hapticUpdate() {
 
 // Serial "buzz" plays a plain full-power 300 ms buzz with no shaping, to tell
 // a wiring problem from a tuning one.
+// It bypasses the engine and its timer: the pin is held fully on (low) by
+// hand, exactly as 2.6.4 did at full strength.
 void hapticSelfTest() {
-  static const HapFrame TEST[] = { {255, 1}, {255, 300}, {0, 1} };
-  Serial.println("[HAPTIC] self test: 300 ms at full power");
-  hapAskFor(TEST, 3, false, false, 1);
+  Serial.printf("[HAPTIC] self test: pin %d held on for 300 ms, no engine\n", BUZZER_PIN);
+  ledcWrite(BUZZER_PIN, 0);
+  delay(300);
+  ledcWrite(BUZZER_PIN, hapMaxDuty);
+  hDuty = 0;
+  Serial.println("[HAPTIC] self test done");
 }
 
 #undef EDGE
