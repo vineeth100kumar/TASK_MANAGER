@@ -28,6 +28,10 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   if (strcmp(st, "digital") == 0)      style = CLOCK_DIGITAL;
   else if (strcmp(st, "minimal") == 0) style = CLOCK_MINIMAL;
   else if (strcmp(st, "analog") == 0)  style = CLOCK_ANALOG;
+  else if (strcmp(st, "monolith") == 0)   style = CLOCK_MONOLITH;
+  else if (strcmp(st, "stacked") == 0)    style = CLOCK_STACKED;
+  else if (strcmp(st, "nightstand") == 0) style = CLOCK_NIGHTSTAND;
+  else if (strcmp(st, "dial") == 0)       style = CLOCK_DIAL;
   bool h24  = doc["hour24"].is<bool>() ? doc["hour24"].as<bool>() : s.hour24;
   bool secs = doc["show_seconds"].is<bool>() ? doc["show_seconds"].as<bool>() : s.show_seconds;
 

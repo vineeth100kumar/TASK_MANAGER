@@ -1,6 +1,8 @@
 #include <Arduino.h>
 #include "display.h"
 #include "clockkeeper.h"
+#include "faces.h"
+#include "aa_text.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans24pt7b.h>
@@ -22,11 +24,8 @@ static const uint16_t COLOR_RED_DARK  = 0x7800;
 
 static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
 
-// The rows the case window shows (see SCREEN_HIDDEN_* in config.h). Layouts are
-// written for the full 240 rows; SY() maps such a row into the visible band.
-static constexpr int VIS_T = SCREEN_HIDDEN_TOP;
-static constexpr int VIS_B = 240 - SCREEN_HIDDEN_BOTTOM;
-static constexpr int VIS_H = VIS_B - VIS_T;
+// Layouts are written for the full 240 rows; SY() maps such a row into the
+// rows the case window shows (VIS_T..VIS_B, see display.h).
 static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
 static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
 static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
@@ -427,6 +426,12 @@ void displayClockTick(const LumoState& s) {
     c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
   }
 
+  if (faceIsPremium(s.clock_style)) {
+    faceTick(s, c);
+    clockNeedsStatic = false;
+    return;
+  }
+
   float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
   fade = fade * fade * (3.0f - 2.0f * fade);
 
@@ -458,6 +463,16 @@ static void drawClockScreen(const LumoState& s, bool full) {
     clockLastMinute = -1;
     clockLastColonStep = 255;
     dialLast[0] = dialLast[1] = dialLast[2] = -1;
+    faceReset();
+    // The classic time canvas and the smooth faces' buffer are big; keep only
+    // the one the current style uses.
+    if (faceIsPremium(s.clock_style)) {
+      delete timeCanvas;
+      timeCanvas = nullptr;
+      canvasTried = false;
+    } else {
+      aaRelease();
+    }
   }
   displayClockTick(s);
 }

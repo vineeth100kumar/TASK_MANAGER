@@ -5,6 +5,11 @@
 #include "config.h"
 
 extern Adafruit_ILI9341 tft;
+
+// The rows the case window shows (see SCREEN_HIDDEN_* in config.h).
+static constexpr int VIS_T = SCREEN_HIDDEN_TOP;
+static constexpr int VIS_B = 240 - SCREEN_HIDDEN_BOTTOM;
+static constexpr int VIS_H = VIS_B - VIS_T;
 extern uint8_t artBuf[20004];
 extern bool newArtReady;
 

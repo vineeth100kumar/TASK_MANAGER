@@ -33,7 +33,9 @@ ACTIONS = (
     "snooze_alarm", "stop_alarm",
     "lights_toggle",
 ) + tuple(f"screen:{s}" for s in SCREENS)
-CLOCK_STYLES = ("digital", "minimal", "analog")
+# The first three are LUMO's classic styles; the rest are the smooth faces
+# added in firmware 2.1 (an older clock keeps its style if sent one of those).
+CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial")
 LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
 
 DEFAULTS: Dict[str, Any] = {
