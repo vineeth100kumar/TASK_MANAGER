@@ -1,7 +1,9 @@
 #include <Arduino.h>
 #include "display.h"
-#include "animator.h"
+#include "anim.h"
 #include "clockkeeper.h"
+#include "faces.h"
+#include "aa_text.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans24pt7b.h>
@@ -9,13 +11,11 @@
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
 
-uint8_t artBuf[20004];
+alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
 
 static const uint16_t COLOR_BG_BLACK  = 0x0000;
 static const uint16_t COLOR_BG_STEALTH= 0x0842; // Deep stealth black/navy
-static const uint16_t COLOR_HEADER    = 0x0842;
-static const uint16_t COLOR_TIME_BAR  = 0x0000;
 static const uint16_t COLOR_WHITE     = 0xFFFF;
 static const uint16_t COLOR_MUTED     = 0x632C; // Slate gray
 static const uint16_t COLOR_ACCENT    = 0x073F; // Electric Cyan
@@ -23,25 +23,13 @@ static const uint16_t COLOR_GREEN     = 0x07E6; // Matrix Green
 static const uint16_t COLOR_RED_PULSE = 0xF8A4; // Tactical Red
 static const uint16_t COLOR_RED_DARK  = 0x7800;
 
-// Mood Color Palette (Vector / Cozmo expressive coloration)
-static const uint16_t COLOR_WARM_AMBER = 0xFD20; // Warm Golden Amber (Happy)
-static const uint16_t COLOR_NEON_GREEN = 0x07E0; // Neon Emerald Green (Excited)
-static const uint16_t COLOR_MUTED_TEAL = 0x0473; // Muted Teal (Bored)
-static const uint16_t COLOR_SAD_BLUE   = 0x5B1E; // Melancholy Slate Blue (Sad)
-static const uint16_t COLOR_SLEEP_DIM  = 0x2187; // Low-power dim slate blue (Sleep/Drowsy)
-
-// Dirty-Rect tracking for high-performance zero-flicker eye redraws
-struct DirtyBox {
-  int x, y, w, h;
-  bool valid;
-};
-static DirtyBox prevEyeL = {0,0,0,0,false};
-static DirtyBox prevEyeR = {0,0,0,0,false};
-static DirtyBox prevMouth = {0,0,0,0,false};
-static bool forceFaceClear = true;
-
-static int lastMinuteDrawn = -1;
 static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
+
+// Layouts are written for the full 240 rows; SY() maps such a row into the
+// rows the case window shows (VIS_T..VIS_B, see display.h).
+static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
+static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
+static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
 
 void displayInit() {
   tft.begin();
@@ -50,11 +38,51 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
+// The cover's most vivid colour, for the light ring while music plays: each
+// pixel counts by how saturated and bright it is, so a grey sleeve with one
+// red stripe still gives red.
+static uint8_t tintRGB[3] = { 30, 215, 96 };
+
+static void measureArtTint() {
+  const uint16_t* px = (const uint16_t*)artBuf;
+  float r = 0, g = 0, b = 0, w = 0;
+  for (int i = 0; i < 100 * 100; i += 3) {
+    uint16_t c = px[i];
+    float pr = ((c >> 11) & 31) / 31.0f, pg = ((c >> 5) & 63) / 63.0f, pb = (c & 31) / 31.0f;
+    float mx = max(pr, max(pg, pb)), mn = min(pr, min(pg, pb));
+    float wt = (mx - mn) * mx;                  // saturation times value
+    wt *= wt;
+    r += pr * wt; g += pg * wt; b += pb * wt; w += wt;
+  }
+  if (w < 0.5f) { tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170; return; }
+  r /= w; g /= w; b /= w;
+  float mx = max(r, max(g, b));
+  if (mx < 0.01f) mx = 0.01f;
+  tintRGB[0] = (uint8_t)(255 * r / mx);         // full brightness: the ring sets its own
+  tintRGB[1] = (uint8_t)(255 * g / mx);
+  tintRGB[2] = (uint8_t)(255 * b / mx);
+}
+
+void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = tintRGB[0]; g = tintRGB[1]; b = tintRGB[2];
+}
+
+// The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that
+// each fit in one network packet. A whole 20 KB frame could arrive in pieces,
+// and the websocket library then misread the stream and the clock restarted.
+// Whole frames (0xAA 0xBB) are still taken if they get through.
 void onNewArt(const uint8_t* data, size_t len) {
-  if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
+  static const size_t ROW_BYTES = 100 * 2;
+  if (len >= 4 && data[0] == 0xAA && data[1] == 0xBD) {
+    size_t row = data[2], rows = data[3];
+    if (row + rows > 100 || len - 4 < rows * ROW_BYTES) return;
+    memcpy(artBuf + row * ROW_BYTES, data + 4, rows * ROW_BYTES);
+    if (row + rows == 100) { newArtReady = true; measureArtTint(); }   // the last strip completes the cover
+  } else if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
     size_t copyLen = min(len - 4, (size_t)20000);
     memcpy(artBuf, data + 4, copyLen);
     newArtReady = true;
+    measureArtTint();
   }
 }
 
@@ -83,21 +111,21 @@ void onNewMemoryStrip(const uint8_t* data, size_t len) {
   tft.drawRGBBitmap(0, y_off, stripBuf, strip_w, strip_h);
 
   // If this strip reaches the bottom, re-draw caption overlay if present
-  if (y_off + strip_h >= 240 && lastMemoryCaption[0] != '\0') {
-    tft.fillRect(0, 214, 320, 26, COLOR_BG_STEALTH);
-    tft.drawFastHLine(0, 214, 320, tft.color565(40, 50, 65));
+  if (y_off + strip_h > CAPTION_Y && lastMemoryCaption[0] != '\0') {
+    tft.fillRect(0, CAPTION_Y, 320, 26, COLOR_BG_STEALTH);
+    tft.drawFastHLine(0, CAPTION_Y, 320, tft.color565(40, 50, 65));
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_ACCENT);
-    tft.setCursor(10, 222);
+    tft.setCursor(10, CAPTION_Y + 8);
     tft.print("MEMORY //");
 
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(72, 222);
+    tft.setCursor(72, CAPTION_Y + 8);
     tft.print(lastMemoryCaption);
 
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(240, 222);
+    tft.setCursor(240, CAPTION_Y + 8);
     tft.print("<  OK  >");
   }
 }
@@ -113,355 +141,6 @@ void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, 
   }
 }
 
-void drawTimeBar(const LumoState& s, bool force) {
-  bool isVoice = (strcmp(s.voice_state, "IDLE") != 0) || (s.voice_subtitle[0] != '\0');
-  if (!force && !isVoice && s.m == lastMinuteDrawn) return;
-  if (!isVoice) lastMinuteDrawn = s.m;
-
-  tft.fillRect(0, 204, 320, 36, COLOR_TIME_BAR);
-  tft.drawFastHLine(20, 204, 280, tft.color565(30, 35, 45));
-
-  tft.setFont(NULL);
-
-  if (isVoice) {
-    if (strcmp(s.voice_state, "LISTENING") == 0) {
-      tft.setTextSize(2);
-      tft.setTextColor(COLOR_GREEN);
-      tft.setCursor(20, 214);
-      tft.print("// JARVIS: LISTENING...");
-    } else if (strcmp(s.voice_state, "THINKING") == 0) {
-      tft.setTextSize(2);
-      tft.setTextColor(tft.color565(255, 179, 0));
-      tft.setCursor(20, 214);
-      tft.print("// JARVIS: THINKING...");
-    } else if (strcmp(s.voice_state, "SPEAKING") == 0) {
-      tft.setTextSize(1);
-      tft.setTextColor(COLOR_ACCENT);
-      tft.setCursor(14, 210);
-      tft.print("JARVIS //");
-
-      tft.setTextSize(1);
-      tft.setTextColor(COLOR_WHITE);
-      tft.setCursor(76, 210);
-      char cutSub[40];
-      strncpy(cutSub, s.voice_subtitle, sizeof(cutSub) - 1);
-      cutSub[39] = '\0';
-      tft.printf("\"%s\"", cutSub);
-
-      int barW = constrain((int)(s.voice_volume * 280.0f), 10, 280);
-      tft.fillRect(20, 226, barW, 4, COLOR_ACCENT);
-    }
-    return;
-  }
-
-  char timeBuf[16];
-  uint8_t dispH = s.h % 12;
-  if (dispH == 0) dispH = 12;
-  snprintf(timeBuf, sizeof(timeBuf), "%d:%02d %s", dispH, s.m, (s.h >= 12) ? "PM" : "AM");
-
-  char dateBuf[24];
-  snprintf(dateBuf, sizeof(dateBuf), "%s %s", s.weekday, s.date);
-
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(20, 214);
-  tft.print(timeBuf);
-
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(195, 214);
-  tft.print(dateBuf);
-}
-
-// Mood Eye Color resolution: automatic expressive colors when manual override is not locked
-static uint16_t getMoodEyeColor(const LumoState& s, AnimType anim) {
-  if (anim == ANIM_ALERT) return COLOR_RED_PULSE;
-  if (s.eye_color != 0 && s.eye_color != COLOR_ACCENT) {
-    return s.eye_color;
-  }
-  if (s.schedule == SCHED_SLEEP || s.schedule == SCHED_DROWSY) {
-    return COLOR_SLEEP_DIM;
-  }
-  switch (s.mood) {
-    case MOOD_HAPPY:   return COLOR_WARM_AMBER;
-    case MOOD_EXCITED: return COLOR_NEON_GREEN;
-    case MOOD_BORED:   return COLOR_MUTED_TEAL;
-    case MOOD_SAD:     return COLOR_SAD_BLUE;
-    default:           return (s.eye_color != 0) ? s.eye_color : COLOR_ACCENT;
-  }
-}
-
-// Sleek Cybernetic Eye with Dynamic Geometry, Eyelid-Scaled Brow Notch, and 3D Parallax Catchlight
-static void drawCyberEye(int cx, int cy, int w, int h, int r, float eyelid, uint16_t color, bool isLeft, int browSlant, bool isStandby, int gx = 0, int gy = 0) {
-  if (isStandby || eyelid <= 0.10f) {
-    // Sleek horizontal low-power visor slit (---)
-    tft.fillRoundRect(cx - w/2, cy - 3, w, 6, 2, color);
-    return;
-  }
-
-  // Base Visor Capsule with dynamic rounded corners
-  tft.fillRoundRect(cx - w/2, cy - h/2, w, h, r, color);
-
-  // Eyelid masking from top (smooth shutter blink)
-  if (eyelid < 0.96f) {
-    int clipH = (int)(h * (1.0f - eyelid));
-    if (clipH > 0) {
-      tft.fillRect(cx - w/2 - 2, cy - h/2 - 2, w + 4, clipH + 2, COLOR_BG_STEALTH);
-    }
-  }
-
-  // Angular Brow Slant with Eyelid-scaled Notch Height
-  // Dynamically shrink slant height and width as eyelid closes so it never jaggedly clips the eyelid mask
-  float browScale = constrain((eyelid - 0.20f) / 0.80f, 0.0f, 1.0f);
-  if (browScale > 0.05f && browSlant != 0) {
-    int maxSlant = (browSlant > 0) ? 18 : 14;
-    int slantH = (int)(min(abs(browSlant), maxSlant) * browScale);
-    int slantW = (int)(min(w / 3, 20) * browScale);
-
-    if (slantH > 0 && slantW > 0) {
-      if (browSlant > 0) {
-        // Inward determined brow
-        if (isLeft) {
-          tft.fillTriangle(cx + w/2 - slantW, cy - h/2 - 1, cx + w/2 + 2, cy - h/2 - 1, cx + w/2 + 2, cy - h/2 + slantH, COLOR_BG_STEALTH);
-        } else {
-          tft.fillTriangle(cx - w/2 - 2, cy - h/2 - 1, cx - w/2 + slantW, cy - h/2 - 1, cx - w/2 - 2, cy - h/2 + slantH, COLOR_BG_STEALTH);
-        }
-      } else {
-        // Outward curious / quizzical brow
-        if (isLeft) {
-          tft.fillTriangle(cx - w/2 - 2, cy - h/2 - 1, cx - w/2 + slantW, cy - h/2 - 1, cx - w/2 - 2, cy - h/2 + slantH, COLOR_BG_STEALTH);
-        } else {
-          tft.fillTriangle(cx + w/2 - slantW, cy - h/2 - 1, cx + w/2 + 2, cy - h/2 - 1, cx + w/2 + 2, cy - h/2 + slantH, COLOR_BG_STEALTH);
-        }
-      }
-    }
-  }
-
-  // High-Tech Cyber Catchlight with 3D Convex Cornea Parallax
-  // Instead of rigidly following the eye center, the reflection stays anchored to the virtual light source
-  if (eyelid > 0.35f && h > 18) {
-    int catchX = cx - (int)(gx * 0.60f) + 4;
-    int catchY = cy - h/2 + 6 - (int)(gy * 0.50f);
-
-    // Keep catchlight safely inside eye boundaries
-    catchX = constrain(catchX, cx - w/2 + 4, cx + w/2 - 16);
-    catchY = constrain(catchY, cy - h/2 + 3, cy + h/2 - 6);
-
-    int cW = (eyelid < 0.70f) ? 8 : 14;
-    int cH = (eyelid < 0.70f) ? 3 : 4;
-    tft.fillRoundRect(catchX, catchY, cW, cH, 2, COLOR_WHITE);
-  }
-}
-
-// Curved Expressive Mouth Renderer (Vector-style organic curves)
-static void drawCurvedMouth(int mcx, int mcy, MouthShape shape, uint16_t color) {
-  switch (shape) {
-    case MOUTH_SMILE: {
-      // 5-point curved warm smile: (-14, 0) -> (-8, 3) -> (0, 4) -> (8, 3) -> (14, 0)
-      for (int t = 0; t <= 1; t++) {
-        tft.drawLine(mcx - 14, mcy + t,     mcx - 8,  mcy + 3 + t, color);
-        tft.drawLine(mcx - 8,  mcy + 3 + t, mcx,      mcy + 4 + t, color);
-        tft.drawLine(mcx,      mcy + 4 + t, mcx + 8,  mcy + 3 + t, color);
-        tft.drawLine(mcx + 8,  mcy + 3 + t, mcx + 14, mcy + t,     color);
-      }
-      break;
-    }
-    case MOUTH_SMIRK: {
-      // Asymmetric wry smirk curling higher on right
-      for (int t = 0; t <= 1; t++) {
-        tft.drawLine(mcx - 12, mcy + 2 + t, mcx - 4,  mcy + 1 + t, color);
-        tft.drawLine(mcx - 4,  mcy + 1 + t, mcx + 4,  mcy - 1 + t, color);
-        tft.drawLine(mcx + 4,  mcy - 1 + t, mcx + 12, mcy - 4 + t, color);
-        tft.drawLine(mcx + 12, mcy - 4 + t, mcx + 15, mcy - 2 + t, color);
-      }
-      break;
-    }
-    case MOUTH_SAD: {
-      // Gentle downward melancholy arc
-      for (int t = 0; t <= 1; t++) {
-        tft.drawLine(mcx - 14, mcy + 3 + t, mcx - 8,  mcy + 1 + t, color);
-        tft.drawLine(mcx - 8,  mcy + 1 + t, mcx,      mcy + t,     color);
-        tft.drawLine(mcx,      mcy + t,     mcx + 8,  mcy + 1 + t, color);
-        tft.drawLine(mcx + 8,  mcy + 1 + t, mcx + 14, mcy + 3 + t, color);
-      }
-      break;
-    }
-    case MOUTH_SURPRISED: {
-      // Rounded oval sensor / O-mouth
-      tft.drawRoundRect(mcx - 6, mcy - 3, 12, 8, 3, color);
-      tft.drawRoundRect(mcx - 5, mcy - 2, 10, 6, 2, color);
-      break;
-    }
-    case MOUTH_FOCUSED: {
-      // Minimalist precision sensor bar
-      tft.drawFastHLine(mcx - 16, mcy, 32, color);
-      tft.drawFastHLine(mcx - 16, mcy + 1, 32, color);
-      tft.drawFastHLine(mcx - 8, mcy + 4, 16, COLOR_MUTED);
-      break;
-    }
-    case MOUTH_NEUTRAL:
-    default: {
-      // Flat subtle sensor dash
-      tft.drawFastHLine(mcx - 12, mcy + 2, 24, color);
-      break;
-    }
-  }
-}
-
-static void drawFaceFull(const LumoState& s) {
-  tft.fillScreen(COLOR_BG_STEALTH);
-
-  tft.fillRect(0, 0, 320, 32, COLOR_HEADER);
-  tft.setFont(NULL);
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(16, 8);
-  tft.print("LUMO // SYSTEM");
-
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(240, 12);
-  tft.print("v" FW_VERSION);
-
-  tft.drawFastHLine(16, 30, 288, tft.color565(35, 45, 60));
-
-  drawTimeBar(s, true);
-  forceFaceClear = true;
-}
-
-// The labels the Pi set for LEFT, OK and RIGHT, in a row at y.
-static void drawActionBar(const LumoState& s, int y, uint16_t bg) {
-  tft.setFont(NULL);
-  tft.setTextSize(1);
-  const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
-  const char* keys[3]   = { "<", "OK", ">" };
-  const int   xs[3]     = { 24, 124, 224 };
-  for (int i = 0; i < 3; i++) {
-    tft.fillRect(xs[i], y, 90, 10, bg);
-    if (!labels[i][0]) continue;
-    tft.setCursor(xs[i], y);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.print(keys[i]);
-    tft.print(" ");
-    tft.setTextColor(COLOR_WHITE);
-    tft.print(labels[i]);
-  }
-}
-
-static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
-  int gx = animatorGetGazeX();
-  int gy = animatorGetGazeY();
-
-  AnimType anim = animatorGetAnim();
-
-  // Audio beat groove bounce
-  if (anim == ANIM_DANCE) {
-    gy += (int)(sin(millis() / 110.0f) * 6.0f);
-  }
-
-  int lx = 100 + gx;
-  int rx = 220 + gx;
-  int cy = 104 + gy;
-
-  // Notification Banner. A card with actions (a reminder) stays up until
-  // it is answered; a plain one goes after 4.5 s.
-  static bool bannerWasShown = false;
-  bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
-  bool notifActive = s.notif_active && (hasActions || millis() - s.notif_start < 4500);
-  int bannerH = hasActions ? 62 : 48;
-  if (notifActive) {
-    cy += hasActions ? 24 : 16;
-    fullRefresh = true;
-  } else if (bannerWasShown) {
-    fullRefresh = true;   // wipe the banner that just went away
-  }
-  bannerWasShown = notifActive;
-
-  // High-Performance Dirty-Rect Erase: Only wipe previous bounding boxes
-  if (fullRefresh || forceFaceClear) {
-    tft.fillRect(14, 34, 292, 166, COLOR_BG_STEALTH);   // as wide as the banner
-    forceFaceClear = false;
-  } else {
-    if (prevEyeL.valid) {
-      tft.fillRect(prevEyeL.x - 4, prevEyeL.y - 4, prevEyeL.w + 8, prevEyeL.h + 8, COLOR_BG_STEALTH);
-    }
-    if (prevEyeR.valid) {
-      tft.fillRect(prevEyeR.x - 4, prevEyeR.y - 4, prevEyeR.w + 8, prevEyeR.h + 8, COLOR_BG_STEALTH);
-    }
-    if (prevMouth.valid) {
-      tft.fillRect(prevMouth.x - 4, prevMouth.y - 4, prevMouth.w + 8, prevMouth.h + 8, COLOR_BG_STEALTH);
-    }
-  }
-
-  if (notifActive) {
-    tft.fillRoundRect(14, 36, 292, bannerH, 8, tft.color565(20, 25, 35));
-    tft.drawRoundRect(14, 36, 292, bannerH, 8, COLOR_ACCENT);
-
-    tft.setTextSize(1);
-    tft.setTextColor(COLOR_ACCENT);
-    tft.setCursor(24, 42);
-    tft.printf("%s: %s", s.notif_app, s.notif_title);
-
-    tft.setTextSize(hasActions ? 1 : 2);
-    tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(24, 56);
-    // 46 characters fit at the small size, 23 at the large one.
-    char cutBody[47];
-    strlcpy(cutBody, s.notif_body, hasActions ? 47 : 24);
-    tft.print(cutBody);
-
-    if (hasActions) drawActionBar(s, 78, tft.color565(20, 25, 35));
-  }
-
-  float el = animatorGetEyelidL();
-  float er = animatorGetEyelidR();
-  int   bl = animatorGetBrowL();
-  int   br = animatorGetBrowR();
-
-  int wl = animatorGetEyeWL();
-  int wr = animatorGetEyeWR();
-  int hl = animatorGetEyeHL();
-  int hr = animatorGetEyeHR();
-  int r  = animatorGetEyeR();
-
-  uint16_t eyeCol = getMoodEyeColor(s, anim);
-  bool isStandby  = (anim == ANIM_STANDBY || s.schedule == SCHED_SLEEP);
-
-  // Draw High-Tech Cyber Visor Eyes with Dynamic Dimensions & Parallax
-  drawCyberEye(lx, cy, wl, hl, r, el, eyeCol, true,  bl, isStandby, gx, gy);
-  drawCyberEye(rx, cy, wr, hr, r, er, eyeCol, false, br, isStandby, gx, gy);
-
-  // Update previous bounding boxes for dirty rect clearing
-  prevEyeL = { lx - wl/2, cy - hl/2, wl, hl, true };
-  prevEyeR = { rx - wr/2, cy - hr/2, wr, hr, true };
-
-  // Cyber Scanner Beam (ANIM_SCAN)
-  if (anim == ANIM_SCAN) {
-    int scanX = 50 + (int)((sin(millis() / 200.0f) + 1.0f) * 110.0f);
-    tft.drawFastVLine(scanX, cy - 24, 48, COLOR_WHITE);
-    tft.drawFastVLine(scanX + 1, cy - 24, 48, eyeCol);
-    forceFaceClear = true;
-  }
-
-  // Audio Equalizer tick marks during beat
-  if (anim == ANIM_DANCE) {
-    tft.drawFastHLine(lx - 24, cy + 34, 48, eyeCol);
-    tft.drawFastHLine(rx - 24, cy + 34, 48, eyeCol);
-    int eqH = (int)(abs(sin(millis() / 150.0f)) * 10.0f);
-    tft.fillRect(156, cy + 28 - eqH, 8, eqH * 2, eyeCol);
-    forceFaceClear = true;
-  }
-
-  // Curved Expressive Mouth
-  if (!isStandby && anim != ANIM_DANCE) {
-    int mcx = 160 + gx, mcy = cy + 36;
-    MouthShape mShape = animatorGetMouthShape();
-    drawCurvedMouth(mcx, mcy, mShape, eyeCol);
-    prevMouth = { mcx - 18, mcy - 4, 36, 14, true };
-  } else {
-    prevMouth.valid = false;
-  }
-}
-
 // =====================================================================
 //  CLOCK SCREEN
 //
@@ -474,8 +153,8 @@ static void drawFaceEyes(const LumoState& s, bool fullRefresh = false) {
 static const int CLK_CANVAS_W = 280;
 static const int CLK_CANVAS_H = 80;
 static const int CLK_CANVAS_X = (320 - CLK_CANVAS_W) / 2;
-static const int CLK_CANVAS_Y = 38;
-static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = 134, CLK_BAR_H = 3;
+static const int CLK_CANVAS_Y = SY(38);
+static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = SY(134), CLK_BAR_H = 3;
 
 static GFXcanvas16* timeCanvas = nullptr;
 static bool          canvasTried = false;
@@ -484,6 +163,11 @@ static int           clockLastBarPx = -1;
 static int           clockLastMinute = -1;
 static uint8_t       clockLastColonStep = 255;
 static bool          clockNeedsStatic = true;
+// The minute turning over: Digital rolls the digits that changed up and out,
+// Minimal cross-fades them. clkPrev* is the time being animated away from.
+static int           clkShownH = -1, clkShownM = -1, clkPrevH = -1, clkPrevM = -1;
+static unsigned long clkTurnMs = 0;
+static bool          clkTurning = false;
 
 static inline uint16_t mix565(uint16_t a, uint16_t b, float t) {
   t = constrain(t, 0.0f, 1.0f);
@@ -538,52 +222,178 @@ static void drawTempWithDegree(int x, int baseline, float temp, const char* cond
   }
 }
 
-// Labels that change at most once a minute: greeting, date, weather, alarm.
+// h:m as the clock is set to show it: "18:05" or "6:05 PM".
+static void formatTime(char* buf, size_t n, int h, int m, bool hour24) {
+  if (hour24) {
+    snprintf(buf, n, "%02d:%02d", h, m);
+  } else {
+    int dh = h % 12; if (dh == 0) dh = 12;
+    snprintf(buf, n, "%d:%02d %s", dh, m, h >= 12 ? "PM" : "AM");
+  }
+}
+
+static void rightText(const char* txt, int baseline, uint16_t color) {
+  int16_t x1, y1; uint16_t w, h;
+  tft.setFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.getTextBounds(txt, 0, baseline, &x1, &y1, &w, &h);
+  tft.setTextColor(color);
+  tft.setCursor(298 - (int)w - x1, baseline);
+  tft.print(txt);
+}
+
+// "London 09:50": the second time zone, when Sage has set one.
+static bool zone2Text(const LumoState& s, const ClockNow& c, char* buf, size_t n) {
+  if (!s.zone2[0]) return false;
+  int mins = ((c.h * 60 + c.m + s.zone2_offset) % 1440 + 1440) % 1440;
+  char t[12];
+  formatTime(t, sizeof(t), mins / 60, mins % 60, s.hour24);
+  snprintf(buf, n, "%s %s", s.zone2, t);
+  return true;
+}
+
+static void alarmText(const LumoState& s, char* buf, size_t n) {
+  char t[12];
+  formatTime(t, sizeof(t), s.alarm_h, s.alarm_m, s.hour24);
+  snprintf(buf, n, "Alarm %s", t);
+}
+
+// Labels that change at most once a minute. Digital: greeting (or the second
+// time zone), date, weather and alarm. Minimal: date and alarm only.
 static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) {
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
+  char buf[40];
 
-  tft.fillRect(0, 6, 320, 26, COLOR_BG_BLACK);
-  centerText(greeting, 24, accent, &FreeSans9pt7b);
+  tft.fillRect(0, SY(6), 320, SH(6, 26), COLOR_BG_BLACK);
+  if (zone2Text(s, c, buf, sizeof(buf))) centerText(buf, SY(24), accent, &FreeSans9pt7b);
+  else if (s.clock_style == CLOCK_DIGITAL) centerText(greeting, SY(24), accent, &FreeSans9pt7b);
 
-  tft.fillRect(0, 146, 320, 36, COLOR_BG_BLACK);
-  char dBuf[32];
-  snprintf(dBuf, sizeof(dBuf), "%s, %s", s.weekday, s.date);
-  centerText(dBuf, 172, ink, &FreeSans12pt7b);
+  tft.fillRect(0, SY(146), 320, SH(146, 36), COLOR_BG_BLACK);
+  snprintf(buf, sizeof(buf), "%s, %s", s.weekday, s.date);
+  centerText(buf, SY(172), ink, &FreeSans12pt7b);
 
-  tft.fillRect(0, 196, 320, 38, COLOR_BG_BLACK);
-  drawTempWithDegree(22, 224, s.temp_c, s.weather_icon, muted);
-
+  tft.fillRect(0, SY(196), 320, SH(196, 38), COLOR_BG_BLACK);
+  if (s.clock_style == CLOCK_DIGITAL) drawTempWithDegree(22, SY(224), s.temp_c, s.weather_icon, muted);
   if (s.alarm_set) {
-    char aBuf[24];
-    uint8_t ah = s.alarm_h % 12; if (ah == 0) ah = 12;
-    snprintf(aBuf, sizeof(aBuf), "Alarm %d:%02d %s", ah, s.alarm_m, s.alarm_h >= 12 ? "PM" : "AM");
-    int16_t x1, y1; uint16_t w, h;
-    tft.setFont(&FreeSans9pt7b);
-    tft.setTextSize(1);
-    tft.getTextBounds(aBuf, 0, 224, &x1, &y1, &w, &h);
-    tft.setTextColor(s.alarm_ringing ? COLOR_RED_PULSE : accent);
-    tft.setCursor(298 - (int)w - x1, 224);
-    tft.print(aBuf);
+    alarmText(s, buf, sizeof(buf));
+    rightText(buf, SY(224), s.alarm_ringing ? COLOR_RED_PULSE : (s.clock_style == CLOCK_MINIMAL ? muted : accent));
   }
   tft.setFont(NULL);
 }
 
-static void drawClockTime(const ClockNow& c, float fade, bool force) {
+// =====================================================================
+//  ANALOG CLOCK: a dial above, the date and alarm (or second zone) below.
+// =====================================================================
+static const int DIAL_X = 160, DIAL_Y = SY(102), DIAL_R = 88 * VIS_H / 240;
+static const int HAND_H = DIAL_R * 50 / 88, HAND_M = DIAL_R * 74 / 88, HAND_S = DIAL_R * 80 / 88;
+static float dialLast[3] = { -1, -1, -1 };   // hour, minute, second hand angles drawn
+
+static void dialHand(float turns, int len, int width, uint16_t color) {
+  float a = turns * 6.2831853f;
+  float sx = sinf(a), cy = -cosf(a);
+  int x = DIAL_X + (int)(sx * len), y = DIAL_Y + (int)(cy * len);
+  for (int o = -(width / 2); o <= width / 2; o++) {
+    tft.drawLine(DIAL_X + (int)(-cy * o), DIAL_Y + (int)(sx * o), x + (int)(-cy * o), y + (int)(sx * o), color);
+  }
+}
+
+static void dialTicks(uint16_t major, uint16_t minor) {
+  for (int i = 0; i < 60; i++) {
+    float a = i / 60.0f * 6.2831853f;
+    bool hour = (i % 5) == 0;
+    int r0 = DIAL_R - (hour ? 10 : 4);
+    tft.drawLine(DIAL_X + (int)(sinf(a) * r0), DIAL_Y - (int)(cosf(a) * r0),
+                 DIAL_X + (int)(sinf(a) * DIAL_R), DIAL_Y - (int)(cosf(a) * DIAL_R), hour ? major : minor);
+  }
+}
+
+static void drawAnalogStatics(const LumoState& s, const ClockNow& c, float fade) {
+  uint16_t accent, ink, muted; const char* greeting;
+  clockPalette(c, accent, ink, muted, greeting, fade);
+  char buf[40];
+  tft.fillRect(0, SY(200), 320, VIS_B - SY(200), COLOR_BG_BLACK);
+  snprintf(buf, sizeof(buf), "%s, %s", s.weekday, s.date);
+  tft.setFont(&FreeSans9pt7b);
+  tft.setTextSize(1);
+  tft.setTextColor(ink);
+  tft.setCursor(22, SY(226));
+  tft.print(buf);
+  if (s.alarm_set) {
+    alarmText(s, buf, sizeof(buf));
+    rightText(buf, SY(226), s.alarm_ringing ? COLOR_RED_PULSE : accent);
+  } else if (zone2Text(s, c, buf, sizeof(buf))) {
+    rightText(buf, SY(226), muted);
+  }
+  tft.setFont(NULL);
+}
+
+// The second hand ticks like a quartz movement (a quick step and a tiny
+// bounce), and when the clock screen opens the hands spin round from twelve.
+static void drawAnalogHands(const LumoState& s, const ClockNow& c, float fade, bool force) {
+  float tick = (c.s - 1) + easeTick(c.secFrac / 0.22f);
+  float sec = s.show_seconds ? (tick < 0 ? tick + 60 : tick) / 60.0f : -1.0f;
+  float mn = (c.m + c.s / 60.0f) / 60.0f;
+  float hr = ((c.h % 12) + c.m / 60.0f) / 12.0f;
+  float enter = animProgress(clockEnterMs, millis(), 900);
+  if (enter < 1) {
+    float e = easeOutBack(enter);
+    hr *= e; mn *= e;
+    if (sec >= 0) sec *= e;
+  }
+  if (!force && fabsf(sec - dialLast[2]) < 0.0004f && fabsf(mn - dialLast[1]) < 0.002f) return;
+
+  uint16_t accent, ink, muted; const char* greeting;
+  clockPalette(c, accent, ink, muted, greeting, fade);
+  {   // wipe the hands where they were
+    if (dialLast[0] >= 0) dialHand(dialLast[0], HAND_H, 5, COLOR_BG_BLACK);
+    if (dialLast[1] >= 0) dialHand(dialLast[1], HAND_M, 3, COLOR_BG_BLACK);
+    if (dialLast[2] >= 0) dialHand(dialLast[2], HAND_S, 1, COLOR_BG_BLACK);
+  }
+  dialTicks(ink, mix565(COLOR_BG_BLACK, muted, 0.6f));
+  dialHand(hr, HAND_H, 5, ink);
+  dialHand(mn, HAND_M, 3, ink);
+  if (sec >= 0) dialHand(sec, HAND_S, 1, accent);
+  tft.fillCircle(DIAL_X, DIAL_Y, 4, accent);
+  dialLast[0] = hr; dialLast[1] = mn; dialLast[2] = sec;
+}
+
+static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, bool force) {
+  unsigned long now = millis();
+  if (clkShownM >= 0 && c.m != clkShownM && fade >= 1.0f) {
+    clkPrevH = clkShownH; clkPrevM = clkShownM;
+    clkTurnMs = now;
+    clkTurning = true;
+  }
+  clkShownH = c.h; clkShownM = c.m;
+  bool minimal = s.clock_style == CLOCK_MINIMAL;
+  bool turnFrame = clkTurning;
+  float tr = 1.0f;
+  if (clkTurning) {
+    tr = animProgress(clkTurnMs, now, minimal ? 640 : 460);
+    if (tr >= 1) clkTurning = false;            // this frame draws the end state
+  }
+
   // Colon breathes once per second; quantised so we only blit when it visibly changes.
   float pulse = 0.5f + 0.5f * cosf(c.secFrac * 6.2831853f);     // 1 -> 0 -> 1
   uint8_t step = (uint8_t)(pulse * 12.0f);
-  if (!force && step == clockLastColonStep && fade >= 1.0f) return;
+  if (!force && !turnFrame && step == clockLastColonStep && fade >= 1.0f) return;
   clockLastColonStep = step;
 
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
-  uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.25f + 0.75f * pulse);
+  uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.45f + 0.55f * pulse);
 
-  uint8_t dispH = c.h % 12; if (dispH == 0) dispH = 12;
-  char hs[4], ms[4];
-  snprintf(hs, sizeof(hs), "%d", dispH);
+  char hs[4], ms[4], phs[4], pms[4];
+  auto hourStr = [&](int h, char* out) {
+    int dh = h % 12; if (dh == 0) dh = 12;
+    if (s.hour24) snprintf(out, 4, "%02d", h);
+    else snprintf(out, 4, "%d", dh);
+  };
+  hourStr(c.h, hs);
   snprintf(ms, sizeof(ms), "%02d", c.m);
+  hourStr(clkPrevH >= 0 ? clkPrevH : c.h, phs);
+  snprintf(pms, sizeof(pms), "%02d", clkPrevM >= 0 ? clkPrevM : c.m);
 
   if (!canvasTried) {
     canvasTried = true;
@@ -601,43 +411,82 @@ static void drawClockTime(const ClockNow& c, float fade, bool force) {
   if (timeCanvas) timeCanvas->fillScreen(COLOR_BG_BLACK);
   else tft.fillRect(CLK_CANVAS_X, CLK_CANVAS_Y, CLK_CANVAS_W, CLK_CANVAS_H, COLOR_BG_BLACK);
 
-  int16_t x1, y1; uint16_t wh, wm, wc, hh;
+  // Each piece is placed by its ink, not its cursor: FreeSans digits carry
+  // wide side bearings at size 2, and placing by cursor let the colon touch
+  // the digits on either side.
+  int16_t hx1, hy1, mx1, my1, ax1 = 0, ay1;
+  uint16_t wh, hh, wm, hm, wap = 0, hap;
   g->setFont(&FreeSans24pt7b);
   g->setTextSize(2);
-  g->getTextBounds(hs, 0, baseline, &x1, &y1, &wh, &hh);
-  g->getTextBounds(ms, 0, baseline, &x1, &y1, &wm, &hh);
-  g->getTextBounds(":", 0, baseline, &x1, &y1, &wc, &hh);
+  g->getTextBounds(hs, 0, baseline, &hx1, &hy1, &wh, &hh);
+  g->getTextBounds(ms, 0, baseline, &mx1, &my1, &wm, &hm);
 
-  const int gap = 3;
-  g->setTextSize(1);
-  g->setFont(&FreeSans12pt7b);
-  uint16_t wap, hap;
-  const char* ap = (c.h >= 12) ? "PM" : "AM";
-  g->getTextBounds(ap, 0, baseline, &x1, &y1, &wap, &hap);
-  g->setFont(&FreeSans24pt7b);
-  g->setTextSize(2);
+  const char* ap = s.hour24 ? "" : ((c.h >= 12) ? "PM" : "AM");
+  if (ap[0]) {
+    g->setTextSize(1);
+    g->setFont(&FreeSans12pt7b);
+    g->getTextBounds(ap, 0, baseline, &ax1, &ay1, &wap, &hap);
+  }
 
-  int total = wh + gap + wc + gap + wm + 8 + wap;
+  const int dot = 7;                         // colon dot size
+  const int apGap = ap[0] ? 12 : 0;
+  int gap = 12;                              // between the digits and the colon
+  int total = wh + gap + dot + gap + wm + apGap + wap;
+  if (total > CLK_CANVAS_W - 4) {            // wide times ("12:58 PM") give up some air
+    gap = max(5, gap - (total - (CLK_CANVAS_W - 4) + 1) / 2);
+    total = wh + gap + dot + gap + wm + apGap + wap;
+  }
   int x = ox + (CLK_CANVAS_W - total) / 2;
 
-  g->setTextColor(ink);
-  g->setCursor(x, baseline);
-  g->print(hs);
-  x += wh + gap;
-  g->setTextColor(colon);
-  g->setCursor(x, baseline);
-  g->print(":");
-  x += wc + gap;
-  g->setTextColor(ink);
-  g->setCursor(x, baseline);
-  g->print(ms);
-  x += wm + 8;
+  // One group of digits (hours or minutes), mid turn-over if it changed. The
+  // canvas cuts off whatever rolls past its edges; straight to the panel
+  // there is no animation.
+  bool animate = timeCanvas && tr < 1.0f;
+  auto group = [&](const char* from, const char* to, int gx) {
+    if (!animate || !strcmp(from, to)) {
+      g->setTextColor(ink);
+      g->setCursor(gx, baseline);
+      g->print(to);
+      return;
+    }
+    int fromX = gx;                             // the old digits leave from where the new ones land
+    if (minimal) {                              // fade out, then fade in
+      bool old = tr < 0.5f;
+      float u = easeInOutCubic(old ? 1 - tr * 2 : tr * 2 - 1);
+      g->setTextColor(mix565(COLOR_BG_BLACK, ink, u));
+      g->setCursor(old ? fromX : gx, baseline);
+      g->print(old ? from : to);
+    } else {                                    // roll up
+      int d = (int)(easeInOutCubic(tr) * CLK_CANVAS_H + 0.5f);
+      g->setTextColor(ink);
+      g->setCursor(fromX, baseline - d);
+      g->print(from);
+      g->setCursor(gx, baseline - d + CLK_CANVAS_H);
+      g->print(to);
+    }
+  };
 
-  g->setTextSize(1);
-  g->setFont(&FreeSans12pt7b);
-  g->setTextColor(accent);
-  g->setCursor(x, baseline);
-  g->print(ap);
+  g->setFont(&FreeSans24pt7b);
+  g->setTextSize(2);
+  group(phs, hs, x - hx1);
+  x += wh + gap;
+
+  // The colon is two squares centred on the digits, so it reads at a glance.
+  int top = hy1, digitH = hh;            // bounds were taken at the baseline
+  g->fillRect(x, top + digitH * 30 / 100 - dot / 2, dot, dot, colon);
+  g->fillRect(x, top + digitH * 72 / 100 - dot / 2, dot, dot, colon);
+  x += dot + gap;
+
+  group(pms, ms, x - mx1);
+  x += wm + apGap;
+
+  if (ap[0]) {
+    g->setTextSize(1);
+    g->setFont(&FreeSans12pt7b);
+    g->setTextColor(accent);
+    g->setCursor(x - ax1, baseline);
+    g->print(ap);
+  }
   g->setFont(NULL);
 
   if (timeCanvas) {
@@ -677,16 +526,32 @@ void displayClockTick(const LumoState& s) {
     c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
   }
 
+  if (faceIsPremium(s.clock_style)) {
+    faceTick(s, c);
+    clockNeedsStatic = false;
+    return;
+  }
+
   float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
   fade = fade * fade * (3.0f - 2.0f * fade);
+
+  if (s.clock_style == CLOCK_ANALOG) {
+    if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+      drawAnalogStatics(s, c, fade);
+      clockLastMinute = c.m;
+    }
+    drawAnalogHands(s, c, fade, clockNeedsStatic || entering);
+    clockNeedsStatic = false;
+    return;
+  }
 
   if (clockNeedsStatic || entering || c.m != clockLastMinute) {
     drawClockStatics(s, c, fade);
     clockLastMinute = c.m;
     clockNeedsStatic = false;
   }
-  drawClockTime(c, fade, entering);
-  if (c.synced) drawClockSeconds(c, fade, entering);
+  drawClockTime(s, c, fade, entering);
+  if (c.synced && s.show_seconds) drawClockSeconds(c, fade, entering);
 }
 
 static void drawClockScreen(const LumoState& s, bool full) {
@@ -697,6 +562,19 @@ static void drawClockScreen(const LumoState& s, bool full) {
     clockLastBarPx = -1;
     clockLastMinute = -1;
     clockLastColonStep = 255;
+    clkShownM = -1;
+    clkTurning = false;
+    dialLast[0] = dialLast[1] = dialLast[2] = -1;
+    faceReset();
+    // The classic time canvas and the smooth faces' buffer are big; keep only
+    // the one the current style uses.
+    if (faceIsPremium(s.clock_style)) {
+      delete timeCanvas;
+      timeCanvas = nullptr;
+      canvasTried = false;
+    } else {
+      aaRelease();
+    }
   }
   displayClockTick(s);
 }
@@ -714,97 +592,46 @@ static void drawSystemScreen(const LumoState& s, bool full) {
 
     tft.setTextSize(1);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(65, 220);
+    tft.setCursor(65, SY(220));
     tft.print("Controlled via Web Dashboard");
   }
 
-  tft.fillRect(14, 42, 292, 18, COLOR_BG_BLACK);
+  tft.fillRect(14, SY(42), 292, 18, COLOR_BG_BLACK);
   tft.setTextSize(2);
   tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(14, 42);
+  tft.setCursor(14, SY(42));
   tft.printf("CPU Temp: %.1f C", s.cpu_temp);
-  drawProgressBar(14, 64, 292, 8, s.cpu_temp / 85.0f, (s.cpu_temp > 70.0f ? COLOR_RED_PULSE : COLOR_ACCENT), tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(64), 292, 8, s.cpu_temp / 85.0f, (s.cpu_temp > 70.0f ? COLOR_RED_PULSE : COLOR_ACCENT), tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 82, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 82);
+  tft.fillRect(14, SY(82), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(82));
   tft.printf("CPU Load: %d%%", s.cpu_pct);
-  drawProgressBar(14, 104, 292, 8, s.cpu_pct / 100.0f, COLOR_GREEN, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(104), 292, 8, s.cpu_pct / 100.0f, COLOR_GREEN, tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 122, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 122);
+  tft.fillRect(14, SY(122), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(122));
   tft.printf("RAM:      %d%%", s.ram_pct);
-  drawProgressBar(14, 144, 292, 8, s.ram_pct / 100.0f, COLOR_ACCENT, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(144), 292, 8, s.ram_pct / 100.0f, COLOR_ACCENT, tft.color565(40, 40, 50));
 
-  tft.fillRect(14, 162, 292, 18, COLOR_BG_BLACK);
-  tft.setCursor(14, 162);
+  tft.fillRect(14, SY(162), 292, 18, COLOR_BG_BLACK);
+  tft.setCursor(14, SY(162));
   tft.printf("Disk:     %d%%", s.disk_pct);
-  drawProgressBar(14, 184, 292, 8, s.disk_pct / 100.0f, COLOR_MUTED, tft.color565(40, 40, 50));
+  drawProgressBar(14, SY(184), 292, 8, s.disk_pct / 100.0f, COLOR_MUTED, tft.color565(40, 40, 50));
 }
 
 static void drawSpotifyScreen(const LumoState& s, bool full) {
-  tft.setFont(NULL);
-
   if (full) {
-    tft.fillScreen(COLOR_BG_BLACK);
-
-    tft.setTextSize(2);
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(12, 10);
-    tft.print("Now Playing");
-
-    tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(255, 10);
-    tft.print("LUMO");
-    tft.drawFastHLine(10, 32, 300, tft.color565(40, 40, 50));
-
-    tft.setTextSize(1);
-    tft.setCursor(30, 218);
-    tft.print("Controlled via Local Web Dashboard");
+    // The clock's time canvas is big; the music screen draws through aa_text.
+    delete timeCanvas;
+    timeCanvas = nullptr;
+    canvasTried = false;
+    nowPlayingReset();
   }
-
-  if (newArtReady || full) {
-    tft.drawRect(10, 42, 104, 104, tft.color565(60, 60, 70));
-    tft.drawRGBBitmap(12, 44, (uint16_t*)artBuf, 100, 100);
-    newArtReady = false;
-  }
-
-  tft.fillRect(122, 42, 195, 104, COLOR_BG_BLACK);
-
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(124, 46);
-  char titleCut[16];
-  strncpy(titleCut, s.sp_title, 15);
-  titleCut[15] = '\0';
-  tft.print(strlen(titleCut) > 0 ? titleCut : "No Track");
-
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(124, 72);
-  char artistCut[16];
-  strncpy(artistCut, s.sp_artist, 15);
-  artistCut[15] = '\0';
-  tft.print(strlen(artistCut) > 0 ? artistCut : "Idle");
-
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(124, 108);
-  int curSec = s.sp_progress_ms / 1000;
-  int totSec = s.sp_duration_ms / 1000;
-  if (totSec > 0) {
-    tft.printf("%d:%02d / %d:%02d", curSec / 60, curSec % 60, totSec / 60, totSec % 60);
-  }
-
-  tft.setTextColor(s.sp_playing ? COLOR_GREEN : COLOR_MUTED);
-  tft.setCursor(124, 126);
-  tft.print(s.sp_playing ? "[PLAYING]" : "[PAUSED]");
-
-  float pct = (s.sp_duration_ms > 0) ? ((float)s.sp_progress_ms / s.sp_duration_ms) : 0.0f;
-  drawProgressBar(12, 162, 296, 8, pct, COLOR_GREEN, tft.color565(40, 40, 40));
-
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(12, 186);
-  tft.print("< Prev        OK Play/Pause        Next >");
+  nowPlayingTick(s);
 }
+
+// The music screen lives with the smooth faces (faces.cpp).
+void displaySpotifyTick(const LumoState& s) { nowPlayingTick(s); }
 
 static void drawTasksScreen(const LumoState& s) {
   tft.setFont(NULL);
@@ -835,7 +662,7 @@ static void drawTasksScreen(const LumoState& s) {
   if (s.task_count == 0) {
     tft.setTextSize(2);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(55, 100);
+    tft.setCursor(55, SY(100));
     tft.print("All tasks done!");
   } else {
     int y = 44;
@@ -843,7 +670,7 @@ static void drawTasksScreen(const LumoState& s) {
     const int maxCharsPerLine = 44; // At textSize 1, 44 chars * 6px = 264px (fits comfortably in 320-30=290px)
 
     for (int i = 0; i < s.task_count && i < 5; i++) {
-      if (y > 195) break;
+      if (y > SY(195)) break;
 
       // Draw bullet indicator
       tft.setTextSize(1);
@@ -913,7 +740,7 @@ static void drawTasksScreen(const LumoState& s) {
     }
 
     // If more tasks remain that could not fit
-    if (s.task_count > drawn && y <= 208) {
+    if (s.task_count > drawn && y <= SY(208)) {
       tft.setTextSize(1);
       tft.setTextColor(COLOR_MUTED);
       tft.setCursor(24, y);
@@ -925,21 +752,22 @@ static void drawTasksScreen(const LumoState& s) {
 
   tft.setTextSize(1);
   tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(65, 226);
+  tft.setCursor(65, VIS_B - 14);
   tft.print("Controlled via Web Dashboard");
 }
 
 // Alarm: drawn once, then only a pulsing frame and the minute change. No more
 // full-screen strobing; it is urgent without being harsh.
 static bool alarmNeedsStatic = true;
+static unsigned long alarmShownMs = 0;
 
 static void drawAlarmFrame(float pulse) {
   uint16_t col = mix565(0x2000, COLOR_RED_PULSE, pulse);
   const int t = 5;
-  tft.fillRect(0, 0, 320, t, col);
-  tft.fillRect(0, 240 - t, 320, t, col);
-  tft.fillRect(0, t, t, 240 - 2 * t, col);
-  tft.fillRect(320 - t, t, t, 240 - 2 * t, col);
+  tft.fillRect(0, VIS_T, 320, t, col);
+  tft.fillRect(0, VIS_B - t, 320, t, col);
+  tft.fillRect(0, VIS_T + t, t, VIS_H - 2 * t, col);
+  tft.fillRect(320 - t, VIS_T + t, t, VIS_H - 2 * t, col);
 }
 
 void displayAlarmReset() { alarmNeedsStatic = true; }
@@ -955,31 +783,41 @@ void displayAlarmTick(const LumoState& s) {
   if (!c.synced) { c.h = s.h; c.m = s.m; }
 
   if (alarmNeedsStatic) {
+    alarmShownMs = now;
     tft.fillScreen(COLOR_BG_BLACK);
-    centerText("ALARM", 52, COLOR_RED_PULSE, &FreeSans12pt7b);
-    centerText("RIGHT: 5 more min    Other: stop", 214, COLOR_MUTED, &FreeSans9pt7b);
+    centerText("ALARM", SY(52), COLOR_RED_PULSE, &FreeSans12pt7b);
+    char hint[48];
+    snprintf(hint, sizeof(hint), s.local_ringing ? "RIGHT: %u more min    Other: stop" : "Press a button to stop", s.snooze_minutes);
+    centerText(hint, SY(214), COLOR_MUTED, &FreeSans9pt7b);
     lastMin = -1;
     alarmNeedsStatic = false;
   }
 
   if (c.m != lastMin) {
     lastMin = c.m;
-    tft.fillRect(10, 70, 300, 90, COLOR_BG_BLACK);
+    tft.fillRect(10, SY(140) - 70, 300, 90, COLOR_BG_BLACK);
     uint8_t dh = c.h % 12; if (dh == 0) dh = 12;
     char tb[8];
     snprintf(tb, sizeof(tb), "%d:%02d", dh, c.m);
     int16_t x1, y1; uint16_t w, h;
     tft.setFont(&FreeSans24pt7b);
     tft.setTextSize(2);
-    tft.getTextBounds(tb, 0, 140, &x1, &y1, &w, &h);
+    tft.getTextBounds(tb, 0, SY(140), &x1, &y1, &w, &h);
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor((320 - (int)w) / 2 - x1, 140);
+    tft.setCursor((320 - (int)w) / 2 - x1, SY(140));
     tft.print(tb);
     tft.setTextSize(1);
     tft.setFont(NULL);
   }
 
-  float pulse = 0.5f + 0.5f * sinf(now / 1000.0f * 6.2831853f * 1.6f);
+  // The frame beats with the motor and the light: "bu-bump" every 1.3 s.
+  float u = fmodf((now - alarmShownMs) / 1000.0f, 1.3f);
+  auto swell = [](float x, float len) {
+    if (x < 0 || x >= len) return 0.0f;
+    float r = animClamp(x / 0.15f), f = 1 - x / len;
+    return r * r * (3 - 2 * r) * f * f;
+  };
+  float pulse = animClamp(swell(u, 0.5f) + 0.7f * swell(u - 0.26f, 0.6f));
   drawAlarmFrame(pulse);
 }
 
@@ -996,16 +834,16 @@ void displayConnectingTick(const LumoState& s) {
 
   if (connNeedsStatic) {
     tft.fillScreen(COLOR_BG_STEALTH);
-    drawCyberEye(100, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, true, 0, false);
-    drawCyberEye(220, 96, 56, 48, 8, 1.0f, COLOR_ACCENT, false, 0, false);
+    centerText("LUMO", SY(108), COLOR_WHITE, &FreeSans24pt7b);
+    centerText("v" FW_VERSION, SY(132), COLOR_MUTED, &FreeSans9pt7b);
     if (s.pair_refused) {
-      centerText("Not paired", 168, COLOR_RED_PULSE, &FreeSans12pt7b);
-      centerText("Check DESK_TOKEN in secrets.h", 222, COLOR_MUTED, &FreeSans9pt7b);
+      centerText("Not paired", SY(168), COLOR_RED_PULSE, &FreeSans12pt7b);
+      centerText("Check DESK_TOKEN in secrets.h", SY(222), COLOR_MUTED, &FreeSans9pt7b);
     } else {
-      centerText("Connecting", 168, COLOR_WHITE, &FreeSans12pt7b);
+      centerText("Connecting", SY(168), COLOR_WHITE, &FreeSans12pt7b);
       char ipBuf[40];
       snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
-      centerText(ipBuf, 222, COLOR_MUTED, &FreeSans9pt7b);
+      centerText(ipBuf, SY(222), COLOR_MUTED, &FreeSans9pt7b);
     }
     tft.setFont(NULL);
     connNeedsStatic = false;
@@ -1014,8 +852,76 @@ void displayConnectingTick(const LumoState& s) {
   for (int i = 0; i < 3; i++) {
     float phase = now / 1000.0f * 3.2f - i * 0.7f;
     float k = 0.5f + 0.5f * sinf(phase);
-    tft.fillCircle(144 + i * 16, 190, 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
+    tft.fillCircle(144 + i * 16, SY(190), 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
   }
+}
+
+// A reminder or notification, over whatever was on screen (the sketch goes
+// back to that screen when the card is answered or times out). Cards with
+// actions show what LEFT, OK and RIGHT do along the bottom.
+static void drawCardScreen(const LumoState& s) {
+  const uint16_t panel = tft.color565(21, 26, 34);
+  bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
+  tft.fillScreen(COLOR_BG_BLACK);
+  const int panelH = hasActions ? SH(18, 164) : SH(18, 204);
+  tft.fillRoundRect(12, SY(18), 296, panelH, 10, panel);
+  tft.drawRoundRect(12, SY(18), 296, panelH, 10, COLOR_ACCENT);
+
+  tft.setFont(NULL);
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_ACCENT);
+  tft.setCursor(28, SY(32));
+  tft.print(s.notif_app);
+
+  tft.setFont(&FreeSans12pt7b);
+  tft.setTextColor(COLOR_WHITE);
+  tft.setCursor(28, SY(72));
+  tft.print(s.notif_title);
+
+  // The body wraps on spaces, about 30 characters to a line, three lines.
+  tft.setFont(&FreeSans9pt7b);
+  tft.setTextColor(tft.color565(170, 178, 192));
+  const char* p = s.notif_body;
+  int y = SY(104);
+  for (int line = 0; line < 3 && *p; line++) {
+    while (*p == ' ') p++;
+    int len = strlen(p), take = len;
+    if (len > 30) {
+      take = 30;
+      while (take > 0 && p[take] != ' ') take--;
+      if (take == 0) take = 30;
+    }
+    char row[32];
+    strlcpy(row, p, min(take + 1, (int)sizeof(row)));
+    tft.setCursor(28, y);
+    tft.print(row);
+    p += take;
+    y += SH(104, 24);
+  }
+
+  if (hasActions) {
+    const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
+    const char* keys[3]   = { "<", "OK", ">" };
+    const int btnY = SY(196);
+    for (int i = 0; i < 3; i++) {
+      int x = 12 + i * 102;
+      if (!labels[i][0]) continue;
+      bool primary = (i == 1);
+      if (primary) tft.fillRoundRect(x, btnY, 92, 32, 6, COLOR_ACCENT);
+      else tft.drawRoundRect(x, btnY, 92, 32, 6, COLOR_MUTED);
+      char text[20];
+      if (i == 2) snprintf(text, sizeof(text), "%s %s", labels[i], keys[i]);   // "Snooze >"
+      else snprintf(text, sizeof(text), "%s %s", keys[i], labels[i]);         // "< Tomorrow", "OK Done"
+      int16_t x1, y1; uint16_t w, h;
+      tft.setFont(NULL);
+      tft.setTextSize(1);
+      tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
+      tft.setTextColor(primary ? COLOR_BG_BLACK : COLOR_WHITE);
+      tft.setCursor(x + (92 - (int)w) / 2, btnY + 12);
+      tft.print(text);
+    }
+  }
+  tft.setFont(NULL);
 }
 
 static void drawMemoryScreen(const LumoState& s, bool full) {
@@ -1028,25 +934,25 @@ static void drawMemoryScreen(const LumoState& s, bool full) {
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(85, 115);
+    tft.setCursor(85, SY(115));
     tft.print("Receiving Memory Photo...");
   }
 
   if (s.mem_caption[0] != '\0') {
-    tft.fillRect(0, 214, 320, 26, COLOR_BG_STEALTH);
-    tft.drawFastHLine(0, 214, 320, tft.color565(40, 50, 65));
+    tft.fillRect(0, CAPTION_Y, 320, 26, COLOR_BG_STEALTH);
+    tft.drawFastHLine(0, CAPTION_Y, 320, tft.color565(40, 50, 65));
     tft.setFont(NULL);
     tft.setTextSize(1);
     tft.setTextColor(COLOR_ACCENT);
-    tft.setCursor(10, 222);
+    tft.setCursor(10, CAPTION_Y + 8);
     tft.print("MEMORY //");
 
     tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(72, 222);
+    tft.setCursor(72, CAPTION_Y + 8);
     tft.print(s.mem_caption);
 
     tft.setTextColor(COLOR_MUTED);
-    tft.setCursor(240, 222);
+    tft.setCursor(240, CAPTION_Y + 8);
     tft.print("<  OK  >");
   }
 }
@@ -1059,9 +965,8 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
   lastModeDrawn = mode;
 
   switch (mode) {
-    case SCREEN_FACE:
-      if (modeChanged) drawFaceFull(s);
-      drawFaceEyes(s, modeChanged);
+    case SCREEN_CARD:
+      drawCardScreen(s);
       break;
     case SCREEN_CLOCK:
       drawClockScreen(s, modeChanged);

@@ -105,7 +105,138 @@ class State(unittest.TestCase):
         self.run_async(go())
         media = self.sent[-1]["media"]
         self.assertEqual((media["title"], media["artist"], media["playing"]), ("Yellow", "Coldplay", True))
+        self.assertEqual((media["elapsed"], media["rate"]), (12.5, 1.0))  # where the song is, for the lyrics
 
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class V:
+    def __init__(self, value):
+        self.value = value
+
+
+class FakeChar:
+    def __init__(self, fail_notify=None, fail_write=None):
+        self.fail_notify, self.fail_write = fail_notify, fail_write
+        self.notified, self.writes = 0, []
+
+    async def call_start_notify(self):
+        self.notified += 1
+        if self.fail_notify:
+            raise Exception(self.fail_notify)
+
+    async def call_write_value(self, value, options):
+        self.writes.append(value)
+        if self.fail_write:
+            raise Exception(self.fail_write)
+
+
+class FakeProps:
+    def __init__(self):
+        self.handlers = []
+
+    def on_properties_changed(self, handler):
+        self.handlers.append(handler)
+
+    def off_properties_changed(self, handler):
+        self.handlers.remove(handler)
+
+
+class FakeObj:
+    def __init__(self, char, props):
+        self.char, self.props = char, props
+
+    def get_interface(self, name):
+        return self.char if name.endswith("GattCharacteristic1") else self.props
+
+
+class Subscribing(unittest.TestCase):
+    """After Sage restarts, BlueZ can still be starting the last run's notify
+    ("In Progress") and the phone can refuse a step (ATT 0x0e). Neither may stop
+    the rest, or the clock stops getting songs."""
+
+    def test_refused_steps_dont_stop_now_playing(self):
+        dev = "/org/bluez/hci0/dev_X"
+        chars = {
+            phone_link.ANCS_DATA_SOURCE: FakeChar(fail_notify="Operation failed with ATT error: 0x0e"),
+            phone_link.ANCS_NOTIFICATION_SOURCE: FakeChar(fail_notify="In Progress"),
+            phone_link.AMS_ENTITY_UPDATE: FakeChar(),
+        }
+        objects, props = {}, {}
+        for i, uuid in enumerate(chars):
+            path = f"{dev}/service1/char{i}"
+            objects[path] = {"org.bluez.GattCharacteristic1": {"UUID": V(uuid), "Notifying": V(False)}}
+            props[path] = FakeProps()
+        link = phone_link.PhoneLink()
+
+        async def char(path):
+            uuid = objects[path]["org.bluez.GattCharacteristic1"]["UUID"].value
+            return FakeObj(chars[uuid], props[path])
+        link._char = char
+
+        asyncio.run(link._subscribe(objects, dev))
+        self.assertEqual(len(chars[phone_link.AMS_ENTITY_UPDATE].writes), 2)  # player and track asked for
+        asyncio.run(link._subscribe(objects, dev))  # a retry adds no second watcher
+        self.assertTrue(all(len(p.handlers) == 1 for p in props.values()))
+        link._unwatch()
+        self.assertTrue(all(not p.handlers for p in props.values()))
+
+        # The phone wasn't ready for the now-playing request: ask again next tick.
+        ams = chars[phone_link.AMS_ENTITY_UPDATE]
+        ams.fail_write = "Not connected"
+        asyncio.run(link._subscribe(objects, dev))
+        self.assertEqual(link._chars, {})
+        ams.fail_write = None
+        asyncio.run(link._subscribe(objects, dev))
+        self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
+
+
+class Logging(unittest.TestCase):
+    def test_lines_say_what_failed_and_repeat_once_a_minute(self):
+        link = phone_link.PhoneLink()
+        self.assertIn("BLE", phone_link.hint_for("Not connected"))
+        with self.assertLogs("phone_link", "WARNING") as logs, mock.patch.object(phone_link.time, "time", return_value=1000):
+            for _ in range(5):
+                link.say("x", "same thing")
+        self.assertEqual(len(logs.output), 1)
+        with self.assertLogs("phone_link", "WARNING") as logs, mock.patch.object(phone_link.time, "time", return_value=1061):
+            link.say("x", "same thing")
+        self.assertIn("repeated 5 times", logs.output[0])
+
+
+class OpeningBle(unittest.TestCase):
+    def test_asks_bluez_for_le_and_waits_between_tries(self):
+        calls = []
+
+        class Dev:
+            async def set_preferred_bearer(self, value):
+                calls.append(("bearer", value))
+
+            async def call_connect(self):
+                calls.append("connect")
+
+        link = phone_link.PhoneLink()
+
+        class Obj:
+            def get_interface(self, name):
+                return Dev()
+
+        async def char(path):
+            return Obj()
+        link._char = char
+        with self.assertLogs("phone_link", "WARNING") as logs:
+            asyncio.run(link._open_ble("/dev", "VK's spot", "60:0F"))
+            asyncio.run(link._open_ble("/dev", "VK's spot", "60:0F"))  # within 30 s: not again
+        self.assertEqual(calls, [("bearer", "le"), "connect"])
+        self.assertIn("over BLE (PreferredBearer=le)", logs.output[0])
+
+
+class Advertising(unittest.TestCase):
+    def test_advertisement_fits_in_31_bytes(self):
+        fields = phone_link.PhoneLink.advert_fields("Sage Companion")
+        size = 3 + (2 + 16 * len(fields["SolicitUUIDs"])) + (2 + len(fields["LocalName"]))
+        self.assertLessEqual(size, 31)
+        self.assertEqual(fields["LocalName"], "Sage")
+        self.assertEqual(phone_link.PhoneLink.advert_fields("Lumo")["LocalName"], "Lumo")

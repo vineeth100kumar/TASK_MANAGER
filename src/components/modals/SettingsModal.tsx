@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { NotificationSettings } from './NotificationSettings';
 import { CaptureGuide } from './CaptureGuide';
 import { BluetoothSettings } from './BluetoothSettings';
+import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 import { importCSVData } from '../../utils/dataImporter';
@@ -21,7 +22,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'radar' | 'data' | 'system'>('attention');
+  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -194,6 +195,14 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
             Bluetooth
           </button>
           <button
+            onClick={() => setActiveTab('clock')}
+            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
+              activeTab === 'clock' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
+            }`}
+          >
+            Desk Clock
+          </button>
+          <button
             onClick={() => setActiveTab('radar')}
             className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
               activeTab === 'radar' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
@@ -259,6 +268,8 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
         {activeTab === 'bluetooth' && <BluetoothSettings />}
 
+        {/* LUMO desk clock: pick the clock face */}
+        {activeTab === 'clock' && <DeskClockSettings />}
         {activeTab === 'radar' && <RadarSettings />}
 
         {/* Tab 3: Data Portability & Migration */}

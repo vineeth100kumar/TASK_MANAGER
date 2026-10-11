@@ -5,7 +5,7 @@
 #define TFT_CS        8
 #define TFT_DC        7
 #define BUTTON_PIN    1
-#define BUZZER_PIN    9    // Active-LOW haptic/buzzer
+#define BUZZER_PIN    9    // Active-LOW buzzer: silent knocks at 50 kHz, a tone for the alarm
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
 
@@ -36,6 +36,7 @@
 // ===================== HAPTICS =====================
 #define HAPTIC_FREQ  50000
 #define HAPTIC_RES   8
+#define ALARM_TONE_HZ 2700   // the buzzer's loudest pitch; only the alarm uses it
 
 // ===================== BUTTON VOLTAGE THRESHOLDS =====================
 #define V_OK    0.15f
@@ -45,17 +46,34 @@
 #define V_RIGHT 0.33f
 #define V_TOL   0.05f
 
+// ===================== SCREEN AREA =====================
+// Rows of the 320x240 panel that the case hides. Every screen fits its layout
+// into the rows that are left, so nothing ends up behind the bezel. Raise a
+// number if text is still clipped on that edge; set both to 0 if the whole
+// panel shows.
+#define SCREEN_HIDDEN_TOP     0
+#define SCREEN_HIDDEN_BOTTOM  24
+
 // ===================== FIRMWARE =====================
-#define FW_VERSION "1.6.0"
+#define FW_VERSION "2.6.4"
 
 // ===================== ENUMS =====================
-enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT };
-enum ScreenMode   { SCREEN_FACE, SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY };
-enum LumoMood     { MOOD_NORMAL, MOOD_HAPPY, MOOD_BORED, MOOD_SAD, MOOD_EXCITED };
-enum CharSchedule { SCHED_AWAKE, SCHED_DROWSY, SCHED_SLEEP };
+// BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
+#define HOLD_OK_MS 800
+enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN_HOLD_OK };
+// SCREEN_CARD shows a reminder or notification over whatever was on screen,
+// and goes back to it when the card is answered or times out.
+enum ScreenMode   { SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY, SCREEN_CARD };
 enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM, NEO_AUTO, NEO_AURORA, NEO_COMET };
-enum AnimType     { ANIM_NORMAL, ANIM_FOCUSED, ANIM_SMIRK, ANIM_SCAN, ANIM_DANCE, ANIM_ALERT, ANIM_CURIOUS, ANIM_STANDBY, ANIM_LOOK };
-enum MouthShape   { MOUTH_SMILE, MOUTH_SMIRK, MOUTH_FOCUSED, MOUTH_SAD, MOUTH_SURPRISED, MOUTH_NEUTRAL };
+// How the clock screen shows the time (set in Sage, kept in flash). The first
+// three are the classic styles; the rest are the smooth faces in faces.cpp.
+enum ClockStyle   { CLOCK_DIGITAL, CLOCK_MINIMAL, CLOCK_ANALOG,
+                    CLOCK_MONOLITH, CLOCK_STACKED, CLOCK_NIGHTSTAND, CLOCK_DIAL };
+
+// Alarms the clock rings by itself while it can't reach Sage.
+#define MAX_LOCAL_ALARMS 4
+#define LOCAL_RING_MINUTES 10
+struct LocalAlarm { uint8_t h, m; };
 
 // ===================== CENTRAL STATE STRUCT =====================
 struct LumoState {
@@ -69,10 +87,17 @@ struct LumoState {
   uint32_t sp_progress_ms = 0;
   uint32_t sp_duration_ms = 0;
   bool     sp_playing = false;
-  LumoMood     mood     = MOOD_NORMAL;
-  CharSchedule schedule = SCHED_AWAKE;
+  // About the song, from Sage (SONG_INFO, LYRIC). Looked up, not heard: the
+  // tempo is an estimate, so the light keeps the song's pace, not its beat.
+  char     sp_genre[24] = "";
+  uint16_t sp_bpm = 0;
+  float    sp_energy = 0.5f;
+  char     sp_facts[3][100];
+  uint8_t  sp_fact_count = 0;
+  bool     sp_lyrics = false;     // the song has timed lyrics
+  char     sp_lyric[100] = "";    // the line being sung ("" between lines)
   NeoMode  neo_mode       = NEO_AUTO;
-  uint8_t  neo_brightness = 40;
+  uint8_t  neo_brightness = 100;
   uint16_t neo_hue        = 0;
   char    tasks[5][96];
   uint8_t task_count = 0;
@@ -80,17 +105,25 @@ struct LumoState {
   uint8_t alarm_h = 7, alarm_m = 0;
   bool    alarm_set = false;   // true when the Pi reports an upcoming alarm
 
+  // The next day's alarms from Sage (ALARMS), rung here only while Sage is
+  // out of reach; local_ringing says this ring is the clock's own.
+  LocalAlarm local_alarms[MAX_LOCAL_ALARMS];
+  uint8_t    local_alarm_count = 0;
+  uint8_t    snooze_minutes    = 5;
+  bool       local_ringing     = false;
+
+  // How to show the time (from CLOCK).
+  ClockStyle clock_style   = CLOCK_DIGITAL;
+  bool       hour24        = false;
+  bool       show_seconds  = true;
+  char       zone2[16]     = "";     // a second time zone's name, "" for none
+  int16_t    zone2_offset  = 0;      // its minutes ahead of local time
+
   // Pi 5 System Vitals
   float   cpu_temp = 0.0f;
   uint8_t cpu_pct  = 0;
   uint8_t ram_pct  = 0;
   uint8_t disk_pct = 0;
-
-  // Cybernetic Face & Animation State
-  AnimType anim_type = ANIM_NORMAL;
-  uint16_t eye_color = 0x073F; // Default Electric Cyan
-  int8_t   gaze_x    = 0;
-  int8_t   gaze_y    = 0;
 
   // Phone Notifications Overlay
   bool          notif_active = false;
@@ -120,9 +153,10 @@ struct LumoState {
   bool       flag_spotify_changed = false;
   bool       flag_tasks_changed   = false;
   bool       flag_system_changed  = false;
-  bool       flag_anim_changed    = false;
+  bool       flag_card_changed    = false;
+  bool       flag_clock_changed   = false;
   bool       flag_screen_switch   = false;
   bool       flag_voice_changed   = false;
   bool       flag_memory_changed  = false;
-  ScreenMode next_screen          = SCREEN_FACE;
+  ScreenMode next_screen          = SCREEN_CLOCK;
 };

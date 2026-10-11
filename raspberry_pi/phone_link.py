@@ -57,6 +57,31 @@ COMMANDS = {"play": 0, "pause": 1, "toggle": 2, "next": 3, "previous": 4}
 
 Broadcast = Callable[[dict], Awaitable[None]]
 
+# Names for the log, so a line says what failed rather than a UUID.
+CHAR_NAMES = {
+    ANCS_NOTIFICATION_SOURCE: "notifications (ANCS Notification Source)",
+    ANCS_CONTROL_POINT: "notification details request (ANCS Control Point)",
+    ANCS_DATA_SOURCE: "notification details (ANCS Data Source)",
+    AMS_REMOTE_COMMAND: "media buttons (AMS Remote Command)",
+    AMS_ENTITY_UPDATE: "now playing (AMS Entity Update)",
+}
+# What a BlueZ or ATT error usually means here, for the log.
+HINTS = {
+    "not connected": "the phone's Bluetooth Low Energy link to the Pi is down (classic Bluetooth audio can still be up); "
+                     "the phone has to reconnect to the Pi's 'Sage Companion' over BLE",
+    "0x0e": "the phone refused the request (ATT 'Unlikely Error'); usually the phone is still setting up "
+            "encryption or hasn't allowed the Pi to see notifications and media",
+    "0x05": "the phone wants the Pi paired again (insufficient authentication)",
+    "0x0f": "the link isn't encrypted yet (insufficient encryption)",
+    "in progress": "BlueZ is still starting this from an earlier try",
+    "not permitted": "BlueZ refused it for this characteristic",
+}
+
+
+def hint_for(error: str) -> str:
+    low = error.lower()
+    return next((h for key, h in HINTS.items() if key in low), "")
+
 
 # --- Pure decoding, kept free of D-Bus so it can be tested anywhere ---
 
@@ -121,11 +146,28 @@ class PhoneLink:
         self.last_seen = 0.0
         self.home = False
         self.notifications: Deque[dict] = deque(maxlen=KEEP)
-        self.media: Dict[str, Any] = {"title": "", "artist": "", "album": "", "playing": False, "app": ""}
+        self.media: Dict[str, Any] = {"title": "", "artist": "", "album": "", "playing": False, "app": "",
+                                      # where the song was (s), at what rate, and when we heard (epoch s)
+                                      "duration": 0.0, "elapsed": None, "rate": 1.0, "elapsedAt": 0.0}
         self._pending: Dict[int, dict] = {}
         self._data_buffer = b""
         self._bus = None
         self._chars: Dict[str, Any] = {}
+        # Value watchers by characteristic path. They outlive a failed
+        # subscribe so a retry doesn't add a second one, and go when the
+        # phone does.
+        self._watching: Dict[str, tuple] = {}
+        # What the log last said, so a line repeated every few seconds is
+        # written once and then summarised once a minute.
+        self._said: Dict[str, list] = {}
+        # The link's state as the Pi sees it, for the log and /api/phone.
+        self._ble_last_try = 0.0
+        self._ble_tries = 0
+        self._advertising = False
+        self._adv_exported = False
+        self._adv_last_try = 0.0
+        self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
+                                     "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -139,6 +181,7 @@ class PhoneLink:
             "lastSeen": int(self.last_seen * 1000) if self.last_seen else None,
             "media": self.media,
             "notifications": list(reversed(self.notifications)),
+            "link": self.link,
         }
 
     async def _emit(self, event: dict) -> None:
@@ -221,15 +264,17 @@ class PhoneLink:
             await self.control.register_agent()
         except Exception as e:
             log.warning("Could not register the pairing agent (pairing from Sage may not work): %s", e)
-        await self._advertise()
         while True:
             try:
                 await self._tick()
             except Exception as e:
-                log.warning("Phone link error: %s", e)
-                self._chars.clear()
+                self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
+                self._chars.clear()  # subscribe again on the next tick
             # Poll faster while scanning, pairing or connecting so the page keeps up.
-            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") else 5)
+            # Also fast while waiting for the phone's BLE link, which can be up
+            # for only a few seconds before the phone drops it again.
+            waiting_for_ble = self.link["classic"] and not self.link["ble"]
+            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") or waiting_for_ble else 5)
 
     async def _objects(self) -> dict:
         intro = await self._bus.introspect(BLUEZ, "/")
@@ -237,24 +282,71 @@ class PhoneLink:
         return await manager.call_get_managed_objects()
 
     async def _tick(self) -> None:
+        if not self._advertising and time.time() - self._adv_last_try >= 30:
+            await self._advertise()
         objects = await self._objects()
         if self.control:
             await self.control.refresh(objects)
-        phone_path, phone_name = None, ""
+        phone_path, phone_name, dev = None, "", None
         for path, ifaces in objects.items():
-            dev = ifaces.get("org.bluez.Device1")
-            if dev and dev["Paired"].value and dev["Connected"].value:
-                uuids = {u.lower() for u in dev.get("UUIDs").value} if dev.get("UUIDs") else set()
+            d = ifaces.get("org.bluez.Device1")
+            if d and d["Paired"].value and d["Connected"].value:
+                uuids = {u.lower() for u in d.get("UUIDs").value} if d.get("UUIDs") else set()
                 services = self._services_under(objects, path)
                 if ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids:
-                    phone_path, phone_name = path, dev.get("Alias").value if dev.get("Alias") else ""
+                    phone_path, phone_name, dev = path, d.get("Alias").value if d.get("Alias") else "", d
                     break
         await self.set_presence(phone_path is not None, phone_name)
         if phone_path is None:
+            self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
+            self.say("state", "no paired phone is connected to the Pi; waiting")
             self._chars.clear()
+            self._unwatch()
             return
+        # ServicesResolved is BlueZ's word for "the BLE (GATT) link is up and
+        # its services are read". Connected alone can be just classic audio.
+        ble = bool(dev.get("ServicesResolved") and dev["ServicesResolved"].value)
+        address = dev["Address"].value if dev.get("Address") else phone_path.rsplit("dev_", 1)[-1].replace("_", ":")
+        self._set_link(phone=phone_name, address=address, classic=True, ble=ble)
+        if not ble:
+            self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
+                              f"(ServicesResolved=no), so notifications and now playing can't be read. "
+                              f"Opening the BLE link from the Pi.")
+            self._chars.clear()
+            await self._open_ble(phone_path, phone_name, address)
+            return
+        self._ble_tries = 0
         if not self._chars:
             await self._subscribe(objects, phone_path)
+
+    async def _open_ble(self, path: str, name: str, address: str) -> None:
+        """Ask BlueZ to connect to the phone over BLE. A phone that is already
+        connected for classic audio doesn't open its BLE link on its own after
+        Sage restarts, and without it there are no songs or notifications.
+        BlueZ 5.78+ takes PreferredBearer=le for this; older BlueZ connects
+        whatever is missing. Tried every 30 s, so a phone that refuses isn't
+        hammered."""
+        now = time.time()
+        if now - self._ble_last_try < 30:
+            return
+        self._ble_last_try = now
+        self._ble_tries += 1
+        try:
+            dev = (await self._char(path)).get_interface("org.bluez.Device1")
+            bearer = ""
+            if hasattr(dev, "set_preferred_bearer"):
+                await dev.set_preferred_bearer("le")
+                bearer = " (PreferredBearer=le)"
+            await asyncio.wait_for(dev.call_connect(), timeout=20)
+            self.say("open-ble", f"asked BlueZ to connect {name} ({address}) over BLE{bearer}, try {self._ble_tries}: "
+                                 f"BlueZ accepted; waiting for ServicesResolved.")
+        except Exception as e:
+            error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
+            advice = ("If this keeps failing: on the iPhone open Settings > Bluetooth, tap (i) next to the Pi and "
+                      "check 'Share System Notifications' is on; if it still fails, forget the Pi there and pair "
+                      "again from Sage Settings > Bluetooth.") if self._ble_tries >= 3 else ""
+            self.say("open-ble", f"could not open the BLE link to {name} ({address}), try {self._ble_tries}: {error}. "
+                                 + advice)
 
     @staticmethod
     def _services_under(objects: dict, device_path: str) -> set:
@@ -269,6 +361,7 @@ class PhoneLink:
         return self._bus.get_proxy_object(BLUEZ, path, intro)
 
     async def _subscribe(self, objects: dict, device_path: str) -> None:
+        notifying: Dict[str, bool] = {}
         for path, ifaces in objects.items():
             char = ifaces.get("org.bluez.GattCharacteristic1")
             if not char or not path.startswith(device_path + "/"):
@@ -278,17 +371,74 @@ class PhoneLink:
                 continue
             obj = await self._char(path)
             self._chars[uuid] = obj.get_interface("org.bluez.GattCharacteristic1")
-            if uuid in {ANCS_NOTIFICATION_SOURCE, ANCS_DATA_SOURCE, AMS_ENTITY_UPDATE}:
+            notifying[uuid] = bool(char.get("Notifying") and char["Notifying"].value)
+            if uuid in {ANCS_NOTIFICATION_SOURCE, ANCS_DATA_SOURCE, AMS_ENTITY_UPDATE} and path not in self._watching:
                 props = obj.get_interface("org.freedesktop.DBus.Properties")
-                props.on_properties_changed(self._value_handler(uuid))
+                handler = self._value_handler(uuid)
+                props.on_properties_changed(handler)
+                self._watching[path] = (props, handler)
+        # Each step is tried on its own: a phone that refuses one (an ANCS
+        # error, say) still gets the others, and a notify BlueZ already has
+        # running or starting ("In Progress") counts as on. Before this, the
+        # first failure after a restart made every retry fail the same way and
+        # the clock stopped getting songs.
         # Data Source must be listening before Notification Source starts.
         for uuid in (ANCS_DATA_SOURCE, ANCS_NOTIFICATION_SOURCE, AMS_ENTITY_UPDATE):
-            if uuid in self._chars:
-                await self._chars[uuid].call_start_notify()
+            if uuid in self._chars and not notifying.get(uuid):
+                await self._try(f"turning on {CHAR_NAMES.get(uuid, uuid)}", self._chars[uuid].call_start_notify())
         if AMS_ENTITY_UPDATE in self._chars:
-            await self._chars[AMS_ENTITY_UPDATE].call_write_value(bytes([AMS_PLAYER, 0, 1, 2]), {})
-            await self._chars[AMS_ENTITY_UPDATE].call_write_value(bytes([AMS_TRACK, 0, 1, 2]), {})
-        log.info("Phone link subscribed: %s", ", ".join(sorted(self._chars)))
+            for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2, 3])):
+                what = "asking for the player" if entity[0] == AMS_PLAYER else "asking for the track"
+                if not await self._try(f"{what} on {CHAR_NAMES[AMS_ENTITY_UPDATE]}",
+                                       self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
+                    self._set_link(nowPlaying="failed, retrying in 5 s")
+                    # Without this request the phone never sends songs, so
+                    # forget the subscription and ask again on the next tick
+                    # (the watchers stay, so nothing is added twice).
+                    self._chars.clear()
+                    return
+        self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
+        self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
+                          + ", ".join(self.link["subscribed"]) + ". Now playing will update on the next song change.")
+
+    async def _try(self, step: str, call) -> bool:
+        try:
+            await call
+            return True
+        except Exception as e:
+            error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"  # D-Bus errors carry a name
+            if "progress" in str(e).lower() or "already" in str(e).lower():
+                return True
+            hint = hint_for(str(e))
+            self._set_link(lastError={"step": step, "error": error, "at": int(time.time())})
+            self.say(step, f"{step} failed on {self.link['phone']} ({self.link['address']}, "
+                           f"BLE {'up' if self.link['ble'] else 'down'}): {error}" + (f". Likely: {hint}" if hint else ""))
+            return False
+
+    def _set_link(self, **fields) -> None:
+        self.link.update(fields)
+
+    def say(self, key: str, message: str) -> None:
+        """Log a phone-link line. The same line for the same key is written
+        once, then at most once a minute with how often it happened."""
+        now = time.time()
+        last = self._said.get(key)
+        if last and last[0] == message:
+            last[2] += 1
+            if now - last[1] >= 60:
+                log.warning("Phone link: %s (repeated %d times in the last minute)", message, last[2])
+                last[1], last[2] = now, 0
+            return
+        self._said[key] = [message, now, 0]
+        log.warning("Phone link: %s", message)
+
+    def _unwatch(self) -> None:
+        for props, handler in self._watching.values():
+            try:
+                props.off_properties_changed(handler)
+            except Exception:
+                pass
+        self._watching.clear()
 
     def _value_handler(self, uuid: str):
         def handler(_iface, changed, _invalidated):
@@ -326,19 +476,47 @@ class PhoneLink:
             if entity == AMS_PLAYER and attr == 0:
                 self.media["app"] = value
             elif entity == AMS_PLAYER and attr == 1:
-                self.media["playing"] = value.split(",")[0] == "1"
+                # PlaybackInfo: "state,rate,elapsed seconds", sent on play,
+                # pause and seek; the desk carries the position on from there.
+                parts = value.split(",")
+                self.media["playing"] = parts[0] == "1"
+                try:
+                    self.media["rate"] = float(parts[1]) if len(parts) > 1 and parts[1] else 1.0
+                    self.media["elapsed"] = float(parts[2]) if len(parts) > 2 and parts[2] else None
+                except ValueError:
+                    self.media["elapsed"] = None
+                self.media["elapsedAt"] = time.time()
             elif entity == AMS_TRACK and attr in (0, 1, 2):
                 self.media[("artist", "album", "title")[attr]] = value
+            elif entity == AMS_TRACK and attr == 3:
+                try:
+                    self.media["duration"] = float(value or 0)
+                except ValueError:
+                    self.media["duration"] = 0.0
             await self._emit({"type": "PHONE_MEDIA", "media": self.media})
 
+    @staticmethod
+    def advert_fields(name: str) -> dict:
+        """What goes in the advertisement. A legacy BLE advertisement holds 31
+        bytes: flags (3) and the ANCS solicitation (2 + 16) leave 10 for the
+        name (2 + 8), so a longer name is cut to its first word. AMS is not
+        solicited: ANCS alone makes the iPhone connect, and AMS comes with the
+        same link. Both UUIDs and the full name came to 53 bytes, which BlueZ
+        refuses ("Failed to register advertisement") on most Pi adapters."""
+        short = name if len(name) <= 8 else (name.split()[0][:8] if name.split() else name[:8])
+        return {"LocalName": short, "SolicitUUIDs": [ANCS_SERVICE]}
+
     async def _advertise(self) -> None:
-        """Advertise as a connectable BLE device that asks for ANCS, which is
-        what makes it show up in the iPhone's Bluetooth settings."""
+        """Advertise as a connectable BLE device that asks for ANCS. This is
+        what makes the iPhone find the Pi, and reconnect over BLE after the
+        link drops. Retried from the tick every 30 s until BlueZ takes it."""
+        self._adv_last_try = time.time()
         try:
             from dbus_next.service import ServiceInterface, method, dbus_property
-            from dbus_next import PropertyAccess, Variant
+            from dbus_next import PropertyAccess
         except Exception:
             return
+        fields = self.advert_fields(DEVICE_NAME)
 
         class Advertisement(ServiceInterface):
             def __init__(self):
@@ -354,24 +532,38 @@ class PhoneLink:
 
             @dbus_property(access=PropertyAccess.READ)
             def LocalName(self) -> "s":  # noqa: F821,N802
-                return DEVICE_NAME
+                return fields["LocalName"]
 
             @dbus_property(access=PropertyAccess.READ)
             def SolicitUUIDs(self) -> "as":  # noqa: F821,N802
-                return [ANCS_SERVICE, AMS_SERVICE]
+                return fields["SolicitUUIDs"]
 
             @dbus_property(access=PropertyAccess.READ)
             def Includes(self) -> "as":  # noqa: F821,N802
                 return []
 
+        path = "/sage/phone/advertisement0"
+        slots = ""
         try:
-            path = "/sage/phone/advertisement0"
-            self._bus.export(path, Advertisement())
+            if not self._adv_exported:
+                self._bus.export(path, Advertisement())
+                self._adv_exported = True
             adapter = await self._char("/org/bluez/hci0")
-            await adapter.get_interface("org.bluez.LEAdvertisingManager1").call_register_advertisement(path, {})
-            log.info("Advertising as %s", DEVICE_NAME)
+            manager = adapter.get_interface("org.bluez.LEAdvertisingManager1")
+            try:
+                active = await manager.get_active_instances()
+                free = await manager.get_supported_instances()
+                slots = f" (advertising slots in use: {active} of {active + free})"
+            except Exception:
+                pass
+            await manager.call_register_advertisement(path, {})
+            self._advertising = True
+            self.say("advertise", f"advertising as {fields['LocalName']}{slots}, so the iPhone can find and "
+                                  f"reconnect to the Pi over BLE")
         except Exception as e:
-            log.warning("Could not advertise (pairing from the iPhone may not find the Pi): %s", e)
-
+            self.say("advertise", f"could not advertise as {fields['LocalName']}{slots}, so the iPhone can't "
+                                  f"reconnect to the Pi over BLE: {getattr(e, 'type', None) or type(e).__name__}: "
+                                  f"{e}. Trying again every 30 s. If it keeps failing, run "
+                                  f"'sudo systemctl restart bluetooth'.")
 
 link = PhoneLink()

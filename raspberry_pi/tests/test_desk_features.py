@@ -7,7 +7,6 @@ cards, the phone's notifications and music, and the ambient bits.
 import asyncio
 import datetime
 import os
-import random
 import sys
 import tempfile
 import unittest
@@ -140,9 +139,8 @@ class Helpers(unittest.TestCase):
         self.assertIsNone(alarms.due(at(7, 0)))
         self.assertIsNone(alarms.next(at(6, 0)))
 
-    def test_weather_icons_and_schedule(self):
+    def test_weather_icons(self):
         self.assertEqual([ambient.weather_icon(c) for c in (0, 2, 61, 73, 95)], ["clear", "cloudy", "rain", "snow", "storm"])
-        self.assertEqual([ambient.schedule_for(h) for h in (3, 9, 23)], ["SLEEP", "AWAKE", "DROWSY"])
 
     def test_vitals_read_proc_and_sys(self):
         root = Path(tempfile.mkdtemp())
@@ -157,11 +155,10 @@ class Helpers(unittest.TestCase):
         stats = vitals.command()
         self.assertEqual((stats["cpu_temp"], stats["cpu_pct"], stats["ram_pct"]), (52.3, 50, 75))
 
-    def test_idle_animation(self):
-        rng = random.Random(1)
-        self.assertEqual(ambient.idle_animation(rng, True)["type"], "dance")
-        kinds = {(ambient.idle_animation(rng, False) or {}).get("type") for _ in range(200)}
-        self.assertEqual(kinds, {"look", "focused", "curious", None})
+    def test_upcoming_alarms_are_the_next_day_soonest_first(self):
+        alarms = Alarms(TZ)
+        alarms.load([alarm("late", 22, 0), alarm("wake", 7, 0), alarm("old", 5, 0), alarm("far", 7, 0, day=9)])
+        self.assertEqual([a.id for a in alarms.upcoming(at(6, 0))], ["wake", "late"])
 
     @unittest.skipIf(art.Image is None, "Pillow not installed")
     def test_art_frame(self):
@@ -189,15 +186,24 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
         async def cover(title, artist):
             self.covers.append((title, artist))
-            return b"art"
+            return b"\xaa\xbb\x64\x64" + bytes(art.FRAME_LEN - 4)
 
         async def weather():
             return {"cmd": "WEATHER", "temp_c": 24.5, "icon": "rain"}
 
+        self.lookups = []
+
+        async def about(title, artist, **details):
+            self.lookups.append((title, details))
+            return {"genre": "Alt rock", "bpm": 131, "energy": 0.7, "facts": ["Released in 2002 on A Rush of Blood to the Head."]}
+
+        async def lyrics(title, artist, duration=0):
+            return [(0.0, ""), (10.0, "The lights go out and I can't be saved"), (16.0, "Tides that I tried to swim against")]
+
         self.desk = Desk(
             self.link, lambda: self.clock, self.phone, broadcast,
             items=lambda: [i for i in self.items if i.get("status") != "done"],
-            actions=self.actions, weather=weather, cover=cover, rng=random.Random(0),
+            actions=self.actions, weather=weather, cover=cover, song_about=about, song_lyrics=lyrics,
         )
         self.desk.loop = asyncio.get_running_loop()
 
@@ -243,7 +249,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.controller.on_button("OK")
         self.assertIn({"cmd": "ALARM_OFF"}, self.link.sent[-3:])
         self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")
-        self.assertEqual(self.link.last("EMOTION")["mood"], "HAPPY")
+        self.assertNotIn("EMOTION", self.link.cmds())  # no face any more
 
     async def test_unanswered_alarm_stops(self):
         await self.desk.refresh()
@@ -259,7 +265,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         took = await asyncio.to_thread(self.desk.clock_reminder, self.items[0], message)
         self.assertTrue(took)
         await asyncio.sleep(0.05)
-        self.assertEqual(self.link.last("SCREEN"), {"cmd": "SCREEN", "mode": "FACE"})
+        self.assertNotIn("SCREEN", self.link.cmds())  # firmware 2 shows cards over any screen
         self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "Reminder", "title": "Gym", "body": "Due today at 7:30 AM"})
         self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Tomorrow", "ok": "Done", "right": "Snooze"})
         await self.desk.controller.on_button("OK")
@@ -290,7 +296,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
     async def test_phone_notification_is_shown_unless_a_reminder_waits(self):
         await self.desk.controller.show_screen("CLOCK")
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Call me"})
-        self.assertEqual(self.link.last("SCREEN")["mode"], "FACE")
+        self.assertEqual(self.link.last("SCREEN")["mode"], "CLOCK")
         self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "WhatsApp", "title": "Mum", "body": "Call me"})
         await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Again"})
@@ -300,8 +306,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
         await self.desk.show_media(media)
         self.assertEqual(self.link.last("SPOTIFY")["title"], "Clocks")
-        self.assertEqual(self.link.binary, [b"art"])
-        self.assertEqual(self.link.last("EMOTION")["mood"], "HAPPY")
+        self.assertEqual(self.link.binary, [])  # firmware before 2.2 restarts on a cover
         await self.desk.show_media({**media, "playing": False})
         self.assertEqual(self.covers, [("Clocks", "Coldplay")])  # same song: no second lookup
 
@@ -312,16 +317,79 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
             await self.desk.controller.on_button(button)
         self.assertEqual(self.phone.commands, ["previous", "toggle", "next"])
 
+    async def test_song_info_and_lyrics_follow_the_song(self):
+        import time
+        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True, "album": "A Rush of Blood to the Head",
+                            "duration": 307.0, "app": "Spotify", "elapsed": 9.9, "rate": 1.0, "elapsedAt": time.time()}
+        await self.desk.show_media(self.phone.media)
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if "LYRIC" in self.link.cmds():
+                break
+        info = self.link.last("SONG_INFO")
+        self.assertEqual((info["title"], info["genre"], info["bpm"], info["lyrics"]), ("Clocks", "Alt rock", 131, True))
+        self.assertEqual(self.link.last("LYRIC")["line"], "The lights go out and I can't be saved")
+
+        # The phone seeks on: the line follows.
+        self.phone.media = {**self.phone.media, "elapsed": 17.0, "elapsedAt": time.time()}
+        await self.desk.follow_lyrics(("Clocks", "Coldplay"))
+        self.assertEqual(self.link.last("LYRIC")["line"], "Tides that I tried to swim against")
+
+        # A reconnecting clock gets the song and the line back; the song isn't looked up again.
+        self.link.sent.clear()
+        await self.desk.controller.redraw()
+        self.assertIn("SONG_INFO", self.link.cmds())
+        self.assertEqual(self.link.last("LYRIC")["line"], "Tides that I tried to swim against")
+        self.assertEqual(self.lookups, [("Clocks", {"album": "A Rush of Blood to the Head", "duration": 307.0, "app": "Spotify"})])
+        self.desk.track = None  # stops following
+
+    async def test_no_lyrics_until_the_phone_says_where_it_is(self):
+        self.phone.media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
+        await self.desk.show_media(self.phone.media)
+        await asyncio.sleep(1.1)
+        self.assertIn("SONG_INFO", self.link.cmds())
+        self.assertNotIn("LYRIC", self.link.cmds())
+        self.desk.track = None
+
+    async def test_cover_goes_in_small_strips_to_new_firmware(self):
+        self.link.fw = "2.2.0"
+        await self.desk.show_media({"title": "Clocks", "artist": "Coldplay", "playing": True})
+        self.assertEqual(len(self.link.binary), 17)
+        self.assertTrue(all(len(b) <= 1204 and b[:2] == b"\xaa\xbd" for b in self.link.binary))
+        self.assertEqual(sum(b[3] for b in self.link.binary), 100)
+
     async def test_reconnected_clock_gets_everything_back(self):
         await self.desk.refresh()
         await self.desk.update_weather()
         await self.desk.show_media({"title": "Clocks", "artist": "Coldplay", "playing": True})
         self.link.sent.clear()
         self.link.binary.clear()
+        self.link.fw = "2.2.0"
         await self.desk.controller.redraw()
-        for cmd in ("CLOCK", "SCREEN", "LIGHTS", "EYE_COLOR", "SHOW_TASKS", "EMOTION", "WEATHER", "SPOTIFY"):
+        for cmd in ("CLOCK", "SCREEN", "LIGHTS", "SHOW_TASKS", "ALARMS", "WEATHER", "SPOTIFY"):
             self.assertIn(cmd, self.link.cmds())
-        self.assertEqual(self.link.binary[-1], b"art")
+        for cmd in ("EYE_COLOR", "EMOTION", "ANIM"):
+            self.assertNotIn(cmd, self.link.cmds())
+        self.assertEqual(len(self.link.binary), 17)  # the cover, once, in strips
+
+    async def test_firmware_1_gets_its_cards_on_the_face(self):
+        self.link.fw = "1.6.0"
+        await self.desk.controller.show_screen("CLOCK")
+        await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Call me"})
+        self.assertEqual(self.link.last("SCREEN")["mode"], "FACE")
+        await self.desk.controller.on_button("DOWN")  # off the face, back into the loop
+        self.assertEqual(self.link.last("SCREEN")["mode"], "CLOCK")
+
+    async def test_alarms_for_the_next_day_go_to_the_clock_when_they_change(self):
+        await self.desk.refresh()
+        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0}], "snooze": 5})
+        await self.desk.refresh()
+        self.assertEqual(self.link.cmds().count("ALARMS"), 1)  # unchanged: not sent again
+        self.clock = at(7, 0)
+        await self.desk.ring()
+        await self.desk.controller.on_button("RIGHT")  # snooze to 7:05
+        await self.desk.refresh()
+        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5}])
 
     async def test_system_screen_gets_vitals(self):
         await self.desk.controller.show_screen("SYSTEM")

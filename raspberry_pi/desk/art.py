@@ -6,6 +6,10 @@ cover is looked up on iTunes. The clock takes a 100x100 RGB565 frame with a
 four-byte header (0xAA 0xBB 100 100), little-endian, 20004 bytes in all. When
 there's no cover (or Pillow isn't installed) a plain card with the initials
 is drawn instead, so the screen never shows the last song's art.
+
+The cover goes to the clock as strips (`strips`) small enough for one network
+packet each. One 20 KB message could arrive in pieces, and the clock's
+websocket library then misreads the rest of the stream and restarts the clock.
 """
 
 import io
@@ -32,6 +36,20 @@ def encode(image) -> bytes:
         r, g, b = rgb[i], rgb[i + 1], rgb[i + 2]
         body += struct.pack("<H", ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3))
     return HEADER + bytes(body)
+
+
+STRIP_ROWS = 6  # 6 rows of 100 pixels: 1200 bytes, inside one TCP segment
+
+
+def strips(frame: bytes) -> list:
+    """A whole frame as strips: 0xAA 0xBD, first row, row count, then pixels."""
+    body = frame[len(HEADER):]
+    row_bytes = SIZE * 2
+    out = []
+    for row in range(0, SIZE, STRIP_ROWS):
+        n = min(STRIP_ROWS, SIZE - row)
+        out.append(bytes([0xAA, 0xBD, row, n]) + body[row * row_bytes:(row + n) * row_bytes])
+    return out
 
 
 def placeholder(title: str, artist: str) -> Optional[bytes]:

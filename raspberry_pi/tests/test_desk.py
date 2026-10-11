@@ -85,7 +85,7 @@ class Controller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((clock["h"], clock["m"], clock["s"], clock["ms"]), (18, 47, 21, 500))
         self.assertEqual((clock["weekday"], clock["date"]), ("Tue", "06 Oct"))
         self.assertNotIn("alarm_h", clock)
-        self.assertEqual(self.link.sent[1], {"cmd": "SCREEN", "mode": "FACE"})
+        self.assertEqual(self.link.sent[1], {"cmd": "SCREEN", "mode": "CLOCK"})
         self.assertEqual(self.link.sent[2]["mode"], "AUTO")
 
     async def test_clock_carries_next_alarm(self):
@@ -94,12 +94,12 @@ class Controller(unittest.IsolatedAsyncioTestCase):
         self.assertEqual((self.link.sent[0]["alarm_h"], self.link.sent[0]["alarm_m"]), (6, 30))
 
     async def test_up_and_down_step_through_screens(self):
-        desk = self.make(screens=["FACE", "CLOCK", "TASKS"])
+        desk = self.make(screens=["SYSTEM", "CLOCK", "TASKS"])
         await desk.on_button("DOWN")
         await desk.on_button("down")
         await desk.on_button("DOWN")
         await desk.on_button("UP")
-        self.assertEqual([c["mode"] for c in self.link.sent], ["CLOCK", "TASKS", "FACE", "TASKS"])
+        self.assertEqual([c["mode"] for c in self.link.sent], ["CLOCK", "TASKS", "SYSTEM", "TASKS"])
 
     async def test_card_buttons_run_its_actions(self):
         desk = self.make()

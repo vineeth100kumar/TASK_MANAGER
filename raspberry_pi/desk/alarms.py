@@ -93,16 +93,22 @@ class Alarms:
                 return alarm
         return None
 
+    def upcoming(self, now: datetime.datetime, hours: int = 24, limit: int = 4) -> List[Alarm]:
+        """The alarms that ring within `hours`, soonest first."""
+        until = now + datetime.timedelta(hours=hours)
+        soon = sorted((a for a in self.alarms if a.rings_at and now < a.rings_at <= until), key=lambda a: a.rings_at)
+        return soon[:limit]
+
     def next(self, now: datetime.datetime) -> Optional[Alarm]:
         """The alarm that rings soonest, for the clock face."""
         upcoming = [a for a in self.alarms if a.rings_at and a.rings_at > now]
         return min(upcoming, key=lambda a: a.rings_at) if upcoming else None
 
     @staticmethod
-    def snoozed(now: datetime.datetime) -> dict:
-        """Fields for five more minutes. Only remindAt moves, so tomorrow's
+    def snoozed(now: datetime.datetime, minutes: int = SNOOZE_MINUTES) -> dict:
+        """Fields for a few more minutes. Only remindAt moves, so tomorrow's
         alarm is still set for the time it always was."""
-        return {"remindAt": sage_time(now + datetime.timedelta(minutes=SNOOZE_MINUTES))}
+        return {"remindAt": sage_time(now + datetime.timedelta(minutes=minutes))}
 
     @staticmethod
     def rolled(alarm: Alarm, now: datetime.datetime) -> dict:
