@@ -238,16 +238,23 @@ class Desk:
             self.track = track
             self.track_started = time.time()
             self.song_info, self.lyric_lines, self.lyric = None, [], ""
-            self._spawn(self._guard(self.learn_song(track, media.get("duration") or 0)))
+            self._spawn(self._guard(self.learn_song(track, media)))
             self.cover = await self.fetch_cover(*track)
             if self.track == track:
                 await self.send_cover()
 
-    async def learn_song(self, track: tuple, duration: float) -> None:
+    async def learn_song(self, track: tuple, media: dict) -> None:
         """Look the song up (genre, tempo, facts, lyrics) and, while it's
         still playing, tell the clock and follow the lyrics."""
-        about, lines = await asyncio.gather(self._guard(self.song_about(*track)),
-                                            self._guard(self.song_lyrics(*track, duration)))
+        # The phone sends the length a moment after the title, so wait a beat for it.
+        await asyncio.sleep(1.0)
+        if self.track != track:
+            return
+        media = {**media, **(self.phone.media or {})} if (self.phone.media or {}).get("title") == track[0] else media
+        duration = media.get("duration") or 0
+        about, lines = await asyncio.gather(
+            self._guard(self.song_about(*track, album=media.get("album") or "", duration=duration, app=media.get("app") or "")),
+            self._guard(self.song_lyrics(*track, duration)))
         if self.track != track:
             return
         about = about or {}

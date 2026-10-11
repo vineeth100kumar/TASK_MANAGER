@@ -130,7 +130,7 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         async def cover(title, artist):
             return None
 
-        async def about(title, artist):
+        async def about(title, artist, **details):
             return None
 
         async def lyrics(title, artist, duration=0):
