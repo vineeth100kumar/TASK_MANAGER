@@ -4,6 +4,7 @@
 #include "display.h"
 #include "aa_text.h"
 #include "aa_fonts.h"
+#include "anim.h"
 
 // The faces were designed for the 320x216 window the case shows; VY() maps a
 // row of that design into the visible band (VIS_T..VIS_B).
@@ -16,7 +17,40 @@ static int   lastMinute = -1;
 static int   lastSecond = -1;
 static float lastDim    = -1;
 
-void faceReset() { needAll = true; }
+// Animations: every face fades in when the clock screen opens (the Dial's
+// hands also spin into place), and each has its own way of turning a minute
+// over. prevH/prevM are the time being animated away from.
+static const unsigned long ENTER_MS = 650;
+static unsigned long enterMs = 0, transMs = 0;
+static bool  entryDone = true, transDone = true;
+static int   shownH = -1, shownM = -1, prevH = -1, prevM = -1;
+
+struct FaceAnim {
+  float k;          // brightness: the day phase times the fade-in
+  bool  all;        // redraw every band
+  bool  timeBand;   // redraw the time (a minute is turning over)
+  bool  second;     // a new second
+  float enter;      // 0..1 through the fade-in
+  float tr;         // 0..1 through the minute's turn-over (1 when idle)
+};
+
+void faceReset() {
+  needAll = true;
+  enterMs = millis();
+  entryDone = false;
+  transMs = 0;
+  transDone = true;
+  shownH = shownM = -1;
+}
+
+static unsigned long turnMs(ClockStyle st) {
+  switch (st) {
+    case CLOCK_MONOLITH:   return 560;
+    case CLOCK_STACKED:    return 520;
+    case CLOCK_NIGHTSTAND: return 1200;
+    default:               return 0;     // the Dial's hands simply move on
+  }
+}
 
 // ------------------------------------------------------------- words
 
@@ -87,11 +121,14 @@ static bool band(AASurface& sf, int x0, int x1, int baseline, const AAFont& f, u
 
 static const uint16_t MONO_BG = 0x0841;   // (8,9,11)
 
-static void monolith(const LumoState& s, const ClockNow& c, bool minute, float k) {
+// The minute turns over as a cross-fade through the background.
+static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
+  float k = a.k;
+  bool minute = a.all;
   uint16_t bg = MONO_BG;
-  uint16_t ink = aaRGB(238, 236, 230, k), mute = aaRGB(120, 124, 130, k), acc = aaRGB(214, 170, 110, k);
+  uint16_t mute = aaRGB(120, 124, 130, k), acc = aaRGB(214, 170, 110, k);
   AASurface sf;
-  char buf[48], hs[4], ms[4], day[4], mon[8];
+  char buf[48], hs[4], ms[8], day[4], mon[8];
 
   if (minute) {
     dateParts(s, day, sizeof(day), mon, sizeof(mon));
@@ -102,14 +139,21 @@ static void monolith(const LumoState& s, const ClockNow& c, bool minute, float k
       aaEnd(sf);
     }
 
-    hourText(s, c.h, hs, sizeof(hs));
-    snprintf(ms, sizeof(ms), "%02d", c.m);
+  }
+
+  if (a.all || a.timeBand) {
+    bool old = a.tr < 0.5f && prevM >= 0;
+    float fk = a.tr >= 1 ? 1.0f : easeInOutCubic(old ? 1 - a.tr * 2 : a.tr * 2 - 1);
+    hourText(s, old ? prevH : c.h, hs, sizeof(hs));
+    snprintf(ms, sizeof(ms), "%02d", old ? prevM : c.m);
     snprintf(buf, sizeof(buf), "%s:%s", hs, ms);
     if (band(sf, 0, 320, VY(130), AA_MONO_TIME, bg)) {
-      aaTextCentered(sf, 160, VY(130), buf, AA_MONO_TIME, ink);
+      aaTextCentered(sf, 160, VY(130), buf, AA_MONO_TIME, aaRGB(238, 236, 230, k * fk));
       aaEnd(sf);
     }
+  }
 
+  if (minute) {
     if (band(sf, 0, 320, VY(190), AA_BODY11, bg)) {
       if (!zone2Text(s, c, buf, sizeof(buf))) {
         char cond[16];
@@ -144,27 +188,45 @@ static void monolith(const LumoState& s, const ClockNow& c, bool minute, float k
 
 static const uint16_t STACK_BG = 0x0021;  // (6,6,8)
 
-static void stacked(const LumoState& s, const ClockNow& c, bool minute, float k) {
-  if (!minute) return;
+// The minute turns over by rolling: the old number slides up and out as the
+// new one rises in behind it (the hour too, when it changes).
+static void rollText(AASurface& sf, int x, int base, int travel, const char* from, const char* to,
+                     float tr, const AAFont& f, uint16_t col) {
+  if (tr >= 1 || !strcmp(from, to)) { aaText(sf, x, base, to, f, col); return; }
+  float e = easeInOutCubic(tr);
+  int d = (int)(e * travel + 0.5f);
+  aaText(sf, x, base - d, from, f, col);
+  aaText(sf, x, base - d + travel, to, f, col);
+}
+
+static void stacked(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
+  if (!a.all && !a.timeBand) return;
+  float k = a.k;
   uint16_t bg = STACK_BG;
   uint16_t ink = aaRGB(245, 243, 238, k), acc = aaRGB(255, 159, 67, k), mute = aaRGB(128, 132, 140, k);
   uint16_t rule = aaRGB(34, 36, 40, k);
   AASurface sf;
-  char buf[32], hs[4], ms[4];
+  char buf[32], hs[4], ms[8];
 
+  char phs[4], pms[8];
   hourText(s, c.h, hs, sizeof(hs));
   snprintf(ms, sizeof(ms), "%02d", c.m);
+  hourText(s, prevH >= 0 ? prevH : c.h, phs, sizeof(phs));
+  snprintf(pms, sizeof(pms), "%02d", prevM >= 0 ? prevM : c.m);
   int top = VY(14), base = VY(94);
-  if (aaBegin(sf, 0, top, 186, base + AA_STACK_TIME.descent + 3 - top, bg)) {
-    int x = aaText(sf, 18, base, hs, AA_STACK_TIME, ink);
+  int hBandH = base + AA_STACK_TIME.descent + 3 - top;
+  if ((a.all || strcmp(phs, hs)) && aaBegin(sf, 0, top, 186, hBandH, bg)) {
+    rollText(sf, 18, base, hBandH, phs, hs, a.tr, AA_STACK_TIME, ink);
+    int x = 18 + aaTextWidth(AA_STACK_TIME, hs);
     if (!s.hour24) aaText(sf, x + 8, VY(28), c.h >= 12 ? "PM" : "AM", AA_SEMI11, mute);
     aaEnd(sf);
   }
   if (band(sf, 0, 186, VY(194), AA_STACK_TIME, bg)) {
-    aaText(sf, 18, VY(194), ms, AA_STACK_TIME, acc);
+    rollText(sf, 18, VY(194), sf.h, pms, ms, a.tr, AA_STACK_TIME, acc);
     aaEnd(sf);
   }
 
+  if (!a.all) return;
   // The details column.
   const int x = 196, right = 304;
   if (!aaBegin(sf, 186, VY(26), 320 - 186, VY(196) - VY(26), bg)) return;
@@ -205,26 +267,38 @@ static void stacked(const LumoState& s, const ClockNow& c, bool minute, float k)
 
 static const uint16_t NIGHT_BG = 0x0000;  // (5,3,2) rounds to black on the panel
 
-static void nightstand(const LumoState& s, const ClockNow& c, bool minute, float k) {
-  if (!minute) return;
+// The minute turns over slowly, like a filament: the digits sink to an ember
+// and the glow lingers a moment longer, then the new time warms back up.
+static void nightstand(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
+  if (!a.all && !a.timeBand) return;
+  float k = a.k;
+  bool minute = a.all;
   uint16_t bg = NIGHT_BG;
-  uint16_t amber = aaRGB(255, 150, 60, k), glow = aaRGB(190, 85, 25, k), info = aaRGB(150, 88, 40, k);
+  uint16_t info = aaRGB(150, 88, 40, k);
   AASurface sf;
   char buf[24], hs[4];
 
-  hourText(s, c.h, hs, sizeof(hs));
-  snprintf(buf, sizeof(buf), "%s:%02d", hs, c.m);
+  bool old = a.tr < 0.45f && prevM >= 0;
+  float ink = 1.0f, halo = 1.0f;
+  if (a.tr < 1) {
+    float u = old ? a.tr / 0.45f : (a.tr - 0.45f) / 0.55f;
+    ink  = old ? 1 - easeInOutCubic(u) : easeInOutCubic(u);
+    halo = old ? 1 - 0.7f * easeInOutCubic(u) : 0.3f + 0.7f * easeOutCubic(u);
+    ink  = 0.08f + 0.92f * ink;                  // never quite out: an ember
+  }
+  hourText(s, old ? prevH : c.h, hs, sizeof(hs));
+  snprintf(buf, sizeof(buf), "%s:%02d", hs, old ? prevM : c.m);
   const AAFont& f = AA_NIGHT_TIME;
   int base = VY(136), pad = f.glowPad;
   int top = base - f.ascent - pad - 1;
   if (aaBegin(sf, 0, top, 320, f.ascent + f.descent + 2 * pad + 3, bg)) {
     int x = 160 - aaTextWidth(f, buf) / 2;
-    aaGlow(sf, x, base, buf, f, glow, 210);
-    aaText(sf, x, base, buf, f, amber);
+    aaGlow(sf, x, base, buf, f, aaRGB(190, 85, 25, k * halo), 210);
+    aaText(sf, x, base, buf, f, aaRGB(255, 150, 60, k * ink));
     aaEnd(sf);
   }
 
-  if (band(sf, 0, 320, VY(170), AA_BODY11, bg)) {
+  if (minute && band(sf, 0, 320, VY(170), AA_BODY11, bg)) {
     char day[4], mon[8], date[24];
     dateParts(s, day, sizeof(day), mon, sizeof(mon));
     snprintf(date, sizeof(date), "%s %s %s", s.weekday, day, mon);
@@ -253,7 +327,10 @@ static void dialHand(AASurface& sf, float cx, float cy, float turns, float len, 
   aaLine(sf, cx - sx * tail, cy - sy * tail, cx + sx * len, cy + sy * len, w, col);
 }
 
-static void dial(const LumoState& s, const ClockNow& c, bool minute, bool second, float k) {
+// When the clock screen opens, the hands spin round from twelve and settle.
+static void dial(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
+  float k = a.k;
+  bool minute = a.all, second = a.second;
   uint16_t bg = DIAL_BG;
   uint16_t face = aaRGB(17, 19, 22), ink = aaRGB(236, 234, 228, k), mute = aaRGB(120, 124, 130, k);
   uint16_t orange = aaRGB(255, 122, 60, k);
@@ -282,9 +359,10 @@ static void dial(const LumoState& s, const ClockNow& c, bool minute, bool second
       aaTextCentered(sf, (int)cx, (int)(cy - R * 0.45f), "LUMO", AA_CAPS9, mute, 3);
 
       float sec = c.s + c.secFrac;
-      dialHand(sf, cx, cy, ((c.h % 12) + c.m / 60.0f) / 12.0f, R * 0.55f, 10, 7.0f, ink);
-      dialHand(sf, cx, cy, (c.m + (sweep ? sec : 0) / 60.0f) / 60.0f, R * 0.84f, 12, 4.5f, ink);
-      if (sweep) dialHand(sf, cx, cy, sec / 60.0f, R * 0.90f, 20, 1.6f, orange);
+      float e = a.enter < 1 ? easeOutBack(a.enter) : 1.0f;
+      dialHand(sf, cx, cy, e * ((c.h % 12) + c.m / 60.0f) / 12.0f, R * 0.55f, 10, 7.0f, ink);
+      dialHand(sf, cx, cy, e * (c.m + (sweep ? sec : 0) / 60.0f) / 60.0f, R * 0.84f, 12, 4.5f, ink);
+      if (sweep) dialHand(sf, cx, cy, e * sec / 60.0f, R * 0.90f, 20, 1.6f, orange);
       aaDisc(sf, cx, cy, 5, orange);
       aaDisc(sf, cx, cy, 2, face);
       aaEnd(sf);
@@ -339,7 +417,11 @@ static uint16_t faceBg(ClockStyle st) {
 void faceTick(const LumoState& s, const ClockNow& c) {
   static unsigned long lastDraw = 0;
   unsigned long now = millis();
-  if (!needAll && now - lastDraw < 50) return;
+  float enter = entryDone ? 1.0f : animProgress(enterMs, now, ENTER_MS);
+  unsigned long turn = turnMs(s.clock_style);
+  bool turning = !transDone;
+  bool animating = enter < 1 || turning;
+  if (!needAll && now - lastDraw < (animating ? 33UL : 50UL)) return;
   lastDraw = now;
 
   // Same day-phase dimming as the classic clock: calm at night, never dark.
@@ -347,18 +429,42 @@ void faceTick(const LumoState& s, const ClockNow& c) {
   bool minute = needAll || c.m != lastMinute || fabsf(k - lastDim) > 0.03f;
   bool second = minute || c.s != lastSecond;
   bool smooth = s.clock_style == CLOCK_MONOLITH && s.show_seconds;   // the dot glides
-  if (!minute && !second && !smooth) return;
+
+  // A new minute (not the first one drawn) starts the face's turn-over.
+  if (shownM >= 0 && c.m != shownM && turn && enter >= 1) {
+    prevH = shownH; prevM = shownM;
+    transMs = now;
+    transDone = false;
+    turning = true;
+  }
+  shownH = c.h; shownM = c.m;
+  float tr = 1.0f;
+  if (turning) {
+    tr = animProgress(transMs, now, turn);
+    if (tr >= 1) transDone = true;               // this frame draws the end state
+  }
+  if (!entryDone && enter >= 1) { entryDone = true; minute = true; }
+  if (enter < 1) minute = true;
+  if (!minute && !second && !smooth && !turning) return;
+
+  FaceAnim an;
+  an.enter = enter;
+  an.k = k * easeInOutCubic(enter);
+  an.all = minute;
+  an.timeBand = turning;
+  an.second = second;
+  an.tr = tr;
 
   if (needAll) tft.fillScreen(faceBg(s.clock_style));
   switch (s.clock_style) {
-    case CLOCK_MONOLITH:   monolith(s, c, minute, k); break;
-    case CLOCK_STACKED:    stacked(s, c, minute, k); break;
-    case CLOCK_NIGHTSTAND: nightstand(s, c, minute, k); break;
-    case CLOCK_DIAL:       dial(s, c, minute, second, k); break;
+    case CLOCK_MONOLITH:   monolith(s, c, an); break;
+    case CLOCK_STACKED:    stacked(s, c, an); break;
+    case CLOCK_NIGHTSTAND: nightstand(s, c, an); break;
+    case CLOCK_DIAL:       dial(s, c, an); break;
     default: break;
   }
   needAll = false;
   lastMinute = c.m;
   lastSecond = c.s;
-  if (minute) lastDim = k;
+  if (minute && enter >= 1) lastDim = k;
 }

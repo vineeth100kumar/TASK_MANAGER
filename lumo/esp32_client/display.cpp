@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "display.h"
+#include "anim.h"
 #include "clockkeeper.h"
 #include "faces.h"
 #include "aa_text.h"
@@ -37,6 +38,35 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
+// The cover's most vivid colour, for the light ring while music plays: each
+// pixel counts by how saturated and bright it is, so a grey sleeve with one
+// red stripe still gives red.
+static uint8_t tintRGB[3] = { 30, 215, 96 };
+
+static void measureArtTint() {
+  const uint16_t* px = (const uint16_t*)artBuf;
+  float r = 0, g = 0, b = 0, w = 0;
+  for (int i = 0; i < 100 * 100; i += 3) {
+    uint16_t c = px[i];
+    float pr = ((c >> 11) & 31) / 31.0f, pg = ((c >> 5) & 63) / 63.0f, pb = (c & 31) / 31.0f;
+    float mx = max(pr, max(pg, pb)), mn = min(pr, min(pg, pb));
+    float wt = (mx - mn) * mx;                  // saturation times value
+    wt *= wt;
+    r += pr * wt; g += pg * wt; b += pb * wt; w += wt;
+  }
+  if (w < 0.5f) { tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170; return; }
+  r /= w; g /= w; b /= w;
+  float mx = max(r, max(g, b));
+  if (mx < 0.01f) mx = 0.01f;
+  tintRGB[0] = (uint8_t)(255 * r / mx);         // full brightness: the ring sets its own
+  tintRGB[1] = (uint8_t)(255 * g / mx);
+  tintRGB[2] = (uint8_t)(255 * b / mx);
+}
+
+void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = tintRGB[0]; g = tintRGB[1]; b = tintRGB[2];
+}
+
 // The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that
 // each fit in one network packet. A whole 20 KB frame could arrive in pieces,
 // and the websocket library then misread the stream and the clock restarted.
@@ -47,11 +77,12 @@ void onNewArt(const uint8_t* data, size_t len) {
     size_t row = data[2], rows = data[3];
     if (row + rows > 100 || len - 4 < rows * ROW_BYTES) return;
     memcpy(artBuf + row * ROW_BYTES, data + 4, rows * ROW_BYTES);
-    if (row + rows == 100) newArtReady = true;   // the last strip completes the cover
+    if (row + rows == 100) { newArtReady = true; measureArtTint(); }   // the last strip completes the cover
   } else if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
     size_t copyLen = min(len - 4, (size_t)20000);
     memcpy(artBuf, data + 4, copyLen);
     newArtReady = true;
+    measureArtTint();
   }
 }
 
@@ -132,6 +163,11 @@ static int           clockLastBarPx = -1;
 static int           clockLastMinute = -1;
 static uint8_t       clockLastColonStep = 255;
 static bool          clockNeedsStatic = true;
+// The minute turning over: Digital rolls the digits that changed up and out,
+// Minimal cross-fades them. clkPrev* is the time being animated away from.
+static int           clkShownH = -1, clkShownM = -1, clkPrevH = -1, clkPrevM = -1;
+static unsigned long clkTurnMs = 0;
+static bool          clkTurning = false;
 
 static inline uint16_t mix565(uint16_t a, uint16_t b, float t) {
   t = constrain(t, 0.0f, 1.0f);
@@ -292,15 +328,24 @@ static void drawAnalogStatics(const LumoState& s, const ClockNow& c, float fade)
   tft.setFont(NULL);
 }
 
+// The second hand ticks like a quartz movement (a quick step and a tiny
+// bounce), and when the clock screen opens the hands spin round from twelve.
 static void drawAnalogHands(const LumoState& s, const ClockNow& c, float fade, bool force) {
-  float sec = s.show_seconds ? (c.s / 60.0f) : -1.0f;
+  float tick = (c.s - 1) + easeTick(c.secFrac / 0.22f);
+  float sec = s.show_seconds ? (tick < 0 ? tick + 60 : tick) / 60.0f : -1.0f;
   float mn = (c.m + c.s / 60.0f) / 60.0f;
   float hr = ((c.h % 12) + c.m / 60.0f) / 12.0f;
-  if (!force && sec == dialLast[2] && fabsf(mn - dialLast[1]) < 0.002f) return;
+  float enter = animProgress(clockEnterMs, millis(), 900);
+  if (enter < 1) {
+    float e = easeOutBack(enter);
+    hr *= e; mn *= e;
+    if (sec >= 0) sec *= e;
+  }
+  if (!force && fabsf(sec - dialLast[2]) < 0.0004f && fabsf(mn - dialLast[1]) < 0.002f) return;
 
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
-  if (!force) {   // wipe the hands where they were
+  {   // wipe the hands where they were
     if (dialLast[0] >= 0) dialHand(dialLast[0], HAND_H, 5, COLOR_BG_BLACK);
     if (dialLast[1] >= 0) dialHand(dialLast[1], HAND_M, 3, COLOR_BG_BLACK);
     if (dialLast[2] >= 0) dialHand(dialLast[2], HAND_S, 1, COLOR_BG_BLACK);
@@ -314,21 +359,41 @@ static void drawAnalogHands(const LumoState& s, const ClockNow& c, float fade, b
 }
 
 static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, bool force) {
+  unsigned long now = millis();
+  if (clkShownM >= 0 && c.m != clkShownM && fade >= 1.0f) {
+    clkPrevH = clkShownH; clkPrevM = clkShownM;
+    clkTurnMs = now;
+    clkTurning = true;
+  }
+  clkShownH = c.h; clkShownM = c.m;
+  bool minimal = s.clock_style == CLOCK_MINIMAL;
+  bool turnFrame = clkTurning;
+  float tr = 1.0f;
+  if (clkTurning) {
+    tr = animProgress(clkTurnMs, now, minimal ? 640 : 460);
+    if (tr >= 1) clkTurning = false;            // this frame draws the end state
+  }
+
   // Colon breathes once per second; quantised so we only blit when it visibly changes.
   float pulse = 0.5f + 0.5f * cosf(c.secFrac * 6.2831853f);     // 1 -> 0 -> 1
   uint8_t step = (uint8_t)(pulse * 12.0f);
-  if (!force && step == clockLastColonStep && fade >= 1.0f) return;
+  if (!force && !turnFrame && step == clockLastColonStep && fade >= 1.0f) return;
   clockLastColonStep = step;
 
   uint16_t accent, ink, muted; const char* greeting;
   clockPalette(c, accent, ink, muted, greeting, fade);
   uint16_t colon = mix565(COLOR_BG_BLACK, ink, 0.45f + 0.55f * pulse);
 
-  uint8_t dispH = c.h % 12; if (dispH == 0) dispH = 12;
-  char hs[4], ms[4];
-  if (s.hour24) snprintf(hs, sizeof(hs), "%02d", c.h);
-  else snprintf(hs, sizeof(hs), "%d", dispH);
+  char hs[4], ms[4], phs[4], pms[4];
+  auto hourStr = [&](int h, char* out) {
+    int dh = h % 12; if (dh == 0) dh = 12;
+    if (s.hour24) snprintf(out, 4, "%02d", h);
+    else snprintf(out, 4, "%d", dh);
+  };
+  hourStr(c.h, hs);
   snprintf(ms, sizeof(ms), "%02d", c.m);
+  hourStr(clkPrevH >= 0 ? clkPrevH : c.h, phs);
+  snprintf(pms, sizeof(pms), "%02d", clkPrevM >= 0 ? clkPrevM : c.m);
 
   if (!canvasTried) {
     canvasTried = true;
@@ -373,11 +438,37 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
   }
   int x = ox + (CLK_CANVAS_W - total) / 2;
 
+  // One group of digits (hours or minutes), mid turn-over if it changed. The
+  // canvas cuts off whatever rolls past its edges; straight to the panel
+  // there is no animation.
+  bool animate = timeCanvas && tr < 1.0f;
+  auto group = [&](const char* from, const char* to, int gx) {
+    if (!animate || !strcmp(from, to)) {
+      g->setTextColor(ink);
+      g->setCursor(gx, baseline);
+      g->print(to);
+      return;
+    }
+    int fromX = gx;                             // the old digits leave from where the new ones land
+    if (minimal) {                              // fade out, then fade in
+      bool old = tr < 0.5f;
+      float u = easeInOutCubic(old ? 1 - tr * 2 : tr * 2 - 1);
+      g->setTextColor(mix565(COLOR_BG_BLACK, ink, u));
+      g->setCursor(old ? fromX : gx, baseline);
+      g->print(old ? from : to);
+    } else {                                    // roll up
+      int d = (int)(easeInOutCubic(tr) * CLK_CANVAS_H + 0.5f);
+      g->setTextColor(ink);
+      g->setCursor(fromX, baseline - d);
+      g->print(from);
+      g->setCursor(gx, baseline - d + CLK_CANVAS_H);
+      g->print(to);
+    }
+  };
+
   g->setFont(&FreeSans24pt7b);
   g->setTextSize(2);
-  g->setTextColor(ink);
-  g->setCursor(x - hx1, baseline);
-  g->print(hs);
+  group(phs, hs, x - hx1);
   x += wh + gap;
 
   // The colon is two squares centred on the digits, so it reads at a glance.
@@ -386,8 +477,7 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
   g->fillRect(x, top + digitH * 72 / 100 - dot / 2, dot, dot, colon);
   x += dot + gap;
 
-  g->setCursor(x - mx1, baseline);
-  g->print(ms);
+  group(pms, ms, x - mx1);
   x += wm + apGap;
 
   if (ap[0]) {
@@ -472,6 +562,8 @@ static void drawClockScreen(const LumoState& s, bool full) {
     clockLastBarPx = -1;
     clockLastMinute = -1;
     clockLastColonStep = 255;
+    clkShownM = -1;
+    clkTurning = false;
     dialLast[0] = dialLast[1] = dialLast[2] = -1;
     faceReset();
     // The classic time canvas and the smooth faces' buffer are big; keep only
@@ -590,6 +682,37 @@ static void drawSpotifyScreen(const LumoState& s, bool full) {
   tft.setTextColor(COLOR_MUTED);
   tft.setCursor(12, SY(188));
   tft.print("< Prev        OK Play/Pause        Next >");
+}
+
+// Four little level bars beside PLAYING that dance while music plays and lie
+// down when it's paused. Each bar is a few sines at unrelated speeds, so the
+// pattern never visibly repeats.
+void displaySpotifyTick(const LumoState& s) {
+  static unsigned long lastDraw = 0;
+  static float level[4] = { 0, 0, 0, 0 };
+  unsigned long now = millis();
+  if (now - lastDraw < 40) return;
+  float dt = (now - lastDraw) / 1000.0f;
+  if (dt > 0.2f) dt = 0.2f;
+  lastDraw = now;
+  const int x0 = 186, base = 136, maxH = 16, bw = 4, gapW = 3;
+  float t = now / 1000.0f;
+  uint8_t tr, tg, tb;
+  displayArtTint(tr, tg, tb);
+  uint16_t col = s.sp_playing ? tft.color565(tr, tg, tb) : COLOR_MUTED;
+  for (int i = 0; i < 4; i++) {
+    float target = 0.12f;
+    if (s.sp_playing) {
+      float v = 0.55f + 0.25f * sinf(t * (5.1f + i * 1.7f) + i * 1.3f)
+                      + 0.20f * sinf(t * (8.3f - i * 0.9f) + i * 2.1f);
+      target = 0.15f + 0.85f * animClamp(v);
+    }
+    level[i] += (target - level[i]) * (1 - expf(-dt / 0.06f));
+    int h = 2 + (int)(level[i] * (maxH - 2));
+    int x = x0 + i * (bw + gapW);
+    tft.fillRect(x, base - maxH, bw, maxH - h, COLOR_BG_BLACK);
+    tft.fillRect(x, base - h, bw, h, col);
+  }
 }
 
 static void drawTasksScreen(const LumoState& s) {

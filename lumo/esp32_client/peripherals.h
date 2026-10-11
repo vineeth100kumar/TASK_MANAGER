@@ -12,6 +12,7 @@ void     neoTick();                                   // call every loop; self-p
 void     neoSetMode(NeoMode mode, uint8_t brightness, uint16_t hue);
 void     applyNeoPixels(NeoMode mode, uint8_t brightness, uint16_t hue);  // alias of neoSetMode
 void     neoSetClockScreen(bool onClock);             // unlocks the seconds comet and chimes
+void     neoSetContext(ScreenMode screen, const LumoState& s);  // AUTO follows the screen and clock face
 void     neoSetSleep(bool sleeping);                  // sleep schedule: AUTO glow drops to a whisper
 void     neoSetAlarm(bool ringing);
 void     neoSetVoice(VoiceFx fx, float level);

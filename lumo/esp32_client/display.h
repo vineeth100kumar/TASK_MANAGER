@@ -20,6 +20,8 @@ void displayAlarmTick(const LumoState& s);
 void displayAlarmReset();
 void displayConnectingTick(const LumoState& s);
 void displayConnectingReset();
+void displaySpotifyTick(const LumoState& s);              // the level bars, ~25 fps
+void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b); // the cover's colour, for the light ring
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor);
 void onNewArt(const uint8_t* data, size_t len);
 void onNewMemoryStrip(const uint8_t* data, size_t len);
