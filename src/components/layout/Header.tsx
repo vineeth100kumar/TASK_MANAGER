@@ -104,6 +104,8 @@ export function Header({
       setActiveTitle('Canvas');
     } else if (activeView === 'radar') {
       setActiveTitle('Radar');
+    } else if (activeView === 'lumo') {
+      setActiveTitle('LUMO');
     } else if (activeWorkspace === 'all') {
       setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : lifeContext === 'work' ? 'All Work Items' : 'All Items');
     } else {

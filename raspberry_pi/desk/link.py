@@ -9,7 +9,10 @@ serves the clock and nothing else: the first frame has to be
 
 and anything else closes the connection. After that the clock sends READY
 when it wants a full redraw and BTN for each press; the Pi sends the JSON
-commands the firmware already draws (CLOCK, SCREEN, NOTIF, ...).
+commands the firmware already draws (CLOCK, SCREEN, NOTIF, ...). Firmware 2.7
+also reports how it is doing every 30 seconds:
+
+    {"evt": "STATUS", "ip": "192.168.1.40", "rssi": -58, "uptime": 3600, "heap": 81234, "ssid": "Home"}
 
 The token is made on first start and kept in Sage's data folder. It is shown
 in Sage's settings and typed into the clock's secrets.h once.
@@ -78,6 +81,8 @@ class ClockLink:
         self.fw = ""
         self.address = ""
         self.connected_at = 0.0
+        self.info: dict = {}          # the clock's last STATUS
+        self.last_seen = 0.0
         self.on_ready: Optional[Ready] = None
         self.on_button: Optional[Button] = None
         self._send_lock = asyncio.Lock()
@@ -93,6 +98,8 @@ class ClockLink:
             "firmware": self.fw or None,
             "address": self.address or None,
             "connectedAt": int(self.connected_at * 1000) if self.connected else None,
+            "lastSeen": int(self.last_seen * 1000) if self.last_seen else None,
+            "wifi": dict(self.info) if self.info else None,
         }
 
     def token_matches(self, candidate: Any) -> bool:
@@ -146,7 +153,8 @@ class ClockLink:
         self.fw = str(first.get("fw") or "")
         remote = getattr(socket, "remote_address", None)
         self.address = str(remote[0]) if isinstance(remote, tuple) and remote else ""
-        self.connected_at = time.time()
+        self.connected_at = self.last_seen = time.time()
+        self.info = {}
         if previous is not None and previous is not socket:
             try:
                 await previous.close(1000, "replaced")
@@ -162,11 +170,15 @@ class ClockLink:
                 msg = _parse(raw)
                 if not msg:
                     continue
+                self.last_seen = time.time()
                 evt = msg.get("evt")
                 if evt == "READY":
                     self.fw = str(msg.get("fw") or self.fw)
                     if self.on_ready:
                         await self._call(self.on_ready)
+                elif evt == "STATUS":
+                    self.info = {k: msg[k] for k in ("ip", "rssi", "uptime", "heap", "ssid")
+                                 if isinstance(msg.get(k), (int, float, str)) and not isinstance(msg.get(k), bool)}
                 elif evt == "BTN" and self.on_button:
                     await self._call(self.on_button, str(msg.get("btn") or ""))
         except Exception as e:

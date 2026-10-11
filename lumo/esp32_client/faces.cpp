@@ -903,3 +903,197 @@ void nowPlayingTick(const LumoState& s) {
   npBars(s, k, t, bdt);
   npNeedAll = false;
 }
+
+// ------------------------------------------------------------- Timer, stopwatch, world
+// Firmware 2.7. Sage keeps the timer and stopwatch (desk/tools.py) and says
+// where they stand; these screens count between its messages. Each band is
+// redrawn only when what it shows changes.
+
+static const uint16_t TOOL_BG = 0x0841;
+static bool toolAll = true;
+static char toolTitleShown[32], toolBigShown[24], toolHintShown[64];
+static int  toolBarShown = -1, toolLapsShown = -1, toolMinuteShown = -1;
+static uint16_t toolInkShown = 0;
+
+void toolScreenReset() {
+  toolAll = true;
+  toolTitleShown[0] = toolBigShown[0] = toolHintShown[0] = '\0';
+  toolBarShown = toolLapsShown = toolMinuteShown = -1;
+}
+
+// "4:59", or past an hour "1:02" with the seconds apart (":34"); the
+// stopwatch adds tenths (".7") under an hour.
+static void splitTime(uint32_t ms, bool tenths, char* big, size_t bn, char* small, size_t sn) {
+  unsigned long secs = ms / 1000;
+  unsigned long h = secs / 3600, m = (secs / 60) % 60, sec = secs % 60;
+  if (h) {
+    snprintf(big, bn, "%lu:%02lu", h, m);
+    snprintf(small, sn, ":%02lu", sec);
+  } else {
+    snprintf(big, bn, "%lu:%02lu", m, sec);
+    if (tenths) snprintf(small, sn, ".%lu", (unsigned long)(ms / 100) % 10);
+    else small[0] = '\0';
+  }
+}
+
+static void toolLine(const char* text, int baseline, const AAFont& f, uint16_t color, char* shown, size_t n) {
+  if (!toolAll && strcmp(text, shown) == 0) return;
+  strlcpy(shown, text, n);
+  AASurface sf;
+  if (band(sf, 0, 320, baseline, f, TOOL_BG)) {
+    char fitted[64];
+    strlcpy(fitted, text, sizeof(fitted));
+    fitText(fitted, f, 300);
+    aaTextCentered(sf, 160, baseline, fitted, f, color);
+    aaEnd(sf);
+  }
+}
+
+// The big time, with its small part (seconds past an hour, or tenths) after it.
+static void toolBig(uint32_t ms, bool tenths, uint16_t ink) {
+  char big[12], small[8], key[24];
+  splitTime(ms, tenths, big, sizeof(big), small, sizeof(small));
+  snprintf(key, sizeof(key), "%s%s", big, small);
+  if (!toolAll && ink == toolInkShown && strcmp(key, toolBigShown) == 0) return;
+  strlcpy(toolBigShown, key, sizeof(toolBigShown));
+  toolInkShown = ink;
+  const AAFont& f = AA_MONO_TIME;
+  const int base = VY(124);
+  AASurface sf;
+  if (!aaBegin(sf, 0, base - f.ascent - 1, 320, f.ascent + f.descent + 3, TOOL_BG)) return;
+  int wb = aaTextWidth(f, big), ws = small[0] ? aaTextWidth(AA_DISP20, small) + 4 : 0;
+  int x = 160 - (wb + ws) / 2;
+  x = aaText(sf, x, base, big, f, ink);
+  if (small[0]) aaText(sf, x + 4, base, small, AA_DISP20, aaMix(ink, TOOL_BG, 70));
+  aaEnd(sf);
+}
+
+static void timerScreen(const LumoState& s) {
+  uint32_t left = 0;
+  if (s.tm_state == TOOL_RUNNING) left = (int32_t)(s.tm_end - millis()) > 0 ? s.tm_end - millis() : 0;
+  else if (s.tm_state == TOOL_PAUSED) left = s.tm_left_ms;
+  else if (s.tm_state == TOOL_IDLE) left = s.tm_total_ms;
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), amber = aaRGB(255, 166, 64);
+
+  toolLine(s.tm_label[0] ? s.tm_label : "Timer", VY(34), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+
+  uint16_t ink = white;
+  if (s.tm_state == TOOL_PAUSED) ink = muted;
+  else if (s.tm_state == TOOL_IDLE) ink = aaRGB(70, 76, 86);
+  else if (s.tm_state == TOOL_DONE) {
+    float k = 0.5f + 0.5f * sinf(millis() / 1000.0f * 6.2831853f * 1.2f);
+    ink = aaMix(amber, white, (uint8_t)(k * 200));
+  }
+  // Rounded up, so "0:00" shows only when it has run out.
+  toolBig(s.tm_state == TOOL_RUNNING || s.tm_state == TOOL_PAUSED ? ((left + 999) / 1000) * 1000 : left, false, ink);
+
+  // What's left, as a bar.
+  int fill = s.tm_total_ms && s.tm_state != TOOL_IDLE ? (int)(240.0f * left / s.tm_total_ms + 0.5f) : 0;
+  if (toolAll || fill != toolBarShown) {
+    toolBarShown = fill;
+    AASurface sf;
+    const int y = VY(150);
+    if (aaBegin(sf, 36, y - 4, 248, 9, TOOL_BG)) {
+      aaRoundRect(sf, 40, y - 2, 240, 4, 2, aaRGB(32, 36, 44));
+      if (fill > 1) aaRoundRect(sf, 40, y - 2, fill, 4, 2, amber);
+      aaEnd(sf);
+    }
+  }
+
+  const char* hint = s.tm_state == TOOL_RUNNING ? "OK pause    < cancel    > 1 more min"
+                   : s.tm_state == TOOL_PAUSED  ? "OK carry on    < cancel"
+                   : s.tm_state == TOOL_DONE    ? "Time's up. Press any button."
+                   : "OK starts it again. Set timers in Sage.";
+  toolLine(hint, VY(196), AA_BODY11, s.tm_state == TOOL_DONE ? amber : muted, toolHintShown, sizeof(toolHintShown));
+}
+
+static void stopwatchScreen(const LumoState& s) {
+  uint32_t ms = s.sw_base_ms + (s.sw_running ? millis() - s.sw_mark : 0);
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), teal = aaRGB(70, 220, 190);
+  toolLine("Stopwatch", VY(34), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+  toolBig(ms, true, s.sw_running || ms == 0 ? white : muted);
+
+  // The last laps, newest first, numbered as Sage counts them.
+  int laps = s.sw_lap_count * 8 + s.sw_lap_shown;
+  if (toolAll || laps != toolLapsShown) {
+    toolLapsShown = laps;
+    AASurface sf;
+    const int top = VY(140), h = VY(188) - top;
+    if (aaBegin(sf, 0, top, 320, h, TOOL_BG)) {
+      int rows = min((int)s.sw_lap_shown, 3);
+      for (int i = 0; i < rows; i++) {
+        int idx = s.sw_lap_shown - 1 - i;
+        char name[12], big[12], small[8], t[24];
+        snprintf(name, sizeof(name), "Lap %u", (unsigned)(s.sw_lap_count - i));
+        splitTime(s.sw_laps[idx], true, big, sizeof(big), small, sizeof(small));
+        snprintf(t, sizeof(t), "%s%s", big, small);
+        int base = top + 13 + i * 16;
+        uint16_t c = i == 0 ? teal : muted;
+        aaText(sf, 96, base, name, AA_BODY11, c);
+        aaTextRight(sf, 224, base, t, AA_BODY11, c);
+      }
+      aaEnd(sf);
+    }
+  }
+
+  const char* hint = s.sw_running ? "OK pause    > lap" : ms ? "OK carry on    < reset" : "OK start";
+  toolLine(hint, VY(204), AA_BODY11, muted, toolHintShown, sizeof(toolHintShown));
+}
+
+static void worldScreen(const LumoState& s, const ClockNow& c) {
+  if (!toolAll && c.m == toolMinuteShown) return;
+  toolMinuteShown = c.m;
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), line = aaRGB(30, 34, 42);
+  toolLine("World", VY(26), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+  if (!s.wc_count) {
+    toolLine("Add places on the LUMO page in Sage", VY(118), AA_BODY11, muted, toolHintShown, sizeof(toolHintShown));
+    toolAll = false;
+    return;
+  }
+  int here = c.h * 60 + c.m;
+  int rows = s.wc_count + 1;
+  int rowH = (VY(210) - VY(40)) / rows;
+  for (int r = 0; r < rows; r++) {
+    int mins = here + (r ? s.wc_offset[r - 1] : 0);
+    int dayShift = mins < 0 ? -1 : mins >= 1440 ? 1 : 0;
+    mins = (mins % 1440 + 1440) % 1440;
+    char hs[4], t[16], sub[32];
+    hourText(s, mins / 60, hs, sizeof(hs));
+    if (s.hour24) snprintf(t, sizeof(t), "%s:%02d", hs, mins % 60);
+    else snprintf(t, sizeof(t), "%s:%02d %s", hs, mins % 60, mins >= 720 ? "PM" : "AM");
+    if (r == 0) {
+      snprintf(sub, sizeof(sub), "%s", s.weekday);
+    } else {
+      int off = s.wc_offset[r - 1], a = abs(off);
+      const char* day = dayShift < 0 ? "Yesterday" : dayShift > 0 ? "Tomorrow" : "Today";
+      if (!off) snprintf(sub, sizeof(sub), "%s, same time", day);
+      else if (a % 60) snprintf(sub, sizeof(sub), "%s, %d:%02d %s", day, a / 60, a % 60, off > 0 ? "ahead" : "behind");
+      else snprintf(sub, sizeof(sub), "%s, %d h %s", day, a / 60, off > 0 ? "ahead" : "behind");
+    }
+    AASurface sf;
+    int top = VY(40) + r * rowH;
+    if (aaBegin(sf, 0, top, 320, rowH, TOOL_BG)) {
+      if (r) aaLine(sf, 24, top + 0.5f, 296, top + 0.5f, 1, line);
+      int mid = top + rowH / 2;
+      aaText(sf, 24, mid - 2, r ? s.wc_name[r - 1] : "Here", AA_SEMI11, r ? white : muted);
+      aaText(sf, 24, mid + 14, sub, AA_BODY11, muted);
+      aaTextRight(sf, 296, mid + 8, t, AA_DISP20, r ? white : muted);
+      aaEnd(sf);
+    }
+  }
+}
+
+void toolScreenTick(ScreenMode screen, const LumoState& s) {
+  static unsigned long last = 0;
+  unsigned long now = millis();
+  if (!toolAll && now - last < 40) return;   // ~25 fps is plenty
+  last = now;
+  if (screen == SCREEN_TIMER) timerScreen(s);
+  else if (screen == SCREEN_STOPWATCH) stopwatchScreen(s);
+  else if (screen == SCREEN_WORLD) {
+    ClockNow c = clockNow();
+    if (!c.synced) { c.h = s.h; c.m = s.m; }
+    worldScreen(s, c);
+  }
+  toolAll = false;
+}

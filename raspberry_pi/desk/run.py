@@ -3,6 +3,8 @@
 import asyncio
 import datetime
 import logging
+import re
+from pathlib import Path
 from typing import Callable, Optional
 
 import notifier
@@ -44,14 +46,39 @@ def _radar_line():
         return None
 
 
+# The firmware in this checkout: what the clock could be running after a flash.
+FIRMWARE_CONFIG = Path(__file__).resolve().parents[2] / "lumo" / "esp32_client" / "config.h"
+
+
+def latest_firmware(path: Path = FIRMWARE_CONFIG) -> Optional[str]:
+    try:
+        match = re.search(r'#define\s+FW_VERSION\s+"([^"]+)"', path.read_text(encoding="utf-8"))
+    except OSError:
+        return None
+    return match.group(1) if match else None
+
+
+def _version(text) -> tuple:
+    try:
+        return tuple(int(x) for x in str(text or "").split("."))
+    except ValueError:
+        return ()
+
+
 def status(enabled: bool) -> dict:
     """What Sage's settings show about the clock. The token is only ever
     served behind Sage's key or login, like every other /api route."""
     from desk.link import PORT
-    base = {"enabled": enabled, "port": PORT}
+    latest = latest_firmware()
+    base = {"enabled": enabled, "port": PORT, "latestFirmware": latest}
     if link is None:
-        return {**base, "connected": False, "token": load_token() if enabled else None}
-    return {**base, **link.status(), "token": link.token}
+        return {**base, "connected": False, "token": load_token() if enabled else None, "updateAvailable": False, "state": None}
+    running = link.fw
+    return {
+        **base, **link.status(), "token": link.token,
+        "updateAvailable": bool(latest and running and _version(latest) > _version(running)),
+        "state": desk.state() if desk is not None else None,
+    }
 
 
 async def save_settings(update: dict) -> dict:
@@ -68,6 +95,26 @@ async def reset_settings() -> dict:
     if desk is not None:
         await desk.apply_settings(saved)
     return saved
+
+
+def running() -> bool:
+    return desk is not None
+
+
+async def timer(action: str, seconds: int = 0, label: str = "") -> None:
+    await desk.timer_do(action, seconds, label)
+
+
+async def stopwatch(action: str) -> None:
+    await desk.stopwatch_do(action)
+
+
+async def ringing(action: str) -> bool:
+    return await desk.ringing_do(action)
+
+
+async def device(action: str, tone: str = "", volume: int = 0) -> bool:
+    return await desk.device_do(action, tone, volume)
 
 
 async def press(button: str) -> bool:

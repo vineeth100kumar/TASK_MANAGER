@@ -27,6 +27,7 @@ import { NotesView } from './components/views/NotesView';
 import { NotesLock } from './components/notes/NotesLock';
 import { CanvasView } from './components/views/CanvasView';
 import { RadarView } from './components/views/RadarView';
+import { LumoView } from './components/views/LumoView';
 import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
@@ -395,6 +396,8 @@ function MainApp() {
                 onOpenProject={(id) => { setActiveWorkspace(id); setPresentationMode('branches'); setActiveView('tasks'); }}
                 onOpenNote={(id) => { setOpenNoteId(id); setActiveView('notes'); }}
               />
+            ) : activeView === 'lumo' ? (
+              <LumoView />
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (

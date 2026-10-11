@@ -91,3 +91,36 @@ def move_to_tomorrow(item_id: str, source: str, today: datetime.date) -> Optiona
 
 def set_fields(item_id: str, fields: dict, source: str) -> Optional[Tuple[dict, int]]:
     return update_item(item_id, lambda item: item.update(fields), source, f"{source}-edit")
+
+
+def create_item(payload: dict, source: str, label: str) -> Tuple[dict, int]:
+    """Save a new work item made on the Pi (an alarm from the LUMO page, say).
+    It gets a key like TASK-12, which the web app expects every item to have."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.cursor()
+        item = dict(payload)
+        if not str(item.get("key") or "").strip():
+            count = sum(
+                1 for (raw,) in cursor.execute("SELECT payload FROM entities WHERE table_name = 'workItems'")
+                if str((json.loads(raw) or {}).get("key") or "").startswith("TASK")
+            )
+            item["key"] = f"TASK-{count + 1}"
+        now = utc_now().isoformat()
+        item.setdefault("createdAt", now)
+        item["updatedAt"] = now
+        item.setdefault("version", 1)
+        rev = next_revision(cursor)
+        cursor.execute(
+            "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
+            ("workItems", item["id"], json.dumps(item), rev),
+        )
+        cursor.execute(
+            "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+            (f"{label}-{item['id']}-{rev}", source, "workItems", item["id"], "save"),
+        )
+        conn.commit()
+        return item, rev
+    finally:
+        conn.close()
+
