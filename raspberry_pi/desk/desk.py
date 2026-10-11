@@ -22,7 +22,7 @@ The clock only draws and reports button presses; this decides what it shows:
 - Settings changed in Sage (desk/settings.py) apply at once, and Sage can
   press the clock's buttons itself (press).
 - The LUMO page in Sage runs a timer and a stopwatch here (tools.py) and
-  shows them on the clock (firmware 2.7), keeps the World screen's places,
+  shows them on the clock (firmware 2.8), keeps the World screen's places,
   dims everything at night, and can ring a tone, flash the clock to find it
   or restart it. Whatever it changes is announced as DESK_STATE, so an open
   page follows along.
@@ -52,7 +52,7 @@ NIGHT_EVERY = 20
 WORLD_EVERY = 15 * 60
 # Firmware that draws the timer, stopwatch and world screens, plays the alarm
 # tones and takes the haptics and night settings.
-TOOLS_FIRMWARE = (2, 7)
+TOOLS_FIRMWARE = (2, 8)
 
 
 class Desk:
@@ -408,6 +408,13 @@ class Desk:
             return {"mode": night["lightsMode"], "brightness": night["brightness"]}
         return dict(self.settings["lights"])
 
+    async def send_haptics(self) -> None:
+        """The haptics: strength (firmware 2.7+, kept in flash, one tick when
+        it changes) and which events knock (2.8+). Older firmware ignores it."""
+        haptics = self.settings["haptics"]
+        await self.link.send({"cmd": "HAPTICS", "strength": haptics["strength"],
+                              "buttons": haptics["buttons"], "notify": haptics["notifications"]})
+
     def clock_extra(self) -> dict:
         """How to show the time, sent with every CLOCK (firmware 1.6 ignores
         these; LUMO 2 draws the clock styles from them)."""
@@ -432,6 +439,7 @@ class Desk:
                 self.controller.screen = new["homeScreen"]
             return
         await self.controller.send_lights()
+        await self.send_haptics()
         await self.controller.send_clock()
         await self.send_alarms()
         await self.send_tool_settings(force=True)
@@ -445,6 +453,7 @@ class Desk:
     async def after_redraw(self) -> None:
         """The rest of what a freshly connected clock needs."""
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
+        await self.send_haptics()
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
@@ -477,7 +486,7 @@ class Desk:
         return {"cmd": "WORLD", "zones": zones}
 
     async def send_tool_settings(self, force: bool = False) -> None:
-        """World places, haptics and night, for firmware 2.7 and later. The
+        """World places and night, for firmware 2.8 and later. The
         places are re-sent when an offset changes (summer time)."""
         if not self.has_tools:
             return
@@ -486,8 +495,6 @@ class Desk:
             if await self.link.send(world):
                 self.sent_world = world
         if force:
-            haptics = self.settings["haptics"]
-            await self.link.send({"cmd": "HAPTICS", "buttons": haptics["buttons"], "notify": haptics["notifications"]})
             await self.link.send({"cmd": "NIGHT", "on": self.night})
 
     async def night_tick(self) -> None:

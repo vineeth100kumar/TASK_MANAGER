@@ -244,16 +244,28 @@ static void handleTextMessage(const String& payload) {
     neoSetMode(nm, bri, hue);
   }
   else if (strcmp(cmd, "HAPTIC") == 0) {
-    // A named pattern, or a length: Sage sends 300 ms with a reminder.
+    // A named effect, or a length: Sage sends 300 ms with a reminder.
     const char* pattern = doc["pattern"] | "";
     uint16_t ms = doc["ms"] | 50;
     lastHapticCmd = millis();
     if (!s.hap_notify) return;   // knocks for notifications are off in Sage
-    if      (!strcmp(pattern, "tap"))      hapticPlay(HAP_TAP);
-    else if (!strcmp(pattern, "notify"))   hapticPlay(HAP_NOTIFY);
-    else if (!strcmp(pattern, "success"))  hapticPlay(HAP_SUCCESS);
-    else if (!strcmp(pattern, "reminder") || ms >= 250) hapticPlay(HAP_REMINDER);
+    if (pattern[0] && hapticPlayNamed(pattern)) {}
+    else if (ms >= 250) hapticPlay(HAP_REMINDER);
     else hapticPulse(ms);
+  }
+  else if (strcmp(cmd, "HAPTICS") == 0) {
+    // Which events knock, and the strength set in Sage. A change of
+    // strength plays one tick so you feel it.
+    s.hap_buttons = doc["buttons"] | s.hap_buttons;
+    s.hap_notify  = doc["notify"]  | s.hap_notify;
+    int pct = doc["strength"] | (int)s.haptic_strength;
+    pct = constrain(pct, 0, 100);
+    if (pct != s.haptic_strength) {
+      s.haptic_strength = pct;
+      hapticSetStrength(pct);
+      storeSaveHaptics(s);
+      hapticPlay(HAP_TICK);
+    }
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
     strlcpy(s.alarm_label, doc["label"] | "", sizeof(s.alarm_label));
@@ -301,10 +313,6 @@ static void handleTextMessage(const String& payload) {
       s.wc_count++;
     }
     s.flag_tools_changed = true;
-  }
-  else if (strcmp(cmd, "HAPTICS") == 0) {
-    s.hap_buttons = doc["buttons"] | true;
-    s.hap_notify  = doc["notify"]  | true;
   }
   else if (strcmp(cmd, "NIGHT") == 0) {
     s.night = doc["on"] | false;

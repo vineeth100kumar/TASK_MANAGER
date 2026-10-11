@@ -28,7 +28,7 @@ const TABS: { id: Tab; name: string; icon: typeof Clock }[] = [
 ];
 
 const TAB_KEY = 'sage-lumo-tab';
-const TOOLS_FIRMWARE = '2.7.0';
+const TOOLS_FIRMWARE = '2.8.0';
 
 export function LumoView() {
   const { showToast } = useToast();

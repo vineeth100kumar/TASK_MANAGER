@@ -206,7 +206,7 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
         self.clock = at(6, 0)
         self.items = [with_days(alarm(), [2], tone="rising", volume=40, snoozeMinutes=9)]
         self.link = FakeLink()
-        self.link.fw = "2.7.0"
+        self.link.fw = "2.8.0"
         self.events = []
 
         async def broadcast(event):
@@ -270,7 +270,7 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
         await self.desk.apply_settings(settings.merge(settings.defaults(), {
             "world": {"zones": ["Europe/London", "Asia/Tokyo"]}, "haptics": {"buttons": False}}))
         self.assertEqual(self.link.last("WORLD")["zones"], [{"name": "London", "offset": -270}, {"name": "Tokyo", "offset": 210}])
-        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "buttons": False, "notify": True})
+        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 70, "buttons": False, "notify": True})
 
     async def test_device_actions(self):
         self.assertTrue(await self.desk.device_do("identify"))

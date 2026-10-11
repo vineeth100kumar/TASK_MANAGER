@@ -66,7 +66,12 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
         </div>
       </Panel>
 
-      <Panel icon={<Vibrate size={16} className="text-rose-500" />} title="Haptics" note={toolsSupported ? undefined : 'Needs firmware 2.7'}>
+      <Panel icon={<Vibrate size={16} className="text-rose-500" />} title="Haptics" note={toolsSupported ? undefined : 'The switches need firmware 2.8'}>
+        <div className="space-y-2">
+          <div className="text-[13px] font-medium text-gray-500">Strength</div>
+          <Slider label="Haptic strength" value={settings.haptics.strength} min={0} max={100}
+            format={v => (v === 0 ? 'Off' : `${v}%`)} onCommit={v => save({ haptics: { strength: v } })} />
+        </div>
         <Row title="Knock on every button press" hint="A silent tap you feel">
           <Toggle on={settings.haptics.buttons} onChange={on => save({ haptics: { buttons: on } })} label="Button knocks" />
         </Row>

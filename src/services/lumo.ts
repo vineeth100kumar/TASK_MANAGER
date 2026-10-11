@@ -77,7 +77,7 @@ export interface LumoSettings {
   lights: { mode: string; brightness: number };
   world: { zones: string[] };
   night: { enabled: boolean; start: string; end: string; face: string; lightsMode: string; brightness: number };
-  haptics: { buttons: boolean; notifications: boolean };
+  haptics: { strength: number; buttons: boolean; notifications: boolean };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
 

@@ -84,7 +84,7 @@ export function DeviceTab({ status, settings, save, onChange }: {
             </div>
           ))}
         </dl>
-        {connected && !w.ssid && <p className="text-[12px] text-gray-400">Wi-Fi details and uptime show from firmware 2.7.</p>}
+        {connected && !w.ssid && <p className="text-[12px] text-gray-400">Wi-Fi details and uptime show from firmware 2.8.</p>}
       </Panel>
 
       <Panel icon={<Cpu size={16} className="text-blue-600" />} title="Firmware">
@@ -95,7 +95,7 @@ export function DeviceTab({ status, settings, save, onChange }: {
               <div className="mt-0.5">LUMO runs {status.firmware}. It updates over USB from your laptop.</div>
             </div>
             <ol className="list-decimal pl-5 space-y-1 text-[13px] text-gray-600 dark:text-gray-300">
-              <li>Open the <b>lumo_fw2</b> sketch in the Arduino IDE (its files are updated for you).</li>
+              <li>Open the <b>lumo_fw2</b> sketch in the Arduino IDE, with the files from Sage's <b>lumo/esp32_client</b> folder.</li>
               <li>Plug LUMO in with USB and pick its port.</li>
               <li>Press Upload. LUMO restarts and reconnects by itself.</li>
             </ol>

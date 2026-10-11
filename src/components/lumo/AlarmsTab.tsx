@@ -165,7 +165,7 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
                   {[1, 2, 5, 10, 15, 20, 30].map(m => <option key={m} value={m}>{m} min</option>)}
                 </select>
               </Row>
-              {!tonesSupported && <p className="text-[12px] text-amber-700 dark:text-amber-400">The sound and volume need LUMO firmware 2.7. Until it's flashed, every alarm pulses.</p>}
+              {!tonesSupported && <p className="text-[12px] text-amber-700 dark:text-amber-400">The sound and volume need LUMO firmware 2.8. Until it's flashed, every alarm pulses.</p>}
             </div>
           )}
         </Panel>

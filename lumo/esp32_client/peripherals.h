@@ -20,12 +20,18 @@ void     neoPing(uint8_t r, uint8_t g, uint8_t b);    // two soft pulses, e.g. a
 void     neoClear();
 
 Button   readButton();
-// Named patterns, played without blocking (see peripherals.cpp).
-enum Haptic { HAP_TAP, HAP_HOLD, HAP_NOTIFY, HAP_REMINDER, HAP_SUCCESS, HAP_ALARM };
+// The haptic engine's effects, played without blocking (see peripherals.cpp).
+// All are silent (motor only) except HAP_ALARM, the one audible sound.
+enum Haptic { HAP_TICK, HAP_HOLD, HAP_TAP, HAP_NOTIFY, HAP_REMINDER, HAP_SUCCESS,
+              HAP_WARNING, HAP_PULSE, HAP_RAMP_UP, HAP_RAMP_DOWN, HAP_HEARTBEAT, HAP_ALARM,
+              HAP_COUNT };
+void     hapticInit(uint8_t strength);                 // strength 0-100, 0 = silent effects off
 void     hapticPlay(Haptic h);                         // HAP_ALARM loops until hapticOff()
 void     hapticRing(AlarmTone tone, uint8_t volume);   // an alarm's sound, looped until hapticOff()
 void     hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds);   // a few seconds of it
-bool     hapticRinging();                              // an alarm or timer is sounding
+bool     hapticPlayNamed(const char* name);            // "tick", "notify", "pulse"...; false if unknown
 void     hapticPulse(uint16_t ms);
+void     hapticSetStrength(uint8_t pct);
+uint8_t  hapticStrength();
 void     hapticOff();
-void     hapticUpdate();
+void     hapticUpdate();                               // a fallback; the engine runs on its own timer

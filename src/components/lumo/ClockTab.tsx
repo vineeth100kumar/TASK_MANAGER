@@ -15,13 +15,13 @@ export const FACES: { id: string; name: string; hint: string; classic?: boolean 
   { id: 'analog', name: 'Classic analog', hint: 'Thin dial and hands', classic: true },
 ];
 
-const SCREENS: { id: string; name: string; hint: string; needs27?: boolean }[] = [
+const SCREENS: { id: string; name: string; hint: string; needs28?: boolean }[] = [
   { id: 'CLOCK', name: 'Clock', hint: 'The face you picked' },
   { id: 'TASKS', name: 'Today', hint: "Today's tasks from Sage" },
   { id: 'SPOTIFY', name: 'Now playing', hint: "What your phone's playing" },
-  { id: 'TIMER', name: 'Timer', hint: 'OK pauses, RIGHT adds a minute', needs27: true },
-  { id: 'STOPWATCH', name: 'Stopwatch', hint: 'OK starts, RIGHT laps', needs27: true },
-  { id: 'WORLD', name: 'World', hint: 'Your places side by side', needs27: true },
+  { id: 'TIMER', name: 'Timer', hint: 'OK pauses, RIGHT adds a minute', needs28: true },
+  { id: 'STOPWATCH', name: 'Stopwatch', hint: 'OK starts, RIGHT laps', needs28: true },
+  { id: 'WORLD', name: 'World', hint: 'Your places side by side', needs28: true },
   { id: 'SYSTEM', name: 'Pi vitals', hint: 'Temperature, CPU and memory' },
 ];
 
@@ -119,7 +119,7 @@ export function ClockTab({ settings, save, toolsSupported }: { settings: LumoSet
               </div>
             </div>
           )}
-          <p className="text-[12px] text-gray-400">Shown on LUMO's World screen{toolsSupported ? '' : ' (needs firmware 2.7)'}. Add World to the screens to step to it.</p>
+          <p className="text-[12px] text-gray-400">Shown on LUMO's World screen{toolsSupported ? '' : ' (needs firmware 2.8)'}. Add World to the screens to step to it.</p>
         </Panel>
 
         <Panel icon={<LayoutGrid size={16} className="text-purple-500" />} title="Screens" note="UP and DOWN step through these">
@@ -132,7 +132,7 @@ export function ClockTab({ settings, save, toolsSupported }: { settings: LumoSet
                     <div className="text-[14px] font-medium text-gray-900 dark:text-white flex items-center gap-2">
                       {s.name}
                       {settings.homeScreen === s.id && <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md text-blue-600 bg-blue-500/10">Home</span>}
-                      {s.needs27 && !toolsSupported && <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md text-amber-700 dark:text-amber-400 bg-amber-500/10">FW 2.7</span>}
+                      {s.needs28 && !toolsSupported && <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md text-amber-700 dark:text-amber-400 bg-amber-500/10">FW 2.8</span>}
                     </div>
                     <div className="text-[12px] text-gray-500 dark:text-gray-400 truncate">{s.hint}</div>
                   </div>

@@ -126,10 +126,8 @@ void setup() {
   delay(200);
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
-  ledcAttach(BUZZER_PIN, HAPTIC_FREQ, HAPTIC_RES);
-  ledcWrite(BUZZER_PIN, 255);
-
   storeLoad(lumoState);
+  hapticInit(lumoState.haptic_strength);
   initNeoPixels();
   displayInit();
 
@@ -182,7 +180,7 @@ void loop() {
 
   Button btn = readButton();
   if (btn != BTN_NONE) {
-    if (lumoState.hap_buttons) hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TAP);
+    if (lumoState.hap_buttons) hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
     if (lumoState.tm_state == TOOL_DONE && !lumoState.alarm_ringing) {
       // Any button stops a finished timer; Sage hears it too and agrees.
       lumoState.tm_state = TOOL_IDLE;

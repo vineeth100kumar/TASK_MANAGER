@@ -2,8 +2,8 @@
 settings.py - the desk clock's settings, changed from Sage.
 
 Which screens UP and DOWN step through, what every button does on each screen,
-the alarm's snooze and ring length, the lights, and how the clock shows the
-time. They live in Sage's metadata table (key `deskSettings`) next to the
+the alarm's snooze and ring length, the lights, how strong the haptics are,
+and how the clock shows the time. They live in Sage's metadata table (key `deskSettings`) next to the
 notification preferences, and reach the clock the moment they are saved.
 
 A button map is a set of layers. While an alarm rings the `alarm` layer
@@ -24,7 +24,7 @@ KEY = "deskSettings"
 BUTTONS = ("UP", "DOWN", "LEFT", "OK", "RIGHT", "HOLD_OK")
 # The screens UP and DOWN can step through. (Firmware 1.6 also has a face,
 # kept only as the place it draws cards; see controller.py.) The timer,
-# stopwatch and world clock screens need firmware 2.7.
+# stopwatch and world clock screens need firmware 2.8.
 SCREENS = ("CLOCK", "TASKS", "SPOTIFY", "SYSTEM", "TIMER", "STOPWATCH", "WORLD")
 LAYERS = ("default", "alarm") + SCREENS
 ACTIONS = (
@@ -40,7 +40,7 @@ ACTIONS = (
 # added in firmware 2.1 (an older clock keeps its style if sent one of those).
 CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial")
 LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
-# The buzzer's alarm patterns (firmware 2.7; older firmware always pulses).
+# The buzzer's alarm patterns (firmware 2.8; older firmware always pulses).
 ALARM_TONES = ("pulse", "classic", "rising", "chirp")
 MAX_WORLD_CLOCKS = 3
 
@@ -58,9 +58,10 @@ DEFAULTS: Dict[str, Any] = {
     # the usual one) and knocks are softer.
     "night": {"enabled": False, "start": "22:30", "end": "07:00", "face": "nightstand",
               "lightsMode": "WARM", "brightness": 12},
-    # The silent knocks (firmware 2.7): on each button press, and twice for a
-    # notification or reminder. The alarm always sounds.
-    "haptics": {"buttons": True, "notifications": True},
+    # The silent knocks: how hard the motor knocks, 0-100 (0 = off; firmware
+    # 2.7+), and whether to knock on each button press and twice for a
+    # notification or reminder (firmware 2.8+). The alarm always rings.
+    "haptics": {"strength": 70, "buttons": True, "notifications": True},
     "buttons": {
         "locked": False,
         "map": {
@@ -192,18 +193,20 @@ def merge(current: dict, update: dict) -> dict:
         if "brightness" in night:
             out["night"]["brightness"] = _int(night["brightness"], "night.brightness", 0, 255)
 
-    if "haptics" in update:
-        haptics = _section(update["haptics"], "haptics")
-        for name in ("buttons", "notifications"):
-            if name in haptics:
-                out["haptics"][name] = _bool(haptics[name], f"haptics.{name}")
-
     if "lights" in update:
         lights = _section(update["lights"], "lights")
         if "mode" in lights:
             out["lights"]["mode"] = _choice(lights["mode"], "lights.mode", LIGHT_MODES)
         if "brightness" in lights:
             out["lights"]["brightness"] = _int(lights["brightness"], "lights.brightness", 0, 255)
+
+    if "haptics" in update:
+        haptics = _section(update["haptics"], "haptics")
+        if "strength" in haptics:
+            out["haptics"]["strength"] = _int(haptics["strength"], "haptics.strength", 0, 100)
+        for name in ("buttons", "notifications"):
+            if name in haptics:
+                out["haptics"][name] = _bool(haptics[name], f"haptics.{name}")
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")

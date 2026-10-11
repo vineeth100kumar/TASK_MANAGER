@@ -37,7 +37,7 @@ CARD_SECONDS = 120
 ACTION_BUTTONS = ("LEFT", "OK", "RIGHT")
 # Every screen the firmware can be told to show, in or out of the UP/DOWN loop.
 # FACE is firmware 1.x's, where it draws cards; firmware 2 has no face. The
-# timer, stopwatch and world clock screens came with firmware 2.7.
+# timer, stopwatch and world clock screens came with firmware 2.8.
 KNOWN_SCREENS = ("FACE", "CLOCK", "TASKS", "SPOTIFY", "SYSTEM", "TIMER", "STOPWATCH", "WORLD")
 
 
