@@ -159,6 +159,8 @@ class PhoneLink:
         # written once and then summarised once a minute.
         self._said: Dict[str, list] = {}
         # The link's state as the Pi sees it, for the log and /api/phone.
+        self._ble_last_try = 0.0
+        self._ble_tries = 0
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
@@ -265,7 +267,10 @@ class PhoneLink:
                 self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
                 self._chars.clear()  # subscribe again on the next tick
             # Poll faster while scanning, pairing or connecting so the page keeps up.
-            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") else 5)
+            # Also fast while waiting for the phone's BLE link, which can be up
+            # for only a few seconds before the phone drops it again.
+            waiting_for_ble = self.link["classic"] and not self.link["ble"]
+            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") or waiting_for_ble else 5)
 
     async def _objects(self) -> dict:
         intro = await self._bus.introspect(BLUEZ, "/")
@@ -300,11 +305,42 @@ class PhoneLink:
         if not ble:
             self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
                               f"(ServicesResolved=no), so notifications and now playing can't be read. "
-                              f"Waiting for the phone to reconnect over BLE.")
+                              f"Opening the BLE link from the Pi.")
             self._chars.clear()
+            await self._open_ble(phone_path, phone_name, address)
             return
+        self._ble_tries = 0
         if not self._chars:
             await self._subscribe(objects, phone_path)
+
+    async def _open_ble(self, path: str, name: str, address: str) -> None:
+        """Ask BlueZ to connect to the phone over BLE. A phone that is already
+        connected for classic audio doesn't open its BLE link on its own after
+        Sage restarts, and without it there are no songs or notifications.
+        BlueZ 5.78+ takes PreferredBearer=le for this; older BlueZ connects
+        whatever is missing. Tried every 30 s, so a phone that refuses isn't
+        hammered."""
+        now = time.time()
+        if now - self._ble_last_try < 30:
+            return
+        self._ble_last_try = now
+        self._ble_tries += 1
+        try:
+            dev = (await self._char(path)).get_interface("org.bluez.Device1")
+            bearer = ""
+            if hasattr(dev, "set_preferred_bearer"):
+                await dev.set_preferred_bearer("le")
+                bearer = " (PreferredBearer=le)"
+            await asyncio.wait_for(dev.call_connect(), timeout=20)
+            self.say("open-ble", f"asked BlueZ to connect {name} ({address}) over BLE{bearer}, try {self._ble_tries}: "
+                                 f"BlueZ accepted; waiting for ServicesResolved.")
+        except Exception as e:
+            error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
+            advice = ("If this keeps failing: on the iPhone open Settings > Bluetooth, tap (i) next to the Pi and "
+                      "check 'Share System Notifications' is on; if it still fails, forget the Pi there and pair "
+                      "again from Sage Settings > Bluetooth.") if self._ble_tries >= 3 else ""
+            self.say("open-ble", f"could not open the BLE link to {name} ({address}), try {self._ble_tries}: {error}. "
+                                 + advice)
 
     @staticmethod
     def _services_under(objects: dict, device_path: str) -> set:
@@ -477,9 +513,10 @@ class PhoneLink:
             self._bus.export(path, Advertisement())
             adapter = await self._char("/org/bluez/hci0")
             await adapter.get_interface("org.bluez.LEAdvertisingManager1").call_register_advertisement(path, {})
-            log.info("Advertising as %s", DEVICE_NAME)
+            self.say("advertise", f"advertising as {DEVICE_NAME}, so the iPhone can find and reconnect to the Pi over BLE")
         except Exception as e:
-            log.warning("Could not advertise (pairing from the iPhone may not find the Pi): %s", e)
+            self.say("advertise", f"could not advertise as {DEVICE_NAME}, so the iPhone may not find or reconnect "
+                                  f"to the Pi over BLE: {getattr(e, 'type', None) or type(e).__name__}: {e}")
 
 
 link = PhoneLink()
