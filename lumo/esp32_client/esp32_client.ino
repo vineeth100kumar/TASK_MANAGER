@@ -141,6 +141,7 @@ void setup() {
 void loop() {
   wsPoll();
   hapticUpdate();
+  neoSetContext(currentScreen, lumoState);   // the ring's AUTO scene follows the screen and face
   neoTick();
 
   // The ESP32 keeps its own time between Pi updates, so every screen's clock stays live.
@@ -231,6 +232,7 @@ void loop() {
       lumoState.flag_spotify_changed = false;
       displayDrawScreen(SCREEN_SPOTIFY, lumoState, false);
     }
+    displaySpotifyTick(lumoState);
   }
   else if (currentScreen == SCREEN_TASKS) {
     if (lumoState.flag_tasks_changed) {
