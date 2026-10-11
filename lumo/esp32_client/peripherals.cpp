@@ -10,28 +10,34 @@ Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // =====================================================================
 //  Haptics
 //
-//  The motor sits on BUZZER_PIN, active low, on a 50 kHz PWM so it is
-//  silent (the old clock's settings). A pattern is a short list of steps,
-//  each a strength (0 = rest) and a length, played without blocking. Every
-//  pulse starts with a 6 ms kick at full power so a small motor spins up
-//  crisply, then holds its own strength. At night everything but a
-//  button press is softer.
+//  The buzzer on BUZZER_PIN (active low) has two voices. On a 50 kHz PWM
+//  it is silent and only knocks, which is the haptic: every button press, and
+//  a double knock for a notification or reminder. Only the alarm switches it
+//  to an audible tone (ALARM_TONE_HZ), so the alarm is the one thing that
+//  makes a sound. A pattern is a short list of steps, each a strength
+//  (0 = rest) and a length, played without blocking. Every knock starts with
+//  a 6 ms kick at full power so it spins up crisply. At night everything but
+//  a button press and the alarm is softer.
 // =====================================================================
 
 struct HapStep { uint8_t strength; uint16_t ms; };
 static bool nightTime();                  // the sleep schedule, set from Sage
 
-static const HapStep HP_TAP[]      = { {200, 18} };
-static const HapStep HP_HOLD[]     = { {160, 14}, {0, 70}, {255, 26} };
-static const HapStep HP_NOTIFY[]   = { {140, 20}, {0, 110}, {210, 28} };
-static const HapStep HP_REMINDER[] = { {140, 20}, {0, 110}, {210, 28}, {0, 420}, {140, 20}, {0, 110}, {230, 34} };
+static const HapStep HP_TAP[]      = { {255, 24} };
+static const HapStep HP_HOLD[]     = { {180, 18}, {0, 80}, {255, 34} };
+// Notifications and reminders knock twice; a reminder a little harder.
+static const HapStep HP_NOTIFY[]   = { {210, 40}, {0, 130}, {230, 40} };
+static const HapStep HP_REMINDER[] = { {240, 55}, {0, 150}, {255, 55} };
 static const HapStep HP_SUCCESS[]  = { {150, 16}, {0, 60}, {230, 22} };
-// A heartbeat, "bu-bump ... bu-bump", the same rhythm the light beats to.
+// "beep-beep ... beep-beep", the same rhythm the light beats to.
 static const HapStep HP_ALARM[]    = { {255, 130}, {0, 130}, {255, 130}, {0, 910} };
+
+#define HAP_LEN(p) (sizeof(p) / sizeof((p)[0]))
 
 static const HapStep* hapSteps = nullptr;
 static uint8_t  hapCount = 0, hapIndex = 0;
 static bool     hapLoop = false, hapNight = false;
+static bool     hapTone = false;          // true while the buzzer is on the alarm's audible tone
 static unsigned long hapStepAt = 0, hapLoopStart = 0;
 static int      hapLevel = -1;            // what the pin is set to, -1 = unknown
 
@@ -41,22 +47,34 @@ static void hapWrite(int strength) {
   ledcWrite(BUZZER_PIN, 255 - strength);  // active low
 }
 
+// Silent knocks or the alarm's audible tone.
+static void hapVoice(bool tone) {
+  if (tone == hapTone) return;
+  hapTone = tone;
+  hapLevel = -1;
+  ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
+}
+
 void hapticOff() {
   hapSteps = nullptr;
   hapCount = 0;
+  hapLoop = false;
   hapWrite(0);
+  hapVoice(false);
 }
 
 void hapticPlay(Haptic h) {
+  if (hapLoop && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
   switch (h) {
-    case HAP_TAP:      hapSteps = HP_TAP;      hapCount = 1; break;
-    case HAP_HOLD:     hapSteps = HP_HOLD;     hapCount = 3; break;
-    case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = 3; break;
-    case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = 7; break;
-    case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = 3; break;
-    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = 4; break;
+    case HAP_TAP:      hapSteps = HP_TAP;      hapCount = HAP_LEN(HP_TAP); break;
+    case HAP_HOLD:     hapSteps = HP_HOLD;     hapCount = HAP_LEN(HP_HOLD); break;
+    case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = HAP_LEN(HP_NOTIFY); break;
+    case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = HAP_LEN(HP_REMINDER); break;
+    case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = HAP_LEN(HP_SUCCESS); break;
+    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = HAP_LEN(HP_ALARM); break;
   }
   hapLoop = (h == HAP_ALARM);
+  hapVoice(hapLoop);
   hapNight = nightTime() && h != HAP_TAP && h != HAP_HOLD && h != HAP_ALARM;
   hapIndex = 0;
   hapStepAt = hapLoopStart = millis();
@@ -65,6 +83,7 @@ void hapticPlay(Haptic h) {
 
 // A single pulse of `ms`, for the Pi's HAPTIC command without a pattern.
 void hapticPulse(uint16_t ms) {
+  if (hapLoop) return;
   static HapStep one[1];
   one[0].strength = 220;
   one[0].ms = ms;
@@ -89,12 +108,15 @@ void hapticUpdate() {
   }
   int strength = hapSteps[hapIndex].strength;
   if (strength > 0) {
-    if (hapLoop) {                          // the alarm starts gently and builds over 20 s
+    if (hapTone) {
+      // The alarm starts quieter and builds to full over 20 s. A square
+      // wave is loudest at half duty, so 255 maps to 50%.
       float k = (now - hapLoopStart) / 20000.0f;
-      strength = (int)(strength * (0.55f + 0.45f * (k > 1 ? 1 : k)));
+      strength = (int)(strength * (0.25f + 0.75f * (k > 1 ? 1 : k))) / 2;
+    } else {
+      if (hapNight) strength = strength * 6 / 10;
+      if (now - hapStepAt < 6) strength = 255;   // the kick
     }
-    if (hapNight) strength = strength * 6 / 10;
-    if (now - hapStepAt < 6) strength = 255;   // the kick
   }
   hapWrite(strength);
 }
