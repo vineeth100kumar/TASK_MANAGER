@@ -26,6 +26,7 @@ import { TimelineView } from './components/views/TimelineView';
 import { NotesView } from './components/views/NotesView';
 import { NotesLock } from './components/notes/NotesLock';
 import { CanvasView } from './components/views/CanvasView';
+import { RadarView } from './components/views/RadarView';
 import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
 import { TrashModal } from './components/modals/TrashModal';
 import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
@@ -65,6 +66,10 @@ function MainApp() {
     try { localStorage.setItem('sage-life-filter', f); } catch { /* storage unavailable */ }
   }, []);
   const lifeContext = lifeFilter === 'all' ? undefined : lifeFilter;
+  // Radar is work only; switching to Personal while on it goes back to Today.
+  useEffect(() => {
+    if (lifeFilter === 'personal' && activeView === 'radar') setActiveView('dashboard');
+  }, [lifeFilter, activeView]);
   
   // Data State
   const [workItems, setWorkItems] = useState<any[]>([]);
@@ -382,6 +387,8 @@ function MainApp() {
               </div>
             ) : activeView === 'notes' ? (
               <NotesLock><NotesView lifeContext={lifeContext} /></NotesLock>
+            ) : activeView === 'radar' ? (
+              <RadarView />
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (

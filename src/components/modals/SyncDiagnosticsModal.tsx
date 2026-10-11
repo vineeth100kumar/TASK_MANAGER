@@ -6,6 +6,34 @@ import { SyncEngineStatus, syncEndpointLabel, syncEngine } from '../../services/
 import { SyncOpRecord } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { RadarSummary, radarApi, radarAvailable } from '../../services/radar';
+import { SourceList } from '../views/RadarView';
+
+// Radar's news feeds and market prices, each with its last result, so a broken
+// feed reads as broken here instead of as an empty Radar page.
+function RadarSources() {
+  const [summary, setSummary] = useState<RadarSummary | null>(null);
+  const [error, setError] = useState('');
+  useEffect(() => {
+    if (!radarAvailable()) return;
+    radarApi.summary().then(setSummary).catch(e => setError(e.message || "Can't reach the Pi"));
+  }, []);
+  if (!radarAvailable()) return null;
+  const down = summary?.sources.filter(s => !s.ok).length || 0;
+  return (
+    <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">Radar sources</span>
+        {summary && (
+          <span className={`text-xs font-semibold ${down ? 'text-amber-600 dark:text-amber-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+            {down ? `${down} down` : 'All working'}
+          </span>
+        )}
+      </div>
+      {error ? <div className="text-xs text-red-500">{error}</div> : summary ? <SourceList sources={summary.sources} /> : <div className="text-xs text-gray-400">Checking…</div>}
+    </div>
+  );
+}
 
 interface SyncDiagnosticsModalProps {
   onClose: () => void;
@@ -188,6 +216,8 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
                   <div className="text-xs font-medium text-red-500 break-words">Last error: {syncStatus.lastError}</div>
                 )}
               </div>
+
+              <RadarSources />
 
               {/* Backup & Tools */}
               <div className="pt-2 space-y-3">

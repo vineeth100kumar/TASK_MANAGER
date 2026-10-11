@@ -21,6 +21,7 @@ import desk
 import item_actions
 import phone_link
 import quick_add
+import radar
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -457,6 +458,8 @@ async def startup_event():
     if desk.ENABLED:
         from desk import run as desk_run
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
+    if radar.ENABLED:
+        _background(radar.collector.run(events.broadcast))
 
 
 @app.get("/api/health")
@@ -1316,6 +1319,10 @@ async def _claude_quick_add(text: str) -> dict:
 claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
+
+# Radar's headlines and prices (radar.py): cache tables in the same database.
+radar.connect(DB_PATH)
+app.include_router(radar.router)
 
 
 if (DIST_DIR / "index.html").is_file():
