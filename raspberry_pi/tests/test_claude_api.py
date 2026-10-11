@@ -76,6 +76,8 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertTrue(made["success"])
         item = made["record"]
         self.assertEqual((item["status"], item["entityType"], item["isInbox"]), ("todo", "task", False))
+        # The web app needs a key on every item (it crashed without one).
+        self.assertTrue(item["key"].startswith("TASK-"))
 
         changes = client.get("/api/sync/changes", params={"sinceRevision": seen}, headers=OWNER).json()
         self.assertEqual([r["title"] for r in changes["changes"]["workItems"]], ["Plan trip"])
@@ -92,6 +94,14 @@ class ClaudeApiTests(unittest.TestCase):
 
         ops = [c["operation"] for c in client.get("/api/claude/history", headers=CLAUDE).json()["changes"]]
         self.assertEqual(sorted(ops), ["delete", "patch", "save"])
+
+    def test_new_item_gets_project_key(self):
+        project = client.post("/api/claude/projects", json={"name": "Keys", "key": "KEYS"}, headers=CLAUDE).json()["record"]
+        first = client.post("/api/claude/workItems", json={"title": "One", "projectId": project["id"]}, headers=CLAUDE).json()["record"]
+        second = client.post("/api/claude/workItems", json={"title": "Two", "projectId": project["id"]}, headers=CLAUDE).json()["record"]
+        self.assertEqual((first["key"], second["key"]), ("KEYS-1", "KEYS-2"))
+        kept = client.post("/api/claude/workItems", json={"title": "Mine", "key": "OWN-7"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(kept["key"], "OWN-7")
 
     def test_list_filters_and_shortens(self):
         client.post("/api/claude/workItems", json={"title": "Buy milk", "status": "todo"}, headers=CLAUDE)

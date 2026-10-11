@@ -340,8 +340,8 @@ export const api = {
       if (filters?.search) {
         const q = filters.search.toLowerCase();
         items = items.filter(i =>
-          i.title.toLowerCase().includes(q) ||
-          i.key.toLowerCase().includes(q) ||
+          (i.title || '').toLowerCase().includes(q) ||
+          (i.key || '').toLowerCase().includes(q) ||
           (i.description && i.description.toLowerCase().includes(q))
         );
       }
@@ -374,7 +374,8 @@ export const api = {
         prefix = 'LIFE';
       }
 
-      const count = state.workItems.filter(i => i && i.key.startsWith(prefix)).length + 1;
+      // Items added through the Claude connector may have no key.
+      const count = state.workItems.filter(i => i && (i.key || '').startsWith(prefix)).length + 1;
       const key = `${prefix}-${count}`;
 
       // Auto-infer quick wins from action verbs if not explicitly set
