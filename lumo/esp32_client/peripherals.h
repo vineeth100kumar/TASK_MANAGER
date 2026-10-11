@@ -34,4 +34,5 @@ void     hapticPulse(uint16_t ms);
 void     hapticSetStrength(uint8_t pct);
 uint8_t  hapticStrength();
 void     hapticOff();
+void     hapticSelfTest();                             // full-power 300 ms buzz, from the serial monitor
 void     hapticUpdate();                               // a fallback; the engine runs on its own timer
