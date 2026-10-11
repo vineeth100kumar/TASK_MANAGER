@@ -620,100 +620,18 @@ static void drawSystemScreen(const LumoState& s, bool full) {
 }
 
 static void drawSpotifyScreen(const LumoState& s, bool full) {
-  tft.setFont(NULL);
-
   if (full) {
-    tft.fillScreen(COLOR_BG_BLACK);
-
-    tft.setTextSize(2);
-    tft.setTextColor(COLOR_GREEN);
-    tft.setCursor(12, 10);
-    tft.print("Now Playing");
-
-    tft.setTextColor(COLOR_WHITE);
-    tft.setCursor(255, 10);
-    tft.print("LUMO");
-    tft.drawFastHLine(10, 32, 300, tft.color565(40, 40, 50));
-
-    tft.setTextSize(1);
-    tft.setCursor(30, SY(218));
-    tft.print("Controlled via Local Web Dashboard");
+    // The clock's time canvas is big; the music screen draws through aa_text.
+    delete timeCanvas;
+    timeCanvas = nullptr;
+    canvasTried = false;
+    nowPlayingReset();
   }
-
-  if (newArtReady || full) {
-    tft.drawRect(10, 42, 104, 104, tft.color565(60, 60, 70));
-    tft.drawRGBBitmap(12, 44, (uint16_t*)artBuf, 100, 100);
-    newArtReady = false;
-  }
-
-  tft.fillRect(122, 42, 195, 104, COLOR_BG_BLACK);
-
-  tft.setTextSize(2);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(124, 46);
-  char titleCut[16];
-  strncpy(titleCut, s.sp_title, 15);
-  titleCut[15] = '\0';
-  tft.print(strlen(titleCut) > 0 ? titleCut : "No Track");
-
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(124, 72);
-  char artistCut[16];
-  strncpy(artistCut, s.sp_artist, 15);
-  artistCut[15] = '\0';
-  tft.print(strlen(artistCut) > 0 ? artistCut : "Idle");
-
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(124, 108);
-  int curSec = s.sp_progress_ms / 1000;
-  int totSec = s.sp_duration_ms / 1000;
-  if (totSec > 0) {
-    tft.printf("%d:%02d / %d:%02d", curSec / 60, curSec % 60, totSec / 60, totSec % 60);
-  }
-
-  tft.setTextColor(s.sp_playing ? COLOR_GREEN : COLOR_MUTED);
-  tft.setCursor(124, 126);
-  tft.print(s.sp_playing ? "[PLAYING]" : "[PAUSED]");
-
-  float pct = (s.sp_duration_ms > 0) ? ((float)s.sp_progress_ms / s.sp_duration_ms) : 0.0f;
-  drawProgressBar(12, SY(166), 296, 8, pct, COLOR_GREEN, tft.color565(40, 40, 40));
-
-  tft.setTextColor(COLOR_MUTED);
-  tft.setCursor(12, SY(188));
-  tft.print("< Prev        OK Play/Pause        Next >");
+  nowPlayingTick(s);
 }
 
-// Four little level bars beside PLAYING that dance while music plays and lie
-// down when it's paused. Each bar is a few sines at unrelated speeds, so the
-// pattern never visibly repeats.
-void displaySpotifyTick(const LumoState& s) {
-  static unsigned long lastDraw = 0;
-  static float level[4] = { 0, 0, 0, 0 };
-  unsigned long now = millis();
-  if (now - lastDraw < 40) return;
-  float dt = (now - lastDraw) / 1000.0f;
-  if (dt > 0.2f) dt = 0.2f;
-  lastDraw = now;
-  const int x0 = 186, base = 136, maxH = 16, bw = 4, gapW = 3;
-  float t = now / 1000.0f;
-  uint8_t tr, tg, tb;
-  displayArtTint(tr, tg, tb);
-  uint16_t col = s.sp_playing ? tft.color565(tr, tg, tb) : COLOR_MUTED;
-  for (int i = 0; i < 4; i++) {
-    float target = 0.12f;
-    if (s.sp_playing) {
-      float v = 0.55f + 0.25f * sinf(t * (5.1f + i * 1.7f) + i * 1.3f)
-                      + 0.20f * sinf(t * (8.3f - i * 0.9f) + i * 2.1f);
-      target = 0.15f + 0.85f * animClamp(v);
-    }
-    level[i] += (target - level[i]) * (1 - expf(-dt / 0.06f));
-    int h = 2 + (int)(level[i] * (maxH - 2));
-    int x = x0 + i * (bw + gapW);
-    tft.fillRect(x, base - maxH, bw, maxH - h, COLOR_BG_BLACK);
-    tft.fillRect(x, base - h, bw, h, col);
-  }
-}
+// The music screen lives with the smooth faces (faces.cpp).
+void displaySpotifyTick(const LumoState& s) { nowPlayingTick(s); }
 
 static void drawTasksScreen(const LumoState& s) {
   tft.setFont(NULL);
