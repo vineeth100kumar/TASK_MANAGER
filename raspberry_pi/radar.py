@@ -31,7 +31,7 @@ import os
 import re
 import sqlite3
 import xml.etree.ElementTree as ET
-from typing import Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 import httpx
@@ -188,6 +188,10 @@ def connect(db_path: str) -> None:
             change_pct REAL,
             closes TEXT,
             updated_at TEXT
+        );
+        CREATE TABLE IF NOT EXISTS radar_settings (
+            key TEXT PRIMARY KEY,
+            value TEXT
         );
         CREATE TABLE IF NOT EXISTS radar_sources (
             name TEXT PRIMARY KEY,
@@ -582,6 +586,92 @@ def signals(region: str = "", tag: str = "", limit: int = 60, now: Optional[date
         conn.close()
 
 
+# --- Settings ---
+
+# brief: the Radar card on Today (off until switched on). dailyCap: research runs
+# a day. engine: which AI researches first, Groq (free) or Claude (paid).
+# lumoLine: a Radar line on the desk clock's Tasks screen in the morning.
+DEFAULT_SETTINGS = {"brief": False, "dailyCap": 5, "engine": "groq", "lumoLine": False}
+
+
+def get_settings() -> dict:
+    conn = _db()
+    try:
+        rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM radar_settings")}
+    finally:
+        conn.close()
+    out = dict(DEFAULT_SETTINGS)
+    for key, raw in rows.items():
+        if key in out:
+            try:
+                out[key] = json.loads(raw)
+            except ValueError:
+                pass
+    return out
+
+
+def update_settings(changes: dict) -> dict:
+    """Only known keys, each checked; anything else is ignored."""
+    clean = {}
+    if isinstance(changes.get("brief"), bool):
+        clean["brief"] = changes["brief"]
+    if isinstance(changes.get("lumoLine"), bool):
+        clean["lumoLine"] = changes["lumoLine"]
+    if changes.get("engine") in ("groq", "claude"):
+        clean["engine"] = changes["engine"]
+    cap = changes.get("dailyCap")
+    if isinstance(cap, (int, float)) and not isinstance(cap, bool):
+        clean["dailyCap"] = max(0, min(50, int(cap)))
+    if clean:
+        conn = _db()
+        try:
+            conn.executemany(
+                "INSERT OR REPLACE INTO radar_settings (key, value) VALUES (?, ?)",
+                [(k, json.dumps(v)) for k, v in clean.items()],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+    return get_settings()
+
+
+# --- Brief (Today card and the desk clock) ---
+
+def brief(now: Optional[datetime.datetime] = None) -> dict:
+    """Three signals worth a look today, the biggest market move and the
+    hottest topic. Rising headlines come first, then the newest."""
+    now = now or _utcnow()
+    data = summary(now)
+    day_ago = _iso(now - datetime.timedelta(hours=24))
+    recent = [s for s in signals(limit=80, now=now) if s["published"] >= day_ago]
+    picks = sorted(recent, key=lambda s: (not s["rising"], -len(s["tags"])))[:3]
+    moves = [q for q in data["ticker"] if q["changePct"] is not None]
+    move = max(moves, key=lambda q: abs(q["changePct"]), default=None)
+    rising = [t for t in data["velocity"]["tags"] if (t["velocity"] or 0) >= RISING]
+    return {
+        "success": True,
+        "enabled": get_settings()["brief"],
+        "headline": data["headline"],
+        "signals": picks,
+        "move": move,
+        "trend": rising[0] if rising else None,
+    }
+
+
+def lumo_line(now: Optional[datetime.datetime] = None) -> Optional[str]:
+    """One short line for the clock, e.g. "Radar: Regulation 3.1x, Crude -1.2%"."""
+    if not get_settings()["lumoLine"]:
+        return None
+    data = brief(now)
+    parts = []
+    if data["trend"]:
+        parts.append(f"{data['trend']['tag']} {data['trend']['velocity']:g}x")
+    move = data["move"]
+    if move and move["changePct"] is not None:
+        parts.append(f"{move['name']} {'+' if move['changePct'] >= 0 else ''}{move['changePct']:.1f}%")
+    return "Radar: " + ", ".join(parts) if parts else None
+
+
 # --- Background loop ---
 
 class Collector:
@@ -649,6 +739,21 @@ def radar_summary():
 @router.get("/api/radar/signals")
 def radar_signals(region: str = "", tag: str = "", limit: int = 60):
     return {"success": True, "signals": signals(region, tag, limit)}
+
+
+@router.get("/api/radar/brief")
+def radar_brief():
+    return brief()
+
+
+@router.get("/api/radar/settings")
+def radar_settings():
+    return {"success": True, "settings": get_settings()}
+
+
+@router.put("/api/radar/settings")
+def radar_settings_update(changes: Dict[str, Any]):
+    return {"success": True, "settings": update_settings(changes)}
 
 
 @router.post("/api/radar/refresh")

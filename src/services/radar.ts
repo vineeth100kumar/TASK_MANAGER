@@ -100,3 +100,78 @@ export function timeAgo(iso: string | null, now = Date.now()): string {
   if (hours < 24) return `${hours} h`;
   return `${Math.round(hours / 24)} d`;
 }
+
+// --- Research (Studio) ---
+
+export interface ResearchStep {
+  name: string;
+  status: 'todo' | 'run' | 'done' | 'failed';
+  detail: string;
+  seconds: number | null;
+}
+
+export interface ResearchJob {
+  id: string;            // also the id of the dossier it writes
+  theme: string;
+  depth: 'brief' | 'memo';
+  status: 'queued' | 'running' | 'done' | 'needs_review' | 'failed';
+  step: number;
+  steps: ResearchStep[];
+  engine: string | null;
+  error: string;
+  ideaIds: string[];
+  noteId: string | null;
+  createdAt: string;
+  finishedAt: string | null;
+}
+
+export interface ResearchList {
+  jobs: ResearchJob[];
+  runsToday: number;
+  dailyCap: number;
+  engines: string[];
+}
+
+export interface RadarSettings {
+  brief: boolean;
+  dailyCap: number;
+  engine: 'groq' | 'claude';
+  lumoLine: boolean;
+}
+
+export interface RadarBrief {
+  enabled: boolean;
+  headline: string;
+  signals: RadarSignal[];
+  move: RadarQuote | null;
+  trend: { tag: string; recent: number; velocity: number | null } | null;
+}
+
+export const researchApi = {
+  start: async (theme: string, depth: 'brief' | 'memo'): Promise<ResearchJob> =>
+    (await call<{ job: ResearchJob }>('/api/radar/research', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme, depth }),
+    })).job,
+  list: () => call<ResearchList>('/api/radar/research'),
+};
+
+export const radarSettingsApi = {
+  get: async (): Promise<RadarSettings> => (await call<{ settings: RadarSettings }>('/api/radar/settings')).settings,
+  update: async (changes: Partial<RadarSettings>): Promise<RadarSettings> =>
+    (await call<{ settings: RadarSettings }>('/api/radar/settings', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(changes),
+    })).settings,
+};
+
+export const radarBrief = () => call<RadarBrief>('/api/radar/brief');
+
+export function money(n: number | null): string {
+  if (n === null || n === undefined) return '?';
+  if (n >= 1_000_000) return `$${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  if (n >= 1000) return `$${Math.round(n / 1000)}k`;
+  return `$${Math.round(n)}`;
+}

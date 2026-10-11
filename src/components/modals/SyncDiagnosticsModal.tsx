@@ -7,7 +7,7 @@ import { SyncOpRecord } from '../../services/db';
 import { useToast } from '../../context/ToastContext';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
 import { RadarSummary, radarApi, radarAvailable } from '../../services/radar';
-import { SourceList } from '../views/RadarView';
+import { SourceList } from '../radar/parts';
 
 // Radar's news feeds and market prices, each with its last result, so a broken
 // feed reads as broken here instead of as an empty Radar page.

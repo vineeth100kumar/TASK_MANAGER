@@ -65,8 +65,8 @@ export class LiveStream {
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
         // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
         window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
-      } else if (event?.type === 'RADAR_UPDATED') {
-        // New headlines or prices on the Pi (see RadarView).
+      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS') {
+        // New headlines or prices, or a research run moving on (see RadarView).
         window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
       } else if (event?.type === 'BT_STATE') {
         // The Bluetooth settings page (see BluetoothSettings) shows the device list live.

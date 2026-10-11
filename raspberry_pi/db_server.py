@@ -22,6 +22,7 @@ import item_actions
 import phone_link
 import quick_add
 import radar
+import radar_research
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -52,6 +53,8 @@ CORS_ORIGINS = [o.strip() for o in os.getenv("SAGE_CORS_ORIGINS", "*").split(","
 SYNC_TABLES = {
     "workItems", "projects", "areas", "goals", "habits", "notes",
     "comments", "subtasks", "activities", "boards",
+    # Radar's research (radar_research.py): one dossier per run, three ideas each.
+    "dossiers", "ideas",
 }
 SYNC_OPERATIONS = {"save", "patch", "delete"}
 LEDGER_DAYS = 90
@@ -1323,6 +1326,17 @@ app.include_router(claude_api.mcp_router)
 # Radar's headlines and prices (radar.py): cache tables in the same database.
 radar.connect(DB_PATH)
 app.include_router(radar.router)
+
+
+async def _radar_apply(operations: list) -> dict:
+    return await apply_operations(ProcessOperationsRequest(operations=operations), radar_research.SOURCE)
+
+
+radar_research.connect(
+    DB_PATH, _radar_apply, events.broadcast,
+    lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())),
+)
+app.include_router(radar_research.router)
 
 
 if (DIST_DIR / "index.html").is_file():

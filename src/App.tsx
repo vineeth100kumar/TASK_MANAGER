@@ -81,6 +81,9 @@ function MainApp() {
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isMorningOpen, setIsMorningOpen] = useState(false);
   const [isEveningOpen, setIsEveningOpen] = useState(false);
+  // A note to open when Notes shows next (Radar's "Open note").
+  const [openNoteId, setOpenNoteId] = useState<string | null>(null);
+  useEffect(() => { if (activeView !== 'notes') setOpenNoteId(null); }, [activeView]);
 
   const { showToast, dismissToast, toasts } = useToast();
 
@@ -386,9 +389,12 @@ function MainApp() {
                 <div className="skeleton h-16 !rounded-2xl" />
               </div>
             ) : activeView === 'notes' ? (
-              <NotesLock><NotesView lifeContext={lifeContext} /></NotesLock>
+              <NotesLock><NotesView lifeContext={lifeContext} openNoteId={openNoteId} /></NotesLock>
             ) : activeView === 'radar' ? (
-              <RadarView />
+              <RadarView
+                onOpenProject={(id) => { setActiveWorkspace(id); setPresentationMode('branches'); setActiveView('tasks'); }}
+                onOpenNote={(id) => { setOpenNoteId(id); setActiveView('notes'); }}
+              />
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (
