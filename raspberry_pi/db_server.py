@@ -791,6 +791,12 @@ async def quick_add_endpoint(req: QuickAddRequest):
     conn = sqlite3.connect(DB_PATH)
     try:
         cursor = conn.cursor()
+        # The web app expects every item to have a key like TASK-12.
+        task_keys = sum(
+            1 for (raw,) in cursor.execute("SELECT payload FROM entities WHERE table_name = 'workItems'")
+            if str((json.loads(raw) or {}).get("key") or "").startswith("TASK")
+        )
+        payload["key"] = f"TASK-{task_keys + 1}"
         next_rev = increment_server_revision(cursor)
         cursor.execute(
             "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",

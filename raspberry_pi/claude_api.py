@@ -231,6 +231,19 @@ _DEFAULTS = {
 }
 
 
+def _next_key(record: dict) -> str:
+    """Same key scheme as the web app: PROJECTKEY-n, LIFE-n for areas, else TASK-n."""
+    prefix = "TASK"
+    if record.get("projectId"):
+        project = _find("projects", record["projectId"]) if "projects" in TABLES else None
+        if project and project.get("key"):
+            prefix = project["key"]
+    elif record.get("areaId"):
+        prefix = "LIFE"
+    count = sum(1 for i in _rows("workItems") if str(i.get("key") or "").startswith(prefix))
+    return f"{prefix}-{count + 1}"
+
+
 async def create_record(table: str, fields: dict) -> dict:
     _check_table(table)
     if not isinstance(fields, dict) or not fields:
@@ -245,6 +258,8 @@ async def create_record(table: str, fields: dict) -> dict:
             raise ApiError(400, "A work item needs a title")
         record.setdefault("isInbox", not record.get("dueDate") and not record.get("projectId"))
         record.setdefault("source", CLIENT_ID)
+        if not record.get("key"):
+            record["key"] = _next_key(record)
     if table == "notes":
         record.setdefault("title", "Untitled")
         record.setdefault("content", "")

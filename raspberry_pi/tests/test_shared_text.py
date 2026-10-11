@@ -79,6 +79,8 @@ class TestQuickAddEndpoint(unittest.TestCase):
         self.assertEqual(item["title"], "Buy milk")
         self.assertNotIn("description", item)
         self.assertEqual(item["labels"], ["errands"])
+        # The web app needs a key on every item (it crashed without one).
+        self.assertTrue(item["key"].startswith("TASK-"))
 
 
 if __name__ == "__main__":
