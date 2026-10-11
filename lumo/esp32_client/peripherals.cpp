@@ -238,7 +238,7 @@ static const float TWO_PI_F = 6.2831853f;
 //    a quick rise and a long, gentle fall;
 //  - changing face or screen cross-fades over 0.8 s.
 
-static const float GLOW        = 0.45f;   // the resting glow, before the day's level
+static const float GLOW        = 0.85f;   // the resting glow (perceptual): bright, with room for the mark
 static const float BREATH_S    = 7.0f;
 static const float BREATH      = 0.10f;
 static const float MARK_W      = 1.5f;    // LEDs either side the mark reaches
@@ -490,7 +490,8 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
   ClockNow c = clockNow();
   PhaseStyle ph = clockPhase(c.minuteOfDay);
   Rgb dayColor = rgb8(ph.r, ph.g, ph.b);
-  float day = (0.40f + 0.60f * ph.level) * (sleeping ? 0.30f : 1.0f);
+  // Full strength all day; only softer while you sleep.
+  float day = sleeping ? 0.45f : 1.0f;
   if (!ctx) {
     Look k = { dayColor, day, true, MARK_NONE, rgb(1, 1, 1), 0, false };
     renderLook(k, t, c, out);
