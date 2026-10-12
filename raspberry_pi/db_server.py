@@ -21,6 +21,7 @@ import desk
 import item_actions
 import phone_link
 import quick_add
+import markets
 import radar
 import radar_research
 
@@ -463,6 +464,7 @@ async def startup_event():
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
     if radar.ENABLED:
         _background(radar.collector.run(events.broadcast))
+        _background(markets.collector.run())
 
 
 @app.get("/api/health")
@@ -1509,6 +1511,10 @@ radar_research.connect(
     lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())),
 )
 app.include_router(radar_research.router)
+
+# Radar's Markets board (markets.py): a year of daily closes per symbol, and why things moved.
+markets.connect(DB_PATH, events.broadcast)
+app.include_router(markets.router)
 
 
 if (DIST_DIR / "index.html").is_file():
