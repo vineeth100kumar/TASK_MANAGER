@@ -46,11 +46,12 @@ TABLES: set = set()
 _apply: Optional[Callable[[List[dict]], Awaitable[dict]]] = None
 _quick_add: Optional[Callable[[str], Awaitable[dict]]] = None
 _today: Callable[[], datetime.date] = datetime.date.today
+_health: Optional[Callable[[], dict]] = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today
-    DB_PATH, TABLES, _apply, _quick_add, _today = db_path, set(tables), apply, quick_add, today
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health
+    DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -174,6 +175,12 @@ def overview() -> dict:
         "inbox": [brief(i) for i in open_items if i.get("isInbox")][:20],
         "projects": [{"id": p.get("id"), "name": p.get("name")} for p in (_rows("projects") if "projects" in TABLES else [])],
     }
+
+
+def health() -> dict:
+    if _health is None:
+        raise ApiError(503, "The health report isn't connected")
+    return _health()
 
 
 def history(limit: int = 50) -> dict:
@@ -325,6 +332,11 @@ async def http_overview():
     return await _answer(overview)
 
 
+@router.get("/health")
+async def http_health():
+    return await _answer(health)
+
+
 @router.get("/history")
 async def http_history(limit: int = 50):
     return await _answer(lambda: history(limit))
@@ -379,7 +391,7 @@ notes (title, content), comments and subtasks (workItemId), activities, boards (
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
 acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
-Start with sage_overview. Changes appear in the open web app straight away. Prefer updating
+Start with sage_overview; sage_health says whether the Pi itself is working. Changes appear in the open web app straight away. Prefer updating
 over deleting, and say what you changed."""
 
 
@@ -409,6 +421,10 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "required": ["table", "id"], "properties": {"table": _table_prop(), "id": {"type": "string"}}}},
         {"name": "sage_quick_add", "description": "Add a work item from a sentence, the way Siri quick add does, e.g. 'Call the bank tomorrow 5pm !high #money'.",
          "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
+        {"name": "sage_health", "description": "Is the Pi working? Server version and uptime, background workers, "
+         "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, plus a "
+         "plain list of problems.",
+         "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
     ]
@@ -429,6 +445,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await delete_record(args.get("table", ""), str(args.get("id", "")))
     if name == "sage_quick_add":
         return await quick_add(args.get("text", ""))
+    if name == "sage_health":
+        return health()
     if name == "sage_history":
         return history(args.get("limit", 50))
     raise ApiError(404, f"Unknown tool {name}")
