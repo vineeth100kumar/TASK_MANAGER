@@ -193,7 +193,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
         {tab === 'signals' && summary && <Ticker quotes={summary.ticker} />}
         {tab === 'signals' && down.length > 0 && (
           <p className="text-[12px] font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-            <AlertTriangle size={13} /> Down: {down.map(s => s.name).join(', ')}
+            <AlertTriangle size={13} /> Down: {down.map(s => s.error ? `${s.name} (${s.error.split(';')[0].split(': ').pop()})` : s.name).join(', ')}
           </p>
         )}
       </div>

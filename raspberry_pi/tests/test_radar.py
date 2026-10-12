@@ -58,6 +58,7 @@ def reset():
     conn.executescript("DELETE FROM radar_signals; DELETE FROM radar_quotes; DELETE FROM radar_sources;")
     conn.commit()
     conn.close()
+    radar.forget_yahoo_session()
 
 
 def insert_signal(id_, published, tags, seen=None, region="Global", source="Test"):
@@ -130,6 +131,51 @@ class Chart(unittest.TestCase):
 
 def mock_client(handler):
     return httpx.AsyncClient(transport=httpx.MockTransport(handler))
+
+
+class YahooChart(unittest.TestCase):
+    def setUp(self):
+        reset()
+
+    def test_second_host_answers_when_first_is_down(self):
+        def handler(request):
+            if request.url.host == "query1.finance.yahoo.com":
+                raise httpx.ConnectError("down")
+            return httpx.Response(200, json=chart([10, 11], 11))
+
+        data = asyncio.run(radar.yahoo_chart(mock_client(handler), "^GSPC", {"range": "10d"}))
+        self.assertEqual(radar.parse_chart(data)["price"], 11)
+
+    def test_refused_gets_cookie_and_crumb_once(self):
+        calls = {"crumb": 0}
+
+        def handler(request):
+            if request.url.host == "fc.yahoo.com":
+                return httpx.Response(404, headers={"set-cookie": "A3=abc; Domain=.yahoo.com; Path=/"})
+            if request.url.path.endswith("getcrumb"):
+                calls["crumb"] += 1
+                return httpx.Response(200, text="Xy1.z")
+            if request.url.params.get("crumb") == "Xy1.z":
+                return httpx.Response(200, json=chart([10, 11], 11))
+            return httpx.Response(429)
+
+        async def run():
+            async with mock_client(handler) as client:
+                return await asyncio.gather(*[radar.yahoo_chart(client, s, {}) for s in ("A", "B", "C")])
+
+        self.assertEqual(len(asyncio.run(run())), 3)
+        self.assertEqual(calls["crumb"], 1)
+
+    def test_unknown_symbol_is_not_retried(self):
+        seen = []
+
+        def handler(request):
+            seen.append(request.url.host)
+            return httpx.Response(404)
+
+        with self.assertRaises(httpx.HTTPStatusError):
+            asyncio.run(radar.yahoo_chart(mock_client(handler), "NOPE", {}))
+        self.assertEqual(seen, ["query1.finance.yahoo.com"])
 
 
 class Fetching(unittest.TestCase):
