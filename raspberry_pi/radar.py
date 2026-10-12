@@ -36,6 +36,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import xml.etree.ElementTree as ET
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 from zoneinfo import ZoneInfo
@@ -81,7 +82,10 @@ QUOTES = [
     ("SOXX", "Semis", "index"),
     ("BTC-USD", "Bitcoin", "usd"),
 ]
-YAHOO_CHART = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}"
+# Yahoo serves the same chart data from two hosts; when one refuses, the other often answers.
+YAHOO_HOSTS = ("query1.finance.yahoo.com", "query2.finance.yahoo.com")
+YAHOO_COOKIE = "https://fc.yahoo.com"
+YAHOO_CRUMB = "https://query2.finance.yahoo.com/v1/test/getcrumb"
 
 FEED_EVERY = datetime.timedelta(minutes=15)
 QUOTES_EVERY_OPEN = datetime.timedelta(minutes=5)
@@ -92,8 +96,9 @@ KEEP_DAYS = 30
 RECENT_HOURS = 48
 RISING = 2.0
 TIMEOUT = 15.0
-# Yahoo refuses requests without a browser-like agent.
-USER_AGENT = "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Sage-Radar"
+# Yahoo refuses requests that don't look like a browser, and an extra word on the end
+# of the agent was enough for it to start answering 429.
+USER_AGENT = "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36"
 NEW_YORK = ZoneInfo("America/New_York")
 KOLKATA = ZoneInfo("Asia/Kolkata")
 
@@ -456,11 +461,74 @@ def parse_chart(data: dict) -> dict:
     return {"price": float(price), "changePct": None if change is None else round(change, 2), "closes": [round(c, 4) for c in closes[-7:]]}
 
 
+# A cookie and crumb from Yahoo, as its website gets them. Kept between refreshes.
+_yahoo: Dict[str, Any] = {"crumb": None, "cookies": {}, "tried": 0.0}
+_yahoo_lock = asyncio.Lock()
+YAHOO_REFUSED = (401, 403, 429)
+# Asking Yahoo for a new session at most this often (seconds).
+YAHOO_SESSION_GAP = 30 * 60
+
+
+def forget_yahoo_session() -> None:
+    global _yahoo_lock
+    _yahoo.update(crumb=None, cookies={}, tried=0.0)
+    _yahoo_lock = asyncio.Lock()
+
+
+async def _yahoo_session(client: httpx.AsyncClient, stale: Optional[str]) -> None:
+    """Get a fresh cookie and crumb, once, however many requests were refused together."""
+    async with _yahoo_lock:
+        if _yahoo["crumb"] != stale:
+            return  # another request already got a new one
+        if _yahoo["tried"] and time.monotonic() - _yahoo["tried"] < YAHOO_SESSION_GAP:
+            return
+        _yahoo["tried"] = time.monotonic()
+        try:
+            await client.get(YAHOO_COOKIE)  # answers 404, but sets the cookie
+        except httpx.HTTPError:
+            pass
+        try:
+            resp = await client.get(YAHOO_CRUMB)
+            crumb = resp.text.strip() if resp.status_code == 200 else ""
+        except httpx.HTTPError:
+            crumb = ""
+        _yahoo["crumb"] = crumb if crumb and "<" not in crumb and " " not in crumb else ""
+        _yahoo["cookies"] = dict(client.cookies)
+
+
+async def yahoo_chart(client: httpx.AsyncClient, symbol: str, params: dict) -> dict:
+    """Yahoo's chart JSON for a symbol. Tries both hosts; when Yahoo refuses, gets
+    a cookie and crumb and asks once more. Raises the last error."""
+    last: Exception = ValueError("no chart data")
+    for attempt in range(2):
+        crumb = _yahoo["crumb"]
+        client.cookies.update(_yahoo["cookies"])
+        for host in YAHOO_HOSTS:
+            try:
+                resp = await client.get(
+                    f"https://{host}/v8/finance/chart/{symbol}", params={**params, **({"crumb": crumb} if crumb else {})}
+                )
+                resp.raise_for_status()
+                return resp.json()
+            except httpx.HTTPStatusError as e:
+                last = e
+                if e.response.status_code == 404:
+                    raise  # an unknown symbol is unknown on both hosts
+            except httpx.RequestError as e:
+                last = e
+        refused = isinstance(last, httpx.HTTPStatusError) and last.response.status_code in YAHOO_REFUSED
+        if attempt or not refused:
+            break
+        await _yahoo_session(client, crumb)
+        if not _yahoo["crumb"] or _yahoo["crumb"] == crumb:
+            break  # no new crumb, so asking again would get the same answer
+    raise last
+
+
 async def _fetch_quote(client: httpx.AsyncClient, symbol: str):
     try:
-        resp = await client.get(YAHOO_CHART.format(symbol=symbol), params={"range": "10d", "interval": "1d"})
-        resp.raise_for_status()
-        return symbol, parse_chart(resp.json()), ""
+        data = await yahoo_chart(client, symbol, {"range": "10d", "interval": "1d"})
+        return symbol, parse_chart(data), ""
     except Exception as e:
         return symbol, None, _short_error(e)
 
@@ -570,7 +638,7 @@ def summary(now: Optional[datetime.datetime] = None) -> dict:
             ),
             key=lambda q: order[q["symbol"]],
         )
-        known = {f["name"] for f in feeds()} | {"Yahoo markets"}
+        known = {f["name"] for f in feeds()} | {"Yahoo markets", "Markets board"}
         sources = [
             {
                 "name": r["name"], "kind": r["kind"], "ok": bool(r["ok"]), "items": r["items"],

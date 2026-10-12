@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Radar, Newspaper, FlaskConical, Lightbulb, Archive, RefreshCw, AlertTriangle, Server } from 'lucide-react';
+import { Radar, Newspaper, FlaskConical, Lightbulb, Archive, RefreshCw, AlertTriangle, Server, LineChart } from 'lucide-react';
 import { api } from '../../services/api';
 import { Dossier, Idea } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -11,11 +11,13 @@ import { StudioTab } from '../radar/StudioTab';
 import { IdeasTab } from '../radar/IdeasTab';
 import { IdeaPage } from '../radar/IdeaPage';
 import { VaultTab } from '../radar/VaultTab';
+import { MarketsTab } from '../radar/MarketsTab';
 
-type Tab = 'signals' | 'studio' | 'ideas' | 'vault';
+type Tab = 'signals' | 'markets' | 'studio' | 'ideas' | 'vault';
 
 const TABS: { id: Tab; name: string; icon: typeof Newspaper }[] = [
   { id: 'signals', name: 'Signals', icon: Newspaper },
+  { id: 'markets', name: 'Markets', icon: LineChart },
   { id: 'studio', name: 'Studio', icon: FlaskConical },
   { id: 'ideas', name: 'Ideas', icon: Lightbulb },
   { id: 'vault', name: 'Vault', icon: Archive },
@@ -154,6 +156,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
   const down = summary?.sources.filter(s => !s.ok) || [];
   const tagline = error ? `Can't reach the Pi right now (${error}).`
     : tab === 'signals' ? (summary ? summary.headline : 'Loading the latest signals…')
+    : tab === 'markets' ? 'Every industry at a glance, and the likely reason it moved.'
     : tab === 'studio' ? 'Give it a theme. It reads the news, the web and Hacker News, then drafts and red-teams three ideas.'
     : tab === 'ideas' ? `${ideas.length} idea${ideas.length === 1 ? '' : 's'}, best first. Numbers are AI estimates.`
     : `${dossiers.length} dossier${dossiers.length === 1 ? '' : 's'}, starred first.`;
@@ -175,7 +178,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
               {TABS.map(t => (
                 <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}
                   className={`flex-1 md:flex-none flex items-center justify-center gap-1 md:gap-1.5 px-1.5 md:px-3 py-1.5 rounded-lg text-[12.5px] md:text-[13px] font-semibold transition-colors ${tab === t.id ? 'bg-white dark:bg-[#2c2c2e] shadow-sm ring-1 ring-black/5 text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
-                  <t.icon size={14} />{t.name}
+                  <t.icon size={14} className="hidden sm:block" />{t.name}
                 </button>
               ))}
             </div>
@@ -190,7 +193,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
         {tab === 'signals' && summary && <Ticker quotes={summary.ticker} />}
         {tab === 'signals' && down.length > 0 && (
           <p className="text-[12px] font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-            <AlertTriangle size={13} /> Down: {down.map(s => s.name).join(', ')}
+            <AlertTriangle size={13} /> Down: {down.map(s => s.error ? `${s.name} (${s.error.split(';')[0].split(': ').pop()})` : s.name).join(', ')}
           </p>
         )}
       </div>
@@ -205,6 +208,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
           sentIds={sentIds} onInbox={sendToInbox} onResearch={research}
           topIdeas={ideas.slice(0, 3)} onOpenIdea={openIdea} onAllIdeas={() => setTab('ideas')} />
       ))}
+      {tab === 'markets' && <MarketsTab ideas={ideas} onOpenIdea={openIdea} onResearch={research} />}
       {tab === 'studio' && <StudioTab seedTheme={seedTheme} signals={signals} dossiers={dossiers} ideas={ideas} onOpenIdea={openIdea} onOpenDossier={openDossier} />}
       {tab === 'ideas' && <IdeasTab ideas={ideas} dossiers={dossiers} onOpenIdea={openIdea} onStudio={() => setTab('studio')} />}
       {tab === 'vault' && <VaultTab dossiers={dossiers} ideas={ideas} openId={vaultOpenId} setOpenId={setVaultOpenId} onOpenIdea={openIdea} onOpenNote={onOpenNote} onStudio={() => setTab('studio')} />}
