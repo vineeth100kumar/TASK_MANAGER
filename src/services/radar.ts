@@ -177,3 +177,89 @@ export function money(n: number | null): string {
   if (n >= 1000) return `$${Math.round(n / 1000)}k`;
   return `$${Math.round(n)}`;
 }
+
+// --- Markets (raspberry_pi/markets.py) ---
+
+export type MarketRegion = 'US' | 'India' | 'Global';
+export type MarketRange = '1D' | '1W' | '1M' | 'YTD';
+
+export interface MarketEvidence {
+  kind: 'number' | 'headline';
+  label: string;
+  link?: string;
+  published?: string;
+}
+
+export interface MarketReason {
+  title: string;
+  text: string;
+  confidence: 'High' | 'Medium' | 'Low';
+  evidence: MarketEvidence[];
+}
+
+export interface MarketPart {
+  key: 'market' | 'oil' | 'rates' | 'dollar' | 'left';
+  name: string;
+  value: number;
+  beta?: number;
+  factorMove?: number;
+}
+
+export interface MarketWhy {
+  parts: MarketPart[];
+  reasons: MarketReason[];
+  news: { title: string; source: string; link: string; published: string }[];
+  top: { symbol: string; change: number } | null;
+}
+
+export interface MarketIndustry {
+  name: string;
+  symbol: string;
+  change: number | null;
+  closes: number[];
+}
+
+export interface MarketSector extends MarketIndustry {
+  weight: number;
+  tag: string;
+  industries: MarketIndustry[];
+  why: MarketWhy;
+}
+
+export interface MarketGauge {
+  symbol: string;
+  name: string;
+  unit: 'index' | 'pct' | 'usd' | 'inr';
+  price: number | null;
+  change: number | null;
+  closes: number[];
+}
+
+export interface MarketBoard {
+  region: MarketRegion;
+  range: MarketRange;
+  regions: MarketRegion[];
+  ranges: MarketRange[];
+  updatedAt: string | null;
+  open: boolean;
+  headline: string;
+  gauges: MarketGauge[];
+  sectors: MarketSector[];
+  breadth: { up: number; down: number; of: number; unit: string };
+  leaders: { name: string; symbol: string; change: number }[];
+  laggards: { name: string; symbol: string; change: number }[];
+  why: MarketWhy & { points: { name: string; value: number }[]; change: number | null };
+  writer: string;
+  writtenAt: string | null;
+  writing?: boolean;
+}
+
+export const marketsApi = {
+  board: (region: MarketRegion, range: MarketRange) =>
+    call<MarketBoard>(`/api/radar/markets?${new URLSearchParams({ region, range })}`),
+};
+
+export function signedPct(n: number | null, digits = 2): string {
+  if (n === null || n === undefined) return '–';
+  return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(digits)}%`;
+}
