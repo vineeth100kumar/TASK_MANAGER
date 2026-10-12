@@ -570,7 +570,7 @@ def summary(now: Optional[datetime.datetime] = None) -> dict:
             ),
             key=lambda q: order[q["symbol"]],
         )
-        known = {f["name"] for f in feeds()} | {"Yahoo markets"}
+        known = {f["name"] for f in feeds()} | {"Yahoo markets", "Markets board"}
         sources = [
             {
                 "name": r["name"], "kind": r["kind"], "ok": bool(r["ok"]), "items": r["items"],
