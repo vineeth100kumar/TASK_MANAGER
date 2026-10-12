@@ -4,6 +4,7 @@ its changes go through sync like any device's, and the MCP endpoint works.
     cd raspberry_pi && python -m unittest discover -s tests
 """
 
+import json
 import os
 import sys
 import tempfile
@@ -129,6 +130,13 @@ class ClaudeApiTests(unittest.TestCase):
             self.assertEqual(client.get("/api/settings/groq-key", headers=CLAUDE).status_code, 401)
             self.assertEqual(client.get("/", headers=CLAUDE, follow_redirects=False).status_code != 303, True)
 
+    def test_health(self):
+        self.assertEqual(client.get("/api/claude/health").status_code, 401)
+        data = client.get("/api/claude/health", headers=CLAUDE).json()
+        self.assertTrue(data["success"])
+        self.assertIsInstance(data["problems"], list)
+        self.assertGreaterEqual(data["server"]["uptimeMinutes"], 0)
+
     def test_mcp(self):
         def rpc(method, params=None, msg_id=1, token=TOKEN):
             return client.post(f"/mcp/{token}", json={"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}})
@@ -145,6 +153,14 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertIn("From MCP", listed["result"]["content"][0]["text"])
         bad = rpc("tools/call", {"name": "sage_get", "arguments": {"table": "workItems", "id": "missing"}}).json()
         self.assertTrue(bad["result"]["isError"])
+
+        self.assertIn("sage_health", names)
+        report = rpc("tools/call", {"name": "sage_health", "arguments": {}}).json()["result"]
+        self.assertFalse(report["isError"])
+        data = json.loads(report["content"][0]["text"])
+        for part in ("server", "workers", "radar", "markets", "backups", "phone", "clock", "problems"):
+            self.assertIn(part, data)
+        self.assertNotIn("token", data["clock"])
 
         self.assertEqual(rpc("ping", token="w" * 40).status_code, 404)
         self.assertEqual(client.get(f"/mcp/{TOKEN}").status_code, 405)
