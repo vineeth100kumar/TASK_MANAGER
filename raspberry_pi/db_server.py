@@ -24,6 +24,7 @@ import quick_add
 import markets
 import radar
 import radar_research
+import system_health
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -444,9 +445,16 @@ _background_tasks: set = set()
 
 
 def _background(coro) -> None:
+    name = system_health.worker_name(coro)
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
-    task.add_done_callback(_background_tasks.discard)
+    system_health.worker_started(name)
+
+    def done(t: asyncio.Task) -> None:
+        _background_tasks.discard(t)
+        system_health.worker_stopped(name, None if t.cancelled() else t.exception())
+
+    task.add_done_callback(done)
 
 
 @app.on_event("startup")
@@ -1376,7 +1384,25 @@ async def _claude_quick_add(text: str) -> dict:
     return await quick_add_endpoint(QuickAddRequest(text=text, source=claude_api.CLIENT_ID))
 
 
-claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today)
+def _clock_status() -> dict:
+    from desk import run as desk_run
+    return desk_run.status(desk.ENABLED)
+
+
+def _claude_health() -> dict:
+    return system_health.report(
+        DB_PATH,
+        web_app=(DIST_DIR / "index.html").is_file(),
+        auth=bool(API_SECRET),
+        password_gate=access_gate.enabled,
+        radar_enabled=radar.ENABLED,
+        backups=backup.status,
+        phone=phone_link.link.snapshot,
+        clock=_clock_status,
+    )
+
+
+claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 
