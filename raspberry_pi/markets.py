@@ -7,12 +7,13 @@ The board covers three views:
   Global  10 country indices
 plus 8 gauges per view (stocks, rates, the dollar or rupee, oil, gold, fear, bitcoin).
 
-Prices come from Yahoo's chart data, like the rest of Radar. Each symbol keeps
-about a year of daily closes in a cache table (`market_series`) that never
-syncs. A full year is fetched once a day; in between only the last 5 days are
-fetched and merged in. A view refreshes every 20 minutes while its market is
-open and every 3 hours otherwise, a few symbols at a time, so Yahoo isn't
-hammered. A symbol that fails keeps its last good closes.
+Prices come from prices.py: Twelve Data (free key), NSE, FRED, then Yahoo,
+the first that answers. Each symbol keeps about a year of daily closes in a
+cache table (`market_series`, with the source that gave them) that never
+syncs. A view is looked at every 20 minutes while its market is open and every
+3 hours otherwise; only symbols whose source's prices have gone stale are
+fetched (Twelve Data hourly, to fit its free 800 calls a day). A symbol that
+fails keeps its last good closes. Radar's ticker copies its prices from here.
 
 Why it moved, in three layers:
   1. Math. Each sector's daily returns over the last year are fitted against
@@ -42,6 +43,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import httpx
 from fastapi import APIRouter
 
+import prices
 import radar
 
 RANGES = ["1D", "1W", "1M", "YTD"]
@@ -53,7 +55,6 @@ NEWS_HOURS = {"1D": 30, "1W": 7 * 24, "1M": 30 * 24, "YTD": 30 * 24}
 QUIET = {"1D": 0.5, "1W": 1.0, "1M": 2.0, "YTD": 4.0}
 MARKET_QUIET = {k: v / 2 for k, v in QUIET.items()}
 
-HISTORY_EVERY = datetime.timedelta(hours=20)
 OPEN_EVERY = datetime.timedelta(minutes=20)
 CLOSED_EVERY = datetime.timedelta(hours=3)
 AI_GAP = {"1D": datetime.timedelta(minutes=30)}
@@ -71,7 +72,7 @@ GAUGES: Dict[str, List[Tuple[str, str, str]]] = {
         ("^VIX", "VIX (fear)", "index"), ("BTC-USD", "Bitcoin", "usd"),
     ],
     "India": [
-        ("^NSEI", "Nifty 50", "index"), ("^BSESN", "Sensex", "index"), ("^NSEBANK", "Nifty Bank", "index"),
+        ("^NSEI", "Nifty 50", "index"), ("NIFTY_MIDCAP_100.NS", "Nifty Midcap", "index"), ("^NSEBANK", "Nifty Bank", "index"),
         ("INR=X", "USD/INR", "inr"), ("^INDIAVIX", "India VIX", "index"), ("CL=F", "Crude oil", "usd"),
         ("GC=F", "Gold", "usd"), ("^TNX", "US 10Y", "pct"),
     ],
@@ -199,6 +200,10 @@ def connect(db_path: str, broadcast=None) -> None:
         );
         """
     )
+    columns = {r[1] for r in conn.execute("PRAGMA table_info(market_series)")}
+    for column in ("source", "via"):
+        if column not in columns:
+            conn.execute(f"ALTER TABLE market_series ADD COLUMN {column} TEXT")
     conn.commit()
     conn.close()
 
@@ -255,18 +260,11 @@ def merge(old: List[Tuple[str, float]], new: List[Tuple[str, float]]) -> List[Tu
     return sorted(both.items())[-KEEP_CLOSES:]
 
 
-async def _fetch(client: httpx.AsyncClient, symbol: str, full: bool, gate: asyncio.Semaphore):
-    async with gate:
-        try:
-            data = await radar.yahoo_chart(client, symbol, {"range": "1y" if full else "5d", "interval": "1d"})
-            return symbol, parse_series(data), ""
-        except Exception as e:
-            return symbol, None, radar._short_error(e)
-
-
-async def refresh(symbols: List[str], client: Optional[httpx.AsyncClient] = None, now: Optional[datetime.datetime] = None) -> int:
-    """Fetch these symbols; a year of closes when the last full fetch is old,
-    else the last 5 days. Returns how many updated."""
+async def refresh(symbols: List[str], client: Optional[httpx.AsyncClient] = None, now: Optional[datetime.datetime] = None,
+                  open_now: bool = True) -> int:
+    """Fetch the symbols whose prices are stale, each from the first source
+    that answers (prices.py). Each result is saved as it lands, so the board
+    fills in while slow sources are still being asked. Returns how many updated."""
     now = now or radar._utcnow()
     conn = _db()
     try:
@@ -274,25 +272,28 @@ async def refresh(symbols: List[str], client: Optional[httpx.AsyncClient] = None
     finally:
         conn.close()
 
-    def needs_history(symbol: str) -> bool:
+    def stale(symbol: str) -> bool:
         row = known.get(symbol)
-        when = radar._parse_iso(row["history_at"]) if row else None
-        return not when or now - when >= HISTORY_EVERY
+        return not row or not prices.fresh(row["source"], radar._parse_iso(row["updated_at"]), now, open_now)
 
+    due = [s for s in symbols if stale(s)]
+    if not due:
+        return 0
     own = client is None
     client = client or radar._client()
     gate = asyncio.Semaphore(CONCURRENCY)
-    try:
-        results = await asyncio.gather(*[_fetch(client, s, needs_history(s), gate) for s in symbols])
-    finally:
-        if own:
-            await client.aclose()
     updated = 0
-    failed = []
-    conn = _db()
-    try:
-        for symbol, series, error in results:
-            row = known.get(symbol)
+    failed: List[str] = []
+
+    async def one(symbol: str) -> None:
+        nonlocal updated
+        async with gate:
+            try:
+                series, source, name = await prices.fetch(client, symbol)
+            except Exception as e:
+                series, source, name, error = None, None, None, str(e)[:300]
+        conn = _db()
+        try:
             if series is None:
                 failed.append(f"{symbol}: {error}")
                 conn.execute(
@@ -300,15 +301,27 @@ async def refresh(symbols: List[str], client: Optional[httpx.AsyncClient] = None
                     "ON CONFLICT(symbol) DO UPDATE SET error = excluded.error",
                     (symbol, error),
                 )
-                continue
-            full = needs_history(symbol)
-            old = [(d, c) for d, c in json.loads(row["closes"] or "[]")] if row else []
-            closes = series[-KEEP_CLOSES:] if full else merge(old, series)
-            conn.execute(
-                "INSERT OR REPLACE INTO market_series (symbol, closes, updated_at, history_at, error) VALUES (?, ?, ?, ?, '')",
-                (symbol, json.dumps(closes), radar._iso(now), radar._iso(now) if full else (row["history_at"] if row else None)),
-            )
-            updated += 1
+            else:
+                row = known.get(symbol)
+                old = [(d, c) for d, c in json.loads(row["closes"] or "[]")] if row else []
+                closes = prices.combine(old, row["source"] if row else None, series, source, KEEP_CLOSES)
+                conn.execute(
+                    "INSERT OR REPLACE INTO market_series (symbol, closes, updated_at, history_at, error, source, via) "
+                    "VALUES (?, ?, ?, ?, '', ?, ?)",
+                    (symbol, json.dumps(closes), radar._iso(now), radar._iso(now), source, name),
+                )
+                updated += 1
+            conn.commit()
+        finally:
+            conn.close()
+
+    try:
+        await asyncio.gather(*[one(s) for s in due])
+    finally:
+        if own:
+            await client.aclose()
+    conn = _db()
+    try:
         error = "; ".join(failed[:3]) + (f" (+{len(failed) - 3} more)" if len(failed) > 3 else "")
         radar._record_source(conn, "Markets board", "markets", updated > 0, updated, error, now)
         conn.commit()
@@ -485,6 +498,7 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
     conn = _db()
     try:
         stamps = [r["updated_at"] for r in conn.execute("SELECT updated_at FROM market_series WHERE updated_at IS NOT NULL")]
+        origin = {r["symbol"]: (r["source"], r["via"]) for r in conn.execute("SELECT symbol, source, via FROM market_series WHERE source IS NOT NULL")}
         health = conn.execute("SELECT ok, error FROM radar_sources WHERE name = 'Markets board'").fetchone()
     finally:
         conn.close()
@@ -524,10 +538,15 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
             "why": explain(name, symbol, actual, words, tag, top),
         })
 
+    def proxy(symbol: str) -> Optional[str]:
+        """The fund standing in for an index, e.g. SPY for the S&P 500."""
+        source, via = origin.get(symbol, (None, None))
+        return via if source == "twelve" and via and via != symbol else None
+
     gauges = []
     for symbol, label, unit in GAUGES[region]:
         s = series.get(symbol, [])
-        gauges.append({"symbol": symbol, "name": label, "unit": unit, "price": s[-1][1] if s else None, "change": ch(symbol), "closes": spark(symbol)})
+        gauges.append({"symbol": symbol, "name": label, "unit": unit, "price": s[-1][1] if s else None, "change": ch(symbol), "closes": spark(symbol), "via": proxy(symbol)})
 
     known = [s for s in sectors if s["change"] is not None]
     pool = ([{"name": i["name"], "symbol": i["symbol"], "change": i["change"]} for s in sectors for i in s["industries"] if i["change"] is not None]
@@ -567,9 +586,11 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
         best, worst = max(known, key=lambda s: s["change"]), min(known, key=lambda s: s["change"])
         headline = (f"{best['name']} leads ({_pct(best['change'])}), {worst['name'][0].lower() + worst['name'][1:] if region != 'Global' else worst['name']} lags ({_pct(worst['change'])}). "
                     f"{sum(1 for s in known if s['change'] > 0)} of {len(known)} {NOUN[region]} up {span}.")
+    elif region != "India" and not prices.twelve_key():
+        headline = "US and world prices need a free Twelve Data key. Add it in Settings > Radar."
     elif not stamps and health and not health["ok"]:
         # Saying "fetching" forever hides that Yahoo keeps saying no.
-        headline = f"Radar can't get prices: Yahoo answered {health['error'] or 'with nothing'}. It keeps trying."
+        headline = f"Radar can't get prices yet: {health['error'] or 'no source answered'}. It keeps trying."
     elif not stamps:
         headline = "Radar is fetching the first prices. This takes a minute."
     else:
@@ -582,6 +603,7 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
         "open": is_open(region, now),
         "headline": headline,
         "gauges": gauges,
+        "sources": sorted({prices.LABELS[source] for source, _ in origin.values() if source in prices.LABELS}),
         "sectors": sectors,
         "breadth": {"up": up, "down": len(pool) - up, "of": len(pool), "unit": "industries" if region == "US" else NOUN[region]},
         "leaders": ordered[:5],
@@ -773,7 +795,7 @@ class Collector:
                 last = self.done_at.get(region)
                 if force or not last or now - last >= every:
                     self.done_at[region] = now
-                    if await refresh(view_symbols(region), now=now):
+                    if await refresh(view_symbols(region), now=now, open_now=is_open(region, now)):
                         changed = True
         if changed and _broadcast:
             await _broadcast({"type": "RADAR_MARKETS"})
