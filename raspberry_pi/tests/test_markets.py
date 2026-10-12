@@ -29,6 +29,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 import db_server  # noqa: E402
 import markets  # noqa: E402
+import prices  # noqa: E402
 import radar  # noqa: E402
 import radar_research  # noqa: E402
 
@@ -71,6 +72,7 @@ def reset():
     conn.commit()
     conn.close()
     radar.forget_yahoo_session()
+    prices.forget()
 
 
 def chart(stamps, closes, price=None, when=None, offset=-14400):
@@ -183,7 +185,7 @@ class Fetching(unittest.TestCase):
     def setUp(self):
         reset()
 
-    def test_full_year_then_last_days(self):
+    def test_fresh_prices_are_not_fetched_again(self):
         asked = []
 
         def handler(request):
@@ -191,9 +193,12 @@ class Fetching(unittest.TestCase):
             return httpx.Response(200, json=chart([1791552600], [100.0], price=101.0, when=1791831600))
 
         self.assertEqual(asyncio.run(markets.refresh(["XLK"], mock_client(handler), NOW)), 1)
-        self.assertEqual(asyncio.run(markets.refresh(["XLK"], mock_client(handler), NOW + datetime.timedelta(minutes=20))), 1)
-        self.assertEqual(asked, ["1y", "5d"])
+        self.assertEqual(asyncio.run(markets.refresh(["XLK"], mock_client(handler), NOW + datetime.timedelta(minutes=10))), 0)
+        self.assertEqual(asyncio.run(markets.refresh(["XLK"], mock_client(handler), NOW + datetime.timedelta(minutes=25))), 1)
+        self.assertEqual(asked, ["1y", "1y"])
         self.assertEqual(markets.load_series(["XLK"])["XLK"], [("2026-10-09", 100.0), ("2026-10-12", 101.0)])
+        board = markets.board("US", "1D", NOW)
+        self.assertEqual(board["sources"], ["Yahoo"])
 
     def test_failure_keeps_last_closes_and_shows_in_sources(self):
         store("XLK", [("2026-10-09", 100.0)])
@@ -337,7 +342,9 @@ class Board(unittest.TestCase):
 
     def test_empty_board(self):
         reset()
-        data = markets.board("Global", "1D", NOW)
+        self.assertIn("Twelve Data key", markets.board("Global", "1D", NOW)["headline"])
+        with mock.patch.object(prices, "twelve_key", return_value="k"):
+            data = markets.board("Global", "1D", NOW)
         self.assertEqual(data["headline"], "Radar is fetching the first prices. This takes a minute.")
         self.assertEqual(data["why"]["points"], [])
 
@@ -345,8 +352,9 @@ class Board(unittest.TestCase):
         reset()
         refused = mock_client(lambda r: httpx.Response(429))
         self.assertEqual(asyncio.run(markets.refresh(["XLK", "XLF"], refused, NOW)), 0)
-        headline = markets.board("US", "1D", NOW)["headline"]
-        self.assertIn("Radar can't get prices: Yahoo answered XLK: HTTP 429", headline)
+        with mock.patch.object(prices, "twelve_key", return_value="k"):
+            headline = markets.board("US", "1D", NOW)["headline"]
+        self.assertIn("Radar can't get prices yet: XLK: Yahoo HTTP 429", headline)
 
 
 if __name__ == "__main__":

@@ -205,20 +205,25 @@ class Fetching(unittest.TestCase):
         self.assertFalse(sources["BBC Business"]["ok"])
         self.assertEqual(sources["BBC Business"]["error"], "HTTP 503")
 
-    def test_quotes_keep_last_good_price(self):
-        good = mock_client(lambda r: httpx.Response(200, json=chart([10, 11], 11)))
-        self.assertEqual(asyncio.run(radar.refresh_quotes(good, NOW)), len(radar.quotes()))
-        bad = mock_client(lambda r: httpx.Response(429))
-        self.assertEqual(asyncio.run(radar.refresh_quotes(bad, NOW)), 0)
+    def test_ticker_copies_the_markets_store_and_keeps_last_price(self):
+        import markets
+        markets.connect(radar.DB_PATH)
+        conn = sqlite3.connect(radar.DB_PATH)
+        conn.execute("DELETE FROM market_series")
+        for symbol, _, _ in radar.quotes():
+            conn.execute("INSERT INTO market_series (symbol, closes) VALUES (?, ?)", (symbol, json.dumps([["2026-10-09", 10], ["2026-10-12", 11]])))
+        conn.commit()
+        self.assertEqual(asyncio.run(radar.refresh_quotes(now=NOW)), len(radar.quotes()))
+        conn.execute("DELETE FROM market_series")
+        conn.commit()
+        conn.close()
+        self.assertEqual(asyncio.run(radar.refresh_quotes(now=NOW)), 0)
 
         data = radar.summary(NOW)
         self.assertEqual([q["name"] for q in data["ticker"]], [name for _, name, _ in radar.quotes()])
         self.assertEqual(data["ticker"][0]["name"], "Nifty 50")
         self.assertEqual(data["ticker"][0]["price"], 11)
-        markets = next(s for s in data["sources"] if s["name"] == "Yahoo markets")
-        self.assertFalse(markets["ok"])
-        self.assertIn("HTTP 429", markets["error"])
-        self.assertIsNotNone(markets["lastOkAt"])
+        self.assertEqual(data["ticker"][0]["changePct"], 10.0)
 
 
 class Velocity(unittest.TestCase):
