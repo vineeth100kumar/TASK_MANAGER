@@ -63,16 +63,27 @@ static const HapFrame FX_PULSE[]    = { {HFX_PULSE_PEAK, HFX_PULSE_MS * 2 / 5}, 
 static const HapFrame FX_RAMP_UP[]  = { {HFX_RAMP_PEAK, HFX_RAMP_MS}, {0, FALL} };
 static const HapFrame FX_RAMP_DOWN[]= { {HFX_RAMP_PEAK, EDGE * 2}, {0, HFX_RAMP_MS} };
 static const HapFrame FX_HEARTBEAT[]= { KNOCK(HFX_BEAT_PEAK, 26), REST(90), KNOCK(HFX_BEAT_PEAK * 3 / 4, 20) };
-// "beep-beep ... beep-beep" on the tone, the rhythm the light beats to.
-// Short glides keep the beeps round instead of clicky.
-static const HapFrame FX_ALARM[]    = { {255, 3}, {255, 124}, {0, 3}, REST(127), {255, 3}, {255, 124}, {0, 3}, REST(913) };
-// The other alarm sounds picked in Sage: four quick beeps, one long rising
-// beep, and three chirps (also a finished timer).
+// The alarm sounds. The buzzer sits behind C1 (1 nF), which passes higher
+// pitches better, and rings loudest near its own pitch, so every sound stays
+// in its sweet spot, 2.3-3.5 kHz. Each frame also names a pitch (the P_
+// arrays, one per frame; a rest carries the next beep's pitch, so the pitch
+// changes in silence). The motor shakes along with every beep.
 #define BEEP(ms)  {255, 3}, {255, (ms) - 6}, {0, 3}
+// Pulse: a heartbeat "tick-tock", high then low, the rhythm the light beats to.
+static const HapFrame FX_ALARM[]    = { BEEP(130), REST(127), BEEP(130), REST(913) };
+static const uint16_t P_ALARM[]     = { 2900, 2900, 2900, 2500,  2500, 2500, 2500, 2900 };
+// Classic: four quick beeps on the buzzer's own pitch.
 static const HapFrame FX_CLASSIC[]  = { BEEP(90), REST(90), BEEP(90), REST(90), BEEP(90), REST(90), BEEP(90), REST(680) };
-static const HapFrame FX_RISING[]   = { BEEP(420), REST(1080) };
+// Rising: three steps up the scale, the last one held.
+static const HapFrame FX_RISING[]   = { BEEP(160), REST(60), BEEP(160), REST(60), BEEP(280), REST(880) };
+static const uint16_t P_RISING[]    = { 2300, 2300, 2300, 2700, 2700, 2700, 2700, 3200, 3200, 3200, 3200, 2300 };
+// Chirp: three bird-like chirps, up-down-up (also a finished timer).
 static const HapFrame FX_CHIRP[]    = { BEEP(35), REST(55), BEEP(35), REST(55), BEEP(35), REST(900) };
+static const uint16_t P_CHIRP[]     = { 3300, 3300, 3300, 3500, 3500, 3500, 3500, 3300, 3300, 3300, 3300, 3300 };
 #undef BEEP
+static_assert(sizeof(P_ALARM) / 2 == sizeof(FX_ALARM) / sizeof(HapFrame), "one pitch per frame");
+static_assert(sizeof(P_RISING) / 2 == sizeof(FX_RISING) / sizeof(HapFrame), "one pitch per frame");
+static_assert(sizeof(P_CHIRP) / 2 == sizeof(FX_CHIRP) / sizeof(HapFrame), "one pitch per frame");
 
 #define FX(p) { p, (uint8_t)(sizeof(p) / sizeof((p)[0])) }
 static const struct { const HapFrame* f; uint8_t n; } FX_LIB[HAP_COUNT] = {
@@ -95,15 +106,33 @@ static uint8_t  askCount = 0;
 static bool     askLoop = false, askTone = false;
 static float    askScale = 1;
 static uint32_t askBuildMs = 0, askStopMs = 0;
+static const uint16_t* askPitch = nullptr;
 static HapFrame pulseOne[3];                 // the Pi's plain HAPTIC {ms}
 
 // --- The engine (only the timer touches these) ---
 static esp_timer_handle_t hapTimer = nullptr;
 static uint32_t hapPeriod = 0;               // the timer's period while it runs
 static uint32_t hapMaxDuty = 255;            // (1 << resolution) - 1
+static uint32_t hapFreq = HAPTIC_FREQ;       // knock carrier, changeable from the serial monitor
+static float    hapOnDuty = HAPTIC_ON_DUTY / 100.0f;
+
+// The most duty bits LEDC can give at `hz` from its 80 MHz clock.
+static uint8_t hapResFor(uint32_t hz) {
+  uint8_t r = HAPTIC_RES;
+  while (r > 4 && (80000000UL >> r) < hz) r--;
+  return r;
+}
+
+static void hapSetCarrier(uint32_t hz) {
+  uint8_t res = hapResFor(hz);
+  ledcChangeFrequency(BUZZER_PIN, hz, res);
+  hapMaxDuty = (1u << res) - 1;
+}
 static const HapFrame* hf = nullptr;
 static uint8_t  hn = 0, hi = 0;
 static bool     hLoop = false, hTone = false, hOnTone = false;
+static const uint16_t* hPitch = nullptr;     // a tone's pitch per frame (nullptr: ALARM_TONE_HZ)
+static uint32_t hToneHz = 0;                 // the tone carrier now playing
 static float    hScale = 1, hFrom = 0;      // on a tone, hScale is the loudest duty
 static uint32_t hBuildMs = 0, hStopMs = 0;   // a tone's build-up, and a preview's length (0: until off)
 static int64_t  hSegAt = 0, hStartAt = 0;
@@ -118,11 +147,12 @@ static void hapWrite(uint32_t on) {          // on-time, 0..hapMaxDuty
   ledcWrite(BUZZER_PIN, hapMaxDuty - on);    // active low
 }
 
-static void hapCarrier(bool tone) {
-  if (tone == hOnTone) return;
+static void hapCarrier(bool tone, uint32_t hz = ALARM_TONE_HZ) {
+  if (tone == hOnTone && (!tone || hz == hToneHz)) return;
   hOnTone = tone;
+  hToneHz = tone ? hz : 0;
   hDuty = -1;
-  ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
+  hapSetCarrier(tone ? hz : hapFreq);
 }
 
 // How long a frame lasts. With on/off drive, strength (hScale) stretches the
@@ -138,7 +168,7 @@ static void hapTick(void*) {
   if (hapAsk) {
     portENTER_CRITICAL(&hapMux);
     hf = askFrames; hn = askCount; hLoop = askLoop; hTone = askTone; hScale = askScale;
-    hBuildMs = askBuildMs; hStopMs = askStopMs;
+    hBuildMs = askBuildMs; hStopMs = askStopMs; hPitch = askPitch;
     hapAsk = false;
     portEXIT_CRITICAL(&hapMux);
     hi = 0;
@@ -173,14 +203,22 @@ static void hapTick(void*) {
   float level = (hFrom + (f.level - hFrom) * t) / 255.0f;
 
   float on;
-  if (hTone) {
-    // The alarm starts quieter and builds to its volume.
-    float k = hBuildMs ? (float)(now - hStartAt) / (hBuildMs * 1000.0f) : 1;
+  int64_t ringing = now - hStartAt;
+  if (hTone && !hStopMs && ringing < (int64_t)ALARM_SILENT_MS * 1000) {
+    // A gentle start: the alarm's rhythm on the motor alone (the silent
+    // knock carrier), before any sound.
+    if (hOnTone) { hapWrite(0); hapCarrier(false); }
+    on = level >= 0.5f ? hapOnDuty : 0;
+  } else if (hTone) {
+    hapCarrier(true, hPitch ? hPitch[hi] : ALARM_TONE_HZ);
+    // The sound starts quieter and builds to its volume.
+    if (!hStopMs) ringing -= (int64_t)ALARM_SILENT_MS * 1000;
+    float k = hBuildMs ? (float)ringing / (hBuildMs * 1000.0f) : 1;
     if (k > 1) k = 1;
     float vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
     on = level * vol * hScale;
   } else if (HAPTIC_MOTOR_DC) {
-    on = level >= 0.5f ? 1 : 0;              // held fully on or fully off: see config.h
+    on = level >= 0.5f ? hapOnDuty : 0;      // a knock is on at one fixed duty: see config.h
   } else {
     on = level * hScale;
   }
@@ -197,10 +235,10 @@ static float hapTop(uint8_t pct) {
 }
 
 static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float scale,
-                      uint32_t buildMs = 0, uint32_t stopMs = 0) {
+                      uint32_t buildMs = 0, uint32_t stopMs = 0, const uint16_t* pitch = nullptr) {
   portENTER_CRITICAL(&hapMux);
   askFrames = f; askCount = n; askLoop = loop; askTone = tone; askScale = scale;
-  askBuildMs = buildMs; askStopMs = stopMs;
+  askBuildMs = buildMs; askStopMs = stopMs; askPitch = pitch;
   hapAsk = true;
   portEXIT_CRITICAL(&hapMux);
   // The timer task outranks loop() on the C3's one core, so it can't be
@@ -220,10 +258,10 @@ static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float 
 
 void hapticInit(uint8_t strength) {
   hapStrength = strength > 100 ? 100 : strength;
-  uint8_t res = HAPTIC_RES;
-  if (!ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res)) {
+  uint8_t res = hapResFor(hapFreq);
+  if (!ledcAttach(BUZZER_PIN, hapFreq, res)) {
     res = 8;
-    ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res);
+    ledcAttach(BUZZER_PIN, hapFreq, res);
   }
   hapMaxDuty = (1u << res) - 1;
   ledcWrite(BUZZER_PIN, hapMaxDuty);         // off (active low)
@@ -233,8 +271,8 @@ void hapticInit(uint8_t strength) {
   args.name = "haptics";
   esp_err_t err = esp_timer_create(&args, &hapTimer);
   if (err != ESP_OK) hapTimer = nullptr;     // hapticUpdate() drives it instead
-  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, timer %s, strength %u%%\n", BUZZER_PIN,
-                (unsigned)HAPTIC_FREQ, res, hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
+  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, on-duty %d%%, timer %s, strength %u%%\n", BUZZER_PIN,
+                (unsigned)hapFreq, res, (int)(hapOnDuty * 100 + 0.5f), hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
 }
 
 void hapticPlay(Haptic h) {
@@ -278,22 +316,23 @@ static float toneDuty(uint8_t volume) {
   return ALARM_TONE_DUTY / 100.0f * powf(10.0f, (volume - 100) / 50.0f);
 }
 
-static const HapFrame* toneFrames(AlarmTone tone, uint8_t& n, uint32_t& buildMs) {
+static const HapFrame* toneFrames(AlarmTone tone, uint8_t& n, uint32_t& buildMs, const uint16_t*& pitch) {
   // How long each sound takes to build from ALARM_START_PCT to its volume.
   switch (tone) {
-    case TONE_CLASSIC: n = sizeof(FX_CLASSIC) / sizeof(HapFrame); buildMs = 8000;  return FX_CLASSIC;
-    case TONE_RISING:  n = sizeof(FX_RISING)  / sizeof(HapFrame); buildMs = 60000; return FX_RISING;
-    case TONE_CHIRP:   n = sizeof(FX_CHIRP)   / sizeof(HapFrame); buildMs = 6000;  return FX_CHIRP;
-    default:           n = sizeof(FX_ALARM)   / sizeof(HapFrame); buildMs = ALARM_BUILD_MS; return FX_ALARM;
+    case TONE_CLASSIC: n = sizeof(FX_CLASSIC) / sizeof(HapFrame); buildMs = 8000;  pitch = nullptr;  return FX_CLASSIC;
+    case TONE_RISING:  n = sizeof(FX_RISING)  / sizeof(HapFrame); buildMs = 60000; pitch = P_RISING; return FX_RISING;
+    case TONE_CHIRP:   n = sizeof(FX_CHIRP)   / sizeof(HapFrame); buildMs = 6000;  pitch = P_CHIRP;  return FX_CHIRP;
+    default:           n = sizeof(FX_ALARM)   / sizeof(HapFrame); buildMs = ALARM_BUILD_MS; pitch = P_ALARM; return FX_ALARM;
   }
 }
 
 void hapticRing(AlarmTone tone, uint8_t volume) {
   uint8_t n;
   uint32_t buildMs;
-  const HapFrame* f = toneFrames(tone, n, buildMs);
+  const uint16_t* pitch;
+  const HapFrame* f = toneFrames(tone, n, buildMs, pitch);
   hapAlarm = true;
-  hapAskFor(f, n, true, true, toneDuty(volume), buildMs);
+  hapAskFor(f, n, true, true, toneDuty(volume), buildMs, 0, pitch);
 }
 
 // A few seconds of a sound at its chosen volume, to pick one in Sage. A
@@ -302,8 +341,9 @@ void hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds) {
   if (hapAlarm) return;
   uint8_t n;
   uint32_t buildMs;
-  const HapFrame* f = toneFrames(tone, n, buildMs);
-  hapAskFor(f, n, true, true, toneDuty(volume), 0, seconds * 1000UL);
+  const uint16_t* pitch;
+  const HapFrame* f = toneFrames(tone, n, buildMs, pitch);
+  hapAskFor(f, n, true, true, toneDuty(volume), 0, seconds * 1000UL, pitch);
 }
 
 void hapticSetStrength(uint8_t pct) {
@@ -321,6 +361,29 @@ void hapticOff() {
 // (coarser, but still glides).
 void hapticUpdate() {
   if (!hapTimer) hapTick(nullptr);
+
+  // Tuning from the serial monitor (see HAPTICS in config.h).
+  if (!Serial.available()) return;
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line == "buzz") { hapticSelfTest(); return; }
+  if (line == "tick")  { hapticPlay(HAP_TICK); return; }
+  if (line == "knock") { hapticPlay(HAP_NOTIFY); return; }
+  if (line.startsWith("hz ")) {
+    long hz = line.substring(3).toInt();
+    if (hz < 1000 || hz > 300000 || hapAlarm) { Serial.println("[HAPTIC] hz must be 1000-300000 (and not while the alarm rings)"); return; }
+    hapFreq = hz;
+    hapticOff();
+    if (!hOnTone) { hapSetCarrier(hapFreq); hDuty = -1; hapWrite(0); }
+  } else if (line.startsWith("duty ")) {
+    long d = line.substring(5).toInt();
+    if (d < 1 || d > 100) { Serial.println("[HAPTIC] duty must be 1-100"); return; }
+    hapOnDuty = d / 100.0f;
+  } else if (line != "haptic") {
+    return;
+  }
+  Serial.printf("[HAPTIC] carrier %u Hz (%u-bit), on-duty %d%%. Type tick or knock to feel it.\n",
+                (unsigned)hapFreq, (unsigned)hapResFor(hapFreq), (int)(hapOnDuty * 100 + 0.5f));
 }
 
 // Serial "buzz" plays a plain full-power 300 ms buzz with no shaping, to tell
