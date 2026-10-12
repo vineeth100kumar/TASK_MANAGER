@@ -328,8 +328,8 @@ export function MarketsTab({ ideas, onOpenIdea, onResearch }: MarketsTabProps) {
       {/* A swipeable row on phones, a grid from tablets up. */}
       <div className="flex overflow-x-auto no-scrollbar -mx-1 px-1 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-4 xl:grid-cols-8 gap-2">
         {board.gauges.map(g => (
-          <div key={g.symbol} className="surface-item rounded-2xl px-3 py-2.5 min-w-0 shrink-0 w-[136px] sm:w-auto" title={`${g.symbol} · last 30 trading days`}>
-            <div className="text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 truncate">{g.name}</div>
+          <div key={g.symbol} className="surface-item rounded-2xl px-3 py-2.5 min-w-0 shrink-0 w-[136px] sm:w-auto" title={`${g.via ? `${g.via}, the fund that tracks it` : g.symbol} · last 30 trading days`}>
+            <div className="text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 truncate">{g.name}{g.via && <span className="normal-case tracking-normal font-medium"> · {g.via}</span>}</div>
             <div className="text-[15px] font-semibold tabular-nums text-gray-900 dark:text-white">{g.price === null ? '–' : formatQuote({ ...g, price: g.price } as unknown as RadarQuote)}</div>
             <div className={`text-[11.5px] font-semibold tabular-nums ${tone(g.change)}`}>{arrow(g.change)} {signedPct(g.change)}</div>
             <div className="mt-1"><Spark values={g.closes} up={(g.change ?? 0) >= 0} width={120} height={16} /></div>
@@ -416,7 +416,7 @@ export function MarketsTab({ ideas, onOpenIdea, onResearch }: MarketsTabProps) {
           </Panel>
         ))}
       </div>
-      <p className="text-[11.5px] text-gray-400">Prices from Yahoo via the Pi, up to 15 minutes late. Industries use a fund (ETF) as their price. Weights are approximate.</p>
+      <p className="text-[11.5px] text-gray-400">Prices from {board.sources?.length ? board.sources.join(', ') : 'the Pi'}, up to an hour late (FRED a day). Industries use a fund (ETF) as their price; an index shown with a fund name uses that fund. Weights are approximate.</p>
     </div>
   );
 }

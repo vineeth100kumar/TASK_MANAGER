@@ -4,8 +4,8 @@ Radar, phase 1: Signals.
 Every 15 minutes the Pi reads a handful of news feeds, tags each headline
 (AI, Regulation, Fintech, ...) and guesses its region from the source and the
 countries it names. Every 5 minutes in US or Indian market hours (hourly
-otherwise) it fetches the last week of daily closes for a few markets from
-Yahoo's chart data. Both are kept in cache tables in Sage's database that never sync: they
+otherwise) the ticker copies a few markets' latest closes from the Markets
+board's store (prices.py picks the source). Both are kept in cache tables in Sage's database that never sync: they
 can always be fetched again, and headlines would swamp the Sheets backup.
 
 The web app reads them through /api/radar/summary and /api/radar/signals.
@@ -18,7 +18,7 @@ divided by twice its usual daily count (up to 30 days back). 1x is normal,
 so for the first few days after install it shows counts only.
 
 India gets its own lane: a few Indian business, startup and tech feeds,
-Nifty 50, Sensex, Nifty Bank and the rupee. Settings > Radar can switch them
+Nifty 50, Nifty Midcap, Nifty Bank and the rupee. Settings > Radar can switch them
 off ("india"). The India filter shows headlines that name India plus
 everything from the Indian sources, even a story about the Fed.
 
@@ -53,7 +53,7 @@ DEFAULT_FEEDS = [
     {"name": "Hacker News", "url": "https://hnrss.org/frontpage", "region": None},
     {"name": "MIT Tech Review", "url": "https://www.technologyreview.com/feed/", "region": None},
     {"name": "The Economist", "url": "https://www.economist.com/business/rss.xml", "region": None},
-    {"name": "Yahoo Finance", "url": "https://finance.yahoo.com/news/rssindex", "region": "Americas"},
+    {"name": "CNBC Markets", "url": "https://www.cnbc.com/id/20910258/device/rss/rss.html", "region": "Americas"},
     {"name": "BBC Business", "url": "https://feeds.bbci.co.uk/news/business/rss.xml", "region": "Europe"},
     {"name": "SCMP Business", "url": "https://www.scmp.com/rss/92/feed", "region": "Asia-Pacific"},
     {"name": "Rest of World", "url": "https://restofworld.org/feed/latest", "region": "Emerging"},
@@ -69,7 +69,7 @@ INDIA = "India"
 # (Yahoo symbol, label, unit). The unit tells the app how to show the price.
 INDIA_QUOTES = [
     ("^NSEI", "Nifty 50", "index"),
-    ("^BSESN", "Sensex", "index"),
+    ("NIFTY_MIDCAP_100.NS", "Nifty Midcap", "index"),
     ("^NSEBANK", "Nifty Bank", "index"),
     ("INR=X", "USD/INR", "inr"),
 ]
@@ -237,6 +237,8 @@ def connect(db_path: str) -> None:
         );
         """
     )
+    # Sources that are gone: the old Yahoo news feed, and the ticker's own Yahoo fetch.
+    conn.execute("DELETE FROM radar_sources WHERE name IN ('Yahoo Finance', 'Yahoo markets')")
     conn.commit()
     conn.close()
 
@@ -525,42 +527,28 @@ async def yahoo_chart(client: httpx.AsyncClient, symbol: str, params: dict) -> d
     raise last
 
 
-async def _fetch_quote(client: httpx.AsyncClient, symbol: str):
-    try:
-        data = await yahoo_chart(client, symbol, {"range": "10d", "interval": "1d"})
-        return symbol, parse_chart(data), ""
-    except Exception as e:
-        return symbol, None, _short_error(e)
-
-
 async def refresh_quotes(client: Optional[httpx.AsyncClient] = None, now: Optional[datetime.datetime] = None) -> int:
-    """Fetch every market; returns how many prices were updated."""
+    """Copy the ticker's prices from the Markets board's store (markets.py),
+    which fetches each symbol once from whichever source answers (prices.py).
+    Returns how many prices were updated."""
+    import markets  # markets imports radar, so not at the top
     now = now or _utcnow()
-    own = client is None
-    client = client or _client()
-    try:
-        markets = quotes()
-        results = await asyncio.gather(*[_fetch_quote(client, symbol) for symbol, _, _ in markets])
-    finally:
-        if own:
-            await client.aclose()
-    labels = {symbol: (name, unit) for symbol, name, unit in markets}
-    failed = [f"{labels[s][0]}: {err}" for s, quote, err in results if quote is None]
+    listed = quotes()
+    series = markets.load_series([symbol for symbol, _, _ in listed])
     updated = 0
     conn = _db()
     try:
-        for symbol, quote, _ in results:
-            if quote is None:
+        for symbol, name, unit in listed:
+            closes = [c for _, c in series.get(symbol, [])]
+            if not closes:
                 continue  # keep the last good price rather than blanking it
-            name, unit = labels[symbol]
+            change = (closes[-1] - closes[-2]) / closes[-2] * 100 if len(closes) >= 2 and closes[-2] else None
             conn.execute(
                 "INSERT OR REPLACE INTO radar_quotes (symbol, name, unit, price, change_pct, closes, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (symbol, name, unit, quote["price"], quote["changePct"], json.dumps(quote["closes"]), _iso(now)),
+                (symbol, name, unit, closes[-1], None if change is None else round(change, 2),
+                 json.dumps([round(c, 4) for c in closes[-7:]]), _iso(now)),
             )
             updated += 1
-        # Markets are one source: Yahoo. Half the symbols failing is still worth a warning.
-        error = "; ".join(failed[:3]) + (f" (+{len(failed) - 3} more)" if len(failed) > 3 else "")
-        _record_source(conn, "Yahoo markets", "markets", updated > 0, updated, error, now)
         conn.commit()
     finally:
         conn.close()
@@ -638,7 +626,7 @@ def summary(now: Optional[datetime.datetime] = None) -> dict:
             ),
             key=lambda q: order[q["symbol"]],
         )
-        known = {f["name"] for f in feeds()} | {"Yahoo markets", "Markets board"}
+        known = {f["name"] for f in feeds()} | {"Markets board"}
         sources = [
             {
                 "name": r["name"], "kind": r["kind"], "ok": bool(r["ok"]), "items": r["items"],

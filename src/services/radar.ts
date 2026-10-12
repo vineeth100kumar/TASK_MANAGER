@@ -233,6 +233,7 @@ export interface MarketGauge {
   price: number | null;
   change: number | null;
   closes: number[];
+  via?: string | null;
 }
 
 export interface MarketBoard {
@@ -244,6 +245,7 @@ export interface MarketBoard {
   open: boolean;
   headline: string;
   gauges: MarketGauge[];
+  sources?: string[];
   sectors: MarketSector[];
   breadth: { up: number; down: number; of: number; unit: string };
   leaders: { name: string; symbol: string; change: number }[];
