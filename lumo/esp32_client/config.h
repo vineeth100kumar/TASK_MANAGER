@@ -89,7 +89,8 @@
 #define HFX_BEAT_PEAK      230    // heartbeat "bu-bump"
 
 // The alarm: the one sound LUMO makes.
-#define ALARM_TONE_HZ      2700   // the buzzer's loudest pitch
+#define ALARM_SILENT_MS    6000   // a gentle start: this long on the motor alone before any sound (0 = off)
+#define ALARM_TONE_HZ      2700   // the buzzer's loudest pitch (Classic; the others move around it)
 #define ALARM_TONE_DUTY    50     // % on-time at full volume (a square wave is loudest at 50)
 #define ALARM_START_PCT    25     // first beeps at this % of full volume...
 #define ALARM_BUILD_MS     20000  // ...building to full over this long
@@ -111,7 +112,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.8.2"
+#define FW_VERSION "2.8.3"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
