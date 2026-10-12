@@ -9,7 +9,7 @@ import { piBackendUrl, piHeaders } from './piBackend';
 export interface RadarQuote {
   symbol: string;
   name: string;
-  unit: 'index' | 'pct' | 'usd';
+  unit: 'index' | 'pct' | 'usd' | 'inr';
   price: number;
   changePct: number | null;
   closes: number[];
@@ -88,7 +88,8 @@ export function formatQuote(q: RadarQuote): string {
   const value = big ? q.price / 1000 : q.price;
   const digits = value >= 1000 ? 0 : 2;
   const text = value.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
-  return `${q.unit === 'usd' ? '$' : ''}${text}${big ? 'k' : ''}`;
+  const symbol = q.unit === 'usd' ? '$' : q.unit === 'inr' ? '₹' : '';
+  return `${symbol}${text}${big ? 'k' : ''}`;
 }
 
 export function timeAgo(iso: string | null, now = Date.now()): string {
@@ -137,6 +138,7 @@ export interface RadarSettings {
   dailyCap: number;
   engine: 'groq' | 'claude';
   lumoLine: boolean;
+  india: boolean;
 }
 
 export interface RadarBrief {
