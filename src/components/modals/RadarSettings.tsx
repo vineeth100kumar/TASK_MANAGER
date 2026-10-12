@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Radar } from 'lucide-react';
+import { KeyRound, Radar } from 'lucide-react';
+import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { RadarSettings as Settings, radarAvailable, radarSettingsApi } from '../../services/radar';
 import { useToast } from '../../context/ToastContext';
 
@@ -21,6 +22,65 @@ function Row({ title, detail, children }: { title: string; detail: string; child
       </div>
       {children}
     </div>
+  );
+}
+
+type KeyStatus = { set: boolean; last4: string | null; usedToday: number; perDay: number };
+
+// The free Twelve Data key that Radar's prices come from. Saved on the Pi.
+function PricesKey() {
+  const { showToast } = useToast();
+  const [status, setStatus] = useState<KeyStatus | null>(null);
+  const [key, setKey] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    fetch(`${piBackendUrl()}/api/settings/prices-key`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null)).then(json => json && setStatus(json)).catch(() => {});
+  }, []);
+
+  const save = async (value: string) => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/settings/prices-key`, {
+        method: 'POST', headers: piHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ key: value }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || `The Pi said ${res.status}`);
+      setStatus(json);
+      setKey('');
+      showToast(value ? 'Twelve Data key saved on the Pi' : 'Twelve Data key removed');
+    } catch (e: any) {
+      showToast(e.message || "Couldn't save the key", 'error');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); if (key.trim()) save(key); }}
+      className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2.5">
+      <p className="flex items-center gap-2 text-[13.5px] font-semibold text-gray-900 dark:text-white"><KeyRound size={15} /> Market prices key</p>
+      <p className="text-[12px] text-gray-500 dark:text-gray-400">
+        US and world prices come from Twelve Data. Get a free key at twelvedata.com (sign up, then API keys). India's indices come from NSE and need no key.
+      </p>
+      <p className="text-[12px] font-medium text-gray-700 dark:text-gray-300">
+        {status === null ? 'Checking…' : status.set
+          ? `In use: key ending in ${status.last4}. ${status.usedToday} of ${status.perDay} calls used today.`
+          : 'No key yet, so US and world prices fall back to slower free sources.'}
+      </p>
+      <div className="flex items-center gap-2">
+        <input type="password" autoComplete="off" aria-label="Twelve Data API key" value={key} onChange={e => setKey(e.target.value)}
+          placeholder={status?.set ? 'Paste a new key to replace it' : 'Twelve Data API key'}
+          className="flex-1 min-w-0 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white" />
+        <button type="submit" disabled={saving || !key.trim()} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white font-semibold text-xs rounded-xl shadow-sm">
+          {saving ? 'Checking…' : 'Save'}
+        </button>
+      </div>
+      {status?.set && (
+        <button type="button" onClick={() => save('')} disabled={saving} className="text-xs font-semibold text-red-600 dark:text-red-400 hover:underline">Remove key</button>
+      )}
+    </form>
   );
 }
 
@@ -52,9 +112,10 @@ export function RadarSettings() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-[13px] text-gray-500"><Radar size={16} className="text-purple-500" /> Radar shows in Work and All, never in Personal.</div>
-      <Row title="India news and markets" detail="Economic Times, Mint, BusinessLine, Inc42 and YourStory, plus Nifty 50, Sensex, Nifty Bank and the rupee. The India filter in Signals shows Indian news on its own.">
+      <Row title="India news and markets" detail="Economic Times, Mint, BusinessLine, Inc42 and YourStory, plus Nifty 50, Nifty Midcap, Nifty Bank and the rupee. The India filter in Signals shows Indian news on its own.">
         <Toggle on={settings.india} onChange={india => save({ india })} label="India news and markets" />
       </Row>
+      <PricesKey />
       <Row title="Radar brief on Today" detail="Three signals, the biggest market move and the hottest topic, on the Today screen.">
         <Toggle on={settings.brief} onChange={brief => save({ brief })} label="Radar brief on Today" />
       </Row>

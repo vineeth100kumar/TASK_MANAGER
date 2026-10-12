@@ -72,7 +72,7 @@ def radar_part(db_path: str, enabled: bool) -> dict:
 
 
 def markets_part(db_path: str) -> dict:
-    rows = _rows(db_path, "SELECT symbol, updated_at, error FROM market_series")
+    rows = _rows(db_path, "SELECT * FROM market_series")
     failed = [r for r in rows if r["error"]]
     updated = [r["updated_at"] for r in rows if r["updated_at"]]
     return {
@@ -81,7 +81,25 @@ def markets_part(db_path: str) -> dict:
         "failing": len(failed),
         "lastUpdate": max(updated) if updated else None,
         "errors": [f"{r['symbol']}: {r['error']}" for r in failed[:8]],
+        "bySource": _count(r["source"] if "source" in r.keys() else None for r in rows if r["updated_at"]),
+        "twelveData": _twelve(),
     }
+
+
+def _count(values) -> dict:
+    out: Dict[str, int] = {}
+    for v in values:
+        out[v or "unknown"] = out.get(v or "unknown", 0) + 1
+    return out
+
+
+def _twelve() -> Optional[dict]:
+    try:
+        import prices
+        status = prices.twelve_status()
+        return {"keySet": status["set"], "usedToday": status["usedToday"], "perDay": status["perDay"]}
+    except Exception:
+        return None
 
 
 def report(

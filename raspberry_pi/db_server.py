@@ -22,6 +22,7 @@ import item_actions
 import phone_link
 import quick_add
 import markets
+import prices
 import radar
 import radar_research
 import system_health
@@ -1006,6 +1007,25 @@ def save_groq_key(req: GroqKeyRequest):
             raise HTTPException(status_code=400, detail="Groq says this key isn't valid.")
     canvas_thinker.save_groq_key(key)
     return {"success": True, **canvas_thinker.groq_key_status()}
+
+@app.get("/api/settings/prices-key")
+def prices_key_status():
+    return {"success": True, **prices.twelve_status()}
+
+@app.post("/api/settings/prices-key")
+def save_prices_key(req: GroqKeyRequest):
+    key = req.key.strip()
+    if key:
+        # Check it with Twelve Data first, so a typo shows up here, not as empty prices.
+        try:
+            res = httpx.get("https://api.twelvedata.com/api_usage", params={"apikey": key}, timeout=15)
+            body = res.json()
+        except (httpx.HTTPError, ValueError) as e:
+            raise HTTPException(status_code=502, detail=f"Couldn't reach Twelve Data to check the key: {e}")
+        if res.status_code in (401, 403) or (isinstance(body, dict) and body.get("status") == "error"):
+            raise HTTPException(status_code=400, detail="Twelve Data says this key isn't valid.")
+    prices.save_twelve_key(key)
+    return {"success": True, **prices.twelve_status()}
 
 @app.post("/api/canvas/think")
 def canvas_think(req: canvas_thinker.CanvasThinkRequest):
