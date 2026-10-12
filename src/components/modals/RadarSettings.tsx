@@ -52,6 +52,9 @@ export function RadarSettings() {
   return (
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-[13px] text-gray-500"><Radar size={16} className="text-purple-500" /> Radar shows in Work and All, never in Personal.</div>
+      <Row title="India news and markets" detail="Economic Times, Mint, BusinessLine, Inc42 and YourStory, plus Nifty 50, Sensex, Nifty Bank and the rupee. The India filter in Signals shows Indian news on its own.">
+        <Toggle on={settings.india} onChange={india => save({ india })} label="India news and markets" />
+      </Row>
       <Row title="Radar brief on Today" detail="Three signals, the biggest market move and the hottest topic, on the Today screen.">
         <Toggle on={settings.brief} onChange={brief => save({ brief })} label="Radar brief on Today" />
       </Row>
