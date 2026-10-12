@@ -3,9 +3,9 @@ Radar, phase 1: Signals.
 
 Every 15 minutes the Pi reads a handful of news feeds, tags each headline
 (AI, Regulation, Fintech, ...) and guesses its region from the source and the
-countries it names. Every 5 minutes in US market hours (hourly otherwise) it
-fetches the last week of daily closes for a few markets from Yahoo's chart
-data. Both are kept in cache tables in Sage's database that never sync: they
+countries it names. Every 5 minutes in US or Indian market hours (hourly
+otherwise) it fetches the last week of daily closes for a few markets from
+Yahoo's chart data. Both are kept in cache tables in Sage's database that never sync: they
 can always be fetched again, and headlines would swamp the Sheets backup.
 
 The web app reads them through /api/radar/summary and /api/radar/signals.
@@ -17,8 +17,14 @@ divided by twice its usual daily count (up to 30 days back). 1x is normal,
 2x or more is "rising". It needs a day of history before the last 48 hours,
 so for the first few days after install it shows counts only.
 
+India gets its own lane: a few Indian business, startup and tech feeds,
+Nifty 50, Sensex, Nifty Bank and the rupee. Settings > Radar can switch them
+off ("india"). The India filter shows headlines that name India plus
+everything from the Indian sources, even a story about the Fed.
+
 SAGE_RADAR=0 turns the background fetching off. SAGE_RADAR_FEEDS can replace
 the feed list with JSON: [{"name": "...", "url": "...", "region": "Europe"}].
+A feed with region "India" counts as an Indian source.
 """
 
 import asyncio
@@ -50,9 +56,22 @@ DEFAULT_FEEDS = [
     {"name": "BBC Business", "url": "https://feeds.bbci.co.uk/news/business/rss.xml", "region": "Europe"},
     {"name": "SCMP Business", "url": "https://www.scmp.com/rss/92/feed", "region": "Asia-Pacific"},
     {"name": "Rest of World", "url": "https://restofworld.org/feed/latest", "region": "Emerging"},
+    {"name": "Economic Times", "url": "https://economictimes.indiatimes.com/rssfeedstopstories.cms", "region": "India"},
+    {"name": "ET Tech", "url": "https://economictimes.indiatimes.com/tech/rssfeeds/13357270.cms", "region": "India"},
+    {"name": "Mint Markets", "url": "https://www.livemint.com/rss/markets", "region": "India"},
+    {"name": "BusinessLine", "url": "https://www.thehindubusinessline.com/feeder/default.rss", "region": "India"},
+    {"name": "Inc42", "url": "https://inc42.com/feed/", "region": "India"},
+    {"name": "YourStory", "url": "https://yourstory.com/feed", "region": "India"},
 ]
+INDIA = "India"
 
 # (Yahoo symbol, label, unit). The unit tells the app how to show the price.
+INDIA_QUOTES = [
+    ("^NSEI", "Nifty 50", "index"),
+    ("^BSESN", "Sensex", "index"),
+    ("^NSEBANK", "Nifty Bank", "index"),
+    ("INR=X", "USD/INR", "inr"),
+]
 QUOTES = [
     ("^GSPC", "S&P 500", "index"),
     ("^NDX", "Nasdaq 100", "index"),
@@ -76,6 +95,7 @@ TIMEOUT = 15.0
 # Yahoo refuses requests without a browser-like agent.
 USER_AGENT = "Mozilla/5.0 (X11; Linux aarch64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126 Safari/537.36 Sage-Radar"
 NEW_YORK = ZoneInfo("America/New_York")
+KOLKATA = ZoneInfo("Asia/Kolkata")
 
 # A keyword with a capital letter matches case-sensitively ("US", not "us";
 # "AI", not "ai" inside a name); the rest match whole words in any case.
@@ -119,7 +139,15 @@ TAGS: Dict[str, List[str]] = {
 }
 TAG_ORDER = list(TAGS)
 
+# India comes first, so a tie (an Indian headline naming the US) goes to India.
 REGIONS: Dict[str, List[str]] = {
+    "India": [
+        "India", "Indian", "Indians", "New Delhi", "Delhi", "Mumbai", "Bengaluru", "Bangalore",
+        "Hyderabad", "Chennai", "Pune", "Kolkata", "Gujarat", "Maharashtra", "Karnataka",
+        "Tamil Nadu", "Kerala", "RBI", "Reserve Bank of India", "SEBI", "Sebi", "Sensex",
+        "Nifty", "NSE", "BSE", "rupee", "UPI", "Modi", "Sitharaman", "Reliance", "Tata",
+        "Infosys", "Wipro", "Adani", "Flipkart", "Zomato", "Swiggy", "Paytm", "Ola",
+    ],
     "Americas": [
         "US", "U.S.", "USA", "America", "American", "Americans", "Canada", "Canadian",
         "Wall Street", "Fed", "Federal Reserve", "Silicon Valley", "California", "New York",
@@ -134,7 +162,7 @@ REGIONS: Dict[str, List[str]] = {
     "Asia-Pacific": [
         "Asia", "Asian", "China", "Chinese", "Beijing", "Shanghai", "Shenzhen", "Hong Kong",
         "Japan", "Japanese", "Tokyo", "Korea", "Korean", "Seoul", "Taiwan", "Taiwanese",
-        "India", "Indian", "Singapore", "Australia", "Australian", "Vietnam", "Vietnamese",
+        "Singapore", "Australia", "Australian", "Vietnam", "Vietnamese",
         "Indonesia", "Indonesian", "Philippines", "Thailand", "Malaysia", "New Zealand",
     ],
     "Emerging": [
@@ -231,7 +259,7 @@ def _utcnow() -> datetime.datetime:
     return datetime.datetime.now(datetime.timezone.utc)
 
 
-def feeds() -> List[dict]:
+def _all_feeds() -> List[dict]:
     raw = os.getenv("SAGE_RADAR_FEEDS", "").strip()
     if raw:
         try:
@@ -242,6 +270,22 @@ def feeds() -> List[dict]:
             pass
         print("SAGE_RADAR_FEEDS is not a JSON list of {name, url}; using the default feeds.")
     return DEFAULT_FEEDS
+
+
+def feeds() -> List[dict]:
+    """The feeds to read now: without the Indian ones when India is switched off."""
+    if get_settings()["india"]:
+        return _all_feeds()
+    return [f for f in _all_feeds() if f.get("region") != INDIA]
+
+
+def india_sources() -> List[str]:
+    return [f["name"] for f in _all_feeds() if f.get("region") == INDIA]
+
+
+def quotes() -> list:
+    """Indian markets first when India is on, then the world's."""
+    return (INDIA_QUOTES if get_settings()["india"] else []) + QUOTES
 
 
 # --- Tagging ---
@@ -427,11 +471,12 @@ async def refresh_quotes(client: Optional[httpx.AsyncClient] = None, now: Option
     own = client is None
     client = client or _client()
     try:
-        results = await asyncio.gather(*[_fetch_quote(client, symbol) for symbol, _, _ in QUOTES])
+        markets = quotes()
+        results = await asyncio.gather(*[_fetch_quote(client, symbol) for symbol, _, _ in markets])
     finally:
         if own:
             await client.aclose()
-    labels = {symbol: (name, unit) for symbol, name, unit in QUOTES}
+    labels = {symbol: (name, unit) for symbol, name, unit in markets}
     failed = [f"{labels[s][0]}: {err}" for s, quote, err in results if quote is None]
     updated = 0
     conn = _db()
@@ -513,7 +558,7 @@ def summary(now: Optional[datetime.datetime] = None) -> dict:
     now = now or _utcnow()
     conn = _db()
     try:
-        order = {symbol: i for i, (symbol, _, _) in enumerate(QUOTES)}
+        order = {symbol: i for i, (symbol, _, _) in enumerate(quotes())}
         ticker = sorted(
             (
                 {
@@ -565,12 +610,21 @@ def signals(region: str = "", tag: str = "", limit: int = 60, now: Optional[date
         rising_tags = {t["tag"] for t in _velocity(conn, now)["tags"] if (t["velocity"] or 0) >= RISING}
         sql = "SELECT * FROM radar_signals"
         args: list = []
-        if region and region != "Global":
+        if region == INDIA:
+            # Everything from an Indian source counts, whatever it names.
+            names = india_sources()
+            sql += f" WHERE region = ? OR source IN ({', '.join('?' * len(names))})" if names else " WHERE region = ?"
+            args += [INDIA, *names]
+        elif region and region != "Global":
             sql += " WHERE region = ?"
             args.append(region)
         sql += " ORDER BY published DESC"
+        # With India off, what the Indian sources already sent is hidden too.
+        hidden = set() if get_settings()["india"] else set(india_sources())
         out = []
         for r in conn.execute(sql, args):
+            if r["source"] in hidden:
+                continue
             tags = json.loads(r["tags"] or "[]")
             if tag and tag not in tags:
                 continue
@@ -591,7 +645,8 @@ def signals(region: str = "", tag: str = "", limit: int = 60, now: Optional[date
 # brief: the Radar card on Today (off until switched on). dailyCap: research runs
 # a day. engine: which AI researches first, Groq (free) or Claude (paid).
 # lumoLine: a Radar line on the desk clock's Tasks screen in the morning.
-DEFAULT_SETTINGS = {"brief": False, "dailyCap": 5, "engine": "groq", "lumoLine": False}
+# india: Indian news sources and markets (on unless switched off).
+DEFAULT_SETTINGS = {"brief": False, "dailyCap": 5, "engine": "groq", "lumoLine": False, "india": True}
 
 
 def get_settings() -> dict:
@@ -617,6 +672,8 @@ def update_settings(changes: dict) -> dict:
         clean["brief"] = changes["brief"]
     if isinstance(changes.get("lumoLine"), bool):
         clean["lumoLine"] = changes["lumoLine"]
+    if isinstance(changes.get("india"), bool):
+        clean["india"] = changes["india"]
     if changes.get("engine") in ("groq", "claude"):
         clean["engine"] = changes["engine"]
     cap = changes.get("dailyCap")
@@ -684,8 +741,15 @@ class Collector:
 
     @staticmethod
     def market_open(now: datetime.datetime) -> bool:
+        """New York's hours, or Mumbai's while India is on."""
         local = now.astimezone(NEW_YORK)
-        return local.weekday() < 5 and datetime.time(9, 30) <= local.time() <= datetime.time(16, 0)
+        if local.weekday() < 5 and datetime.time(9, 30) <= local.time() <= datetime.time(16, 0):
+            return True
+        india = now.astimezone(KOLKATA)
+        return (
+            india.weekday() < 5 and datetime.time(9, 15) <= india.time() <= datetime.time(15, 30)
+            and get_settings()["india"]
+        )
 
     async def tick(self, now: datetime.datetime, force: bool = False) -> bool:
         changed = False
