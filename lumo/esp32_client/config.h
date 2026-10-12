@@ -47,13 +47,20 @@
 //  - The buzzer only hears changes (C1 blocks DC). A pin held steady, on or
 //    off, is silent. The audible part was the PWM off-time, when the
 //    floating collector passes the motor's brush noise through C1.
-// So with this board every silent effect is the motor held fully on (DC) for
-// a while, never PWM; strength sets how long. Only the alarm uses a tone.
+// On hardware (2.8.1), fully on (DC) runs the motor but the buzzer is heard
+// too. So each knock is now "on" at HAPTIC_ON_DUTY on a fast HAPTIC_FREQ
+// carrier: high enough that the buzzer can't follow, and on enough that the
+// motor still spins. Strength sets how long. Only the alarm uses a tone.
+// Find the best pair live from the serial monitor (115200 baud):
+//   hz 80000    change the carrier        duty 90   change the on-duty (%)
+//   tick / knock / buzz   try an effect   haptic    show the settings
+// then put the pair that feels right and stays quiet here.
 // If you fit a diode (1N4148 or SS14) across the motor, set HAPTIC_MOTOR_DC
 // to 0 to get smooth PWM strength instead.
-#define HAPTIC_MOTOR_DC    1      // 1 = on/off drive (this board); 0 = smooth PWM (needs a flyback diode)
-#define HAPTIC_FREQ        50000  // PWM carrier when HAPTIC_MOTOR_DC is 0
-#define HAPTIC_RES         10     // duty bits (drops to 8 if the timer can't do 10)
+#define HAPTIC_MOTOR_DC    1      // 1 = knocks at a fixed on-duty (this board); 0 = smooth PWM (needs a flyback diode)
+#define HAPTIC_FREQ        80000  // knock carrier; higher = less buzzer (try 50000-150000)
+#define HAPTIC_ON_DUTY     90     // % on-time during a knock (100 = DC: strongest, but the buzzer is heard)
+#define HAPTIC_RES         10     // most duty bits (fewer at high carriers: 8 bits up to ~300 kHz)
 #define HAPTIC_TICK_US     100    // how often a PWM envelope moves (on/off drive uses 1 ms)
 #define HAPTIC_EDGE_MS     5      // shortest rise or fall in PWM mode
 #define HAPTIC_FALL_MS     10     // how a knock lets go
@@ -104,7 +111,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.8.1"
+#define FW_VERSION "2.8.2"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

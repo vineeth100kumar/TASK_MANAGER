@@ -101,6 +101,21 @@ static HapFrame pulseOne[3];                 // the Pi's plain HAPTIC {ms}
 static esp_timer_handle_t hapTimer = nullptr;
 static uint32_t hapPeriod = 0;               // the timer's period while it runs
 static uint32_t hapMaxDuty = 255;            // (1 << resolution) - 1
+static uint32_t hapFreq = HAPTIC_FREQ;       // knock carrier, changeable from the serial monitor
+static float    hapOnDuty = HAPTIC_ON_DUTY / 100.0f;
+
+// The most duty bits LEDC can give at `hz` from its 80 MHz clock.
+static uint8_t hapResFor(uint32_t hz) {
+  uint8_t r = HAPTIC_RES;
+  while (r > 4 && (80000000UL >> r) < hz) r--;
+  return r;
+}
+
+static void hapSetCarrier(uint32_t hz) {
+  uint8_t res = hapResFor(hz);
+  ledcChangeFrequency(BUZZER_PIN, hz, res);
+  hapMaxDuty = (1u << res) - 1;
+}
 static const HapFrame* hf = nullptr;
 static uint8_t  hn = 0, hi = 0;
 static bool     hLoop = false, hTone = false, hOnTone = false;
@@ -122,7 +137,7 @@ static void hapCarrier(bool tone) {
   if (tone == hOnTone) return;
   hOnTone = tone;
   hDuty = -1;
-  ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
+  hapSetCarrier(tone ? ALARM_TONE_HZ : hapFreq);
 }
 
 // How long a frame lasts. With on/off drive, strength (hScale) stretches the
@@ -180,7 +195,7 @@ static void hapTick(void*) {
     float vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
     on = level * vol * hScale;
   } else if (HAPTIC_MOTOR_DC) {
-    on = level >= 0.5f ? 1 : 0;              // held fully on or fully off: see config.h
+    on = level >= 0.5f ? hapOnDuty : 0;      // a knock is on at one fixed duty: see config.h
   } else {
     on = level * hScale;
   }
@@ -220,10 +235,10 @@ static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float 
 
 void hapticInit(uint8_t strength) {
   hapStrength = strength > 100 ? 100 : strength;
-  uint8_t res = HAPTIC_RES;
-  if (!ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res)) {
+  uint8_t res = hapResFor(hapFreq);
+  if (!ledcAttach(BUZZER_PIN, hapFreq, res)) {
     res = 8;
-    ledcAttach(BUZZER_PIN, HAPTIC_FREQ, res);
+    ledcAttach(BUZZER_PIN, hapFreq, res);
   }
   hapMaxDuty = (1u << res) - 1;
   ledcWrite(BUZZER_PIN, hapMaxDuty);         // off (active low)
@@ -233,8 +248,8 @@ void hapticInit(uint8_t strength) {
   args.name = "haptics";
   esp_err_t err = esp_timer_create(&args, &hapTimer);
   if (err != ESP_OK) hapTimer = nullptr;     // hapticUpdate() drives it instead
-  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, timer %s, strength %u%%\n", BUZZER_PIN,
-                (unsigned)HAPTIC_FREQ, res, hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
+  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, on-duty %d%%, timer %s, strength %u%%\n", BUZZER_PIN,
+                (unsigned)hapFreq, res, (int)(hapOnDuty * 100 + 0.5f), hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
 }
 
 void hapticPlay(Haptic h) {
@@ -321,6 +336,29 @@ void hapticOff() {
 // (coarser, but still glides).
 void hapticUpdate() {
   if (!hapTimer) hapTick(nullptr);
+
+  // Tuning from the serial monitor (see HAPTICS in config.h).
+  if (!Serial.available()) return;
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line == "buzz") { hapticSelfTest(); return; }
+  if (line == "tick")  { hapticPlay(HAP_TICK); return; }
+  if (line == "knock") { hapticPlay(HAP_NOTIFY); return; }
+  if (line.startsWith("hz ")) {
+    long hz = line.substring(3).toInt();
+    if (hz < 1000 || hz > 300000 || hapAlarm) { Serial.println("[HAPTIC] hz must be 1000-300000 (and not while the alarm rings)"); return; }
+    hapFreq = hz;
+    hapticOff();
+    if (!hOnTone) { hapSetCarrier(hapFreq); hDuty = -1; hapWrite(0); }
+  } else if (line.startsWith("duty ")) {
+    long d = line.substring(5).toInt();
+    if (d < 1 || d > 100) { Serial.println("[HAPTIC] duty must be 1-100"); return; }
+    hapOnDuty = d / 100.0f;
+  } else if (line != "haptic") {
+    return;
+  }
+  Serial.printf("[HAPTIC] carrier %u Hz (%u-bit), on-duty %d%%. Type tick or knock to feel it.\n",
+                (unsigned)hapFreq, (unsigned)hapResFor(hapFreq), (int)(hapOnDuty * 100 + 0.5f));
 }
 
 // Serial "buzz" plays a plain full-power 300 ms buzz with no shaping, to tell
