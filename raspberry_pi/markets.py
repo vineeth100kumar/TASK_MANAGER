@@ -485,6 +485,7 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
     conn = _db()
     try:
         stamps = [r["updated_at"] for r in conn.execute("SELECT updated_at FROM market_series WHERE updated_at IS NOT NULL")]
+        health = conn.execute("SELECT ok, error FROM radar_sources WHERE name = 'Markets board'").fetchone()
     finally:
         conn.close()
 
@@ -566,6 +567,9 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
         best, worst = max(known, key=lambda s: s["change"]), min(known, key=lambda s: s["change"])
         headline = (f"{best['name']} leads ({_pct(best['change'])}), {worst['name'][0].lower() + worst['name'][1:] if region != 'Global' else worst['name']} lags ({_pct(worst['change'])}). "
                     f"{sum(1 for s in known if s['change'] > 0)} of {len(known)} {NOUN[region]} up {span}.")
+    elif not stamps and health and not health["ok"]:
+        # Saying "fetching" forever hides that Yahoo keeps saying no.
+        headline = f"Radar can't get prices: Yahoo answered {health['error'] or 'with nothing'}. It keeps trying."
     elif not stamps:
         headline = "Radar is fetching the first prices. This takes a minute."
     else:
