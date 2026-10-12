@@ -341,6 +341,13 @@ class Board(unittest.TestCase):
         self.assertEqual(data["headline"], "Radar is fetching the first prices. This takes a minute.")
         self.assertEqual(data["why"]["points"], [])
 
+    def test_board_says_when_yahoo_refuses(self):
+        reset()
+        refused = mock_client(lambda r: httpx.Response(429))
+        self.assertEqual(asyncio.run(markets.refresh(["XLK", "XLF"], refused, NOW)), 0)
+        headline = markets.board("US", "1D", NOW)["headline"]
+        self.assertIn("Radar can't get prices: Yahoo answered XLK: HTTP 429", headline)
+
 
 if __name__ == "__main__":
     unittest.main()

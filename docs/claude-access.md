@@ -31,7 +31,8 @@ Then give Claude the token one of two ways (both is fine):
   allow on the network): Claude settings > Connectors > Add custom connector,
   with the `https://<sage>/mcp/<token>` address the script printed. Claude gets
   tools named `sage_overview`, `sage_list`, `sage_get`, `sage_create`,
-  `sage_update`, `sage_delete`, `sage_quick_add` and `sage_history`.
+  `sage_update`, `sage_delete`, `sage_quick_add`, `sage_history` and
+  `sage_health`.
 - **In a Claude Code cloud environment** (lets a thread use plain HTTP and open
   the app in a browser): add the environment variables `SAGE_URL` and
   `SAGE_CLAUDE_TOKEN`, and add Sage's hostname under Allowed domains in the
@@ -56,6 +57,7 @@ All routes take `Authorization: Bearer $SAGE_CLAUDE_TOKEN` and answer JSON with
 | `DELETE /api/claude/{table}/{id}` | Delete |
 | `POST /api/claude/quick-add` | `{"text": "Call the bank tomorrow 5pm !high"}`, parsed like Siri quick add |
 | `GET /api/claude/history` | What Claude changed, newest first |
+| `GET /api/claude/health` | Is the Pi working: server version and uptime, background workers, Radar sources (and why any are down), Markets board, backups, phone link, desk clock, and a `problems` list. No secrets |
 
 ```bash
 H="Authorization: Bearer $SAGE_CLAUDE_TOKEN"
