@@ -60,11 +60,11 @@ def reset():
     conn.close()
 
 
-def insert_signal(id_, published, tags, seen=None, region="Global"):
+def insert_signal(id_, published, tags, seen=None, region="Global", source="Test"):
     conn = sqlite3.connect(radar.DB_PATH)
     conn.execute(
         "INSERT INTO radar_signals (id, source, title, link, published, seen_at, region, tags) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        (id_, "Test", f"Headline {id_}", f"https://example.com/{id_}", radar._iso(published), radar._iso(seen or published), region, json.dumps(tags)),
+        (id_, source, f"Headline {id_}", f"https://example.com/{id_}", radar._iso(published), radar._iso(seen or published), region, json.dumps(tags)),
     )
     conn.commit()
     conn.close()
@@ -106,6 +106,14 @@ class Tagging(unittest.TestCase):
         self.assertEqual(radar.guess_region("Why Vietnam and Indonesia are the new back office", None), "Asia-Pacific")
         self.assertEqual(radar.guess_region("Startups raise more money", "Europe"), "Europe")
         self.assertEqual(radar.guess_region("Nigeria's fintechs grow up", "Europe"), "Emerging")
+
+    def test_india(self):
+        self.assertEqual(radar.guess_region("RBI holds repo rate as rupee steadies", None), "India")
+        self.assertEqual(radar.guess_region("Bengaluru startup raises Series B", None), "India")
+        # A tie goes to India; Indian sources keep India when nothing is named.
+        self.assertEqual(radar.guess_region("US tariffs hit Indian exporters", None), "India")
+        self.assertEqual(radar.guess_region("Startups raise more money", "India"), "India")
+        self.assertEqual(radar.guess_region("Japan and China lead chip spending", None), "Asia-Pacific")
 
 
 class Chart(unittest.TestCase):
@@ -153,12 +161,13 @@ class Fetching(unittest.TestCase):
 
     def test_quotes_keep_last_good_price(self):
         good = mock_client(lambda r: httpx.Response(200, json=chart([10, 11], 11)))
-        self.assertEqual(asyncio.run(radar.refresh_quotes(good, NOW)), len(radar.QUOTES))
+        self.assertEqual(asyncio.run(radar.refresh_quotes(good, NOW)), len(radar.quotes()))
         bad = mock_client(lambda r: httpx.Response(429))
         self.assertEqual(asyncio.run(radar.refresh_quotes(bad, NOW)), 0)
 
         data = radar.summary(NOW)
-        self.assertEqual([q["name"] for q in data["ticker"]], [name for _, name, _ in radar.QUOTES])
+        self.assertEqual([q["name"] for q in data["ticker"]], [name for _, name, _ in radar.quotes()])
+        self.assertEqual(data["ticker"][0]["name"], "Nifty 50")
         self.assertEqual(data["ticker"][0]["price"], 11)
         markets = next(s for s in data["sources"] if s["name"] == "Yahoo markets")
         self.assertFalse(markets["ok"])
@@ -218,6 +227,29 @@ class Routes(unittest.TestCase):
             self.assertIn(key, data)
         self.assertEqual(data["regions"][0], "Global")
 
+    def test_india_lane(self):
+        insert_signal("in", NOW - datetime.timedelta(hours=3), [], region="India")
+        # From an Indian source but about the Fed: still in the India lane.
+        insert_signal("et-fed", NOW - datetime.timedelta(hours=4), [], region="Americas", source="Economic Times")
+        ids = [s["id"] for s in client.get("/api/radar/signals?region=India").json()["signals"]]
+        self.assertEqual(ids, ["in", "et-fed"])
+        self.assertEqual([s["id"] for s in client.get("/api/radar/signals?region=Americas").json()["signals"]], ["et-fed"])
+        self.assertEqual(client.get("/api/radar/summary").json()["regions"][:2], ["Global", "India"])
+
+    def test_india_switch(self):
+        self.assertTrue(client.get("/api/radar/settings").json()["settings"]["india"])
+        self.assertIn("Inc42", [f["name"] for f in radar.feeds()])
+        try:
+            self.assertFalse(client.put("/api/radar/settings", json={"india": False}).json()["settings"]["india"])
+            self.assertNotIn("Inc42", [f["name"] for f in radar.feeds()])
+            self.assertNotIn("^NSEI", [s for s, _, _ in radar.quotes()])
+            self.assertIn("TechCrunch", [f["name"] for f in radar.feeds()])
+            insert_signal("et", NOW - datetime.timedelta(hours=1), [], region="India", source="Inc42")
+            self.assertNotIn("et", [x["id"] for x in radar.signals(now=NOW)])
+        finally:
+            client.put("/api/radar/settings", json={"india": True})
+        self.assertEqual(radar.quotes()[0][0], "^NSEI")
+
     def test_radar_tables_never_sync(self):
         self.assertFalse(any(t.startswith("radar") for t in db_server.SYNC_TABLES))
         data = client.get("/api/sync/all").json()
@@ -229,6 +261,9 @@ class Market(unittest.TestCase):
         # 10:00 New York on a Monday; then a Sunday.
         self.assertTrue(radar.Collector.market_open(datetime.datetime(2026, 10, 12, 14, 0, tzinfo=UTC)))
         self.assertFalse(radar.Collector.market_open(datetime.datetime(2026, 10, 11, 14, 0, tzinfo=UTC)))
+        # 11:00 in Mumbai on a Monday (05:30 UTC), when New York is shut.
+        self.assertTrue(radar.Collector.market_open(datetime.datetime(2026, 10, 12, 5, 30, tzinfo=UTC)))
+        self.assertFalse(radar.Collector.market_open(datetime.datetime(2026, 10, 12, 11, 0, tzinfo=UTC)))
 
 
 if __name__ == "__main__":
