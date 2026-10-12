@@ -70,6 +70,7 @@ def reset():
     conn.executescript("DELETE FROM market_series; DELETE FROM market_why; DELETE FROM radar_signals; DELETE FROM radar_sources;")
     conn.commit()
     conn.close()
+    radar.forget_yahoo_session()
 
 
 def chart(stamps, closes, price=None, when=None, offset=-14400):

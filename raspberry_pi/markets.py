@@ -258,9 +258,8 @@ def merge(old: List[Tuple[str, float]], new: List[Tuple[str, float]]) -> List[Tu
 async def _fetch(client: httpx.AsyncClient, symbol: str, full: bool, gate: asyncio.Semaphore):
     async with gate:
         try:
-            resp = await client.get(radar.YAHOO_CHART.format(symbol=symbol), params={"range": "1y" if full else "5d", "interval": "1d"})
-            resp.raise_for_status()
-            return symbol, parse_series(resp.json()), ""
+            data = await radar.yahoo_chart(client, symbol, {"range": "1y" if full else "5d", "interval": "1d"})
+            return symbol, parse_series(data), ""
         except Exception as e:
             return symbol, None, radar._short_error(e)
 
