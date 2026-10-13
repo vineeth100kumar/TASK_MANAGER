@@ -54,6 +54,26 @@ export interface LumoState {
   stopwatch: LumoStopwatch;
 }
 
+export interface LumoLinkEvent {
+  at: number;                // ms since epoch
+  event: 'connected' | 'dropped';
+  detail: string;
+}
+
+// How steady the clock's link to the Pi is (desk/link.py's health).
+export interface LumoLink {
+  state: 'steady' | 'flaky' | 'down';
+  since: number;             // connected since, or down since (ms)
+  drops24h: number;
+  lastDrop: LumoLinkEvent | null;
+  quietSeconds: number | null;
+  rtt: number | null;        // the clock's last ping round trip, ms (firmware 2.10)
+  clockReconnects: number | null;
+  clockLastDrop: string | null;
+  lastBoot: string | null;
+  history: LumoLinkEvent[];  // newest first
+}
+
 export interface LumoStatus {
   enabled: boolean;
   connected: boolean;
@@ -63,7 +83,8 @@ export interface LumoStatus {
   address: string | null;
   connectedAt: number | null;
   lastSeen: number | null;
-  wifi: { ip?: string; rssi?: number; uptime?: number; heap?: number; ssid?: string } | null;
+  wifi: { ip?: string; rssi?: number; uptime?: number; heap?: number; ssid?: string; rtt?: number; wifiDrops?: number } | null;
+  link?: LumoLink;
   token: string | null;
   port: number;
   state: LumoState | null;

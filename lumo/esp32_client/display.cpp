@@ -566,8 +566,32 @@ static void drawClockSeconds(const ClockNow& c, float fade, bool force) {
   clockLastBarPx = px;
 }
 
+// A small amber dot in the top right corner while Sage is out of reach
+// (LINK_BADGE_MS and longer), redrawn each second so a face's redraw can't
+// hide it. Once Sage is back it redraws the whole screen, which clears it.
+static void drawLinkBadge() {
+  static unsigned long lastDot = 0;
+  static bool shown = false;
+  bool away = wsDownFor() > LINK_BADGE_MS;
+  if (away && (!shown || millis() - lastDot > 1000)) {
+    tft.fillCircle(311, VIS_T + 8, 3, tft.color565(255, 160, 0));
+    lastDot = millis();
+    shown = true;
+  } else if (!away && shown) {
+    tft.fillCircle(311, VIS_T + 8, 3, COLOR_BG_BLACK);
+    shown = false;
+  }
+}
+
+static void clockTick(const LumoState& s);
+
 // Called every loop while the clock is on screen; paces itself to ~30 fps.
 void displayClockTick(const LumoState& s) {
+  clockTick(s);
+  drawLinkBadge();
+}
+
+static void clockTick(const LumoState& s) {
   static unsigned long lastDraw = 0;
   unsigned long now = millis();
   bool entering = (now - clockEnterMs) < 700;

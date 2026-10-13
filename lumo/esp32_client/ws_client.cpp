@@ -9,6 +9,7 @@
 #include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
 
 static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 
@@ -18,9 +19,69 @@ static WebsocketsClient client;
 static LumoState* statePtr = nullptr;
 static bool isConnected = false;
 
-static unsigned long lastReconnectAttempt = 0;
-static unsigned long reconnectInterval    = 2000;
-static const unsigned long MAX_BACKOFF    = 30000;
+// ---------------------------------------------------------------------
+//  Keeping the link up. Anything from the Pi (a message, its ping, the
+//  answer to ours) counts as hearing from it; a link that stays quiet for
+//  LINK_DEAD_MS is closed and tried again, so a Pi that restarted or a
+//  Wi-Fi that dropped never leaves the clock thinking it's connected.
+// ---------------------------------------------------------------------
+static unsigned long openedAt     = 0;   // when the socket opened (HELLO sent)
+static unsigned long lastHeard    = 0;
+static unsigned long lastPingSent = 0;
+static unsigned long nextTryAt    = 0;   // when to try the Pi again
+static unsigned long retryMs      = LINK_RETRY_MIN_MS;
+static unsigned long downSince    = 1;   // when Sage was last reachable (0 while it is)
+static uint16_t      reconnects   = 0;   // pairings since this start, less the first
+static uint16_t      wifiDrops    = 0;
+static int           rttMs        = -1;  // how long the Pi took to answer the last ping
+static bool          everPaired   = false;
+static char          lastDrop[40] = "";  // why the link went last, told to the Pi on the way back
+
+// The Pi's address: an IP in secrets.h is used as it is; an mDNS name is
+// looked up once and remembered, and only looked up again when that address
+// stops working (each lookup holds the clock for up to 2 s).
+static IPAddress piIp;
+static bool      piIpKnown = false;
+static uint8_t   piIpFails = 0;
+
+// What the clock did alone while it couldn't reach Sage, told to it in the
+// next HELLO so Sage doesn't ring a stopped alarm again (desk.offline_reports).
+struct OfflineReport { char a[12]; int8_t h, m; unsigned long at; };
+static OfflineReport pending[6];
+static uint8_t pendingCount = 0;
+
+static const char* bootReason() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power on";
+    case ESP_RST_SW:       return "restarted";
+    case ESP_RST_PANIC:    return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout (power dipped)";
+    case ESP_RST_EXT:      return "reset button";
+    default:               return "other";
+  }
+}
+
+static void linkDown(const char* why) {
+  if (isConnected) Serial.printf("[WS] Link down: %s\n", why);
+  isConnected = false;
+  if (statePtr) statePtr->paired = false;
+  if (!downSince) downSince = millis();
+  strlcpy(lastDrop, why, sizeof(lastDrop));
+  nextTryAt = millis() + retryMs;
+}
+
+static void onPaired() {
+  if (everPaired) reconnects++;
+  everPaired = true;
+  downSince = 0;
+  retryMs = LINK_RETRY_MIN_MS;
+  piIpFails = 0;
+  pendingCount = 0;      // Sage has them now
+  lastDrop[0] = '\0';
+}
 
 // CLOCK's display fields: style, hour24, show_seconds and the second zone.
 // Saved to flash only when one of them changed.
@@ -86,6 +147,7 @@ static void handleTextMessage(const String& payload) {
   if (strcmp(cmd, "PAIRED") == 0) {
     s.paired = doc["ok"] | false;
     s.pair_refused = !s.paired;
+    if (s.paired) onPaired();
     Serial.printf("[WS] %s\n", s.paired ? "Paired with Sage" : "Sage refused DESK_TOKEN");
     return;
   }
@@ -104,9 +166,9 @@ static void handleTextMessage(const String& payload) {
     uint8_t n = 0;
     for (JsonObject a : doc["list"].as<JsonArray>()) {
       if (n >= MAX_LOCAL_ALARMS) break;
-      int h = a["h"] | -1, m = a["m"] | -1;
+      int h = a["h"] | -1, m = a["m"] | -1, w = a["w"] | -1;
       if (h < 0 || h > 23 || m < 0 || m > 59) continue;
-      list[n++] = { (uint8_t)h, (uint8_t)m };
+      list[n++] = { (uint8_t)h, (uint8_t)m, (int8_t)(w >= 0 && w <= 6 ? w : -1) };
     }
     uint8_t snooze = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     if (n != s.local_alarm_count || snooze != s.snooze_minutes ||
@@ -169,7 +231,12 @@ static void handleTextMessage(const String& payload) {
   else if (strcmp(cmd, "CLOCK") == 0) {
     s.h = doc["h"] | s.h;
     s.m = doc["m"] | s.m;
-    clockSync(s.h, s.m, doc["s"] | 0, doc["ms"] | 0);
+    clockSync(s.h, s.m, doc["s"] | 0, doc["ms"] | 0, doc["wd"] | -1);
+    if (doc["utc_off"].is<int>() && doc["utc_off"].as<int>() != s.utc_off) {
+      s.utc_off = doc["utc_off"].as<int>();
+      clockSetUtcOffset(s.utc_off);
+      storeSaveClock(s);
+    }
     if (doc["alarm_h"].is<int>() && doc["alarm_m"].is<int>()) {
       s.alarm_h   = doc["alarm_h"];
       s.alarm_m   = doc["alarm_m"];
@@ -385,8 +452,10 @@ static void handleBinaryMessage(const uint8_t* data, size_t len) {
 
 void wsInit(LumoState& state) {
   statePtr = &state;
+  clockSetUtcOffset(state.utc_off);
 
   client.onMessage([](WebsocketsMessage msg) {
+    lastHeard = millis();
     if (msg.isText()) {
       handleTextMessage(msg.data());
     } else if (msg.isBinary()) {
@@ -398,17 +467,58 @@ void wsInit(LumoState& state) {
     if (event == WebsocketsEvent::ConnectionOpened) {
       Serial.println("[WS] Connected to Pi server!");
       isConnected = true;
-      reconnectInterval = 2000;
+      openedAt = lastHeard = lastPingSent = millis();
       // The first frame must be HELLO with the pairing code, or Sage hangs up.
-      char hello[80];
-      snprintf(hello, sizeof(hello), "{\"evt\":\"HELLO\",\"token\":\"%s\",\"fw\":\"%s\"}", DESK_TOKEN, FW_VERSION);
-      client.send(hello);
+      // It also says why the link went last time, and what the clock did on
+      // its own meanwhile.
+      JsonDocument hello;
+      hello["evt"] = "HELLO";
+      hello["token"] = DESK_TOKEN;
+      hello["fw"] = FW_VERSION;
+      hello["reconnects"] = reconnects;
+      if (lastDrop[0]) hello["drop"] = lastDrop;
+      if (!everPaired) hello["boot"] = bootReason();
+      if (pendingCount) {
+        JsonArray list = hello["offline"].to<JsonArray>();
+        for (uint8_t i = 0; i < pendingCount; i++) {
+          JsonObject r = list.add<JsonObject>();
+          r["a"] = pending[i].a;
+          if (pending[i].h >= 0) { r["h"] = pending[i].h; r["m"] = pending[i].m; }
+          r["ago"] = (millis() - pending[i].at) / 1000UL;
+        }
+      }
+      char buf[512];
+      serializeJson(hello, buf, sizeof(buf));
+      client.send(buf);
     } else if (event == WebsocketsEvent::ConnectionClosed) {
-      Serial.println("[WS] Disconnected from Pi server");
-      isConnected = false;
-      if (statePtr) statePtr->paired = false;
+      if (isConnected) linkDown(statePtr && statePtr->pair_refused ? "Sage refused the pairing code" : "the Pi closed the link");
+    } else if (event == WebsocketsEvent::GotPing) {
+      lastHeard = millis();
+    } else if (event == WebsocketsEvent::GotPong) {
+      lastHeard = millis();
+      rttMs = (int)(millis() - lastPingSent);
     }
   });
+}
+
+static String piAddress() {
+  IPAddress ip;
+  if (ip.fromString(PI_HOSTNAME)) return String(PI_HOSTNAME);
+  if (piIpKnown && piIpFails < 2) return piIp.toString();
+  IPAddress found = MDNS.queryHost(PI_HOSTNAME, 2000);
+  if (found != INADDR_NONE && found[0] != 0) {
+    piIpFails = 0;
+    if (!piIpKnown || found != piIp) Serial.printf("[WS] mDNS: %s is %s\n", PI_HOSTNAME, found.toString().c_str());
+    piIp = found;
+    piIpKnown = true;
+    return piIp.toString();
+  }
+  if (piIpKnown) {         // mDNS didn't answer: the last address is still the best guess
+    piIpFails = 0;
+    return piIp.toString();
+  }
+  Serial.println("[WS] mDNS lookup failed; trying the name as it is");
+  return String(PI_HOSTNAME);
 }
 
 void wsConnect() {
@@ -416,23 +526,12 @@ void wsConnect() {
     Serial.println("[WS] WiFi not connected, skipping wsConnect");
     return;
   }
-
-  String hostStr = PI_HOSTNAME;
-  IPAddress piIP;
-  if (!piIP.fromString(PI_HOSTNAME)) {
-    IPAddress resolved = MDNS.queryHost(PI_HOSTNAME, 3000);
-    if (resolved != INADDR_NONE && resolved[0] != 0) {
-      hostStr = resolved.toString();
-      Serial.printf("[WS] mDNS resolved: %s -> %s\n", PI_HOSTNAME, hostStr.c_str());
-    } else {
-      Serial.println("[WS] mDNS query failed. Trying direct hostname...");
-    }
-  } else {
-    hostStr = piIP.toString();
+  String host = piAddress();
+  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", host.c_str(), PI_WS_PORT, PI_WS_PATH);
+  if (!client.connect(host, PI_WS_PORT, PI_WS_PATH)) {
+    if (piIpKnown) piIpFails++;
+    Serial.println("[WS] The Pi didn't answer");
   }
-
-  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", hostStr.c_str(), PI_WS_PORT, PI_WS_PATH);
-  client.connect(hostStr, PI_WS_PORT, PI_WS_PATH);
 }
 
 // Every 30 s, how the clock is doing, for the LUMO page in Sage.
@@ -441,25 +540,81 @@ static void sendStatus() {
   if (!isConnected || !statePtr || !statePtr->paired) return;
   if (lastStatus && millis() - lastStatus < 30000) return;
   lastStatus = millis();
-  char json[200];
+  char json[256];
   snprintf(json, sizeof(json),
-           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\"}",
+           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\",\"rtt\":%d,\"wifiDrops\":%u}",
            WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), millis() / 1000UL,
-           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str());
+           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str(), rttMs, (unsigned)wifiDrops);
   client.send(json);
 }
 
+// The router dropped the clock, or the clock lost the router: join again,
+// and if that doesn't take, restart the radio. The ESP32 retries on its own
+// too, but it can get stuck after the router restarts.
+static void wifiWatch() {
+  static unsigned long lostAt = 0, lastJoin = 0, lastReset = 0;
+  unsigned long now = millis();
+  if (WiFi.status() == WL_CONNECTED) {
+    if (lostAt) Serial.printf("[WiFi] Back after %lu s\n", (now - lostAt) / 1000UL);
+    lostAt = 0;
+    return;
+  }
+  if (!lostAt) {
+    lostAt = lastJoin = lastReset = now;
+    wifiDrops++;
+    Serial.println("[WiFi] Lost the network");
+    if (isConnected) {
+      linkDown("Wi-Fi lost");
+      client.close();
+    }
+    return;
+  }
+  if (now - lastReset > WIFI_RESET_MS) {
+    Serial.println("[WiFi] Still gone; restarting the radio");
+    lastReset = lastJoin = now;
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  } else if (now - lastJoin > WIFI_REJOIN_MS) {
+    Serial.println("[WiFi] Joining again");
+    lastJoin = now;
+    WiFi.disconnect();
+    WiFi.begin(WIFI_SSID, WIFI_PASS);
+  }
+}
+
 void wsPoll() {
+  wifiWatch();
   client.poll();
   sendStatus();
 
-  if (!isConnected && WiFi.status() == WL_CONNECTED) {
-    unsigned long now = millis();
-    if (now - lastReconnectAttempt >= reconnectInterval) {
-      lastReconnectAttempt = now;
-      Serial.printf("[WS] Reconnecting (backoff: %lu ms)...\n", reconnectInterval);
-      wsConnect();
-      reconnectInterval = min(reconnectInterval * 2, MAX_BACKOFF);
+  unsigned long now = millis();
+  if (isConnected) {
+    bool paired = statePtr && statePtr->paired;
+    if (now - lastHeard > LINK_DEAD_MS) {
+      linkDown("no reply to pings");
+      client.close();
+    } else if (!paired && now - openedAt > LINK_HELLO_MS) {
+      linkDown("no answer to the pairing code");
+      client.close();
+    } else if (now - lastPingSent >= LINK_PING_MS) {
+      lastPingSent = now;
+      client.ping();
+    }
+    return;
+  }
+
+  if (WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
+    Serial.printf("[WS] Reconnecting (next wait: %lu ms)...\n", retryMs);
+    wsConnect();
+    if (!isConnected) {
+      // Wait longer each time, with a little randomness so a clock and a
+      // restarting Pi don't keep missing each other.
+      retryMs = min(retryMs * 2, (unsigned long)LINK_RETRY_MAX_MS);
+      nextTryAt = millis() + retryMs * 3 / 4 + random(retryMs / 2 + 1);
     }
   }
 }
@@ -468,8 +623,29 @@ bool wsConnected() {
   return isConnected;
 }
 
+unsigned long wsDownFor() {
+  return downSince ? millis() - downSince : 0;
+}
+
 void wsSend(const char* json) {
   if (isConnected) {
     client.send(json);
   }
+}
+
+void wsReportOffline(const char* action, int h, int m) {
+  if (isConnected && statePtr && statePtr->paired) {
+    char json[96];
+    if (h >= 0) snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"h\":%d,\"m\":%d,\"ago\":0}", action, h, m);
+    else snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"ago\":0}", action);
+    client.send(json);
+    return;
+  }
+  if (pendingCount == sizeof(pending) / sizeof(pending[0])) {   // keep the newest
+    memmove(pending, pending + 1, sizeof(pending) - sizeof(pending[0]));
+    pendingCount--;
+  }
+  OfflineReport& r = pending[pendingCount++];
+  strlcpy(r.a, action, sizeof(r.a));
+  r.h = h; r.m = m; r.at = millis();
 }

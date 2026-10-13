@@ -27,6 +27,21 @@
 #define PI_WS_PORT   8765
 #define PI_WS_PATH   "/"
 
+// ===================== THE LINK TO THE PI =====================
+// Keeping the link up: the clock pings the Pi and gives up on a link that
+// stays quiet (the Pi restarted, or the Wi-Fi went), then tries again, sooner
+// at first and less often the longer the Pi stays away.
+#define LINK_PING_MS        10000   // a ping this often
+#define LINK_DEAD_MS        35000   // nothing from the Pi for this long: the link is gone
+#define LINK_HELLO_MS       10000   // the Pi must accept the pairing code within this
+#define LINK_RETRY_MIN_MS   1000    // first retry after a drop...
+#define LINK_RETRY_MAX_MS   30000   // ...doubling up to this (with a little randomness)
+#define WIFI_REJOIN_MS      20000   // Wi-Fi gone this long: join the network again
+#define WIFI_RESET_MS       120000  // still gone after this: restart the Wi-Fi radio
+#define LINK_BADGE_MS       30000   // the clock face shows a small dot once Sage has been away this long
+#define CLOCK_NTP_AFTER_MS  600000  // no time from the Pi for 10 min: set the clock from internet time...
+#define CLOCK_NTP_EVERY_MS  900000  // ...every 15 min while that lasts
+
 // ===================== NTP / TIMEZONE =====================
 #define GMT_OFFSET_SEC  (5 * 3600 + 30 * 60)
 #define DAYLIGHT_OFFSET 0
@@ -105,7 +120,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.9.0"
+#define FW_VERSION "2.10.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -129,7 +144,9 @@ enum ClockStyle   { CLOCK_DIGITAL, CLOCK_MINIMAL, CLOCK_ANALOG,
 // Alarms the clock rings by itself while it can't reach Sage.
 #define MAX_LOCAL_ALARMS 4
 #define LOCAL_RING_MINUTES 10
-struct LocalAlarm { uint8_t h, m; };
+#define LOCAL_LATE_MINUTES 3    // an offline alarm still rings this many minutes late (the link can take ~35 s to be known dead)
+// w is the day it rings on, 0 Monday ... 6 Sunday, or -1 for any day.
+struct LocalAlarm { uint8_t h, m; int8_t w; };
 
 // The alarm's sound, chosen per alarm in Sage (ALARM_RING's "tone").
 enum AlarmTone    { TONE_PULSE, TONE_CLASSIC, TONE_RISING, TONE_CHIRP };
@@ -182,6 +199,7 @@ struct LumoState {
   bool       show_seconds  = true;
   char       zone2[16]     = "";     // a second time zone's name, "" for none
   int16_t    zone2_offset  = 0;      // its minutes ahead of local time
+  int16_t    utc_off       = GMT_OFFSET_SEC / 60;   // local time's minutes ahead of UTC, as Sage last said
 
   // What the ringing alarm is called and how it sounds (ALARM_RING).
   char       alarm_label[28] = "";

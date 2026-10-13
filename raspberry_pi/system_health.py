@@ -160,12 +160,29 @@ def report(
         "markets": safe(lambda: markets_part(db_path)) if radar_enabled else {"enabled": False},
         "backups": safe(backups),
         "phone": phone_part(phone_state),
-        "clock": {k: clock_state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in clock_state},
+        "clock": clock_part(clock_state),
     }
     if depth_face:
         data["depthFace"] = safe(depth_face)
     data["problems"] = problems(data)
     return data
+
+
+def clock_part(state: dict) -> dict:
+    """The desk clock: connected or not, its firmware, and how steady its
+    link has been (desk/link.py's health, with the last few events)."""
+    out = {k: state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in state}
+    link = state.get("link")
+    if isinstance(link, dict):
+        out["link"] = {**link, "history": (link.get("history") or [])[:5]}
+    wifi = state.get("wifi")
+    if isinstance(wifi, dict) and wifi.get("rssi") is not None:
+        out["rssi"] = wifi["rssi"]
+    return out
+
+
+# A clock that's been quiet this long while "connected" has likely gone.
+CLOCK_QUIET_SECONDS = 75
 
 
 def problems(data: dict) -> List[str]:
@@ -196,8 +213,19 @@ def problems(data: dict) -> List[str]:
                    "so now playing and notifications can't be read.")
     elif phone.get("connected") and phone.get("ble") and phone.get("nowPlaying") not in (None, "asked"):
         out.append(f"Now playing from the phone isn't subscribed ({phone.get('nowPlaying')}).")
-    if data["clock"].get("enabled") and not data["clock"].get("connected"):
-        out.append("The desk clock is on in settings but not connected.")
+    clock = data["clock"]
+    link = clock.get("link") or {}
+    if clock.get("enabled") and not clock.get("connected"):
+        last = (link.get("lastDrop") or {}).get("detail")
+        out.append("The desk clock is on in settings but not connected" + (f" (last drop: {last})." if last else "."))
+    elif clock.get("connected"):
+        if link.get("state") == "flaky":
+            last = (link.get("lastDrop") or {}).get("detail") or "no reason kept"
+            out.append(f"The desk clock's link dropped {link.get('drops24h')} times in the last day (last: {last}).")
+        if (link.get("quietSeconds") or 0) > CLOCK_QUIET_SECONDS:
+            out.append(f"The desk clock hasn't been heard from for {link['quietSeconds']} s although it counts as connected.")
+        if isinstance(clock.get("rssi"), (int, float)) and clock["rssi"] < -78:
+            out.append(f"The desk clock's Wi-Fi signal is weak ({clock['rssi']} dBm), which can drop the link.")
     face = data.get("depthFace", {})
     if face.get("hasPhoto") and not face.get("cutout"):
         out.append(f"The depth face's photo has no cutout: {face.get('cutoutError') or face.get('cutoutProblem') or 'no reason kept'}.")

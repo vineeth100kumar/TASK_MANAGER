@@ -99,7 +99,13 @@ class DeskController:
             "ms": now.microsecond // 1000,
             "weekday": now.strftime("%a"),
             "date": now.strftime("%d %b"),
+            # Firmware 2.10 keeps the weekday and, with the UTC offset, sets
+            # itself from internet time while it can't reach the Pi.
+            "wd": now.weekday(),
         }
+        offset = now.utcoffset()
+        if offset is not None:
+            command["utc_off"] = int(offset.total_seconds() // 60)
         alarm = self.next_alarm()
         if alarm:
             command["alarm_h"], command["alarm_m"] = alarm
