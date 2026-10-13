@@ -16,8 +16,9 @@ strips (firmware 2.9's depth face), then each minute only the rows that
 changed. The same picture is the preview in Sage's LUMO page.
 
 A head over the digits makes the time hard to read, so every render measures
-how much of the digits the person covers. On `auto` the digits go where they
-are covered least.
+how much of the digits the person covers. On `auto` the crop puts the head a
+little below the top and the time goes at the top, behind it, unless that
+hides too much of it; then it goes where it is covered least.
 
 rembg is optional (requirements-depth.txt). Without it a photo can still be
 saved, and the preview shows it with no cutout and says why.
@@ -48,7 +49,10 @@ WIDTH, HEIGHT = 320, 216
 # and keeps the cutout quick.
 KEEP_SIDE = 1280
 PLACEMENTS = ("auto", "top", "middle", "bottom")
-PHOTO_POSITIONS = ("top", "center", "bottom")
+PHOTO_POSITIONS = ("auto", "top", "center", "bottom")
+# On `auto` the crop puts the top of the person's head this far down the
+# screen, so the time at the top tucks behind it as on an iPhone.
+HEAD_TOP = 0.2
 # Above this share of the digits hidden, Sage warns that the time is hard to read.
 COVERAGE_WARN = 0.30
 MODEL = os.getenv("SAGE_DEPTH_MODEL", "u2net_human_seg")
@@ -57,7 +61,8 @@ DATA_DIR = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent
 DEPTH_DIR = Path(os.getenv("SAGE_DEPTH_DIR", str(DATA_DIR / "depth_face")))
 FONT_FILE = Path(__file__).resolve().parent / "fonts" / "InterDisplay-SemiBold-subset.otf"
 
-DEFAULTS = {"placement": "auto", "photoPosition": "top", "hasPhoto": False, "cutout": False, "updatedAt": None}
+DEFAULTS = {"placement": "auto", "photoPosition": "auto", "hasPhoto": False, "cutout": False,
+            "cutoutError": None, "updatedAt": None}
 
 # Where the time's top edge sits for each placement, and the date above it.
 TIME_SIZE = 104
@@ -70,12 +75,19 @@ _session_lock = threading.Lock()
 
 # --- the cutout ---------------------------------------------------------
 
-def cutout_available() -> bool:
+def cutout_problem() -> Optional[str]:
+    """Why the cutout can't run on this Pi, or None when it can."""
+    import importlib
+    importlib.invalidate_caches()  # rembg may have been installed since Sage started
     try:
         import rembg  # noqa: F401
-        return True
-    except Exception:
-        return False
+        return None
+    except Exception as e:
+        return f"rembg won't load ({e.__class__.__name__}: {e})"[:300]
+
+
+def cutout_available() -> bool:
+    return cutout_problem() is None
 
 
 def make_mask(photo) -> Optional["Image.Image"]:
@@ -92,6 +104,24 @@ def make_mask(photo) -> Optional["Image.Image"]:
             _session = new_session(MODEL)
         mask = remove(photo.convert("RGB"), session=_session, only_mask=True, post_process_mask=True)
     return mask.convert("L")
+
+
+def cut_out(photo) -> Tuple[Optional["Image.Image"], Optional[str]]:
+    """make_mask that never raises: (mask, None) or (None, why it failed),
+    so the photo is kept either way and Sage can say what went wrong."""
+    problem = cutout_problem()
+    if problem:
+        return None, problem
+    try:
+        mask = make_mask(photo)
+    except Exception as e:  # a failed model download, too little memory, a broken install
+        log.exception("depth cutout failed")
+        return None, f"{e.__class__.__name__}: {e}"[:300]
+    if mask is None:
+        return None, "rembg isn't installed"
+    if mask.getextrema()[1] < 128:
+        return None, "no person found in this photo"
+    return mask, None
 
 
 # --- storage ------------------------------------------------------------
@@ -113,7 +143,7 @@ def load() -> dict:
 
 def _save_meta(meta: dict) -> dict:
     DEPTH_DIR.mkdir(parents=True, exist_ok=True)
-    keep = {k: meta.get(k, DEFAULTS[k]) for k in ("placement", "photoPosition", "updatedAt")}
+    keep = {k: meta.get(k, DEFAULTS[k]) for k in ("placement", "photoPosition", "cutoutError", "updatedAt")}
     _meta_file().write_text(json.dumps(keep))
     return load()
 
@@ -142,7 +172,9 @@ def decode_upload(data: str) -> "Image.Image":
     return image
 
 
-def set_photo(photo: "Image.Image", mask: Optional["Image.Image"], now: datetime.datetime) -> dict:
+def set_photo(photo: "Image.Image", mask: Optional["Image.Image"], now: datetime.datetime,
+              error: Optional[str] = None) -> dict:
+    """Keep a new photo and its cutout. A new photo starts on auto again."""
     DEPTH_DIR.mkdir(parents=True, exist_ok=True)
     photo.save(DEPTH_DIR / "photo.png")
     mask_file = DEPTH_DIR / "mask.png"
@@ -151,8 +183,23 @@ def set_photo(photo: "Image.Image", mask: Optional["Image.Image"], now: datetime
     elif mask_file.exists():
         mask_file.unlink()
     meta = load()
-    meta["updatedAt"] = now.isoformat(timespec="seconds")
+    meta.update(placement="auto", photoPosition="auto", cutoutError=None if mask is not None else error,
+                updatedAt=now.isoformat(timespec="seconds"))
     return _save_meta(meta)
+
+
+def retry_cutout(now: datetime.datetime) -> dict:
+    """Run the cutout again on the kept photo (after installing rembg, say)."""
+    try:
+        photo = Image.open(DEPTH_DIR / "photo.png").convert("RGB")
+    except (OSError, AttributeError):
+        raise ValueError("There's no photo to cut out yet.")
+    mask, error = cut_out(photo)
+    keep = load()
+    meta = set_photo(photo, mask, now, error)
+    if mask is None:  # keep the user's choices when nothing changed
+        meta = _save_meta({**meta, "placement": keep["placement"], "photoPosition": keep["photoPosition"]})
+    return meta
 
 
 def update(change: dict) -> dict:
@@ -188,21 +235,31 @@ def _font(size: int):
     return ImageFont.load_default()
 
 
-def _crop_box(size: Tuple[int, int], position: str) -> Tuple[int, int, int, int]:
-    """The part of a w x h photo that fills the clock's window, without stretching."""
+def _crop_box(size: Tuple[int, int], position: str, person=None) -> Tuple[int, int, int, int]:
+    """The part of a w x h photo that fills the clock's window, without stretching.
+    On `auto` with a person (their bounding box in the photo), the crop centres
+    on them and puts the top of their head HEAD_TOP down the screen; without
+    one, `auto` keeps the top, where heads usually are."""
     w, h = size
     target = WIDTH / HEIGHT
-    if w / h > target:  # wider than the screen: keep the middle
+    if w / h > target:  # wider than the screen: keep the middle, or the person
         cw = round(h * target)
         x = (w - cw) // 2
+        if position == "auto" and person:
+            x = min(max((person[0] + person[2]) // 2 - cw // 2, 0), w - cw)
         return (x, 0, x + cw, h)
     ch = round(w / target)
-    y = {"top": 0, "center": (h - ch) // 2, "bottom": h - ch}[position]
+    if position == "auto":
+        y = person[1] - round(ch * HEAD_TOP) if person else 0
+    else:
+        y = {"top": 0, "center": (h - ch) // 2, "bottom": h - ch}[position]
+    y = min(max(y, 0), h - ch)
     return (0, y, w, y + ch)
 
 
 def _fit(photo, mask, position: str):
-    box = _crop_box(photo.size, position)
+    person = mask.point(lambda v: 255 if v > 128 else 0).getbbox() if mask is not None else None
+    box = _crop_box(photo.size, position, person)
     pic = photo.crop(box).resize((WIDTH, HEIGHT), Image.LANCZOS)
     cut = mask.crop(box).resize((WIDTH, HEIGHT), Image.LANCZOS) if mask is not None else None
     return pic, cut
@@ -270,14 +327,19 @@ def render(now: datetime.datetime, hour24: bool, meta: Optional[dict] = None,
             mask = Image.open(DEPTH_DIR / "mask.png").convert("L")
         except OSError:
             mask = None
-    pic, cut = _fit(photo, mask, meta.get("photoPosition", "center"))
+    pic, cut = _fit(photo, mask, meta.get("photoPosition", "auto"))
     hard = cut.point(lambda v: 255 if v > 128 else 0) if cut is not None else None
 
     t, d = time_text(now, hour24), date_text(now)
     choices = {p: _text_layer(t, d, p) for p in ("top", "middle", "bottom")}
     covered = {p: coverage(time_layer.getchannel("A"), hard) for p, (time_layer, _) in choices.items()}
     placement = meta.get("placement", "auto")
-    chosen = min(("top", "middle", "bottom"), key=lambda p: (round(covered[p], 2), p != "top")) if placement == "auto" else placement
+    if placement != "auto":
+        chosen = placement
+    elif covered["top"] <= COVERAGE_WARN:  # the iPhone look: time at the top, behind the head
+        chosen = "top"
+    else:
+        chosen = min(("top", "middle", "bottom"), key=lambda p: (round(covered[p], 2), p != "top"))
     time_layer, date_layer = choices[chosen]
 
     def on(base, layer):  # a layer with a soft shadow, so white reads on a bright photo
@@ -351,7 +413,8 @@ def _data_url(image) -> str:
 def describe(now: datetime.datetime, hour24: bool) -> dict:
     """Everything the LUMO page shows about the depth face."""
     meta = load()
-    out = {**meta, "cutoutAvailable": cutout_available(), "model": MODEL,
+    problem = cutout_problem()
+    out = {**meta, "cutoutAvailable": problem is None, "cutoutProblem": problem, "model": MODEL,
            "placements": list(PLACEMENTS), "photoPositions": list(PHOTO_POSITIONS),
            "coverageWarn": COVERAGE_WARN, "preview": None}
     if meta["hasPhoto"]:

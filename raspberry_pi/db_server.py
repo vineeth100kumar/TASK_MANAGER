@@ -1536,16 +1536,26 @@ async def desk_depth_photo(req: DepthPhoto):
 
     def work():
         photo = depth.decode_upload(req.image)
-        try:
-            mask = depth.make_mask(photo)
-        except Exception as e:  # a failed download or a broken model: keep the photo anyway
-            print(f"Depth cutout failed: {e}")
-            mask = None
-        depth.set_photo(photo, mask, _desk_now())
+        mask, error = depth.cut_out(photo)  # a failed cutout keeps the photo and says why
+        if error:
+            print(f"Depth cutout failed: {error}")
+        depth.set_photo(photo, mask, _desk_now(), error)
         return _depth_describe()
 
     try:
         out = await asyncio.to_thread(work)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
+    return out
+
+
+@app.post("/api/desk/depth/cutout")
+async def desk_depth_cutout():
+    """Cut out the person again from the kept photo, e.g. after installing rembg."""
+    from desk import depth
+    try:
+        out = await asyncio.to_thread(lambda: (depth.retry_cutout(_desk_now()), _depth_describe())[1])
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
     await _depth_to_clock()
@@ -1595,6 +1605,13 @@ def _clock_status() -> dict:
     return desk_run.status(desk.ENABLED)
 
 
+def _depth_status() -> dict:
+    from desk import depth
+    meta = depth.load()
+    return {"hasPhoto": meta["hasPhoto"], "cutout": meta["cutout"], "cutoutError": meta.get("cutoutError"),
+            "cutoutProblem": depth.cutout_problem(), "updatedAt": meta.get("updatedAt")}
+
+
 def _claude_health() -> dict:
     return system_health.report(
         DB_PATH,
@@ -1605,6 +1622,7 @@ def _claude_health() -> dict:
         backups=backup.status,
         phone=phone_link.link.snapshot,
         clock=_clock_status,
+        depth_face=_depth_status,
     )
 
 
