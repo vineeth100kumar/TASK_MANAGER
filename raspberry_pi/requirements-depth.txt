@@ -2,4 +2,7 @@
 # network runtime and its friends), so it lives apart from requirements.txt
 # and a failed install never blocks Sage. The first cutout also downloads the
 # model, about 170 MB.
-rembg[cpu]
+# onnxruntime is named on its own: some pip versions skip rembg's [cpu] extra
+# ("does not provide the extra 'cpu'"), and rembg then loads but can't cut out.
+rembg
+onnxruntime
