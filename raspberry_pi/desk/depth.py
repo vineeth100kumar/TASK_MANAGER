@@ -79,12 +79,21 @@ def cutout_problem() -> Optional[str]:
     """Why the cutout can't run on this Pi, or None when it can."""
     import importlib
     importlib.invalidate_caches()  # rembg may have been installed since Sage started
-    for name in ("rembg", "onnxruntime"):  # rembg loads without its runtime but can't run
-        try:
-            importlib.import_module(name)
-        except Exception as e:
-            return f"{name} won't load ({e.__class__.__name__}: {e})"[:300]
+    try:
+        import onnxruntime  # noqa: F401  rembg's runtime; without it rembg calls sys.exit
+        from rembg import new_session, remove  # noqa: F401  the names make_mask needs
+    except (Exception, SystemExit) as e:
+        return f"the cutout tool won't load: {_why(e)}"
     return None
+
+
+def _why(e: BaseException) -> str:
+    """An error as one line, with the error that caused it when there is one."""
+    text = f"{e.__class__.__name__}: {e}"
+    cause = e.__cause__ or e.__context__
+    if cause is not None:
+        text += f" (caused by {cause.__class__.__name__}: {cause})"
+    return text[:400]
 
 
 def cutout_available() -> bool:
@@ -92,14 +101,11 @@ def cutout_available() -> bool:
 
 
 def make_mask(photo) -> Optional["Image.Image"]:
-    """The person in `photo` as a greyscale mask (white = person), or None
-    when rembg isn't installed. The first call loads the model (and the very
+    """The person in `photo` as a greyscale mask (white = person). Raises
+    when rembg can't load or run. The first call loads the model (and the very
     first one downloads it, about 170 MB), so it can take a while."""
     global _session
-    try:
-        from rembg import new_session, remove
-    except Exception:
-        return None
+    from rembg import new_session, remove
     with _session_lock:
         if _session is None:
             _session = new_session(MODEL)
@@ -115,11 +121,9 @@ def cut_out(photo) -> Tuple[Optional["Image.Image"], Optional[str]]:
         return None, problem
     try:
         mask = make_mask(photo)
-    except Exception as e:  # a failed model download, too little memory, a broken install
+    except (Exception, SystemExit) as e:  # a failed model download, too little memory, a broken install
         log.exception("depth cutout failed")
-        return None, f"{e.__class__.__name__}: {e}"[:300]
-    if mask is None:
-        return None, "rembg isn't installed"
+        return None, _why(e)
     if mask.getextrema()[1] < 128:
         return None, "no person found in this photo"
     return mask, None
