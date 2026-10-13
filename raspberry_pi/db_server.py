@@ -1508,6 +1508,65 @@ async def desk_device(req: DeskAction):
     return {"success": True, **desk_run.status(desk.ENABLED)}
 
 
+# The depth face (desk/depth.py): a photo with the time behind the person.
+# Only a preview in Sage for now; the clock doesn't show it yet.
+class DepthPhoto(BaseModel):
+    image: str  # a data URL or bare base64
+
+
+def _depth_describe() -> dict:
+    from desk import depth
+    from desk import settings as desk_settings
+    hour24 = bool(desk_settings.load().get("clock", {}).get("hour24", True))
+    return {"success": True, "depth": depth.describe(_desk_now(), hour24)}
+
+
+@app.get("/api/desk/depth")
+async def desk_depth_get():
+    return await asyncio.to_thread(_depth_describe)
+
+
+@app.post("/api/desk/depth/photo")
+async def desk_depth_photo(req: DepthPhoto):
+    """A new photo: cut out the person (a few seconds on the Pi; the very first
+    time also downloads the model) and keep both."""
+    from desk import depth
+    if len(req.image) > 20_000_000:
+        raise HTTPException(status_code=413, detail="That photo is too big. Try one under 15 MB.")
+
+    def work():
+        photo = depth.decode_upload(req.image)
+        try:
+            mask = depth.make_mask(photo)
+        except Exception as e:  # a failed download or a broken model: keep the photo anyway
+            print(f"Depth cutout failed: {e}")
+            mask = None
+        depth.set_photo(photo, mask, _desk_now())
+        return _depth_describe()
+
+    try:
+        return await asyncio.to_thread(work)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.put("/api/desk/depth")
+async def desk_depth_put(change: Dict[str, Any]):
+    from desk import depth
+    try:
+        await asyncio.to_thread(depth.update, change)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await asyncio.to_thread(_depth_describe)
+
+
+@app.delete("/api/desk/depth")
+async def desk_depth_delete():
+    from desk import depth
+    await asyncio.to_thread(depth.clear)
+    return await asyncio.to_thread(_depth_describe)
+
+
 # --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---
 def _claude_today() -> datetime.date:
     return datetime.datetime.now(notifier._tz(notifier.get_prefs())).date()

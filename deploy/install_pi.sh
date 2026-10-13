@@ -68,6 +68,9 @@ step "Sage server venv"
 as_user python3 -m venv "$REPO/raspberry_pi/venv"
 as_user "$REPO/raspberry_pi/venv/bin/pip" install -q --upgrade pip
 as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt"
+# The depth clock face's cutout is optional and heavy; Sage runs without it.
+as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements-depth.txt" \
+  || echo "The depth face's cutout packages didn't install; photos will show without a cutout."
 command -v ollama >/dev/null || echo "Ollama is not installed, so AI task parsing will fail. See raspberry_pi/README.md."
 
 step "Web app"
