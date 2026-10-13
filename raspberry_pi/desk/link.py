@@ -85,6 +85,7 @@ class ClockLink:
         self.last_seen = 0.0
         self.on_ready: Optional[Ready] = None
         self.on_button: Optional[Button] = None
+        self.on_depth_need: Optional[Ready] = None   # the clock opened the depth face (2.9)
         self._send_lock = asyncio.Lock()
         self._serving: Optional[asyncio.Future] = None
 
@@ -181,6 +182,8 @@ class ClockLink:
                                  if isinstance(msg.get(k), (int, float, str)) and not isinstance(msg.get(k), bool)}
                 elif evt == "BTN" and self.on_button:
                     await self._call(self.on_button, str(msg.get("btn") or ""))
+                elif evt == "DEPTH_NEED" and self.on_depth_need:
+                    await self._call(self.on_depth_need)
         except Exception as e:
             log.info("Desk clock connection ended: %s", e)
         finally:

@@ -40,7 +40,7 @@ function zoneNow(zone: string, hour24: boolean) {
   }
 }
 
-export function ClockTab({ settings, save, toolsSupported }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean }) {
+export function ClockTab({ settings, save, toolsSupported, depthSupported }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean; depthSupported: boolean }) {
   const zones = useMemo<string[]>(() => {
     try { return (Intl as any).supportedValuesOf('timeZone'); } catch { return COMMON_ZONES; }
   }, []);
@@ -150,7 +150,7 @@ export function ClockTab({ settings, save, toolsSupported }: { settings: LumoSet
         </Panel>
       </div>
 
-      <DepthFacePanel />
+      <DepthFacePanel settings={settings} save={save} supported={depthSupported} />
     </div>
   );
 }

@@ -1,15 +1,15 @@
-// The depth face preview: pick a photo, the Pi cuts out the person, and the
-// time sits behind them as on an iPhone lock screen. Preview only for now;
-// sending it to LUMO is the next step.
+// The depth face: pick a photo, the Pi cuts out the person, and the time sits
+// behind them as on an iPhone lock screen. The Pi draws it and sends it to
+// LUMO when the face is on (firmware 2.9); the preview here is the same picture.
 import { useEffect, useRef, useState } from 'react';
 import { AlertTriangle, ImagePlus, Layers, Loader2, Trash2 } from 'lucide-react';
-import { DepthFace, DepthPhotoPosition, DepthPlacement, depthApi, shrinkPhoto } from '../../services/lumo';
+import { DepthFace, DepthPhotoPosition, DepthPlacement, LumoSettings, LumoSettingsUpdate, depthApi, shrinkPhoto } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
-import { Panel, Row, Segmented, btnPrimary, btnQuiet } from './parts';
+import { Panel, Row, Segmented, Toggle, btnPrimary, btnQuiet } from './parts';
 
 type View = 'depth' | 'flat' | 'mask';
 
-export function DepthFacePanel() {
+export function DepthFacePanel({ settings, save, supported }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; supported: boolean }) {
   const { showToast } = useToast();
   const [face, setFace] = useState<DepthFace | null>(null);
   const [busy, setBusy] = useState<'' | 'upload' | 'change' | 'remove'>('');
@@ -48,9 +48,11 @@ export function DepthFacePanel() {
   const p = face.preview;
   const covered = p ? Math.round(p.coverage * 100) : 0;
   const hard = p ? p.coverage > face.coverageWarn : false;
+  const onLumo = settings.clock.style === 'depth';
+  const note = onLumo ? (supported ? 'On LUMO now' : 'Needs firmware 2.9') : 'Preview';
 
   return (
-    <Panel icon={<Layers size={16} className="text-pink-500" />} title="Depth photo" note="Preview only, not on LUMO yet"
+    <Panel icon={<Layers size={16} className="text-pink-500" />} title="Depth photo" note={note}
       right={face.hasPhoto && (
         <button className={btnQuiet} disabled={!!busy} onClick={() => run('remove', depthApi.remove, "Couldn't remove the photo")}>
           <Trash2 size={14} /> Remove
@@ -110,6 +112,19 @@ export function DepthFacePanel() {
             </div>
           )}
 
+          <Row title="Show on LUMO" hint={onLumo
+            ? (face.hasPhoto ? 'This is the clock face now' : 'Pick a photo; LUMO shows Monolith until then')
+            : 'Use this as the clock face'}>
+            <Toggle on={onLumo} label="Show the depth photo on LUMO"
+              onChange={on => save({ clock: { style: on ? 'depth' : 'monolith' } })} />
+          </Row>
+          {onLumo && !supported && (
+            <div className="flex items-start gap-2 rounded-xl px-3 py-2 text-[12.5px] bg-amber-500/10 text-amber-800 dark:text-amber-300">
+              <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+              <span>LUMO needs firmware 2.9 for this face. Until you flash it, LUMO keeps its last face.</span>
+            </div>
+          )}
+
           {face.hasPhoto && (
             <>
               <Row title="Time" hint={face.placement === 'auto' && p ? `Auto put it at the ${p.placement}` : 'Where the time sits'}>
@@ -129,7 +144,7 @@ export function DepthFacePanel() {
             <ImagePlus size={15} /> {face.hasPhoto ? 'Try another photo' : 'Pick a photo'}
           </button>
           <p className="text-[12px] text-gray-400">
-            Works best with one person who stands out from the background, head near the top. The preview uses LUMO's real screen size and colours.
+            Works best with one person who stands out from the background, head near the top. The preview uses LUMO's real screen size and colours, and the time on LUMO moves on every minute.
           </p>
         </div>
       </div>

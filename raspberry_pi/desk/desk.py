@@ -36,7 +36,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Set
 
 import item_actions
 import notifier
-from desk import ambient, art, settings as desk_settings, song, today
+from desk import ambient, art, depth, settings as desk_settings, song, today
 from desk.alarms import Alarms, is_alarm
 from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
@@ -53,6 +53,8 @@ WORLD_EVERY = 15 * 60
 # Firmware that draws the timer, stopwatch and world screens, plays the alarm
 # tones and takes the haptics and night settings.
 TOOLS_FIRMWARE = (2, 8)
+# Firmware with the depth face, which shows a picture the Pi draws (depth.py).
+DEPTH_FIRMWARE = (2, 9)
 
 
 class Desk:
@@ -115,6 +117,11 @@ class Desk:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._refresh_soon = False
         self._tasks: Set[asyncio.Task] = set()
+        # The depth face's rows the clock has now (None: it has none, or
+        # it redrew and asked again), so each minute only changes go out.
+        self.depth_sent: Optional[list] = None
+        self._depth_lock = asyncio.Lock()
+        link.on_depth_need = self.depth_need
 
     # --- Sage's items ---
 
@@ -447,11 +454,13 @@ class Desk:
             await self.controller.show_screen(new["homeScreen"])
 
     async def on_screen(self, screen: str) -> None:
+        self.depth_sent = None  # a new screen; the clock asks again if it's the face
         if screen == "SYSTEM":
             await self.link.send(self.vitals.command())
 
     async def after_redraw(self) -> None:
         """The rest of what a freshly connected clock needs."""
+        self.depth_sent = None
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
         await self.send_haptics()
         await self.send_alarms(force=True)
@@ -587,6 +596,43 @@ class Desk:
     async def announce(self) -> None:
         await self.broadcast({"type": "DESK_STATE", "state": self.state()})
 
+    # --- The depth face (firmware 2.9) ---
+
+    def depth_active(self) -> bool:
+        """The clock is showing the depth face, so it takes the picture."""
+        return (self.link.connected and self.firmware_at_least(DEPTH_FIRMWARE)
+                and self.controller.screen == "CLOCK" and self.clock_extra()["style"] == "depth")
+
+    async def depth_need(self) -> None:
+        """The clock opened the face (or lost the picture): send all of it."""
+        self.depth_sent = None
+        await self.send_depth()
+
+    async def send_depth(self) -> None:
+        """The rows of the depth face that changed since the last send. With
+        no photo nothing goes, and the clock keeps showing Monolith."""
+        async with self._depth_lock:
+            if not self.depth_active():
+                self.depth_sent = None
+                return
+            hour24 = self.settings["clock"]["hour24"]
+            rows = await asyncio.to_thread(depth.clock_frame, self.now(), hour24)
+            if rows is None:
+                return
+            for message in depth.strips(rows, self.depth_sent):
+                if not await self.link.send_binary(message):
+                    self.depth_sent = None
+                    return
+            self.depth_sent = rows
+
+    async def depth_minutes(self) -> None:
+        """Just after each minute turns, the new time for a clock that has the picture."""
+        while True:
+            now = self.now()
+            await asyncio.sleep(60 - now.second - now.microsecond / 1_000_000 + 0.3)
+            if self.depth_sent is not None:
+                await self._guard(self.send_depth())
+
     # --- Running ---
 
     async def _guard(self, coro) -> Any:
@@ -615,6 +661,7 @@ class Desk:
         self.loop = asyncio.get_running_loop()
         await asyncio.gather(
             self.controller.tick_forever(),
+            self.depth_minutes(),
             self._every(1, self.ring),
             self._every(1, self.tools_tick),
             self._every(NIGHT_EVERY, self.night_tick),

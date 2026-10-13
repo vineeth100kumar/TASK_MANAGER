@@ -8,7 +8,7 @@ void storeLoad(LumoState& s) {
   Preferences p;
   if (!p.begin(NS, true)) return;   // nothing saved yet
   s.clock_style  = (ClockStyle)p.getUChar("style", CLOCK_DIGITAL);
-  if (s.clock_style > CLOCK_DIAL) s.clock_style = CLOCK_DIGITAL;
+  if (s.clock_style > CLOCK_DEPTH) s.clock_style = CLOCK_DIGITAL;
   s.hour24       = p.getBool("h24", false);
   s.show_seconds = p.getBool("secs", true);
   p.getString("z2", s.zone2, sizeof(s.zone2));

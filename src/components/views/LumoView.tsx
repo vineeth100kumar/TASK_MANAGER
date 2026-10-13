@@ -29,6 +29,7 @@ const TABS: { id: Tab; name: string; icon: typeof Clock }[] = [
 
 const TAB_KEY = 'sage-lumo-tab';
 const TOOLS_FIRMWARE = '2.8.0';
+const DEPTH_FIRMWARE = '2.9.0';
 
 export function LumoView() {
   const { showToast } = useToast();
@@ -87,6 +88,7 @@ export function LumoView() {
 
   const connected = !!status?.connected;
   const toolsSupported = connected ? compareVersions(status?.firmware ?? null, TOOLS_FIRMWARE) >= 0 : true;
+  const depthSupported = connected ? compareVersions(status?.firmware ?? null, DEPTH_FIRMWARE) >= 0 : true;
   const ringing = live?.ringing;
   const timerDone = live?.timer.state === 'done';
   const next = (alarms || []).filter(a => a.enabled && a.nextRing).sort((a, b) => a.nextRing!.localeCompare(b.nextRing!))[0];
@@ -172,7 +174,7 @@ export function LumoView() {
           ? <p className="text-[14px] text-gray-500 text-center py-10">Can't load LUMO's settings: {settingsError}</p>
           : <div className="grid grid-cols-1 lg:grid-cols-2 gap-4" aria-busy="true"><div className="skeleton h-72" /><div className="skeleton h-72" /></div>
       )}
-      {tab === 'clock' && settings && <ClockTab settings={settings} save={save} toolsSupported={toolsSupported} />}
+      {tab === 'clock' && settings && <ClockTab settings={settings} save={save} toolsSupported={toolsSupported} depthSupported={depthSupported} />}
       {tab === 'lights' && settings && <LightsTab settings={settings} save={save} night={!!live?.night} toolsSupported={toolsSupported} />}
       {tab === 'device' && <DeviceTab status={status} settings={settings} save={save} onChange={loadStatus} />}
     </div>

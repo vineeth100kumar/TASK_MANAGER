@@ -6,13 +6,14 @@ cuts out the person once (rembg, a small neural network that runs on the CPU)
 and keeps the photo and its mask. Every render then stacks three layers:
 
     1. the photo
-    2. the date and time
+    2. the time
     3. the person again, cut out, so they stand in front of the digits
+    4. the date, small, in front of everything
 
 The clock itself can't do any of this (the ESP32-C3 has no room for a whole
-frame), so the Pi draws the finished picture and, in a later step, sends it to
-the clock as strips the way the photo screen already gets them. For now the
-render is only a preview in Sage's LUMO page.
+frame), so the Pi draws the finished picture and sends it to the clock in
+strips (firmware 2.9's depth face), then each minute only the rows that
+changed. The same picture is the preview in Sage's LUMO page.
 
 A head over the digits makes the time hard to read, so every render measures
 how much of the digits the person covers. On `auto` the digits go where they
@@ -22,12 +23,14 @@ rembg is optional (requirements-depth.txt). Without it a photo can still be
 saved, and the preview shows it with no cutout and says why.
 """
 
+import array
 import base64
 import datetime
 import io
 import json
 import logging
 import os
+import sys
 import threading
 from pathlib import Path
 from typing import Optional, Tuple
@@ -295,6 +298,48 @@ def render(now: datetime.datetime, hour24: bool, meta: Optional[dict] = None,
         "coverage": round(covered[chosen], 3),
         "time": t,
     }
+
+
+# --- sending it to the clock (firmware 2.9) -------------------------------
+# The clock takes the picture in strips: 0xAA 0xDE, the first row (two bytes,
+# little-endian), the row count, then 320 RGB565 pixels a row, little-endian.
+# Two rows a message (1285 bytes) keep each one inside a network packet; a
+# bigger message can arrive in pieces and restart the clock (see art.py).
+STRIP_ROWS = 2
+
+
+def frame_rows(image) -> list:
+    """The picture as the clock's rows: 640 bytes (320 RGB565 pixels) each."""
+    rgb = image.convert("RGB").tobytes()
+    px = array.array("H", (((rgb[i] & 0xF8) << 8) | ((rgb[i + 1] & 0xFC) << 3) | (rgb[i + 2] >> 3)
+                           for i in range(0, len(rgb), 3)))
+    if sys.byteorder != "little":
+        px.byteswap()
+    data = px.tobytes()
+    row = WIDTH * 2
+    return [data[y * row:(y + 1) * row] for y in range(len(data) // row)]
+
+
+def strips(rows: list, previous: Optional[list] = None) -> list:
+    """Messages for the rows that differ from `previous` (all of them without one)."""
+    changed = [y for y, r in enumerate(rows)
+               if previous is None or y >= len(previous) or previous[y] != r]
+    out = []
+    i = 0
+    while i < len(changed):
+        y = changed[i]
+        n = 1
+        while n < STRIP_ROWS and i + n < len(changed) and changed[i + n] == y + n:
+            n += 1
+        out.append(bytes([0xAA, 0xDE, y & 0xFF, y >> 8, n]) + b"".join(rows[y:y + n]))
+        i += n
+    return out
+
+
+def clock_frame(now: datetime.datetime, hour24: bool) -> Optional[list]:
+    """The face as the clock's rows, or None with no photo."""
+    frame = render(now, hour24)
+    return frame_rows(frame["depth"]) if frame else None
 
 
 def _data_url(image) -> str:
