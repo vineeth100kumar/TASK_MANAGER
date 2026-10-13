@@ -47,7 +47,8 @@ static bool cardShowing() {
 // ---------------------------------------------------------------------
 //  Offline alarms. Sage rings alarms itself and sends the next day's to
 //  the clock (ALARMS); the clock rings them only while it can't reach Sage,
-//  each on its own weekday, stops on any button (RIGHT snoozes) and gives up
+//  each on its own days (a one-off once, then it's dropped), stops on any
+//  button (RIGHT snoozes) and gives up
 //  after 10 minutes. An alarm Sage was ringing when the link went is taken
 //  over the same way, so it can always be stopped. What happened is told to
 //  Sage when it's back (wsReportOffline), so it isn't rung twice.
@@ -95,10 +96,16 @@ static void localAlarmTick() {
   }
   for (uint8_t i = 0; i < s.local_alarm_count && at < 0; i++) {
     const LocalAlarm& a = s.local_alarms[i];
-    if (dueNow(a.h * 60 + a.m) && (a.w < 0 || c.wd < 0 || a.w == c.wd)) {
+    bool today = a.d ? (c.wd < 0 || (a.d >> c.wd) & 1) : (a.w < 0 || c.wd < 0 || a.w == c.wd);
+    if (dueNow(a.h * 60 + a.m) && today) {
       at = a.h * 60 + a.m;
       ringH = a.h;
       ringM = a.m;
+      if (!a.d) {   // a one-off (or a snooze Sage set): rung, so gone
+        memmove(&s.local_alarms[i], &s.local_alarms[i + 1], sizeof(LocalAlarm) * (s.local_alarm_count - i - 1));
+        s.local_alarm_count--;
+        storeSaveAlarms(s);
+      }
     }
   }
   if (at < 0) return;

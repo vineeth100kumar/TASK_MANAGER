@@ -30,6 +30,7 @@ const TABS: { id: Tab; name: string; icon: typeof Clock }[] = [
 const TAB_KEY = 'sage-lumo-tab';
 const TOOLS_FIRMWARE = '2.8.0';
 const DEPTH_FIRMWARE = '2.9.0';
+const SOUNDS_FIRMWARE = '2.11.0';
 
 export function LumoView() {
   const { showToast } = useToast();
@@ -89,6 +90,7 @@ export function LumoView() {
   const connected = !!status?.connected;
   const toolsSupported = connected ? compareVersions(status?.firmware ?? null, TOOLS_FIRMWARE) >= 0 : true;
   const depthSupported = connected ? compareVersions(status?.firmware ?? null, DEPTH_FIRMWARE) >= 0 : true;
+  const soundsSupported = connected ? compareVersions(status?.firmware ?? null, SOUNDS_FIRMWARE) >= 0 : true;
   const ringing = live?.ringing;
   const timerDone = live?.timer.state === 'done';
   const next = (alarms || []).filter(a => a.enabled && a.nextRing).sort((a, b) => a.nextRing!.localeCompare(b.nextRing!))[0];
@@ -164,7 +166,7 @@ export function LumoView() {
       )}
 
       {tab === 'alarms' && (
-        <AlarmsTab alarms={alarms} settings={settings} save={save} reload={loadAlarms} connected={connected} tonesSupported={toolsSupported} />
+        <AlarmsTab alarms={alarms} settings={settings} save={save} reload={loadAlarms} connected={connected} tonesSupported={toolsSupported} soundsSupported={soundsSupported} />
       )}
       {tab === 'timers' && (
         <TimersTab timer={live?.timer ?? null} stopwatch={live?.stopwatch ?? null} enabled={status?.enabled !== false} onChange={loadStatus} />

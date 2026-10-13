@@ -18,6 +18,7 @@ import json
 from typing import Any, Dict
 
 import notifier
+from desk.alarms import TONES
 
 KEY = "deskSettings"
 # HOLD_OK is OK held for about a second (firmware 2.0 and later).
@@ -44,7 +45,7 @@ CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightsta
 # as COLOR with a hue, so any firmware with COLOR mode shows it.
 LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "PHOTO", "OFF")
 # The buzzer's alarm patterns (firmware 2.8; older firmware always pulses).
-ALARM_TONES = ("pulse", "classic", "rising", "chirp")
+ALARM_TONES = TONES   # desk/alarms.py
 MAX_WORLD_CLOCKS = 3
 
 DEFAULTS: Dict[str, Any] = {

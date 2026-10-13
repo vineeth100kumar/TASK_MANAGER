@@ -385,15 +385,54 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_alarms_for_the_next_day_go_to_the_clock_when_they_change(self):
         await self.desk.refresh()
-        # w: the day it rings on (Wednesday), so a clock cut off for days rings it on the right one.
-        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0, "w": 2}], "snooze": 5})
+        # w: the day it rings next (Wednesday); d: the days it repeats on (every day), so a
+        # clock cut off for days keeps ringing it on the right ones.
+        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0, "w": 2, "d": 127}], "snooze": 5})
         await self.desk.refresh()
         self.assertEqual(self.link.cmds().count("ALARMS"), 1)  # unchanged: not sent again
         self.clock = at(7, 0)
         await self.desk.ring()
         await self.desk.controller.on_button("RIGHT")  # snooze to 7:05
         await self.desk.refresh()
-        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5, "w": 2}])
+        # The snooze rings once; the alarm itself is still there for tomorrow on.
+        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5, "w": 2, "d": 0}, {"h": 7, "m": 0, "w": 3, "d": 127}])
+
+    async def test_alarm_deleted_or_switched_off_while_ringing_goes_quiet_and_stays_off(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.assertIsNotNone(self.desk.alarms.ringing)
+        self.items[1]["remindAt"] = None  # switched off in Sage
+        await self.desk.refresh()
+        self.assertIsNone(self.desk.alarms.ringing)
+        self.assertIn({"cmd": "ALARM_OFF"}, self.link.sent)
+        self.clock = at(7, 20)
+        await self.desk.ring()
+        self.assertIsNone(self.items[1]["remindAt"])  # not set again when its ring would have run out
+        self.assertEqual(self.actions.calls, [])
+
+    async def test_new_label_while_ringing_keeps_it_ringing(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.items[1]["title"] = "Up!"
+        await self.desk.refresh()
+        self.assertEqual(self.desk.alarms.ringing.title, "Up!")
+        self.assertNotIn("ALARM_OFF", self.link.cmds())
+
+    async def test_snooze_on_a_cut_off_clock_carries_over_after_the_pi_set_it_for_tomorrow(self):
+        # The Pi was down from before 7:00 to 7:08; the clock rang at 7:00 and was snoozed at 7:06.
+        self.clock = at(7, 8)
+        await self.desk.refresh()
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")  # missed, so set for tomorrow
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 120}])
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-07T07:11")
+        self.assertEqual(self.items[1]["startAt"], "2026-10-08T07:00")
+        # A snooze that ran out while the Pi was away changes nothing.
+        self.items[1]["remindAt"] = "2026-10-08T07:00"
+        await self.desk.refresh()
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 900}])
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")
 
     async def test_clock_gets_the_weekday_and_utc_offset(self):
         await self.desk.controller.send_clock()

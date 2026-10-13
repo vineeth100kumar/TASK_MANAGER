@@ -39,7 +39,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Set
 import item_actions
 import notifier
 from desk import ambient, art, depth, settings as desk_settings, song, today
-from desk.alarms import Alarms, is_alarm
+from desk.alarms import TONE_CYCLE_MS, Alarms, is_alarm
 from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
 
@@ -170,7 +170,14 @@ class Desk:
         now = self.now()
         self.alarms.tz = now.tzinfo
         before = self.next_alarm()
+        was_ringing = self.alarms.ringing
         self.alarms.load(items)
+        if was_ringing and not self.alarms.ringing:
+            # Deleted, switched off or moved in Sage while it rang: quiet it,
+            # and leave the item as it was just saved.
+            log.info("Alarm %s changed while ringing; stopping it", was_ringing.id)
+            await self.link.send({"cmd": "ALARM_OFF"})
+            await self.announce()
         missed = self.alarms.missed(now)
         for alarm in missed:
             log.info("Alarm %s was missed; setting it for next time", alarm.id)
@@ -192,13 +199,11 @@ class Desk:
         await self.send_alarms()
 
     async def send_alarms(self, force: bool = False) -> None:
-        """The alarms due in the next day, for the clock to ring on its own
-        if it loses the Pi. Sent when they change."""
-        # w (0 is Monday) lets firmware 2.10 ring each on its own day only,
-        # even when it stays cut off for longer than a day.
-        upcoming = [{"h": a.rings_at.hour, "m": a.rings_at.minute, "w": a.rings_at.weekday()}
-                    for a in self.alarms.upcoming(self.now())]
-        command = {"cmd": "ALARMS", "list": upcoming, "snooze": self.settings["alarm"]["snoozeMinutes"]}
+        """The alarms coming up, for the clock to ring on its own if it
+        loses the Pi. Sent when they change."""
+        # w and d (firmware 2.11) let it ring each on its own days, however
+        # long it stays cut off (Alarms.for_clock).
+        command = {"cmd": "ALARMS", "list": self.alarms.for_clock(self.now()), "snooze": self.settings["alarm"]["snoozeMinutes"]}
         if force or command != self.sent_alarms:
             if await self.link.send(command):
                 self.sent_alarms = command
@@ -404,6 +409,14 @@ class Desk:
             # The Pi wasn't ringing it: it was down, or its own ring had ended.
             alarm = next((a for a in self.alarms.alarms if a.rings_at and (a.rings_at.hour, a.rings_at.minute) == (h, m)
                           and at - datetime.timedelta(hours=2) <= a.rings_at <= now + datetime.timedelta(minutes=1)), None)
+            if alarm is None and action == "snooze":
+                # The Pi came back after the alarm's time and has already set
+                # it for next time (or switched a one-off off): the snooze
+                # still stands if it hasn't run out.
+                alarm = next((a for a in self.alarms.alarms if (a.h, a.m) == (h, m) and (not a.rings_at or a.rings_at > now)), None)
+                if alarm is not None and at + datetime.timedelta(minutes=self.snooze_minutes(alarm)) > now:
+                    await self.change(self.actions.set_fields, alarm.id, Alarms.snoozed(at, self.snooze_minutes(alarm)), SOURCE)
+                continue
             if alarm is None:
                 continue
             self.alarms._rung.add(alarm.key)   # the clock has rung this one
@@ -623,8 +636,8 @@ class Desk:
         return True
 
     async def device_do(self, action: str, tone: str = "", volume: int = 0) -> bool:
-        """identify (flash and knock), restart, or tone (play an alarm sound
-        for a few seconds). False when no clock is there to do it."""
+        """identify (flash and knock), restart, or tone (play one cycle of an
+        alarm sound). False when no clock is there to do it."""
         if not self.link.connected:
             return False
         if action == "identify":
@@ -632,8 +645,12 @@ class Desk:
         if action == "restart":
             return await self.link.send({"cmd": "REBOOT"})
         if action == "tone":
-            return await self.link.send({"cmd": "TONE", "tone": tone or self.settings["alarm"]["tone"],
-                                         "volume": volume if volume else self.settings["alarm"]["volume"], "seconds": 4})
+            # One cycle of the sound, then quiet (firmware 2.11). Older
+            # firmware ignores cycles and plays for seconds instead.
+            tone = tone or self.settings["alarm"]["tone"]
+            seconds = -(-TONE_CYCLE_MS.get(tone, 2000) // 1000)
+            return await self.link.send({"cmd": "TONE", "tone": tone, "volume": volume if volume else self.settings["alarm"]["volume"],
+                                         "cycles": 1, "seconds": seconds})
         raise ValueError(f"Unknown device action {action!r}.")
 
     def state(self) -> dict:
