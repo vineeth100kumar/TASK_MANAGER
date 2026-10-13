@@ -9,6 +9,7 @@ const MODES: { id: string; name: string; hint: string; swatch: string }[] = [
   { id: 'WARM', name: 'Warm', hint: 'A steady warm white', swatch: 'bg-amber-300' },
   { id: 'BREATHE', name: 'Breathe', hint: 'Slowly brightens and fades', swatch: 'bg-gradient-to-br from-blue-300 to-blue-500' },
   { id: 'AURORA', name: 'Aurora', hint: 'Soft colours drifting round', swatch: 'bg-gradient-to-br from-emerald-300 via-teal-400 to-violet-500' },
+  { id: 'PHOTO', name: 'Photo', hint: "The main colour of your depth photo (warm white when there isn't one)", swatch: 'bg-gradient-to-br from-amber-400 via-pink-400 to-sky-400' },
   { id: 'OFF', name: 'Off', hint: 'The ring stays dark', swatch: 'bg-gray-700' },
 ];
 
@@ -19,7 +20,7 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
   return (
     <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6 items-start">
       <Panel icon={<Lightbulb size={16} className="text-amber-500" />} title="Light ring" note={night ? 'Night mode is on now' : undefined}>
-        <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+        <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
           {MODES.map(m => (
             <button key={m.id} onClick={() => save({ lights: { mode: m.id } })} aria-pressed={settings.lights.mode === m.id}
               className={`rounded-2xl p-3 text-left transition-all ${settings.lights.mode === m.id ? 'ring-2 ring-blue-600 bg-blue-600/5' : 'ring-1 ring-black/5 dark:ring-white/10 hover:bg-black/[0.03] dark:hover:bg-white/5'}`}>
