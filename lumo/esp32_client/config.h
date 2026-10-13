@@ -39,48 +39,41 @@
 // the buzzer through C1 (1 nF), both returning to GND. There is no flyback
 // diode across the motor.
 //
-// What that means:
-//  - The motor needs the transistor held fully on. PWM at any duty below 100%
-//    cuts the motor's current on every off edge (nowhere for it to flow
-//    without a diode), so even 87% at 50 kHz barely moves it. That is why
-//    2.7.0/2.7.1 went quiet AND still.
-//  - The buzzer only hears changes (C1 blocks DC). A pin held steady, on or
-//    off, is silent. The audible part was the PWM off-time, when the
-//    floating collector passes the motor's brush noise through C1.
-// On hardware (2.8.1), fully on (DC) runs the motor but the buzzer is heard
-// too. So each knock is now "on" at HAPTIC_ON_DUTY on a fast HAPTIC_FREQ
-// carrier: high enough that the buzzer can't follow, and on enough that the
-// motor still spins. Strength sets how long. Only the alarm uses a tone.
-// Find the best pair live from the serial monitor (115200 baud):
-//   hz 80000    change the carrier        duty 90   change the on-duty (%)
+// What the hardware showed (2.7-2.8.3): fully on (DC) runs the motor but the
+// buzzer is heard; short knocks at 87-90% on 50-80 kHz with 10/9-bit duty
+// left the motor still. Your old clock (workinprogmess11) knocked at 220/255
+// (86%) on 50 kHz, 8-bit, for 50 ms per press, and that vibrated with no
+// buzz, so those are the defaults now. Strength sets how long a knock runs.
+// Only the alarm uses a tone. To tune live from the serial monitor (115200):
+//   hz 50000    change the carrier        duty 86   change the on-duty (%)
 //   tick / knock / buzz   try an effect   haptic    show the settings
 // then put the pair that feels right and stays quiet here.
 // If you fit a diode (1N4148 or SS14) across the motor, set HAPTIC_MOTOR_DC
 // to 0 to get smooth PWM strength instead.
 #define HAPTIC_MOTOR_DC    1      // 1 = knocks at a fixed on-duty (this board); 0 = smooth PWM (needs a flyback diode)
-#define HAPTIC_FREQ        80000  // knock carrier; higher = less buzzer (try 50000-150000)
-#define HAPTIC_ON_DUTY     90     // % on-time during a knock (100 = DC: strongest, but the buzzer is heard)
-#define HAPTIC_RES         10     // most duty bits (fewer at high carriers: 8 bits up to ~300 kHz)
+#define HAPTIC_FREQ        50000  // knock carrier: 50 kHz, as the old clock (workinprogmess11) used
+#define HAPTIC_ON_DUTY     92     // % on-time during a knock: 235/255, a bit above the old clock's 86% for a stronger kick (100 = DC: buzzer heard)
+#define HAPTIC_RES         8      // duty bits: 8, as the old clock (fewer only above ~300 kHz)
 #define HAPTIC_TICK_US     100    // how often a PWM envelope moves (on/off drive uses 1 ms)
 #define HAPTIC_EDGE_MS     5      // shortest rise or fall in PWM mode
 #define HAPTIC_FALL_MS     10     // how a knock lets go
 #define HAPTIC_MIN_DUTY    60     // PWM mode: % on-time at strength 1
 #define HAPTIC_MAX_DUTY    100    // PWM mode: % on-time at strength 100
 #define HAPTIC_MIN_LEN_PCT 50     // on/off mode: knock length at strength 1, % of the base length
-#define HAPTIC_MAX_LEN_PCT 160    // on/off mode: knock length at strength 100
+#define HAPTIC_MAX_LEN_PCT 200    // on/off mode: knock length at strength 100
 #define HAPTIC_STRENGTH    100    // default strength 0-100 until Sage sends one (0 = off)
 #define HAPTIC_NIGHT_PCT   60     // notifications at night run at this % (presses don't)
 
 // Per-effect tuning. Peaks are 0-255 of the strength above; lengths in ms.
 #define HFX_TICK_PEAK      235    // every button press: one crisp tick
-#define HFX_TICK_HOLD_MS   12
-#define HFX_KICK_MS        6      // a tick opens at full power for this long to spin up
+#define HFX_TICK_HOLD_MS   40     // a press runs ~70 ms at strength 70 (the old clock ran 50 ms)
+#define HFX_KICK_MS        10     // a tick opens at full power for this long to spin up
 #define HFX_HOLD_PEAK      230    // OK held: a soft tick, then a firm one
 #define HFX_KNOCK_PEAK     245    // a notification: two knocks
-#define HFX_KNOCK_HOLD_MS  30
+#define HFX_KNOCK_HOLD_MS  55
 #define HFX_KNOCK_GAP_MS   120
 #define HFX_REMIND_PEAK    255    // a reminder: two longer, firmer knocks
-#define HFX_REMIND_HOLD_MS 55
+#define HFX_REMIND_HOLD_MS 85
 #define HFX_REMIND_GAP_MS  150
 #define HFX_PULSE_PEAK     200    // a soft swell (breath)
 #define HFX_PULSE_MS       700
@@ -112,7 +105,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.8.3"
+#define FW_VERSION "2.8.5"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
