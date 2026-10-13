@@ -5,6 +5,7 @@ import { Check, Clock, Globe2, LayoutGrid, Plus, X } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
 import { Panel, Row, Toggle, selectCls } from './parts';
 import { DepthFacePanel } from './DepthFacePanel';
+import { Select } from '../common/Select';
 
 export const FACES: { id: string; name: string; hint: string; classic?: boolean }[] = [
   { id: 'monolith', name: 'Monolith', hint: 'One large, light time' },
@@ -75,10 +76,10 @@ export function ClockTab({ settings, save, toolsSupported, depthSupported }: { s
             <Toggle on={settings.clock.seconds} onChange={on => save({ clock: { seconds: on } })} label="Show seconds" />
           </Row>
           <Row title="Second time zone" hint="A small line on the face">
-            <select className={`${selectCls} max-w-44`} value={settings.clock.secondZone} onChange={e => save({ clock: { secondZone: e.target.value } })}>
+            <Select className={`${selectCls} max-w-44`} value={settings.clock.secondZone} onChange={v => save({ clock: { secondZone: v } })}>
               <option value="">None</option>
               {zones.map(z => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}
-            </select>
+            </Select>
           </Row>
         </div>
       </Panel>
@@ -107,10 +108,10 @@ export function ClockTab({ settings, save, toolsSupported, depthSupported }: { s
           {world.length < 3 && (
             <div className="space-y-2">
               <div className="flex gap-2">
-                <select className={`${selectCls} flex-1 min-w-0`} value={newZone} onChange={e => setNewZone(e.target.value)} aria-label="Add a place">
+                <Select className={`${selectCls} flex-1 min-w-0`} value={newZone} onChange={v => setNewZone(v)} aria-label="Add a place">
                   <option value="">Add a place…</option>
                   {zones.filter(z => !world.includes(z)).map(z => <option key={z} value={z}>{z.replace(/_/g, ' ')}</option>)}
-                </select>
+                </Select>
                 <button onClick={() => addZone(newZone)} disabled={!newZone} className="px-3 rounded-xl bg-blue-600 text-white disabled:opacity-40" aria-label="Add"><Plus size={16} /></button>
               </div>
               <div className="flex flex-wrap gap-1.5">
@@ -143,9 +144,9 @@ export function ClockTab({ settings, save, toolsSupported, depthSupported }: { s
             })}
           </ul>
           <Row title="Home screen" hint="Where LUMO starts">
-            <select className={selectCls} value={settings.homeScreen} onChange={e => save({ homeScreen: e.target.value })}>
+            <Select className={selectCls} value={settings.homeScreen} onChange={v => save({ homeScreen: v })}>
               {SCREENS.filter(s => settings.screens.includes(s.id)).map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
-            </select>
+            </Select>
           </Row>
         </Panel>
       </div>

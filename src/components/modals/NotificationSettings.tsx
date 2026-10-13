@@ -5,6 +5,7 @@ import {
   type NotifyConfig, type NotifyPrefs, type PushState,
 } from '../../services/pushNotifications';
 import { useToast } from '../../context/ToastContext';
+import { TimePicker } from '../common/TimePicker';
 
 const card = 'p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-4';
 const field = 'w-full px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500';
@@ -180,13 +181,13 @@ export function NotificationSettings() {
             <Toggle label="Reminders" on={prefs.reminders} onChange={on => update({ reminders: on })} />
           </Row>
           <Row title="Morning plan" hint="What's due today and anything overdue">
-            <input type="time" className="field !w-[7.5rem] !py-1 !px-2 text-sm" value={prefs.morningTime} disabled={!prefs.morningPlan}
-              onChange={e => e.target.value && update({ morningTime: e.target.value })} />
+            <TimePicker clearable={false} className="field !w-[7.5rem] !min-h-0 !py-1 !px-2 text-sm" value={prefs.morningTime} disabled={!prefs.morningPlan}
+              onChange={v => v && update({ morningTime: v })} />
             <Toggle label="Morning plan" on={prefs.morningPlan} onChange={on => update({ morningPlan: on })} />
           </Row>
           <Row title="Evening check-in" hint="Only when something due today is still open">
-            <input type="time" className="field !w-[7.5rem] !py-1 !px-2 text-sm" value={prefs.eveningTime} disabled={!prefs.eveningCheckIn}
-              onChange={e => e.target.value && update({ eveningTime: e.target.value })} />
+            <TimePicker clearable={false} className="field !w-[7.5rem] !min-h-0 !py-1 !px-2 text-sm" value={prefs.eveningTime} disabled={!prefs.eveningCheckIn}
+              onChange={v => v && update({ eveningTime: v })} />
             <Toggle label="Evening check-in" on={prefs.eveningCheckIn} onChange={on => update({ eveningCheckIn: on })} />
           </Row>
           <Row title="Time zone" hint="Used for reminders, the plan and LUMO's alarms">

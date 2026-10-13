@@ -1,6 +1,6 @@
 // Small pieces the LUMO tabs share: panels, switches, sliders, segmented
 // choices, and the settings the page saves to the Pi.
-import { ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { ReactNode, useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 
@@ -68,7 +68,8 @@ export function Slider({ value, min, max, onCommit, label, format }: {
     <div className="flex items-center gap-3 w-full">
       <input type="range" min={min} max={max} value={v} aria-label={label}
         onChange={e => setV(Number(e.target.value))} onPointerUp={commit} onKeyUp={commit} onBlur={commit}
-        className="flex-1 accent-blue-600 h-1.5" />
+        style={{ '--fill': `${((v - min) / (max - min || 1)) * 100}%` } as CSSProperties}
+        className="flex-1" />
       <span className="w-12 text-right text-[13px] font-semibold tabular-nums text-gray-700 dark:text-gray-200">{format ? format(v) : v}</span>
     </div>
   );

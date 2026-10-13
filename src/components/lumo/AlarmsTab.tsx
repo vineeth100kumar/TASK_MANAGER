@@ -9,6 +9,8 @@ import {
 } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 import { Panel, Row, Segmented, Slider, Toggle, btnDanger, btnPrimary, btnQuiet, selectCls } from './parts';
+import { Select } from '../common/Select';
+import { TimePicker } from '../common/TimePicker';
 
 export const TONES: { id: AlarmTone; name: string; hint: string }[] = [
   { id: 'pulse', name: 'Pulse', hint: 'Beep-beep, like a heartbeat' },
@@ -147,23 +149,23 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="text-[13px] font-medium text-gray-500">Sound</div>
-                <select className={`${selectCls} w-full`} value={settings.alarm.tone} onChange={e => save({ alarm: { tone: e.target.value as AlarmTone } })}>
+                <Select className={`${selectCls} w-full`} value={settings.alarm.tone} onChange={v => save({ alarm: { tone: v as AlarmTone } })}>
                   {TONES.map(t => <option key={t.id} value={t.id}>{t.name}: {t.hint}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="space-y-2">
                 <div className="text-[13px] font-medium text-gray-500 flex items-center gap-1.5"><Volume2 size={13} /> Volume</div>
                 <Slider label="Alarm volume" value={settings.alarm.volume} min={5} max={100} format={v => `${v}%`} onCommit={v => save({ alarm: { volume: v } })} />
               </div>
               <Row title="Snooze" hint="RIGHT on the clock">
-                <select className={selectCls} value={settings.alarm.snoozeMinutes} onChange={e => save({ alarm: { snoozeMinutes: Number(e.target.value) } })}>
+                <Select className={selectCls} value={settings.alarm.snoozeMinutes} onChange={v => save({ alarm: { snoozeMinutes: Number(v) } })}>
                   {SNOOZES.map(m => <option key={m} value={m}>{m} min</option>)}
-                </select>
+                </Select>
               </Row>
               <Row title="Rings for" hint="Then it stops by itself">
-                <select className={selectCls} value={settings.alarm.ringMinutes} onChange={e => save({ alarm: { ringMinutes: Number(e.target.value) } })}>
+                <Select className={selectCls} value={settings.alarm.ringMinutes} onChange={v => save({ alarm: { ringMinutes: Number(v) } })}>
                   {[1, 2, 5, 10, 15, 20, 30].map(m => <option key={m} value={m}>{m} min</option>)}
-                </select>
+                </Select>
               </Row>
               {!tonesSupported && <p className="text-[12px] text-amber-700 dark:text-amber-400">The sound and volume need LUMO firmware 2.8. Until it's flashed, every alarm pulses.</p>}
             </div>
@@ -212,7 +214,7 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <label className="space-y-1.5 block">
           <span className="text-[13px] font-medium text-gray-500">Time</span>
-          <input type="time" value={d.time} onChange={e => e.target.value && set({ time: e.target.value })}
+          <TimePicker clearable={false} value={d.time} onChange={v => v && set({ time: v })}
             className={`${selectCls} w-full text-[22px] font-semibold tabular-nums py-2.5`} />
           {!hour24 && <span className="text-[12px] text-gray-400">Shows on LUMO as {clockText(d.time, false)} {ampm(d.time)}</span>}
         </label>
@@ -272,10 +274,10 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
         </div>
         <div className="space-y-2">
           <span className="text-[13px] font-medium text-gray-500">Snooze</span>
-          <select className={`${selectCls} w-full`} value={d.snoozeMinutes ?? ''} onChange={e => set({ snoozeMinutes: e.target.value ? Number(e.target.value) : null })}>
+          <Select className={`${selectCls} w-full`} value={d.snoozeMinutes ?? ''} onChange={v => set({ snoozeMinutes: v ? Number(v) : null })}>
             <option value="">Default ({settings?.alarm.snoozeMinutes ?? 5} min)</option>
             {SNOOZES.map(m => <option key={m} value={m}>{m} min</option>)}
-          </select>
+          </Select>
         </div>
       </div>
 

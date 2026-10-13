@@ -5,7 +5,7 @@
 // the chosen face to the clock straight away. The pictures are the clock's
 // own drawing code rendered off the device, so what you pick is what you get.
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { Check, Clock, Loader2, Vibrate } from 'lucide-react';
 import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
@@ -191,7 +191,8 @@ export function DeskClockSettings() {
             value={strength}
             onChange={e => changeStrength(Number(e.target.value))}
             aria-label="Haptic strength"
-            className="w-full accent-blue-600"
+            style={{ '--fill': `${strength}%` } as CSSProperties}
+            className="w-full"
           />
           <div className="flex justify-between text-[11px] text-gray-400">
             <span>Off</span><span>Strong</span>

@@ -7,6 +7,8 @@ import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -75,6 +77,16 @@ export function Sidebar({
   const [isAddProjectOpen, setIsAddProjectOpen] = useState(false);
   const [isAddAreaOpen, setIsAddAreaOpen] = useState(false);
   const [activeGrowthTab, setActiveGrowthTab] = useState<'goals' | 'habits' | 'notes' | null>(null);
+  // Esc closes whichever of the sidebar's dialogs is open.
+  useEffect(() => {
+    if (!isAddProjectOpen && !isAddAreaOpen && !activeGrowthTab) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return;
+      setIsAddProjectOpen(false); setIsAddAreaOpen(false); setActiveGrowthTab(null);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [isAddProjectOpen, isAddAreaOpen, activeGrowthTab]);
 
   // New Project Form
   const [newProjName, setNewProjName] = useState('');
@@ -478,8 +490,8 @@ export function Sidebar({
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">New Project</h3>
-                <button onClick={() => setIsAddProjectOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+                <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">New Project</h3>
+                <button type="button" onClick={() => setIsAddProjectOpen(false)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18} /></button>
               </div>
               <form onSubmit={handleCreateProject} className="space-y-4">
                 <div>
@@ -498,7 +510,8 @@ export function Sidebar({
                     <label className="field-label mb-1.5">Color</label>
                     <div className="flex gap-1.5 pt-1.5 flex-wrap">
                       {COLOR_OPTIONS.slice(0, 5).map(c => (
-                        <div key={c} onClick={() => setNewProjColor(c)} className={`w-6 h-6 rounded-full cursor-pointer transition-transform ${c} ${newProjColor === c ? 'ring-2 ring-blue-500 scale-110' : 'opacity-70 hover:opacity-100'}`} />
+                        <button type="button" key={c} onClick={() => setNewProjColor(c)} aria-label={`Colour ${c.replace('bg-', '').replace('-500', '')}`} aria-pressed={newProjColor === c}
+                          className={`w-6 h-6 rounded-full transition-transform ${c} ${newProjColor === c ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-[#1c1c1e] scale-110' : 'opacity-70 hover:opacity-100 hover:scale-105'}`} />
                       ))}
                     </div>
                   </div>
@@ -523,8 +536,8 @@ export function Sidebar({
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
-                <h3 className="text-lg font-bold text-gray-900 dark:text-white">New Life Area</h3>
-                <button onClick={() => setIsAddAreaOpen(false)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+                <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">New Life Area</h3>
+                <button type="button" onClick={() => setIsAddAreaOpen(false)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18} /></button>
               </div>
               <form onSubmit={handleCreateArea} className="space-y-4">
                 <div>
@@ -535,13 +548,14 @@ export function Sidebar({
                   <label className="field-label mb-1.5">Color Tag</label>
                   <div className="flex gap-2 pt-1 flex-wrap">
                     {COLOR_OPTIONS.map(c => (
-                      <div key={c} onClick={() => setNewAreaColor(c)} className={`w-7 h-7 rounded-full cursor-pointer transition-transform ${c} ${newAreaColor === c ? 'ring-2 ring-orange-500 scale-110' : 'opacity-70 hover:opacity-100'}`} />
+                      <button type="button" key={c} onClick={() => setNewAreaColor(c)} aria-label={`Colour ${c.replace('bg-', '').replace('-500', '')}`} aria-pressed={newAreaColor === c}
+                        className={`w-7 h-7 rounded-full transition-transform ${c} ${newAreaColor === c ? 'ring-2 ring-offset-2 ring-orange-500 ring-offset-white dark:ring-offset-[#1c1c1e] scale-110' : 'opacity-70 hover:opacity-100 hover:scale-105'}`} />
                     ))}
                   </div>
                 </div>
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setIsAddAreaOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
-                  <button type="submit" disabled={isCreatingArea || !newAreaName.trim()} className="px-5 py-2 rounded-xl text-sm font-bold bg-orange-600 text-white flex items-center gap-2">
+                  <button type="submit" disabled={isCreatingArea || !newAreaName.trim()} className="px-5 py-2 rounded-xl text-sm font-semibold bg-orange-600 hover:bg-orange-700 text-white flex items-center gap-2 shadow-sm shadow-orange-600/20 transition-colors disabled:opacity-50">
                     {isCreatingArea ? <Loader2 size={16} className="animate-spin" /> : 'Create Area'}
                   </button>
                 </div>
@@ -559,26 +573,29 @@ export function Sidebar({
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-xl rounded-3xl shadow-2xl p-6 relative z-10 space-y-6 max-h-[85vh] flex flex-col border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
-                <div className="flex gap-2">
-                  <button onClick={() => setActiveGrowthTab('goals')} className={`px-4 py-1.5 rounded-xl font-bold text-sm ${activeGrowthTab === 'goals' ? 'bg-blue-500 text-white' : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400'}`}>Goals</button>
-                  <button onClick={() => setActiveGrowthTab('habits')} className={`px-4 py-1.5 rounded-xl font-bold text-sm ${activeGrowthTab === 'habits' ? 'bg-emerald-500 text-white' : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400'}`}>Habits</button>
-                  <button onClick={() => setActiveGrowthTab('notes')} className={`px-4 py-1.5 rounded-xl font-bold text-sm ${activeGrowthTab === 'notes' ? 'bg-amber-500 text-white' : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-400'}`}>Notes</button>
+                <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5" role="tablist">
+                  {([['goals', 'Goals', 'text-blue-600 dark:text-blue-400'], ['habits', 'Habits', 'text-emerald-600 dark:text-emerald-400'], ['notes', 'Notes', 'text-amber-600 dark:text-amber-400']] as const).map(([id, label, tint]) => (
+                    <button key={id} type="button" role="tab" aria-selected={activeGrowthTab === id} onClick={() => setActiveGrowthTab(id)}
+                      className={`px-4 py-1.5 rounded-lg text-[13px] font-semibold transition-colors ${activeGrowthTab === id ? `bg-white dark:bg-[#3a3a3c] shadow-sm ring-1 ring-black/5 dark:ring-white/5 ${tint}` : 'text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <button onClick={() => setActiveGrowthTab(null)}><X size={20} className="text-gray-400 hover:text-gray-600" /></button>
+                <button type="button" onClick={() => setActiveGrowthTab(null)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18} /></button>
               </div>
 
               {/* Add form */}
               <form onSubmit={handleAddGrowthItem} className="flex gap-2">
-                <input type="text" placeholder={`Add new ${activeGrowthTab.slice(0, -1)}...`} value={growthTitle} onChange={e => setGrowthTitle(e.target.value)} className="flex-1 bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-4 py-2 text-sm font-semibold outline-none focus:border-blue-500" required />
+                <input type="text" placeholder={`Add new ${activeGrowthTab.slice(0, -1)}...`} value={growthTitle} onChange={e => setGrowthTitle(e.target.value)} className="field flex-1 !w-auto min-w-0" required />
                 {activeGrowthTab === 'habits' && (
-                  <select value={growthTarget} onChange={e => setGrowthTarget(Number(e.target.value))} aria-label="How often" className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-2 py-2 text-xs font-semibold outline-none dark:[color-scheme:dark]">
+                  <Select value={growthTarget} onChange={v => setGrowthTarget(Number(v))} aria-label="How often" className="field !w-auto shrink-0">
                     {[7, 6, 5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{n === 7 ? 'Every day' : `${n}× a week`}</option>)}
-                  </select>
+                  </Select>
                 )}
                 {activeGrowthTab === 'goals' && (
-                  <input type="date" value={growthDate} onChange={e => setGrowthDate(e.target.value)} className="bg-gray-50 dark:bg-white/5 border border-gray-200 dark:border-white/10 rounded-xl px-3 py-2 text-xs font-semibold outline-none" />
+                  <DatePicker value={growthDate} onChange={v => setGrowthDate(v)} placeholder="Target date" aria-label="Target date" className="field !w-auto shrink-0" />
                 )}
-                <button type="submit" className="px-4 py-2 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-black font-bold text-sm">Add</button>
+                <button type="submit" className="shrink-0 px-4 rounded-xl bg-gray-900 hover:bg-gray-800 dark:bg-white dark:hover:bg-gray-100 text-white dark:text-black font-semibold text-sm transition-colors">Add</button>
               </form>
 
               {/* List */}
@@ -588,15 +605,15 @@ export function Sidebar({
                     <div key={g.id} className="p-3.5 rounded-2xl bg-gray-50 dark:bg-white/5 flex justify-between items-center border border-gray-100 dark:border-white/5 group/gitem">
                       <div>
                         <h4 className="font-semibold text-sm text-gray-900 dark:text-white">{g.title}</h4>
-                        <span className="text-xs text-gray-400">Target: {g.targetDate ? parseLocalDate(g.targetDate).toLocaleDateString() : 'Ongoing'}</span>
+                        <span className="text-xs text-gray-400">{g.targetDate ? `Target ${parseLocalDate(g.targetDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}` : 'Ongoing'}</span>
                       </div>
                       <div className="flex items-center gap-3">
-                        <span className="text-sm font-bold text-blue-500">{g.progress}%</span>
+                        <span className="w-10 text-right text-sm font-semibold tabular-nums text-blue-600 dark:text-blue-400">{g.progress}%</span>
                         <input type="range" min={0} max={100} value={g.progress} onChange={async (e) => {
                           const val = Number(e.target.value);
                           await api.goals.updateProgress(g.id, val);
                           loadNavData();
-                        }} className="w-24 cursor-pointer" />
+                        }} style={{ '--fill': `${g.progress}%` } as React.CSSProperties} className="w-24" aria-label="Progress" />
                         <button onClick={(e) => handleDeleteGrowth('goals', g.id, e)} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="Delete Goal">
                           <Trash2 size={15} />
                         </button>
@@ -629,7 +646,10 @@ export function Sidebar({
                 )}
 
                 {((activeGrowthTab === 'goals' && goals.length === 0) || (activeGrowthTab === 'habits' && habits.length === 0) || (activeGrowthTab === 'notes' && notes.length === 0)) && (
-                  <div className="text-center text-gray-400 py-8 text-sm">No items yet. Add one above!</div>
+                  <div className="text-center py-10">
+                    <p className="text-[14px] font-semibold text-gray-700 dark:text-gray-300">Nothing here yet</p>
+                    <p className="mt-1 text-[13px] text-gray-400">{activeGrowthTab === 'goals' ? 'Add a goal above and track how far along it is.' : activeGrowthTab === 'habits' ? 'Add a habit above and tick it off each day.' : 'Add a quick note above.'}</p>
+                  </div>
                 )}
               </div>
             </motion.div>

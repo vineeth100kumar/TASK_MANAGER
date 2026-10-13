@@ -167,7 +167,7 @@ export function Header({
 
             {/* Mobile/Tablet View Switcher Dropdown */}
             <div className="lg:hidden relative">
-              <button onClick={() => setIsViewMenuOpen(!isViewMenuOpen)} className="flex items-center gap-2 h-9 px-2.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/10 transition-colors">
+              <button onClick={() => setIsViewMenuOpen(!isViewMenuOpen)} aria-haspopup="menu" aria-expanded={isViewMenuOpen} className="flex items-center gap-2 h-9 px-2.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/10 transition-colors">
                 <CurrentViewIcon size={16} />
                 <span className="sr-only">{currentViewObj?.label} view</span>
                 <ChevronDown size={14} />

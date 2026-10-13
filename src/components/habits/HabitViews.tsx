@@ -2,6 +2,7 @@ import { Check, X, Flame, Trash2 } from 'lucide-react';
 import { Habit } from '../../services/types';
 import { formatShortDate } from '../../utils/quickAddParser';
 import { HabitDay, bestStreakOf, doneThisWeek, habitDay, lastNDays, recentWeeks, streakOf } from '../../utils/habits';
+import { Select } from '../common/Select';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -116,10 +117,10 @@ export function HabitHistory({ habit, today, onToggle, onUpdate, onDelete }: His
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           className="flex-1 min-w-0 bg-transparent font-semibold text-[15px] text-gray-900 dark:text-white outline-none rounded-lg px-1 -mx-1 focus:bg-white dark:focus:bg-white/10"
         />
-        <select value={target} onChange={e => onUpdate({ targetCount: Number(e.target.value) })} aria-label="How often"
+        <Select value={target} onChange={v => onUpdate({ targetCount: Number(v) })} aria-label="How often"
           className="shrink-0 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1 text-[12px] font-semibold text-gray-600 dark:text-gray-300 outline-none dark:[color-scheme:dark]">
           {[7, 6, 5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{targetLabel(n)}</option>)}
-        </select>
+        </Select>
         <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="Delete habit">
           <Trash2 size={15} />
         </button>

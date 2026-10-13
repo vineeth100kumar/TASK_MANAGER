@@ -7,6 +7,8 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { getTodayString } from '../../utils/dateUtils';
 import { formatShortDate } from '../../utils/quickAddParser';
 import { buildFlow, FlowRow } from './branchFlow';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
 
 const BRANCH_COLORS = ['#8b5cf6', '#f97316', '#10b981', '#ec4899', '#0ea5e9', '#eab308', '#ef4444', '#14b8a6'];
 const MAIN_COLOR = '#64748b';
@@ -264,12 +266,12 @@ function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
         </div>
       </button>
       {branches.length > 0 && (
-        <select value={item.branchId && branches.some(b => b.id === item.branchId) ? item.branchId : ''} onChange={e => onMove(item, e.target.value)}
+        <Select value={item.branchId && branches.some(b => b.id === item.branchId) ? item.branchId : ''} onChange={v => onMove(item, v)}
           aria-label={`Branch for ${item.title}`}
           className="shrink-0 max-w-[8.5rem] text-[12px] font-semibold rounded-lg px-1.5 py-1 bg-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 outline-none cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity dark:[color-scheme:dark]">
           <option value="">Main</option>
           {branches.map(b => <option key={b.id} value={b.id}>{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
-        </select>
+        </Select>
       )}
     </div>
   );
@@ -315,14 +317,14 @@ function NewBranchForm({ project, today, onCancel, onCreate }: {
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Branch from</span>
-        <select value={parentId} onChange={e => setParentId(e.target.value)} className={field}>
+        <Select value={parentId} onChange={v => setParentId(v)} className={field}>
           <option value="">Main</option>
           {branches.filter(b => !b.mergedAt).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        </Select>
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Starts</span>
-        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value || today)} className={field} />
+        <DatePicker clearable={false} value={startDate} onChange={v => setStartDate(v || today)} className={field} />
       </label>
       <div className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Colour</span>
@@ -334,7 +336,7 @@ function NewBranchForm({ project, today, onCancel, onCreate }: {
         </div>
       </div>
       <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="h-9 px-3 rounded-xl text-[13.5px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10"><X size={16} /></button>
+        <button type="button" onClick={onCancel} aria-label="Cancel" className="h-9 px-3 rounded-xl text-[13.5px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10"><X size={16} /></button>
         <button type="submit" className="h-9 px-4 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-black text-[13.5px] font-semibold">Create</button>
       </div>
     </form>
@@ -357,11 +359,11 @@ function AddItemBar({ project, branches, today, lifeContext, onAdded }: {
       onAdded(branches.find(b => b.id === branchId)?.name || 'Main');
     }}>
       <input value={title} onChange={e => setTitle(e.target.value)} placeholder={`Add a step to ${project.name}...`} className={`${field} flex-1 min-w-[12rem]`} />
-      <select value={branchId} onChange={e => setBranchId(e.target.value)} aria-label="Branch" className={field}>
+      <Select value={branchId} onChange={v => setBranchId(v)} aria-label="Branch" className={field}>
         <option value="">Main</option>
         {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-      </select>
-      <input type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Date" className={field} />
+      </Select>
+      <DatePicker value={date} onChange={v => setDate(v)} aria-label="Date" className={field} />
       <button type="submit" className="h-9 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13.5px] font-semibold flex items-center gap-1"><Plus size={15} /> Add</button>
     </form>
   );

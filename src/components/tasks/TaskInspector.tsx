@@ -10,6 +10,9 @@ import { downloadTaskImage } from '../../utils/imageExport';
 
 import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
 import { RepeatSelect } from '../common/RepeatSelect';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
+import { TimePicker, DateTimePicker } from '../common/TimePicker';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -116,8 +119,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
     }
   };
 
-  const handleStatusChange = async (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const newStatus = e.target.value;
+  const handleStatusChange = async (newStatus: string) => {
     try {
       await onTransition(task, newStatus);
       loadData();
@@ -230,37 +232,37 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                   {task.entityType === 'task' && (
                     <>
                       <PropertyRow icon={Circle} label="Status">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
+                        <Select align="end" className="prop-control" 
                           value={task.status} onChange={handleStatusChange}>
-                          {Object.values(STATUSES).filter(s => allowedStatuses.includes(s.id)).map(s => <option key={s.id} value={s.id} className="text-gray-900">{s.label}</option>)}
-                        </select>
+                          {Object.values(STATUSES).filter(s => allowedStatuses.includes(s.id)).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                        </Select>
                       </PropertyRow>
 
                       {task.status === 'blocked' && (
                         <PropertyRow icon={ShieldAlert} label="Blocked Reason">
-                          <input type="text" className="bg-transparent font-semibold text-red-600 dark:text-red-400 outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
+                          <input type="text" className="prop-input w-full !text-red-600 dark:!text-red-400"
                             value={task.blockedReason || ''} onChange={async (e) => { await onUpdateDetails(task, { blockedReason: e.target.value }); loadData(); }} placeholder="Reason for block..." />
                         </PropertyRow>
                       )}
 
                       <PropertyRow icon={Flag} label="Priority">
-                        <select className={`bg-transparent font-semibold outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 ${(PRIORITIES as any)[task.priority]?.color}`} 
-                          value={task.priority} onChange={async (e) => { await onUpdateDetails(task, {priority: e.target.value}); loadData(); }}>
-                          {Object.keys(PRIORITIES).map(p => <option key={p} value={p} className="text-gray-900">{(PRIORITIES as any)[p].label}</option>)}
-                        </select>
+                        <Select align="end" aria-label="Priority" className={`prop-control ${(PRIORITIES as any)[task.priority]?.color}`} 
+                          value={task.priority} onChange={async v => { await onUpdateDetails(task, {priority: v}); loadData(); }}>
+                          {Object.keys(PRIORITIES).map(p => <option key={p} value={p}>{(PRIORITIES as any)[p].label}</option>)}
+                        </Select>
                       </PropertyRow>
 
                       <PropertyRow icon={Folder} label="Space / Project">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
-                          value={task.projectId || task.areaId || ''} onChange={async (e) => {
-                            const val = e.target.value;
+                        <Select align="end" className="prop-control" 
+                          value={task.projectId || task.areaId || ''} onChange={async v => {
+                            const val = v;
                             const isP = projects.some(p => p.id === val);
                             await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null, branchId: null });
                             loadData();
                           }}>
-                          {projects.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.name}</option>)}
-                          {areas.map(a => <option key={a.id} value={a.id} className="text-gray-900">{a.name} (Area)</option>)}
-                        </select>
+                          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          {areas.map(a => <option key={a.id} value={a.id}>{a.name} (Area)</option>)}
+                        </Select>
                       </PropertyRow>
 
                       {(() => {
@@ -268,53 +270,53 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                         if (!branches.length) return null;
                         return (
                           <PropertyRow icon={GitBranch} label="Branch">
-                            <select aria-label="Branch" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                            <Select align="end" aria-label="Branch" className="prop-control"
                               value={task.branchId && branches.some(b => b.id === task.branchId) ? task.branchId : ''}
-                              onChange={async (e) => { await onUpdateDetails(task, { branchId: e.target.value || null }); loadData(); }}>
-                              <option value="" className="text-gray-900">Main</option>
-                              {branches.map(b => <option key={b.id} value={b.id} className="text-gray-900">{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
-                            </select>
+                              onChange={async v => { await onUpdateDetails(task, { branchId: v || null }); loadData(); }}>
+                              <option value="">Main</option>
+                              {branches.map(b => <option key={b.id} value={b.id}>{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
+                            </Select>
                           </PropertyRow>
                         );
                       })()}
 
                       <PropertyRow icon={CalendarIcon} label="Dates">
                         <div className="flex flex-wrap items-center gap-x-2 gap-y-1 justify-end">
-                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
-                            value={toInputDateValue(task.startDate)} onChange={async (e) => { await onUpdateDetails(task, { startDate: e.target.value || null }); loadData(); }} />
-                          <span className="text-gray-400 font-bold">→</span>
-                          <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[138px]"
-                            value={toInputDateValue(task.dueDate)} onChange={async (e) => { await onUpdateDetails(task, { dueDate: e.target.value || null }); loadData(); }} />
-                          <input type="time" aria-label="Time" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-1 py-1 rounded-md focus:ring-2 focus:ring-blue-500 text-[14px] tabular-nums w-[104px]"
-                            value={task.dueTime || ''} onChange={async (e) => { await onUpdateDetails(task, { dueTime: e.target.value || null }); loadData(); }} />
+                          <DatePicker align="end" aria-label="Start date" placeholder="Start" icon={false} className="prop-control"
+                            value={toInputDateValue(task.startDate)} onChange={async v => { await onUpdateDetails(task, { startDate: v || null }); loadData(); }} />
+                          <span className="text-gray-300 dark:text-gray-600" aria-hidden>→</span>
+                          <DatePicker align="end" aria-label="Due date" placeholder="Due" icon={false} className="prop-control"
+                            value={toInputDateValue(task.dueDate)} onChange={async v => { await onUpdateDetails(task, { dueDate: v || null }); loadData(); }} />
+                          <TimePicker align="end" aria-label="Time" placeholder="Time" icon={false} className="prop-control"
+                            value={task.dueTime || ''} onChange={async v => { await onUpdateDetails(task, { dueTime: v || null }); loadData(); }} />
                         </div>
                       </PropertyRow>
 
                       <PropertyRow icon={FileText} label="Estimate">
-                        <input type="text" className="w-20 bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                        <input type="text" className="prop-input w-24"
                           value={task.estimated || ''} onChange={async (e) => { await onUpdateDetails(task, { estimated: e.target.value }); loadData(); }} placeholder="e.g. 2h" />
                       </PropertyRow>
 
                       <PropertyRow icon={FileText} label="Location">
-                        <input type="text" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
+                        <input type="text" className="prop-input w-full"
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Optional" />
                       </PropertyRow>
 
                       <PropertyRow icon={Activity} label="Recurrence">
-                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                        <RepeatSelect align="end" className="prop-control"
                           value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
-                          value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
+                        <Select align="end" className="prop-control"
+                          value={task.reminderLeadMinutes ?? ''} onChange={async v => {
                             // The reminder time follows from the date, time and this lead.
-                            const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                            const val = v === '' ? null : parseInt(v, 10);
                             await onUpdateDetails(task, { reminderLeadMinutes: val, ...(val === null ? { remindAt: null } : {}) });
                             loadData();
                           }}>
-                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
-                        </select>
+                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value}>{opt.label}</option>)}
+                        </Select>
                       </PropertyRow>
                     </>
                   )}
@@ -322,48 +324,48 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                   {task.entityType === 'event' && (
                     <>
                       <PropertyRow icon={Circle} label="Status">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
+                        <Select align="end" className="prop-control" 
                           value={task.status} onChange={handleStatusChange}>
-                          <option value="todo" className="text-gray-900">Scheduled</option>
-                          <option value="done" className="text-gray-900">Attended ✓</option>
-                          <option value="blocked" className="text-gray-900">Cancelled</option>
-                        </select>
+                          <option value="todo">Scheduled</option>
+                          <option value="done">Attended ✓</option>
+                          <option value="blocked">Cancelled</option>
+                        </Select>
                       </PropertyRow>
                       <PropertyRow icon={CalendarIcon} label="Start Time">
-                        <input type="datetime-local" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark"
-                          value={toInputDateTimeValue(task.startAt)} onChange={async (e) => { 
-                            const val = e.target.value;
+                        <DateTimePicker align="end" aria-label="Starts" wrapperClassName="justify-end gap-1" className="prop-control !w-auto !flex-none"
+                          value={toInputDateTimeValue(task.startAt)} onChange={async v => { 
+                            const val = v;
                             await onUpdateDetails(task, { startAt: val || null, startDate: val ? val.slice(0, 10) : null }); 
                             loadData(); 
                           }} />
                       </PropertyRow>
                       <PropertyRow icon={CalendarIcon} label="End Time">
-                        <input type="datetime-local" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark"
-                          value={toInputDateTimeValue(task.endAt)} onChange={async (e) => { 
-                            const val = e.target.value;
+                        <DateTimePicker align="end" aria-label="Ends" wrapperClassName="justify-end gap-1" className="prop-control !w-auto !flex-none"
+                          value={toInputDateTimeValue(task.endAt)} onChange={async v => { 
+                            const val = v;
                             await onUpdateDetails(task, { endAt: val || null, dueDate: val ? val.slice(0, 10) : null }); 
                             loadData(); 
                           }} />
                       </PropertyRow>
                       <PropertyRow icon={FileText} label="Location / Link">
-                        <input type="text" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 w-full"
+                        <input type="text" className="prop-input w-full"
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Zoom link or room..." />
                       </PropertyRow>
 
                       <PropertyRow icon={Activity} label="Recurrence">
-                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                        <RepeatSelect align="end" className="prop-control"
                           value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
-                          value={task.reminderLeadMinutes ?? ''} onChange={async (e) => {
-                            const val = e.target.value === '' ? null : parseInt(e.target.value, 10);
+                        <Select align="end" className="prop-control"
+                          value={task.reminderLeadMinutes ?? ''} onChange={async v => {
+                            const val = v === '' ? null : parseInt(v, 10);
                             await onUpdateDetails(task, { reminderLeadMinutes: val, ...(val === null ? { remindAt: null } : {}) });
                             loadData();
                           }}>
-                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value} className="text-gray-900">{opt.label}</option>)}
-                        </select>
+                          {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value}>{opt.label}</option>)}
+                        </Select>
                       </PropertyRow>
                     </>
                   )}
@@ -371,22 +373,22 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                   {task.entityType === 'reminder' && (
                     <>
                       <PropertyRow icon={Circle} label="Status">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
+                        <Select align="end" className="prop-control" 
                           value={task.status} onChange={handleStatusChange}>
-                          <option value="todo" className="text-gray-900">Active</option>
-                          <option value="done" className="text-gray-900">Completed ✓</option>
-                        </select>
+                          <option value="todo">Active</option>
+                          <option value="done">Completed ✓</option>
+                        </Select>
                       </PropertyRow>
                       <PropertyRow icon={Bell} label="Remind At">
-                        <input type="datetime-local" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark"
-                          value={toInputDateTimeValue(task.remindAt)} onChange={async (e) => { 
-                            const val = e.target.value;
+                        <DateTimePicker align="end" aria-label="Remind at" wrapperClassName="justify-end gap-1" className="prop-control !w-auto !flex-none"
+                          value={toInputDateTimeValue(task.remindAt)} onChange={async v => { 
+                            const val = v;
                             await onUpdateDetails(task, { remindAt: val || null, dueDate: val ? val.slice(0, 10) : null, startDate: val ? val.slice(0, 10) : null }); 
                             loadData(); 
                           }} />
                       </PropertyRow>
                       <PropertyRow icon={Activity} label="Repeat Rule" isLast>
-                        <RepeatSelect className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" optionClassName="text-gray-900"
+                        <RepeatSelect align="end" className="prop-control"
                           value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
                     </>
@@ -395,16 +397,16 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                   {task.entityType === 'milestone' && (
                     <>
                       <PropertyRow icon={Circle} label="Milestone State">
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
+                        <Select align="end" className="prop-control" 
                           value={task.status} onChange={handleStatusChange}>
-                          <option value="todo" className="text-gray-900">Upcoming (In Flight)</option>
-                          <option value="done" className="text-gray-900">Achieved ✓</option>
-                        </select>
+                          <option value="todo">Upcoming (In Flight)</option>
+                          <option value="done">Achieved ✓</option>
+                        </Select>
                       </PropertyRow>
                       <PropertyRow icon={CalendarIcon} label="Target Checkpoint">
-                        <input type="date" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500 color-scheme-light dark:color-scheme-dark"
-                          value={toInputDateValue(task.dueDate || task.startDate)} onChange={async (e) => { 
-                            const val = e.target.value || null;
+                        <DatePicker align="end" icon={false} className="prop-control"
+                          value={toInputDateValue(task.dueDate || task.startDate)} onChange={async v => { 
+                            const val = v || null;
                             await onUpdateDetails(task, { dueDate: val, startDate: val }); 
                             loadData(); 
                           }} />
@@ -414,26 +416,26 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                         if (!branches.length) return null;
                         return (
                           <PropertyRow icon={GitBranch} label="Branch">
-                            <select aria-label="Branch" className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500"
+                            <Select align="end" aria-label="Branch" className="prop-control"
                               value={task.branchId && branches.some(b => b.id === task.branchId) ? task.branchId : ''}
-                              onChange={async (e) => { await onUpdateDetails(task, { branchId: e.target.value || null }); loadData(); }}>
-                              <option value="" className="text-gray-900">Main</option>
-                              {branches.map(b => <option key={b.id} value={b.id} className="text-gray-900">{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
-                            </select>
+                              onChange={async v => { await onUpdateDetails(task, { branchId: v || null }); loadData(); }}>
+                              <option value="">Main</option>
+                              {branches.map(b => <option key={b.id} value={b.id}>{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
+                            </Select>
                           </PropertyRow>
                         );
                       })()}
                       <PropertyRow icon={Folder} label="Space / Project" isLast>
-                        <select className="bg-transparent font-semibold text-gray-900 dark:text-white outline-none cursor-pointer text-right appearance-none hover:bg-gray-200 dark:hover:bg-white/10 px-2 py-1 rounded-md focus:ring-2 focus:ring-blue-500" 
-                          value={task.projectId || task.areaId || ''} onChange={async (e) => {
-                            const val = e.target.value;
+                        <Select align="end" className="prop-control" 
+                          value={task.projectId || task.areaId || ''} onChange={async v => {
+                            const val = v;
                             const isP = projects.some(p => p.id === val);
                             await onUpdateDetails(task, { projectId: isP ? val : null, areaId: !isP ? val : null, branchId: null });
                             loadData();
                           }}>
-                          {projects.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.name}</option>)}
-                          {areas.map(a => <option key={a.id} value={a.id} className="text-gray-900">{a.name} (Area)</option>)}
-                        </select>
+                          {projects.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                          {areas.map(a => <option key={a.id} value={a.id}>{a.name} (Area)</option>)}
+                        </Select>
                       </PropertyRow>
                     </>
                   )}
@@ -447,7 +449,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                         {onFilterTag
                           ? <button type="button" onClick={() => onFilterTag(t)} title={`Show everything tagged #${t}`} className="hover:underline">#{t}</button>
                           : <>#{t}</>}
-                        <button onClick={async () => { await onUpdateDetails(task, { labels: (task.labels || []).filter((x: string) => x !== t) }); loadData(); }}><X size={11} /></button>
+                        <button onClick={async () => { await onUpdateDetails(task, { labels: (task.labels || []).filter((x: string) => x !== t) }); loadData(); }} aria-label={`Remove tag ${t}`} className="rounded-full p-0.5 -mr-1 hover:bg-black/10 dark:hover:bg-white/10"><X size={11} /></button>
                       </span>
                     ))}
                     <TagAdder

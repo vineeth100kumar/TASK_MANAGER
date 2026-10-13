@@ -8,6 +8,16 @@ import { BluetoothSettings } from './BluetoothSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
 import { downloadICSFile } from '../../utils/calendarExport';
+
+const SETTINGS_TABS = [
+  { id: 'attention', label: 'Notifications' },
+  { id: 'capture', label: 'Shortcuts' },
+  { id: 'bluetooth', label: 'Bluetooth' },
+  { id: 'clock', label: 'Desk Clock' },
+  { id: 'radar', label: 'Radar' },
+  { id: 'data', label: 'Data & Migration' },
+  { id: 'system', label: 'Server & Reset' },
+] as const;
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
@@ -158,74 +168,29 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         initial={{ opacity: 0, scale: 0.95, y: 15 }} 
         animate={{ opacity: 1, scale: 1, y: 0 }} 
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-[46rem] rounded-3xl shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-            <Settings size={16} />
-            <span>Sage System Settings</span>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+          <h2 className="flex items-center gap-2.5 text-[18px] font-semibold tracking-tight text-gray-900 dark:text-white">
+            <span className="w-8 h-8 rounded-xl bg-gray-100 dark:bg-white/10 grid place-items-center text-gray-500 dark:text-gray-300"><Settings size={16} /></span>
+            Settings
+          </h2>
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex overflow-x-auto bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
-          <button
-            onClick={() => setActiveTab('attention')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Notifications
-          </button>
-          <button
-            onClick={() => setActiveTab('capture')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'capture' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Shortcuts
-          </button>
-          <button
-            onClick={() => setActiveTab('bluetooth')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'bluetooth' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Bluetooth
-          </button>
-          <button
-            onClick={() => setActiveTab('clock')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'clock' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Desk Clock
-          </button>
-          <button
-            onClick={() => setActiveTab('radar')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'radar' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Radar
-          </button>
-          <button
-            onClick={() => setActiveTab('data')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Data & Migration
-          </button>
-          <button
-            onClick={() => setActiveTab('system')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Server & Reset
-          </button>
+        {/* Tab Navigation: scrolls sideways on narrow screens, fading at the edges. */}
+        <div role="tablist" aria-label="Settings sections"
+          className="flex gap-0.5 overflow-x-auto no-scrollbar bg-gray-100 dark:bg-white/5 p-1 rounded-2xl [mask-image:linear-gradient(to_right,#000_calc(100%-24px),transparent)] sm:[mask-image:none]">
+          {SETTINGS_TABS.map(t => (
+            <button key={t.id} role="tab" aria-selected={activeTab === t.id}
+              ref={el => { if (el && activeTab === t.id) el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
+              onClick={() => setActiveTab(t.id)}
+              className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
+                activeTab === t.id ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
+              }`}>
+              {t.label}
+            </button>
+          ))}
         </div>
 
         {/* Tab 1: Attention & Notifications */}

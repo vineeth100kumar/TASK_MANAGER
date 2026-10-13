@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { withTime } from '../../utils/reminders';
+import { withTime, formatClock } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { STATUSES, PRIORITIES } from '../../services/constants';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
@@ -13,7 +13,7 @@ import { CompleteButton } from '../common/CompleteButton';
 function formatWhen(iso: string) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${formatClock(d)}`;
 }
 
 interface ListViewProps {

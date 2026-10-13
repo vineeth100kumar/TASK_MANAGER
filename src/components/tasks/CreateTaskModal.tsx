@@ -8,6 +8,9 @@ import { Project, Area, LifeContext } from '../../services/types';
 import { parseQuickAdd, QuickAddResult, flipGuessedTime, formatShortDate } from '../../utils/quickAddParser';
 import { formatTime } from '../../utils/reminders';
 import { RepeatSelect } from '../common/RepeatSelect';
+import { Select } from '../common/Select';
+import { DatePicker, formatPickedDate } from '../common/DatePicker';
+import { TimePicker, DateTimePicker } from '../common/TimePicker';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -319,7 +322,7 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
         {tags.map(t => (
           <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
             #{t}
-            <button type="button" onClick={() => setTags(tags.filter(x => x !== t))}><X size={10} /></button>
+            <button type="button" onClick={() => setTags(tags.filter(x => x !== t))} aria-label={`Remove tag ${t}`} className="rounded-full p-0.5 -mr-1 hover:bg-black/10 dark:hover:bg-white/10"><X size={10} /></button>
           </span>
         ))}
         <input
@@ -353,10 +356,10 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
 const SharedReminderLead = ({ value, setValue }: { value: number | ''; setValue: (v: number | '') => void }) => (
   <div className="space-y-1">
     <label className="field-label">Remind Me</label>
-    <select className="field"
-      value={value} onChange={e => setValue(e.target.value === '' ? '' : parseInt(e.target.value, 10))}>
+    <Select className="field"
+      value={value} onChange={v => setValue(v === '' ? '' : parseInt(v, 10))}>
       {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value}>{opt.label}</option>)}
-    </select>
+    </Select>
   </div>
 );
 
@@ -480,20 +483,16 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
             </button>
           );
         })}
-        <label className={`${chipBase} ${customDate ? chipOn : chipOff} relative cursor-pointer`}>
+        <DatePicker aria-label="Due date" value={payload.dueDate} onChange={v => set('dueDate', v)} className={`${chipBase} ${customDate ? chipOn : chipOff}`}>
           <Calendar size={13} />
-          {customDate ? new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Pick date'}
-          <input type="date" aria-label="Due date" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)}
-            className="absolute inset-0 opacity-0 cursor-pointer" />
-        </label>
-        <label className={`${chipBase} ${payload.dueTime ? chipOn : chipOff} relative cursor-pointer`}>
+          {customDate ? formatPickedDate(payload.dueDate) : 'Pick date'}
+        </DatePicker>
+        <TimePicker aria-label="Time" value={payload.dueTime} className={`${chipBase} ${payload.dueTime ? chipOn : chipOff}`}
+          onChange={v => { set('dueTime', v); if (v && !payload.dueDate) set('dueDate', options[0].value); }}>
           <Clock size={13} />
           {payload.dueTime ? formatTime(payload.dueTime) : 'Time'}
-          <input type="time" aria-label="Time" value={payload.dueTime}
-            onChange={e => { set('dueTime', e.target.value); if (e.target.value && !payload.dueDate) set('dueDate', options[0].value); }}
-            className="absolute inset-0 opacity-0 cursor-pointer" />
-        </label>
-        <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5" aria-hidden />
+        </TimePicker>
+        <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5 sm:hidden" aria-hidden />
         <button type="button" onClick={() => set('priority', PRIORITY_CYCLE[(PRIORITY_CYCLE.indexOf(payload.priority as any) + 1) % PRIORITY_CYCLE.length])}
           className={`${chipBase} ${payload.priority === 'high' || payload.priority === 'urgent' ? PRIORITY_STYLE[payload.priority] : chipOff}`}
           title="Tap to change priority" aria-label={`Priority: ${payload.priority}`}>
@@ -520,18 +519,18 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         {!personal ? (
           <div className="space-y-1">
             <label className="field-label">Project</label>
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No projects</option>}
-            </select>
+            </Select>
           </div>
         ) : (
           <div className="space-y-1">
             <label className="field-label">Life Area</label>
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas Yet</option>}
-            </select>
+            </Select>
           </div>
         )}
         <div className="space-y-1">
@@ -540,11 +539,11 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         </div>
         <div className="space-y-1">
           <label className="field-label">Start Date</label>
-          <input type="date" className="field" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
+          <DatePicker className="field" value={payload.startDate} onChange={v => set('startDate', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Due Date</label>
-          <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
+          <DatePicker className="field" value={payload.dueDate} onChange={v => set('dueDate', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1">
@@ -619,24 +618,28 @@ function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeC
         <div className="space-y-1">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            </Select>
           )}
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Starts</label>
-          <input type="datetime-local" className="field" value={payload.startAt} onChange={e => set('startAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Starts" className="field" value={payload.startAt} onChange={v => {
+            set('startAt', v);
+            // An event runs an hour unless you say otherwise.
+            if (v && (!payload.endAt || payload.endAt <= v)) set('endAt', minutesBefore(v, -60));
+          }} disabled={isSubmitting} />
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Ends</label>
-          <input type="datetime-local" className="field" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Ends" className="field" value={payload.endAt} onChange={v => set('endAt', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
@@ -690,9 +693,9 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
       <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Remind At</label>
-          <input type="datetime-local" className="field" value={payload.remindAt} onChange={e => set('remindAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Remind at" className="field" value={payload.remindAt} onChange={v => set('remindAt', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
@@ -702,15 +705,15 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
         <div className="space-y-1 col-span-2">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            </Select>
           )}
         </div>
 
@@ -753,21 +756,21 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
           <label className="field-label">Target Checkpoint Date</label>
-          <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} required />
+          <DatePicker className="field" value={payload.dueDate} onChange={v => set('dueDate', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas</option>}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No Projects</option>}
-            </select>
+            </Select>
           )}
         </div>
 

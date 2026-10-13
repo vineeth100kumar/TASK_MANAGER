@@ -3,6 +3,8 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Clock, Sun, Moon, Calendar, ArrowRight, X } from 'lucide-react';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
+import { DateTimePicker } from './TimePicker';
+import { formatClock } from '../../utils/reminders';
 
 interface SnoozeMenuProps {
   itemId: string;
@@ -63,7 +65,7 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
     e.preventDefault();
     if (!customDate) return;
     const d = new Date(customDate);
-    applySnooze(d, d.toLocaleDateString() + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }));
+    applySnooze(d, d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) + ', ' + formatClock(d));
   };
 
   return (
@@ -72,6 +74,7 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
         onClick={() => setIsOpen(!isOpen)}
         className="p-1.5 rounded-lg text-gray-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
         title="Snooze item"
+        aria-label="Snooze item"
       >
         <Clock size={15} />
       </button>
@@ -97,11 +100,11 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
                   </button>
                   <button onClick={() => handlePreset('tonight')} className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-200">
                     <span className="flex items-center gap-2"><Moon size={14} className="text-indigo-500"/> Tonight</span>
-                    <span className="text-[10px] text-gray-400 font-semibold">8 PM</span>
+                    <span className="text-[10px] text-gray-400 font-semibold">8 pm</span>
                   </button>
                   <button onClick={() => handlePreset('tomorrow')} className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-200">
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-blue-500"/> Tomorrow</span>
-                    <span className="text-[10px] text-gray-400 font-semibold">9 AM</span>
+                    <span className="text-[10px] text-gray-400 font-semibold">9 am</span>
                   </button>
                   <button onClick={() => handlePreset('weekend')} className="w-full flex items-center justify-between px-3 py-2 rounded-xl text-left hover:bg-gray-50 dark:hover:bg-white/5 text-gray-700 dark:text-gray-200">
                     <span className="flex items-center gap-2"><Calendar size={14} className="text-purple-500"/> This Weekend</span>
@@ -122,14 +125,13 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
                 <form onSubmit={handleCustomSubmit} className="p-2 space-y-2">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-semibold uppercase text-gray-400">Custom Snooze</span>
-                    <button type="button" onClick={() => setIsCustomOpen(false)}><X size={13} className="text-gray-400"/></button>
+                    <button type="button" onClick={() => setIsCustomOpen(false)} aria-label="Back" className="p-1 -m-1 rounded-md text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10"><X size={13} /></button>
                   </div>
-                  <input 
-                    type="datetime-local" 
+                  <DateTimePicker 
                     value={customDate} 
-                    onChange={e => setCustomDate(e.target.value)}
-                    className="w-full px-2 py-1.5 text-xs bg-gray-50 dark:bg-white/5 rounded-lg border border-black/10 dark:border-white/10 outline-none"
-                    autoFocus
+                    onChange={v => setCustomDate(v)}
+                    wrapperClassName="flex-col !items-stretch !gap-1.5"
+                    className="field !min-h-9 !py-1.5 !text-[13px] !w-full"
                   />
                   <button 
                     type="submit" 
