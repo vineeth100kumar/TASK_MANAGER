@@ -102,6 +102,23 @@ def _twelve() -> Optional[dict]:
         return None
 
 
+def phone_part(state: dict) -> dict:
+    """The phone link without notification text: is the BLE link up, what it
+    subscribed to, the last error, and the song with when it last changed."""
+    out = {k: state.get(k) for k in ("available", "connected", "deviceName", "lastSeen", "error") if k in state}
+    link = state.get("link") or {}
+    if link:
+        out["ble"] = link.get("ble")
+        out["nowPlaying"] = link.get("nowPlaying")
+        out["subscribed"] = link.get("subscribed")
+        out["lastError"] = link.get("lastError")
+    media = state.get("media") or {}
+    if media:
+        out["song"] = {k: media.get(k) for k in ("title", "artist", "app", "playing")}
+        out["songUpdatedAt"] = state.get("mediaAt")
+    return out
+
+
 def report(
     db_path: str,
     *,
@@ -141,7 +158,7 @@ def report(
         "radar": safe(lambda: radar_part(db_path, radar_enabled)),
         "markets": safe(lambda: markets_part(db_path)) if radar_enabled else {"enabled": False},
         "backups": safe(backups),
-        "phone": {k: phone_state.get(k) for k in ("available", "connected", "deviceName", "lastSeen", "error") if k in phone_state},
+        "phone": phone_part(phone_state),
         "clock": {k: clock_state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in clock_state},
     }
     data["problems"] = problems(data)
@@ -170,6 +187,12 @@ def problems(data: dict) -> List[str]:
         when = datetime.datetime.fromisoformat(last_backup) if last_backup else None
         if not when or time.time() - when.timestamp() > 48 * 3600:
             out.append(f"No nightly backup in the last 2 days (last: {last_backup or 'never'}).")
+    phone = data["phone"]
+    if phone.get("connected") and phone.get("ble") is False:
+        out.append(f"The phone ({phone.get('deviceName') or 'unnamed'}) is connected but its BLE link to the Pi is not, "
+                   "so now playing and notifications can't be read.")
+    elif phone.get("connected") and phone.get("ble") and phone.get("nowPlaying") not in (None, "asked"):
+        out.append(f"Now playing from the phone isn't subscribed ({phone.get('nowPlaying')}).")
     if data["clock"].get("enabled") and not data["clock"].get("connected"):
         out.append("The desk clock is on in settings but not connected.")
     return out

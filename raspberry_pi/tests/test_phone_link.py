@@ -193,6 +193,30 @@ class Subscribing(unittest.TestCase):
         self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
 
 
+class Resubscribing(unittest.TestCase):
+    """The phone's BLE link can drop and come back between two ticks. BlueZ
+    then stops notifying and the phone forgets the song request, so the Pi
+    has to subscribe again or now playing freezes while the phone looks
+    connected."""
+
+    def test_quiet_entity_update_means_subscribe_again(self):
+        dev = "/org/bluez/hci0/dev_X"
+        path = f"{dev}/service1/char0"
+        link = phone_link.PhoneLink()
+        link._chars = {phone_link.AMS_ENTITY_UPDATE: FakeChar()}
+
+        def objects(notifying):
+            return {path: {"org.bluez.GattCharacteristic1": {"UUID": V(phone_link.AMS_ENTITY_UPDATE), "Notifying": V(notifying)}}}
+
+        with mock.patch.object(phone_link.time, "time", return_value=1000):
+            link._subscribed_at = 990  # just subscribed: BlueZ may not have set the flag yet
+            self.assertEqual(link._stale_reason(objects(False), dev), "")
+            link._subscribed_at = 900
+            self.assertEqual(link._stale_reason(objects(True), dev), "")
+            self.assertIn("no longer notifying", link._stale_reason(objects(False), dev))
+            self.assertIn("gone", link._stale_reason({}, dev))
+
+
 class Logging(unittest.TestCase):
     def test_lines_say_what_failed_and_repeat_once_a_minute(self):
         link = phone_link.PhoneLink()
