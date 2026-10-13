@@ -54,8 +54,8 @@ deploy_changes() {
     as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt" || { log "pip failed for sage"; return 1; }
   fi
   # Optional extras (the depth face's cutout): best effort, never blocks a deploy.
-  if grep -q '^raspberry_pi/requirements-depth.txt$' <<<"$changed"; then
-    as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements-depth.txt" || log "optional depth-face packages failed to install"
+  if grep -qE '^(raspberry_pi/requirements-depth\.txt|deploy/install_depth\.sh)$' <<<"$changed"; then
+    as_user "$REPO/deploy/install_depth.sh" "$REPO" || log "optional depth-face packages failed to install"
   fi
 
   if grep -qE '^(src/|public/|index\.html$|package(-lock)?\.json$|vite\.config\.|tailwind\.config\.|postcss\.config\.|\.env\.production$)' <<<"$changed"; then
