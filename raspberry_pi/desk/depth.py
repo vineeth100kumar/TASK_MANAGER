@@ -30,6 +30,7 @@ import datetime
 import io
 import json
 import logging
+import math
 import os
 import signal
 import subprocess
@@ -463,14 +464,82 @@ def _data_url(image) -> str:
     return "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
 
 
+# --- the ring light's colour ---------------------------------------------
+# With the ring on "Photo" (lights mode PHOTO), LUMO's ring takes the main
+# colour of what the face shows. The ring only does full-strength colours
+# (firmware COLOR mode takes a hue), so this finds the strongest hue, not an
+# average: a grey or skin-toned frame has none, and the ring stays warm white.
+HUE_BINS = 24
+_ring: dict = {}
+
+
+def dominant_hue(image) -> Optional[int]:
+    """The hue (0-359 degrees) that most of the colourful pixels share, or
+    None when the picture is mostly grey, black or white."""
+    hsv = image.convert("RGB").resize((80, 54)).convert("HSV")
+    bins = [0.0] * HUE_BINS
+    sums = [[0.0, 0.0] for _ in range(HUE_BINS)]  # x, y of each bin's hues, for an exact mean
+    total = 0.0
+    for h, sat, val in hsv.getdata():
+        total += 1
+        w = (sat / 255) * (val / 255)
+        if sat < 60 or val < 50:
+            continue
+        angle = h / 255 * 2 * math.pi
+        i = h * HUE_BINS // 256
+        bins[i] += w
+        sums[i][0] += w * math.cos(angle)
+        sums[i][1] += w * math.sin(angle)
+    # Neighbouring bins count too, so a colour split across a boundary still wins.
+    best = max(range(HUE_BINS), key=lambda i: bins[i - 1] + 2 * bins[i] + bins[(i + 1) % HUE_BINS])
+    if bins[best] / max(total, 1) < 0.03:  # under ~3% strongly coloured: no real colour
+        return None
+    x = sum(sums[j % HUE_BINS][0] for j in (best - 1, best, best + 1))
+    y = sum(sums[j % HUE_BINS][1] for j in (best - 1, best, best + 1))
+    return round(math.degrees(math.atan2(y, x))) % 360
+
+
+def ring_hue(meta: Optional[dict] = None) -> Optional[int]:
+    """dominant_hue of the face as LUMO shows it (the cropped photo),
+    remembered until the photo or its crop changes."""
+    if Image is None:
+        return None
+    meta = meta or load()
+    if not meta["hasPhoto"]:
+        return None
+    key = (meta.get("updatedAt"), meta.get("photoPosition"))
+    if _ring.get("key") != key:
+        try:
+            photo = Image.open(DEPTH_DIR / "photo.png").convert("RGB")
+            try:
+                mask = Image.open(DEPTH_DIR / "mask.png").convert("L")
+            except OSError:
+                mask = None
+        except OSError:
+            return None
+        pic, _ = _fit(photo, mask, meta.get("photoPosition", "auto"))
+        _ring.update(key=key, hue=dominant_hue(pic))
+    return _ring["hue"]
+
+
+def hue_rgb(hue: int) -> str:
+    """The ring's colour for `hue` (full colour, as the firmware draws it), as #rrggbb."""
+    import colorsys
+    r, g, b = colorsys.hsv_to_rgb(hue / 360, 1.0, 1.0)
+    return "#%02x%02x%02x" % (round(r * 255), round(g * 255), round(b * 255))
+
+
 def describe(now: datetime.datetime, hour24: bool) -> dict:
     """Everything the LUMO page shows about the depth face."""
     meta = load()
     problem = cutout_problem()
     out = {**meta, "cutoutAvailable": problem is None, "cutoutProblem": problem, "model": MODEL,
            "placements": list(PLACEMENTS), "photoPositions": list(PHOTO_POSITIONS),
-           "coverageWarn": COVERAGE_WARN, "preview": None}
+           "coverageWarn": COVERAGE_WARN, "preview": None, "ringHue": None, "ringColor": None}
     if meta["hasPhoto"]:
+        hue = ring_hue(meta)
+        if hue is not None:
+            out["ringHue"], out["ringColor"] = hue, hue_rgb(hue)
         frame = render(now, hour24, meta)
         if frame:
             out["preview"] = {

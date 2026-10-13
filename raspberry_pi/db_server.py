@@ -1584,6 +1584,7 @@ async def desk_depth_put(change: Dict[str, Any]):
 async def desk_depth_delete():
     from desk import depth
     await asyncio.to_thread(depth.clear)
+    await _depth_to_clock()  # the ring may have been following the photo
     return await asyncio.to_thread(_depth_describe)
 
 

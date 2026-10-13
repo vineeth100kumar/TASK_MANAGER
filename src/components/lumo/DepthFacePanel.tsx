@@ -137,6 +137,15 @@ export function DepthFacePanel({ settings, save, supported }: { settings: LumoSe
 
           {face.hasPhoto && (
             <>
+              <Row title="Ring light" hint={face.ringColor
+                ? 'Match the photo\'s main colour'
+                : 'This photo has no strong colour, so the ring stays warm white'}>
+                <div className="flex items-center gap-2">
+                  {face.ringColor && <span className="w-5 h-5 rounded-full ring-1 ring-black/10 dark:ring-white/20" style={{ background: face.ringColor }} />}
+                  <Toggle on={settings.lights.mode === 'PHOTO'} label="Ring light matches the photo"
+                    onChange={on => save({ lights: { mode: on ? 'PHOTO' : 'AUTO' } })} />
+                </div>
+              </Row>
               <Row title="Time" hint={face.placement === 'auto' && p ? `Auto put it at the ${p.placement}` : 'Where the time sits'}>
                 <Segmented<DepthPlacement> size="sm" value={face.placement}
                   onChange={v => run('change', () => depthApi.update({ placement: v }), "Couldn't move the time")}

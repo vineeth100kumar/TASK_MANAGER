@@ -40,7 +40,9 @@ ACTIONS = (
 # added in firmware 2.1, and the depth face (a photo, see depth.py) in 2.9.
 # An older clock keeps its style if sent one it doesn't know.
 CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial", "depth")
-LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
+# PHOTO: the main colour of the depth photo (see depth.ring_hue); LUMO gets it
+# as COLOR with a hue, so any firmware with COLOR mode shows it.
+LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "PHOTO", "OFF")
 # The buzzer's alarm patterns (firmware 2.8; older firmware always pulses).
 ALARM_TONES = ("pulse", "classic", "rising", "chirp")
 MAX_WORLD_CLOCKS = 3

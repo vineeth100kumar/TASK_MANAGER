@@ -412,8 +412,23 @@ class Desk:
             return {"mode": "OFF", "brightness": 0}
         if self.night:
             night = self.settings["night"]
-            return {"mode": night["lightsMode"], "brightness": night["brightness"]}
-        return dict(self.settings["lights"])
+            out = {"mode": night["lightsMode"], "brightness": night["brightness"]}
+        else:
+            out = dict(self.settings["lights"])
+        if out["mode"] == "PHOTO":  # the depth photo's main colour; warm white without one
+            hue = depth.ring_hue()
+            out = {"mode": "COLOR", "brightness": out["brightness"], "hue": hue} if hue is not None \
+                else {"mode": "WARM", "brightness": out["brightness"]}
+        return out
+
+    async def photo_changed(self) -> None:
+        """A new depth photo or crop: the face, and the ring if it follows the photo."""
+        await self.send_depth()
+        lights = self.lights()
+        if lights != self.controller.lights:
+            self.controller.lights = lights
+            if self.link.connected:
+                await self.controller.send_lights()
 
     async def send_haptics(self) -> None:
         """The haptics: strength (firmware 2.7+, kept in flash, one tick when

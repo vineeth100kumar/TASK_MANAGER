@@ -117,7 +117,7 @@ class DeskController:
             await self.after_redraw()
 
     async def send_lights(self) -> None:
-        await self.link.send({"cmd": "LIGHTS", "mode": self.lights["mode"], "brightness": self.lights["brightness"], "hue": 0})
+        await self.link.send({"cmd": "LIGHTS", "mode": self.lights["mode"], "brightness": self.lights["brightness"], "hue": self.lights.get("hue", 0)})
 
     async def show_screen(self, screen: str) -> None:
         if screen not in KNOWN_SCREENS:

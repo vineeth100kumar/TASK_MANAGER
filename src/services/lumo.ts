@@ -124,6 +124,8 @@ export interface DepthFace {
   cutoutAvailable: boolean;     // the Pi has the cutout tool installed
   cutoutProblem: string | null; // why the cutout tool won't load, if it won't
   cutoutError: string | null;   // why the last cutout failed, if it did
+  ringHue: number | null;       // the photo's main colour for the ring (lights mode PHOTO)
+  ringColor: string | null;     // that colour as #rrggbb; null when the photo has none
   placement: DepthPlacement;
   photoPosition: DepthPhotoPosition;
   updatedAt: string | null;

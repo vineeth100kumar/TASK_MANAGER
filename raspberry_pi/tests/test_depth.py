@@ -192,6 +192,21 @@ class DepthTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             depth.retry_cutout(NOW)
 
+    def test_the_ring_takes_the_photos_main_colour(self):
+        self.assertIsNone(depth.ring_hue())  # no photo yet
+        photo, mask = photo_and_mask()  # a blue sky with a red person
+        depth.set_photo(photo, mask, NOW)
+        hue = depth.ring_hue()
+        self.assertTrue(200 <= hue <= 230, hue)  # the sky is most of the frame
+        self.assertEqual(depth.describe(NOW, True)["ringColor"], depth.hue_rgb(hue))
+        red = Image.new("RGB", (640, 432), (230, 20, 20))
+        depth.set_photo(red, None, datetime.datetime(2026, 10, 13, 11, 0))
+        self.assertIn(depth.ring_hue(), (0, 1, 359))
+        grey = Image.new("RGB", (640, 432), (128, 128, 128))
+        depth.set_photo(grey, None, datetime.datetime(2026, 10, 13, 11, 1))
+        self.assertIsNone(depth.ring_hue())  # no colour to take
+        self.assertEqual(depth.hue_rgb(120), "#00ff00")
+
     def test_twelve_hour_time(self):
         self.assertEqual(depth.time_text(datetime.datetime(2026, 10, 13, 0, 5), False), "12:05")
         self.assertEqual(depth.time_text(datetime.datetime(2026, 10, 13, 18, 30), False), "6:30")
@@ -291,6 +306,19 @@ class DepthOnClockTest(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(self.desk.depth_sent)
         await self.desk.controller.show_screen("TASKS")
         self.assertIsNone(self.desk.depth_sent)
+
+    async def test_ring_follows_the_photo(self):
+        self.desk.settings = desk_settings.merge(self.desk.settings, {"lights": {"mode": "PHOTO", "brightness": 90}})
+        lights = self.desk.lights()
+        self.assertEqual(lights["mode"], "COLOR")
+        self.assertEqual(lights["brightness"], 90)
+        self.assertEqual(lights["hue"], depth.ring_hue())
+        # A new photo with no colour: the ring goes warm white straight away.
+        depth.set_photo(Image.new("RGB", (640, 432), (90, 90, 90)), None, at(10, 50, 0))
+        await self.desk.photo_changed()
+        self.assertEqual(self.link.last("LIGHTS"), {"cmd": "LIGHTS", "mode": "WARM", "brightness": 90, "hue": 0})
+        depth.clear()
+        self.assertEqual(self.desk.lights()["mode"], "WARM")
 
     def test_depth_is_a_clock_style(self):
         self.assertIn("depth", desk_settings.CLOCK_STYLES)
