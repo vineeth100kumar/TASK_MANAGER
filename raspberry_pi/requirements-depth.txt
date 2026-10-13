@@ -1,7 +1,8 @@
 # Optional: the depth clock face's cutout (desk/depth.py). Heavy (a neural
 # network runtime and its friends), so it lives apart from requirements.txt
 # and a failed install never blocks Sage. The first cutout also downloads the
-# model, about 170 MB.
+# model, about 170 MB. deploy/install_depth.sh installs these from PyPI only
+# (piwheels served a broken rembg).
 # onnxruntime is named on its own: some pip versions skip rembg's [cpu] extra
 # ("does not provide the extra 'cpu'"), and rembg then loads but can't cut out.
 rembg
