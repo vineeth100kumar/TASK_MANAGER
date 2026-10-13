@@ -47,12 +47,16 @@ static bool cardShowing() {
 // ---------------------------------------------------------------------
 //  Offline alarms. Sage rings alarms itself and sends the next day's to
 //  the clock (ALARMS); the clock rings them only while it can't reach Sage,
-//  stops on any button (RIGHT snoozes) and gives up after 10 minutes.
+//  each on its own weekday, stops on any button (RIGHT snoozes) and gives up
+//  after 10 minutes. An alarm Sage was ringing when the link went is taken
+//  over the same way, so it can always be stopped. What happened is told to
+//  Sage when it's back (wsReportOffline), so it isn't rung twice.
 // ---------------------------------------------------------------------
 static int lastAlarmMinute = -1;
 static unsigned long localRingStart = 0;
 static bool snoozeSet = false;
 static LocalAlarm snoozeAt;
+static int8_t ringH = -1, ringM = -1;   // the alarm ringing now, as set (a snooze keeps the first time)
 
 static void localAlarmTick() {
   LumoState& s = lumoState;
@@ -64,20 +68,43 @@ static void localAlarmTick() {
       Serial.println("[ALARM] Nobody answered; stopping");
       s.local_ringing = false;
       s.alarm_ringing = false;
+      wsReportOffline("timeout", ringH, ringM);
     }
     return;
   }
 
-  int minute = c.h * 60 + c.m;
-  if (minute == lastAlarmMinute || talkingToSage() || s.alarm_ringing) return;
-  bool due = snoozeSet && snoozeAt.h == c.h && snoozeAt.m == c.m;
-  for (uint8_t i = 0; i < s.local_alarm_count && !due; i++) {
-    due = s.local_alarms[i].h == c.h && s.local_alarms[i].m == c.m;
+  // Sage was ringing one when the link went: the clock carries on with it.
+  if (s.alarm_ringing && !talkingToSage()) {
+    Serial.println("[ALARM] Lost Sage while ringing; the clock has it now");
+    s.local_ringing = true;
+    localRingStart = millis();
+    return;
   }
-  if (!due) return;
-  lastAlarmMinute = minute;
+
+  // An alarm counts as due for a few minutes, so one that falls while the
+  // clock is still finding out that the link has gone rings late rather than
+  // never. lastAlarmMinute (also set when Sage rings one) stops a second ring.
+  if (talkingToSage() || s.alarm_ringing) return;
+  int minute = c.h * 60 + c.m;
+  auto dueNow = [&](int at) {
+    return at != lastAlarmMinute && (minute - at + 1440) % 1440 <= LOCAL_LATE_MINUTES;
+  };
+  int at = -1;
+  if (snoozeSet && dueNow(snoozeAt.h * 60 + snoozeAt.m)) {
+    at = snoozeAt.h * 60 + snoozeAt.m;   // ringH/ringM still name the alarm it snoozed
+  }
+  for (uint8_t i = 0; i < s.local_alarm_count && at < 0; i++) {
+    const LocalAlarm& a = s.local_alarms[i];
+    if (dueNow(a.h * 60 + a.m) && (a.w < 0 || c.wd < 0 || a.w == c.wd)) {
+      at = a.h * 60 + a.m;
+      ringH = a.h;
+      ringM = a.m;
+    }
+  }
+  if (at < 0) return;
+  lastAlarmMinute = at;
   snoozeSet = false;
-  Serial.printf("[ALARM] %02d:%02d, ringing without Sage\n", c.h, c.m);
+  Serial.printf("[ALARM] %02d:%02d, ringing without Sage\n", at / 60, at % 60);
   s.local_ringing = true;
   s.alarm_ringing = true;
   localRingStart = millis();
@@ -90,10 +117,25 @@ static void localAlarmButton(Button b) {
   if (b == BTN_RIGHT) {
     ClockNow c = clockNow();
     int at = (c.h * 60 + c.m + s.snooze_minutes) % 1440;
-    snoozeAt = { (uint8_t)(at / 60), (uint8_t)(at % 60) };
+    snoozeAt = { (uint8_t)(at / 60), (uint8_t)(at % 60), -1 };
     snoozeSet = true;
     Serial.printf("[ALARM] Snoozed to %02d:%02d\n", snoozeAt.h, snoozeAt.m);
   }
+  wsReportOffline(b == BTN_RIGHT ? "snooze" : "stop", ringH, ringM);
+}
+
+// Sage started ringing one: remember its time, to name it if the clock has
+// to finish it alone.
+static void noteSageRing() {
+  static bool was = false;
+  bool now = lumoState.alarm_ringing && !lumoState.local_ringing;
+  if (now && !was) {
+    ClockNow c = clockNow();
+    ringH = c.h;
+    ringM = c.m;
+    lastAlarmMinute = c.h * 60 + c.m;   // so the clock doesn't ring it again by itself
+  }
+  was = lumoState.alarm_ringing;
 }
 
 // ---------------------------------------------------------------------
@@ -147,12 +189,14 @@ void setup() {
   }
   Serial.println();
 
+  // Internet time in UTC, whenever the network is there (now or later): the
+  // clock falls back on it while it can't reach the Pi (clockkeeper.cpp).
+  configTime(0, 0, NTP_SERVER1, NTP_SERVER2);
+  WiFi.setSleep(false);
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET, NTP_SERVER1, NTP_SERVER2);
-    WiFi.setSleep(false);
   } else {
-    Serial.println("[WiFi] Connection failed, continuing offline...");
+    Serial.println("[WiFi] Connection failed, continuing offline (it keeps trying)...");
   }
 
   wsInit(lumoState);
@@ -181,6 +225,7 @@ void loop() {
     lumoState.m = clk.m;
   }
 
+  noteSageRing();
   localAlarmTick();
   timerTick();
 
@@ -188,9 +233,11 @@ void loop() {
   if (btn != BTN_NONE) {
     if (lumoState.hap_buttons) hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
     if (lumoState.tm_state == TOOL_DONE && !lumoState.alarm_ringing) {
-      // Any button stops a finished timer; Sage hears it too and agrees.
+      // Any button stops a finished timer; Sage hears it too and agrees
+      // (now, or when it's back).
       lumoState.tm_state = TOOL_IDLE;
       lumoState.flag_tools_changed = true;
+      if (!talkingToSage()) wsReportOffline("timer_stop", -1, -1);
     }
     if (lumoState.local_ringing) {
       localAlarmButton(btn);   // Sage isn't there to decide

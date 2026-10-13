@@ -18,7 +18,9 @@ The clock only draws and reports button presses; this decides what it shows:
   a time as the song reaches them (LYRIC).
 - Weather and the Pi's vitals.
 - The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
-  ring them itself while it can't reach the Pi.
+  ring them itself while it can't reach the Pi. Firmware 2.10 says what it
+  did with them while it was cut off (offline_reports), so an alarm stopped
+  on the clock isn't rung again, and a snooze carries over.
 - Settings changed in Sage (desk/settings.py) apply at once, and Sage can
   press the clock's buttons itself (press).
 - The LUMO page in Sage runs a timer and a stopwatch here (tools.py) and
@@ -122,6 +124,7 @@ class Desk:
         self.depth_sent: Optional[list] = None
         self._depth_lock = asyncio.Lock()
         link.on_depth_need = self.depth_need
+        link.on_offline = self.offline_reports
 
     # --- Sage's items ---
 
@@ -191,7 +194,10 @@ class Desk:
     async def send_alarms(self, force: bool = False) -> None:
         """The alarms due in the next day, for the clock to ring on its own
         if it loses the Pi. Sent when they change."""
-        upcoming = [{"h": a.rings_at.hour, "m": a.rings_at.minute} for a in self.alarms.upcoming(self.now())]
+        # w (0 is Monday) lets firmware 2.10 ring each on its own day only,
+        # even when it stays cut off for longer than a day.
+        upcoming = [{"h": a.rings_at.hour, "m": a.rings_at.minute, "w": a.rings_at.weekday()}
+                    for a in self.alarms.upcoming(self.now())]
         command = {"cmd": "ALARMS", "list": upcoming, "snooze": self.settings["alarm"]["snoozeMinutes"]}
         if force or command != self.sent_alarms:
             if await self.link.send(command):
@@ -368,6 +374,41 @@ class Desk:
         now = self.now()
         fields = Alarms.snoozed(now, self.snooze_minutes(alarm)) if snooze else Alarms.rolled(alarm, now)
         await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
+        await self.announce()
+
+    async def offline_reports(self, reports: list) -> None:
+        """What the clock did by itself while it couldn't reach the Pi
+        (firmware 2.10): {"a": "stop" | "snooze" | "timeout", "h": 7, "m": 0,
+        "ago": seconds} for an alarm it rang, {"a": "timer_stop"} for a
+        finished timer it was told to be quiet."""
+        now = self.now()
+        for report in reports:
+            action = report.get("a")
+            ago = report.get("ago") if isinstance(report.get("ago"), int) and not isinstance(report.get("ago"), bool) else 0
+            at = now - datetime.timedelta(seconds=max(0, min(ago, 86400)))
+            if action == "timer_stop":
+                if self.timer.state == "done":
+                    await self.timer_do("cancel")
+                continue
+            if action not in ("stop", "snooze", "timeout"):
+                continue
+            h, m = report.get("h"), report.get("m")
+            log.info("The clock %s an alarm at %s:%s by itself, %ss ago", {"stop": "stopped", "snooze": "snoozed", "timeout": "gave up on"}[action], h, m, ago)
+            ringing = self.alarms.ringing
+            rang_at = {(ringing.h, ringing.m)} if ringing else set()
+            if ringing and ringing.rings_at:
+                rang_at.add((ringing.rings_at.hour, ringing.rings_at.minute))
+            if (h, m) in rang_at:
+                await self.stop_alarm(snooze=action == "snooze")
+                continue
+            # The Pi wasn't ringing it: it was down, or its own ring had ended.
+            alarm = next((a for a in self.alarms.alarms if a.rings_at and (a.rings_at.hour, a.rings_at.minute) == (h, m)
+                          and at - datetime.timedelta(hours=2) <= a.rings_at <= now + datetime.timedelta(minutes=1)), None)
+            if alarm is None:
+                continue
+            self.alarms._rung.add(alarm.key)   # the clock has rung this one
+            fields = Alarms.snoozed(at, self.snooze_minutes(alarm)) if action == "snooze" else Alarms.rolled(alarm, now)
+            await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
         await self.announce()
 
     # --- Buttons and screens ---

@@ -79,6 +79,24 @@ class Report(unittest.TestCase):
         self.assertIn("No nightly backup", text)
         self.assertEqual(data["radar"]["down"], ["Yahoo markets"])
 
+    def test_a_shaky_clock_link_is_named(self):
+        drop = {"at": 1, "event": "dropped", "detail": "the clock stopped answering pings"}
+        link = {"state": "flaky", "drops24h": 4, "lastDrop": drop, "quietSeconds": 90,
+                "history": [drop] * 9}
+        data = report(db_with(""), clock={"enabled": True, "connected": True, "token": "secret",
+                                          "link": link, "wifi": {"rssi": -82}})
+        text = "\n".join(data["problems"])
+        self.assertIn("dropped 4 times in the last day (last: the clock stopped answering pings)", text)
+        self.assertIn("hasn't been heard from for 90 s", text)
+        self.assertIn("weak (-82 dBm)", text)
+        self.assertEqual(len(data["clock"]["link"]["history"]), 5)
+        self.assertNotIn("token", data["clock"])
+
+    def test_a_disconnected_clock_says_why(self):
+        drop = {"at": 1, "event": "dropped", "detail": "the connection broke without a goodbye (Wi-Fi or power)"}
+        data = report(db_with(""), clock={"enabled": True, "connected": False, "link": {"state": "down", "lastDrop": drop}})
+        self.assertIn("(last drop: the connection broke without a goodbye (Wi-Fi or power)).", "\n".join(data["problems"]))
+
     def test_missing_tables_and_broken_parts(self):
         path = str(Path(tempfile.mkdtemp()) / "empty.db")
         data = system_health.report(

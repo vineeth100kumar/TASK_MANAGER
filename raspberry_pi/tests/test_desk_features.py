@@ -385,14 +385,51 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_alarms_for_the_next_day_go_to_the_clock_when_they_change(self):
         await self.desk.refresh()
-        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0}], "snooze": 5})
+        # w: the day it rings on (Wednesday), so a clock cut off for days rings it on the right one.
+        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0, "w": 2}], "snooze": 5})
         await self.desk.refresh()
         self.assertEqual(self.link.cmds().count("ALARMS"), 1)  # unchanged: not sent again
         self.clock = at(7, 0)
         await self.desk.ring()
         await self.desk.controller.on_button("RIGHT")  # snooze to 7:05
         await self.desk.refresh()
-        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5}])
+        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5, "w": 2}])
+
+    async def test_clock_gets_the_weekday_and_utc_offset(self):
+        await self.desk.controller.send_clock()
+        clock = self.link.last("CLOCK")
+        self.assertEqual((clock["wd"], clock["utc_off"]), (2, 330))
+
+    async def test_alarm_stopped_on_a_cut_off_clock_is_not_rung_again(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.assertIsNotNone(self.desk.alarms.ringing)
+        # The clock lost the Pi, rang it itself and was stopped; it says so on its way back.
+        await self.desk.offline_reports([{"a": "stop", "h": 7, "m": 0, "ago": 20}])
+        self.assertIsNone(self.desk.alarms.ringing)
+        self.assertEqual(self.link.last("ALARM_OFF"), {"cmd": "ALARM_OFF"})
+        self.assertTrue(self.items[1]["remindAt"].startswith("2026-10-08T07:00"))
+
+    async def test_snooze_on_a_cut_off_clock_carries_over_when_the_pi_missed_the_alarm(self):
+        await self.desk.refresh()
+        self.clock = at(7, 3)
+        # The Pi was down at 7:00; the clock rang and was snoozed at 7:01.
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 120}])
+        self.assertTrue(self.items[1]["remindAt"].startswith("2026-10-07T07:06"))
+        await self.desk.ring()
+        self.assertIsNone(self.desk.alarms.ringing)  # not rung a second time by the Pi
+
+    async def test_reports_about_unknown_alarms_change_nothing(self):
+        await self.desk.refresh()
+        self.clock = at(9, 0)
+        await self.desk.offline_reports([{"a": "stop", "h": 3, "m": 15, "ago": 10}, {"a": "dance"}, {"a": "timer_stop"}])
+        self.assertEqual(self.actions.calls, [])
+
+    async def test_finished_timer_stopped_on_a_cut_off_clock(self):
+        self.desk.timer.state = "done"
+        await self.desk.offline_reports([{"a": "timer_stop"}])
+        self.assertEqual(self.desk.timer.state, "idle")
 
     async def test_system_screen_gets_vitals(self):
         await self.desk.controller.show_screen("SYSTEM")

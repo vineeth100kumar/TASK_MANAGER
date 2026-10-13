@@ -1,8 +1,9 @@
-// The LUMO page's device tab: is the clock there, which firmware it runs,
-// a remote for its buttons, and finding, restarting and locking it.
+// The LUMO page's device tab: is the clock there, how steady its link to the
+// Pi is, which firmware it runs, a remote for its buttons, and finding,
+// restarting and locking it.
 import { useState } from 'react';
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, KeyRound, Lock, MapPin, Power, Radio, Wifi } from 'lucide-react';
-import { LumoSettings, LumoSettingsUpdate, LumoStatus, lumoApi } from '../../services/lumo';
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, KeyRound, Lock, MapPin, Power, Radio, Wifi } from 'lucide-react';
+import { LumoLink, LumoSettings, LumoSettingsUpdate, LumoStatus, lumoApi } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 import { Panel, Row, Toggle, btnQuiet } from './parts';
 
@@ -19,6 +20,70 @@ function uptime(seconds?: number): string {
   if (!seconds) return '';
   const d = Math.floor(seconds / 86400), h = Math.floor((seconds % 86400) / 3600), m = Math.floor((seconds % 3600) / 60);
   return d ? `${d} d ${h} h` : h ? `${h} h ${m} min` : `${m} min`;
+}
+
+function since(ms: number | null | undefined): string {
+  if (!ms) return '';
+  const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
+  if (s < 60) return 'under a minute';
+  if (s < 3600) return `${Math.round(s / 60)} min`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ${Math.round((s % 3600) / 60)} min`;
+  return `${Math.floor(s / 86400)} d ${Math.floor((s % 86400) / 3600)} h`;
+}
+
+const LINK_LOOK: Record<LumoLink['state'], { label: string; cls: string; dot: string }> = {
+  steady: { label: 'Steady', cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300', dot: 'bg-emerald-500' },
+  flaky: { label: 'Dropping', cls: 'bg-amber-500/10 text-amber-800 dark:text-amber-300', dot: 'bg-amber-500' },
+  down: { label: 'Offline', cls: 'bg-red-500/10 text-red-700 dark:text-red-300', dot: 'bg-red-500' },
+};
+
+// The link between LUMO and the Pi: steady, dropping or offline, why it last
+// dropped, and its recent connects and drops.
+function LinkPanel({ link }: { link: LumoLink }) {
+  const look = LINK_LOOK[link.state];
+  const facts: [string, string][] = [
+    [link.state === 'down' ? 'Offline for' : 'Up for', since(link.since) || '—'],
+    ['Drops, 24 h', String(link.drops24h)],
+    ['Ping', link.rtt !== null && link.rtt !== undefined && link.rtt >= 0 ? `${link.rtt} ms` : '—'],
+    ['Last restart', link.lastBoot || '—'],
+  ];
+  return (
+    <Panel icon={<Activity size={16} className={link.state === 'steady' ? 'text-emerald-500' : link.state === 'flaky' ? 'text-amber-500' : 'text-red-500'} />}
+      title="Link to the Pi" note="Both ends ping every 10 s">
+      <div className={`rounded-2xl px-4 py-3 text-[13.5px] ${look.cls}`}>
+        <div className="font-semibold flex items-center gap-2">
+          <span className={`w-2 h-2 rounded-full ${look.dot} ${link.state === 'steady' ? '' : 'animate-pulse'}`} />{look.label}
+        </div>
+        {link.lastDrop && (
+          <div className="mt-0.5">Last drop {ago(link.lastDrop.at)}: {link.lastDrop.detail}.</div>
+        )}
+        {link.state === 'down' && (
+          <div className="mt-0.5">LUMO keeps time, rings its alarms and runs its timer on its own, and tells Sage what it did when it's back.</div>
+        )}
+      </div>
+      <dl className="grid grid-cols-2 gap-3">
+        {facts.map(([k, v]) => (
+          <div key={k} className="surface-item rounded-2xl px-3 py-2.5 min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{k}</dt>
+            <dd className="text-[14px] font-semibold text-gray-900 dark:text-white truncate tabular-nums">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      {link.history.length > 0 && (
+        <ul className="space-y-1.5">
+          {link.history.slice(0, 6).map((h, i) => (
+            <li key={`${h.at}-${i}`} className="flex gap-2 text-[12.5px] min-w-0">
+              <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${h.event === 'connected' ? 'bg-emerald-500' : 'bg-red-400'}`} />
+              <span className="text-gray-400 shrink-0 tabular-nums w-20">{ago(h.at)}</span>
+              <span className="text-gray-700 dark:text-gray-200 min-w-0 break-words">
+                {h.event === 'connected' ? 'Connected' : 'Dropped'}{h.detail ? `: ${h.detail}` : ''}
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </Panel>
+  );
 }
 
 function bars(rssi?: number): number {
@@ -86,6 +151,8 @@ export function DeviceTab({ status, settings, save, onChange }: {
         </dl>
         {connected && !w.ssid && <p className="text-[12px] text-gray-400">Wi-Fi details and uptime show from firmware 2.8.</p>}
       </Panel>
+
+      {status?.link && <LinkPanel link={status.link} />}
 
       <Panel icon={<Cpu size={16} className="text-blue-600" />} title="Firmware">
         {status?.updateAvailable ? (
