@@ -4,6 +4,7 @@ import { useMemo, useState } from 'react';
 import { Check, Clock, Globe2, LayoutGrid, Plus, X } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
 import { Panel, Row, Toggle, selectCls } from './parts';
+import { DepthFacePanel } from './DepthFacePanel';
 
 export const FACES: { id: string; name: string; hint: string; classic?: boolean }[] = [
   { id: 'monolith', name: 'Monolith', hint: 'One large, light time' },
@@ -148,6 +149,8 @@ export function ClockTab({ settings, save, toolsSupported }: { settings: LumoSet
           </Row>
         </Panel>
       </div>
+
+      <DepthFacePanel />
     </div>
   );
 }

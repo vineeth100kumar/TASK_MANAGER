@@ -1,0 +1,5 @@
+# Optional: the depth clock face's cutout (desk/depth.py). Heavy (a neural
+# network runtime and its friends), so it lives apart from requirements.txt
+# and a failed install never blocks Sage. The first cutout also downloads the
+# model, about 170 MB.
+rembg[cpu]

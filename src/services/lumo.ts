@@ -113,6 +113,51 @@ export const lumoApi = {
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
 };
 
+// The depth face (desk/depth.py on the Pi): a photo with the time tucked
+// behind the person. A preview in Sage for now; the clock doesn't show it yet.
+export type DepthPlacement = 'auto' | 'top' | 'middle' | 'bottom';
+export type DepthPhotoPosition = 'top' | 'center' | 'bottom';
+
+export interface DepthFace {
+  hasPhoto: boolean;
+  cutout: boolean;              // the person was found and cut out
+  cutoutAvailable: boolean;     // the Pi has the cutout tool installed
+  placement: DepthPlacement;
+  photoPosition: DepthPhotoPosition;
+  updatedAt: string | null;
+  coverageWarn: number;
+  preview: {
+    depth: string;              // data URLs, 320x216, the clock's own colours
+    flat: string;
+    mask: string | null;
+    placement: Exclude<DepthPlacement, 'auto'>;
+    coverage: number;           // 0-1: how much of the time the person hides
+    time: string;
+  } | null;
+}
+
+export const depthApi = {
+  get: () => call<{ depth: DepthFace }>('/api/desk/depth').then(d => d.depth),
+  upload: (image: string) => post<{ depth: DepthFace }>('/api/desk/depth/photo', { image }).then(d => d.depth),
+  update: (change: Partial<Pick<DepthFace, 'placement' | 'photoPosition'>>) =>
+    call<{ depth: DepthFace }>('/api/desk/depth', { method: 'PUT', body: JSON.stringify(change) }).then(d => d.depth),
+  remove: () => call<{ depth: DepthFace }>('/api/desk/depth', { method: 'DELETE' }).then(d => d.depth),
+};
+
+// A picked file as a JPEG data URL no bigger than `side` pixels, so a phone
+// photo uploads quickly. The Pi only needs 320 pixels across, and a little more
+// for a clean cutout.
+export async function shrinkPhoto(file: File, side = 1280): Promise<string> {
+  const bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' } as ImageBitmapOptions);
+  const scale = Math.min(1, side / Math.max(bitmap.width, bitmap.height));
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.round(bitmap.width * scale);
+  canvas.height = Math.round(bitmap.height * scale);
+  canvas.getContext('2d')!.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+  bitmap.close();
+  return canvas.toDataURL('image/jpeg', 0.9);
+}
+
 export const DAY_NAMES = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
 
 export function daysText(days: number[]): string {
