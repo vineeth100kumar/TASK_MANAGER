@@ -2,20 +2,88 @@
 // tap and edited in place, plus the settings every alarm shares.
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlarmClock, BellRing, ChevronDown, Plus, Trash2, Volume2, Loader2, SlidersHorizontal } from 'lucide-react';
+import { AlarmClock, BellRing, Check, ChevronDown, Play, Plus, Trash2, Volume2, Loader2, SlidersHorizontal } from 'lucide-react';
 import {
   AlarmDraft, AlarmTone, DAY_NAMES, LumoAlarm, LumoSettings, LumoSettingsUpdate,
   ampm, clockText, daysText, lumoApi, untilText,
 } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
-import { Panel, Row, Segmented, Slider, Toggle, btnDanger, btnPrimary, btnQuiet, selectCls } from './parts';
+import { Panel, Row, Slider, Toggle, btnDanger, btnPrimary, btnQuiet, selectCls } from './parts';
+import { ALARM_SOUND_SHAPES } from './alarmSounds';
 
-export const TONES: { id: AlarmTone; name: string; hint: string }[] = [
-  { id: 'pulse', name: 'Pulse', hint: 'Beep-beep, like a heartbeat' },
-  { id: 'classic', name: 'Classic', hint: 'Four quick beeps' },
-  { id: 'rising', name: 'Rising', hint: 'Slow beeps that build over a minute' },
-  { id: 'chirp', name: 'Chirp', hint: 'Three short chirps' },
+// The sounds, in the firmware's order (tones.h). fw211: new in firmware 2.11.
+export const TONES: { id: AlarmTone; name: string; hint: string; fw211?: boolean }[] = [
+  { id: 'pulse', name: 'Pulse', hint: 'Tick-tock, high then low, like a heartbeat' },
+  { id: 'classic', name: 'Classic', hint: 'Four quick beeps, the loudest pitch' },
+  { id: 'rising', name: 'Rising', hint: 'Three notes climbing a chord, builds over a minute' },
+  { id: 'chirp', name: 'Chirp', hint: 'Three bird-like chirps' },
+  { id: 'chime', name: 'Chime', hint: 'A three-note bell, high to low, ringing out', fw211: true },
+  { id: 'dawn', name: 'Dawn', hint: 'Soft, slow notes that take two minutes to get loud', fw211: true },
+  { id: 'melody', name: 'Melody', hint: 'A short morning tune that climbs to the top', fw211: true },
+  { id: 'urgent', name: 'Urgent', hint: 'A fast warble for heavy sleepers', fw211: true },
 ];
+
+// Play one cycle of a sound on LUMO's buzzer, then it stops by itself.
+async function playOnce(tone: AlarmTone, volume: number, onError: (m: string) => void) {
+  try {
+    await lumoApi.device('tone', tone, volume);
+  } catch (e: any) {
+    onError(e.message);
+  }
+}
+
+// One cycle of a sound as notes: higher pitch higher up, softer notes fainter.
+function SoundShape({ tone, className = '' }: { tone: AlarmTone; className?: string }) {
+  const shape = ALARM_SOUND_SHAPES[tone];
+  if (!shape) return null;
+  const lo = 2300, hi = 3550;
+  return (
+    <svg viewBox="0 0 100 24" preserveAspectRatio="none" className={className} aria-hidden="true">
+      <line x1="0" x2="100" y1="23.5" y2="23.5" className="stroke-current opacity-15" strokeWidth="0.6" vectorEffect="non-scaling-stroke" />
+      {shape.notes.map(([start, len, hz, peak], i) => {
+        const y = 20 - ((hz - lo) / (hi - lo)) * 17;
+        return <rect key={i} x={(start / shape.cycleMs) * 100} y={y - 1.6} width={Math.max(0.8, (len / shape.cycleMs) * 100)} height={3.2} rx={1.2}
+          className="fill-current" opacity={0.35 + 0.65 * (peak / 255)} />;
+      })}
+    </svg>
+  );
+}
+
+// The sound list: picking one plays it once on LUMO (when it's there to play it).
+function SoundPicker({ value, onPick, onPlay, canPlay, soundsSupported, defaultName }: {
+  value: AlarmTone | null; onPick: (t: AlarmTone | null) => void; onPlay: (t: AlarmTone) => void;
+  canPlay: boolean; soundsSupported: boolean; defaultName?: string;
+}) {
+  const card = (on: boolean) => `relative text-left rounded-2xl border p-3 transition-colors ${on ? 'border-blue-500/50 bg-blue-500/[0.06]' : 'border-black/5 dark:border-white/10 hover:border-black/15 dark:hover:border-white/20'}`;
+  return (
+    <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+      {defaultName !== undefined && (
+        <button type="button" onClick={() => onPick(null)} aria-pressed={value === null} className={card(value === null)}>
+          <div className="text-[13px] font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">{value === null && <Check size={13} className="text-blue-600" />}Default</div>
+          <div className="text-[11.5px] text-gray-500 mt-0.5 leading-snug">Follows "Every alarm" ({defaultName})</div>
+        </button>
+      )}
+      {TONES.map(t => {
+        const on = value === t.id;
+        const old = t.fw211 && !soundsSupported;
+        return (
+          <div key={t.id} className={card(on)}>
+            <button type="button" onClick={() => { onPick(t.id); if (canPlay && !old) onPlay(t.id); }} aria-pressed={on} className="block w-full text-left pr-7">
+              <div className="text-[13px] font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">{on && <Check size={13} className="text-blue-600" />}{t.name}</div>
+              <SoundShape tone={t.id} className={`w-full h-5 my-1.5 ${on ? 'text-blue-600' : 'text-gray-500 dark:text-gray-400'}`} />
+              <div className="text-[11.5px] text-gray-500 leading-snug">{old ? 'Needs LUMO firmware 2.11' : t.hint}</div>
+            </button>
+            <button type="button" onClick={() => onPlay(t.id)} disabled={!canPlay || old} title={canPlay ? 'Play once on LUMO' : 'LUMO is not connected'}
+              aria-label={`Play ${t.name} once on LUMO`}
+              className="absolute top-2 right-2 p-1.5 rounded-lg text-gray-400 hover:text-blue-600 hover:bg-blue-500/10 disabled:opacity-40 disabled:pointer-events-none">
+              <Play size={13} />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 const PRESETS: { name: string; days: number[] }[] = [
   { name: 'Once', days: [] },
@@ -35,9 +103,10 @@ interface AlarmsTabProps {
   reload: () => void;
   connected: boolean;
   tonesSupported: boolean;
+  soundsSupported: boolean;
 }
 
-export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupported }: AlarmsTabProps) {
+export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupported, soundsSupported }: AlarmsTabProps) {
   const { showToast } = useToast();
   const [openId, setOpenId] = useState<string | null>(null);
   const [adding, setAdding] = useState(false);
@@ -74,7 +143,7 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
         <AnimatePresence initial={false}>
           {adding && (
             <motion.div key="new" initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }}>
-              <AlarmEditor draft={BLANK} settings={settings} hour24={hour24} isNew connected={connected} tonesSupported={tonesSupported}
+              <AlarmEditor draft={BLANK} settings={settings} hour24={hour24} isNew connected={connected} tonesSupported={tonesSupported} soundsSupported={soundsSupported}
                 onCancel={() => setAdding(false)}
                 onSave={async (d) => {
                   const made = await lumoApi.createAlarm(d);
@@ -117,7 +186,7 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
               {openId === a.id && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} className="overflow-hidden">
                   <div className="px-4 pb-4 md:px-6 md:pb-6">
-                    <AlarmEditor draft={a} settings={settings} hour24={hour24} connected={connected} tonesSupported={tonesSupported}
+                    <AlarmEditor draft={a} settings={settings} hour24={hour24} connected={connected} tonesSupported={tonesSupported} soundsSupported={soundsSupported}
                       onCancel={() => setOpenId(null)}
                       onDelete={async () => {
                         await lumoApi.deleteAlarm(a.id);
@@ -147,9 +216,16 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
             <div className="space-y-4">
               <div className="space-y-2">
                 <div className="text-[13px] font-medium text-gray-500">Sound</div>
-                <select className={`${selectCls} w-full`} value={settings.alarm.tone} onChange={e => save({ alarm: { tone: e.target.value as AlarmTone } })}>
+                <select className={`${selectCls} w-full`} value={settings.alarm.tone} onChange={e => {
+                  const tone = e.target.value as AlarmTone;
+                  save({ alarm: { tone } });
+                  const t = TONES.find(x => x.id === tone);
+                  if (connected && tonesSupported && !(t?.fw211 && !soundsSupported)) playOnce(tone, settings.alarm.volume, m => showToast(m, 'error'));
+                }}>
                   {TONES.map(t => <option key={t.id} value={t.id}>{t.name}: {t.hint}</option>)}
                 </select>
+                <SoundShape tone={settings.alarm.tone} className="w-full h-5 text-gray-400" />
+                <p className="text-[12px] text-gray-400">Picking a sound plays it once on LUMO.</p>
               </div>
               <div className="space-y-2">
                 <div className="text-[13px] font-medium text-gray-500 flex items-center gap-1.5"><Volume2 size={13} /> Volume</div>
@@ -166,6 +242,7 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
                 </select>
               </Row>
               {!tonesSupported && <p className="text-[12px] text-amber-700 dark:text-amber-400">The sound and volume need LUMO firmware 2.8. Until it's flashed, every alarm pulses.</p>}
+              {tonesSupported && !soundsSupported && <p className="text-[12px] text-amber-700 dark:text-amber-400">Chime, Dawn, Melody and Urgent need LUMO firmware 2.11. Until it's flashed they ring as Pulse.</p>}
             </div>
           )}
         </Panel>
@@ -174,8 +251,8 @@ export function AlarmsTab({ alarms, settings, save, reload, connected, tonesSupp
   );
 }
 
-function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported, onSave, onCancel, onDelete }: {
-  draft: AlarmDraft; settings: LumoSettings | null; hour24: boolean; isNew?: boolean; connected: boolean; tonesSupported: boolean;
+function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported, soundsSupported, onSave, onCancel, onDelete }: {
+  draft: AlarmDraft; settings: LumoSettings | null; hour24: boolean; isNew?: boolean; connected: boolean; tonesSupported: boolean; soundsSupported: boolean;
   onSave: (d: AlarmDraft) => Promise<void>; onCancel: () => void; onDelete?: () => Promise<void>;
 }) {
   const { showToast } = useToast();
@@ -198,13 +275,7 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
     }
   };
 
-  const hear = async () => {
-    try {
-      await lumoApi.device('tone', tone, volume);
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    }
-  };
+  const play = (t: AlarmTone) => playOnce(t, volume, m => showToast(m, 'error'));
 
   return (
     <div className={`space-y-5 ${isNew ? 'surface rounded-3xl border border-blue-500/30 p-4 md:p-6' : 'pt-2 border-t border-black/5 dark:border-white/5'}`}>
@@ -249,13 +320,13 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
       <div className="space-y-2">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[13px] font-medium text-gray-500">Sound</span>
-          <button onClick={hear} disabled={!connected || !tonesSupported} className={`${btnQuiet} !py-1 !px-2.5 !text-[12px]`} title={connected ? 'Play it on LUMO for a few seconds' : 'LUMO is not connected'}>
+          <button onClick={() => play(tone)} disabled={!connected || !tonesSupported} className={`${btnQuiet} !py-1 !px-2.5 !text-[12px]`} title={connected ? 'Play it once on LUMO' : 'LUMO is not connected'}>
             <Volume2 size={13} /> Hear it on LUMO
           </button>
         </div>
-        <Segmented<string> value={d.tone ?? 'default'} onChange={v => set({ tone: v === 'default' ? null : (v as AlarmTone) })} size="sm"
-          options={[{ id: 'default', label: 'Default' }, ...TONES.map(t => ({ id: t.id, label: t.name }))]} />
-        <p className="text-[12px] text-gray-400">{d.tone ? TONES.find(t => t.id === d.tone)?.hint : `Follows "Every alarm" (${TONES.find(t => t.id === settings?.alarm.tone)?.name || 'Pulse'})`}</p>
+        <SoundPicker value={d.tone} onPick={t => set({ tone: t })} onPlay={play} canPlay={connected && tonesSupported}
+          soundsSupported={soundsSupported} defaultName={TONES.find(t => t.id === settings?.alarm.tone)?.name || 'Pulse'} />
+        <p className="text-[12px] text-gray-400">{connected ? 'Picking a sound plays it once on LUMO, at this alarm\'s volume.' : 'Connect LUMO to hear the sounds on it.'}</p>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">

@@ -16,11 +16,11 @@ void storeLoad(LumoState& s) {
   s.utc_off = p.getShort("utcoff", GMT_OFFSET_SEC / 60);
   s.snooze_minutes = constrain(p.getUChar("snooze", 5), 1, 60);
   s.haptic_strength = min((int)p.getUChar("hapt", HAPTIC_STRENGTH), 100);
-  // "alarms2": 2.10 keeps each alarm's day too. 2.9's list is left alone and
-  // Sage sends the alarms again as soon as the clock connects.
-  uint8_t n = p.getUChar("acount2", 0);
+  // "alarms3": 2.11 keeps the days each alarm repeats on too. Older lists
+  // are left alone and Sage sends the alarms again as soon as the clock connects.
+  uint8_t n = p.getUChar("acount3", 0);
   if (n > MAX_LOCAL_ALARMS) n = 0;
-  if (n && p.getBytes("alarms2", s.local_alarms, sizeof(LocalAlarm) * n) == sizeof(LocalAlarm) * n) {
+  if (n && p.getBytes("alarms3", s.local_alarms, sizeof(LocalAlarm) * n) == sizeof(LocalAlarm) * n) {
     s.local_alarm_count = n;
   }
   p.end();
@@ -42,8 +42,8 @@ void storeSaveAlarms(const LumoState& s) {
   Preferences p;
   if (!p.begin(NS, false)) return;
   p.putUChar("snooze", s.snooze_minutes);
-  p.putUChar("acount2", s.local_alarm_count);
-  if (s.local_alarm_count) p.putBytes("alarms2", s.local_alarms, sizeof(LocalAlarm) * s.local_alarm_count);
+  p.putUChar("acount3", s.local_alarm_count);
+  if (s.local_alarm_count) p.putBytes("alarms3", s.local_alarms, sizeof(LocalAlarm) * s.local_alarm_count);
   p.end();
 }
 

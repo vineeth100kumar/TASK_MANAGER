@@ -12,7 +12,8 @@ export const LUMO_EVENT = 'sage:lumo';
 
 export const lumoAvailable = (): boolean => Boolean(piBackendUrl());
 
-export type AlarmTone = 'pulse' | 'classic' | 'rising' | 'chirp';
+// The sounds LUMO's buzzer plays (lumo/esp32_client/tones.h); the last four need firmware 2.11.
+export type AlarmTone = 'pulse' | 'classic' | 'rising' | 'chirp' | 'chime' | 'dawn' | 'melody' | 'urgent';
 
 export interface LumoAlarm {
   id: string;
