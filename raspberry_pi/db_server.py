@@ -1509,7 +1509,7 @@ async def desk_device(req: DeskAction):
 
 
 # The depth face (desk/depth.py): a photo with the time behind the person.
-# Only a preview in Sage for now; the clock doesn't show it yet.
+# LUMO shows it when the Depth face is picked (firmware 2.9).
 class DepthPhoto(BaseModel):
     image: str  # a data URL or bare base64
 
@@ -1545,9 +1545,18 @@ async def desk_depth_photo(req: DepthPhoto):
         return _depth_describe()
 
     try:
-        return await asyncio.to_thread(work)
+        out = await asyncio.to_thread(work)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
+    return out
+
+
+async def _depth_to_clock() -> None:
+    """Show the change on LUMO straight away if its depth face is up."""
+    if desk.ENABLED:
+        from desk import run as desk_run
+        await desk_run.depth_changed()
 
 
 @app.put("/api/desk/depth")
@@ -1557,6 +1566,7 @@ async def desk_depth_put(change: Dict[str, Any]):
         await asyncio.to_thread(depth.update, change)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
     return await asyncio.to_thread(_depth_describe)
 
 

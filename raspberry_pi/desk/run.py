@@ -97,6 +97,12 @@ async def reset_settings() -> dict:
     return saved
 
 
+async def depth_changed() -> None:
+    """A new depth photo or setting from Sage: show it if the face is up."""
+    if desk is not None:
+        await desk.send_depth()
+
+
 def running() -> bool:
     return desk is not None
 

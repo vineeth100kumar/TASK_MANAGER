@@ -105,7 +105,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.8.5"
+#define FW_VERSION "2.9.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -119,8 +119,12 @@ enum ScreenMode   { SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, S
 enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM, NEO_AUTO, NEO_AURORA, NEO_COMET };
 // How the clock screen shows the time (set in Sage, kept in flash). The first
 // three are the classic styles; the rest are the smooth faces in faces.cpp.
+// CLOCK_DEPTH (2.9) shows a photo with the time behind the person, drawn
+// whole on the Pi and sent in strips; until a picture arrives (or when Sage
+// goes quiet) it shows Monolith instead.
 enum ClockStyle   { CLOCK_DIGITAL, CLOCK_MINIMAL, CLOCK_ANALOG,
-                    CLOCK_MONOLITH, CLOCK_STACKED, CLOCK_NIGHTSTAND, CLOCK_DIAL };
+                    CLOCK_MONOLITH, CLOCK_STACKED, CLOCK_NIGHTSTAND, CLOCK_DIAL,
+                    CLOCK_DEPTH };
 
 // Alarms the clock rings by itself while it can't reach Sage.
 #define MAX_LOCAL_ALARMS 4

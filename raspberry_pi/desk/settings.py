@@ -37,8 +37,9 @@ ACTIONS = (
     "stopwatch_toggle", "stopwatch_lap", "stopwatch_reset",
 ) + tuple(f"screen:{s}" for s in SCREENS)
 # The first three are LUMO's classic styles; the rest are the smooth faces
-# added in firmware 2.1 (an older clock keeps its style if sent one of those).
-CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial")
+# added in firmware 2.1, and the depth face (a photo, see depth.py) in 2.9.
+# An older clock keeps its style if sent one it doesn't know.
+CLOCK_STYLES = ("digital", "minimal", "analog", "monolith", "stacked", "nightstand", "dial", "depth")
 LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "OFF")
 # The buzzer's alarm patterns (firmware 2.8; older firmware always pulses).
 ALARM_TONES = ("pulse", "classic", "rising", "chirp")

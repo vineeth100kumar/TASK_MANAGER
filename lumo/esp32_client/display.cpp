@@ -4,6 +4,7 @@
 #include "clockkeeper.h"
 #include "faces.h"
 #include "aa_text.h"
+#include "ws_client.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans24pt7b.h>
@@ -128,6 +129,58 @@ void onNewMemoryStrip(const uint8_t* data, size_t len) {
     tft.setCursor(240, CAPTION_Y + 8);
     tft.print("<  OK  >");
   }
+}
+
+// ===================== DEPTH FACE (2.9) =====================
+//  A photo with the time tucked behind the person. The Pi cuts the person
+//  out and draws the whole face (photo, time, person, date), then sends it as
+//  strips: 0xAA 0xDE, first row (2 bytes, little-endian), row count, then
+//  320 RGB565 pixels per row. Rows count from the top of the case window.
+//  Two rows a message keeps each one inside a network packet (see art.py).
+//  Each minute only the rows that changed come again.
+//
+//  The clock asks for a picture (DEPTH_NEED) when the face opens and draws
+//  Monolith until one arrives. If Sage goes quiet for a few minutes the
+//  photo's time would go stale, so it goes back to Monolith and asks again.
+static bool depthOn = false;                // the clock screen is showing the depth face
+static bool depthShowing = false;           // a picture from the Pi is on screen
+static unsigned long depthLastStrip = 0;
+static unsigned long depthAskedAt = 0;
+static const unsigned long DEPTH_STALE_MS = 150000;   // ~2.5 minutes without a strip
+static const unsigned long DEPTH_ASK_MS   = 60000;    // ask again this often while waiting
+static uint16_t depthRows[320 * 2];
+
+void onDepthStrip(const uint8_t* data, size_t len) {
+  if (!depthOn || lastModeDrawn != SCREEN_CLOCK || len < 5) return;
+  uint16_t y = data[2] | ((uint16_t)data[3] << 8);
+  uint8_t  n = data[4];
+  if (n == 0 || n > 2 || len < 5 + (size_t)n * 640 || y + n > VIS_H) return;
+  memcpy(depthRows, data + 5, (size_t)n * 640);   // aligned copy, as onNewMemoryStrip does
+  tft.drawRGBBitmap(0, VIS_T + y, depthRows, 320, n);
+  depthShowing = true;
+  depthLastStrip = millis();
+}
+
+static void depthAsk() {
+  depthAskedAt = millis();
+  wsSend("{\"evt\":\"DEPTH_NEED\"}");
+}
+
+// Called on the clock screen with the depth face. True while the Pi's
+// picture is up (so nothing else draws); false to draw Monolith.
+static bool depthTick(bool opened) {
+  unsigned long now = millis();
+  if (opened) {
+    depthShowing = false;
+    depthAsk();
+  } else if (depthShowing && now - depthLastStrip > DEPTH_STALE_MS) {
+    depthShowing = false;
+    faceReset();
+    depthAsk();
+  } else if (!depthShowing && now - depthAskedAt > DEPTH_ASK_MS) {
+    depthAsk();
+  }
+  return depthShowing;
 }
 
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor) {
@@ -526,6 +579,11 @@ void displayClockTick(const LumoState& s) {
     c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
   }
 
+  depthOn = s.clock_style == CLOCK_DEPTH;
+  if (depthOn && depthTick(clockNeedsStatic)) {
+    clockNeedsStatic = false;
+    return;
+  }
   if (faceIsPremium(s.clock_style)) {
     faceTick(s, c);
     clockNeedsStatic = false;
@@ -961,6 +1019,7 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
   if (mode != SCREEN_MEMORY) {
     memoryImageLoaded = false;
   }
+  if (mode != SCREEN_CLOCK) depthOn = false;
   bool modeChanged = (mode != lastModeDrawn) || forceFullRedraw;
   lastModeDrawn = mode;
 

@@ -34,6 +34,7 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   else if (strcmp(st, "stacked") == 0)    style = CLOCK_STACKED;
   else if (strcmp(st, "nightstand") == 0) style = CLOCK_NIGHTSTAND;
   else if (strcmp(st, "dial") == 0)       style = CLOCK_DIAL;
+  else if (strcmp(st, "depth") == 0)      style = CLOCK_DEPTH;
   bool h24  = doc["hour24"].is<bool>() ? doc["hour24"].as<bool>() : s.hour24;
   bool secs = doc["show_seconds"].is<bool>() ? doc["show_seconds"].as<bool>() : s.show_seconds;
 
@@ -375,6 +376,8 @@ static void handleTextMessage(const String& payload) {
 static void handleBinaryMessage(const uint8_t* data, size_t len) {
   if (len >= 2 && data[0] == 0xAA && data[1] == 0xCC) {
     onNewMemoryStrip(data, len);
+  } else if (len >= 2 && data[0] == 0xAA && data[1] == 0xDE) {
+    onDepthStrip(data, len);
   } else {
     onNewArt(data, len);
   }

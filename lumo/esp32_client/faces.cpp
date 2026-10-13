@@ -10,7 +10,9 @@
 // row of that design into the visible band (VIS_T..VIS_B).
 static inline int VY(int y) { return VIS_T + (y * VIS_H + 108) / 216; }
 
-bool faceIsPremium(ClockStyle style) { return style >= CLOCK_MONOLITH && style <= CLOCK_DIAL; }
+// The depth face draws as Monolith until the Pi's picture arrives.
+bool faceIsPremium(ClockStyle style) { return style >= CLOCK_MONOLITH && style <= CLOCK_DEPTH; }
+static ClockStyle drawnStyle(ClockStyle style) { return style == CLOCK_DEPTH ? CLOCK_MONOLITH : style; }
 
 static bool  needAll    = true;
 static int   lastMinute = -1;
@@ -418,7 +420,8 @@ void faceTick(const LumoState& s, const ClockNow& c) {
   static unsigned long lastDraw = 0;
   unsigned long now = millis();
   float enter = entryDone ? 1.0f : animProgress(enterMs, now, ENTER_MS);
-  unsigned long turn = turnMs(s.clock_style);
+  const ClockStyle style = drawnStyle(s.clock_style);
+  unsigned long turn = turnMs(style);
   bool turning = !transDone;
   bool animating = enter < 1 || turning;
   if (!needAll && now - lastDraw < (animating ? 33UL : 50UL)) return;
@@ -428,7 +431,7 @@ void faceTick(const LumoState& s, const ClockNow& c) {
   float k = 0.5f + 0.5f * clockPhase(c.minuteOfDay).level;
   bool minute = needAll || c.m != lastMinute || fabsf(k - lastDim) > 0.03f;
   bool second = minute || c.s != lastSecond;
-  bool smooth = s.clock_style == CLOCK_MONOLITH && s.show_seconds;   // the dot glides
+  bool smooth = style == CLOCK_MONOLITH && s.show_seconds;   // the dot glides
 
   // A new minute (not the first one drawn) starts the face's turn-over.
   if (shownM >= 0 && c.m != shownM && turn && enter >= 1) {
@@ -455,8 +458,8 @@ void faceTick(const LumoState& s, const ClockNow& c) {
   an.second = second;
   an.tr = tr;
 
-  if (needAll) tft.fillScreen(faceBg(s.clock_style));
-  switch (s.clock_style) {
+  if (needAll) tft.fillScreen(faceBg(style));
+  switch (style) {
     case CLOCK_MONOLITH:   monolith(s, c, an); break;
     case CLOCK_STACKED:    stacked(s, c, an); break;
     case CLOCK_NIGHTSTAND: nightstand(s, c, an); break;

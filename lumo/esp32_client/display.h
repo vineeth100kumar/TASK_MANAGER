@@ -25,3 +25,4 @@ void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b); // the cover's colour, 
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor);
 void onNewArt(const uint8_t* data, size_t len);
 void onNewMemoryStrip(const uint8_t* data, size_t len);
+void onDepthStrip(const uint8_t* data, size_t len);      // the depth face's picture, from the Pi
