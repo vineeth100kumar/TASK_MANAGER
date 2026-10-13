@@ -166,6 +166,8 @@ class PhoneLink:
         self._advertising = False
         self._adv_exported = False
         self._adv_last_try = 0.0
+        self._subscribed_at = 0.0
+        self.media_at = 0.0  # when the phone last sent a song detail (epoch s)
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
@@ -180,6 +182,7 @@ class PhoneLink:
             "home": self.home,
             "lastSeen": int(self.last_seen * 1000) if self.last_seen else None,
             "media": self.media,
+            "mediaAt": int(self.media_at * 1000) if self.media_at else None,
             "notifications": list(reversed(self.notifications)),
             "link": self.link,
         }
@@ -316,8 +319,34 @@ class PhoneLink:
             await self._open_ble(phone_path, phone_name, address)
             return
         self._ble_tries = 0
+        stale = self._stale_reason(objects, phone_path) if self._chars else ""
+        if stale:
+            self.say("state", f"now playing from {phone_name} went quiet ({stale}); subscribing again.")
+            self._set_link(nowPlaying="resubscribing")
+            self._chars.clear()
         if not self._chars:
             await self._subscribe(objects, phone_path)
+
+    def _stale_reason(self, objects: dict, device_path: str) -> str:
+        """Why the songs subscription is no longer live, or "" when it is.
+
+        When the phone's BLE link drops and comes back between two ticks, the
+        Pi never sees ServicesResolved go false, so it kept its old
+        subscription. But BlueZ stops notifying on a disconnect, and the phone
+        forgets which song details the Pi asked for, so nothing new ever came:
+        the phone stayed connected while now playing froze. BlueZ's Notifying
+        flag shows it, so an Entity Update that is gone or no longer notifying
+        means subscribe again. A short grace after subscribing lets BlueZ set
+        the flag, and keeps a phone that refuses from being asked every tick."""
+        if AMS_ENTITY_UPDATE not in self._chars or time.time() - self._subscribed_at < 30:
+            return ""
+        for path, ifaces in objects.items():
+            char = ifaces.get("org.bluez.GattCharacteristic1")
+            if char and path.startswith(device_path + "/") and char["UUID"].value.lower() == AMS_ENTITY_UPDATE:
+                if char.get("Notifying") and char["Notifying"].value:
+                    return ""
+                return "BlueZ says it is no longer notifying; the BLE link likely dropped and came back"
+        return "the phone's media service is gone from BlueZ; the BLE link likely dropped and came back"
 
     async def _open_ble(self, path: str, name: str, address: str) -> None:
         """Ask BlueZ to connect to the phone over BLE. A phone that is already
@@ -397,6 +426,7 @@ class PhoneLink:
                     # (the watchers stay, so nothing is added twice).
                     self._chars.clear()
                     return
+        self._subscribed_at = time.time()
         self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
         self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
                           + ", ".join(self.link["subscribed"]) + ". Now playing will update on the next song change.")
@@ -473,6 +503,7 @@ class PhoneLink:
             if not update:
                 return
             entity, attr, value = update
+            self.media_at = time.time()
             if entity == AMS_PLAYER and attr == 0:
                 self.media["app"] = value
             elif entity == AMS_PLAYER and attr == 1:

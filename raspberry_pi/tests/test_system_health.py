@@ -25,11 +25,11 @@ def db_with(rows_sql: str) -> str:
     return path
 
 
-def report(path, clock=None, backups=None, radar=True):
+def report(path, clock=None, backups=None, radar=True, phone=None):
     return system_health.report(
         path, web_app=True, auth=True, password_gate=True, radar_enabled=radar,
         backups=lambda: backups or {"lastBackupAt": RECENT, "count": 3},
-        phone=lambda: {"available": True, "connected": False, "notifications": ["private"]},
+        phone=lambda: phone or {"available": True, "connected": False, "notifications": ["private"]},
         clock=lambda: clock or {"enabled": True, "connected": True, "token": "secret", "firmware": "2.8.0"},
     )
 
@@ -37,6 +37,17 @@ def report(path, clock=None, backups=None, radar=True):
 class Report(unittest.TestCase):
     def setUp(self):
         system_health.workers.clear()
+
+    def test_phone_connected_without_ble_is_a_problem(self):
+        phone = {"available": True, "connected": True, "deviceName": "VK", "notifications": [{"message": "private"}],
+                 "link": {"ble": False, "nowPlaying": "not asked", "subscribed": [], "lastError": None},
+                 "media": {"title": "Song", "artist": "A", "app": "Music", "playing": True}, "mediaAt": 5}
+        data = report(db_with(""), phone=phone)
+        self.assertIn("BLE link to the Pi is not", "\n".join(data["problems"]))
+        self.assertEqual(data["phone"]["song"]["title"], "Song")
+        self.assertNotIn("private", str(data["phone"]))
+        phone["link"] = {"ble": True, "nowPlaying": "asked"}
+        self.assertEqual(report(db_with(""), phone=phone)["problems"], [])
 
     def test_all_well_has_no_problems(self):
         data = report(db_with("INSERT INTO radar_sources VALUES ('TechCrunch', 'feed', 1, 5, '', 'x', 'x');"
