@@ -129,6 +129,7 @@ def report(
     backups: Callable[[], dict],
     phone: Callable[[], dict],
     clock: Callable[[], dict],
+    depth_face: Optional[Callable[[], dict]] = None,
 ) -> dict:
     def safe(part: Callable[[], dict]) -> dict:
         try:
@@ -161,6 +162,8 @@ def report(
         "phone": phone_part(phone_state),
         "clock": {k: clock_state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in clock_state},
     }
+    if depth_face:
+        data["depthFace"] = safe(depth_face)
     data["problems"] = problems(data)
     return data
 
@@ -195,4 +198,7 @@ def problems(data: dict) -> List[str]:
         out.append(f"Now playing from the phone isn't subscribed ({phone.get('nowPlaying')}).")
     if data["clock"].get("enabled") and not data["clock"].get("connected"):
         out.append("The desk clock is on in settings but not connected.")
+    face = data.get("depthFace", {})
+    if face.get("hasPhoto") and not face.get("cutout"):
+        out.append(f"The depth face's photo has no cutout: {face.get('cutoutError') or face.get('cutoutProblem') or 'no reason kept'}.")
     return out

@@ -2,7 +2,7 @@
 // behind them as on an iPhone lock screen. The Pi draws it and sends it to
 // LUMO when the face is on (firmware 2.9); the preview here is the same picture.
 import { useEffect, useRef, useState } from 'react';
-import { AlertTriangle, ImagePlus, Layers, Loader2, Trash2 } from 'lucide-react';
+import { AlertTriangle, ImagePlus, Layers, Loader2, RotateCcw, Trash2 } from 'lucide-react';
 import { DepthFace, DepthPhotoPosition, DepthPlacement, LumoSettings, LumoSettingsUpdate, depthApi, shrinkPhoto } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 import { Panel, Row, Segmented, Toggle, btnPrimary, btnQuiet } from './parts';
@@ -12,7 +12,7 @@ type View = 'depth' | 'flat' | 'mask';
 export function DepthFacePanel({ settings, save, supported }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; supported: boolean }) {
   const { showToast } = useToast();
   const [face, setFace] = useState<DepthFace | null>(null);
-  const [busy, setBusy] = useState<'' | 'upload' | 'change' | 'remove'>('');
+  const [busy, setBusy] = useState<'' | 'upload' | 'change' | 'remove' | 'retry'>('');
   const [view, setView] = useState<View>('depth');
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -73,7 +73,7 @@ export function DepthFacePanel({ settings, save, supported }: { settings: LumoSe
                 <span className="text-[13px] font-semibold">Pick a photo of someone</span>
               </button>
             )}
-            {busy === 'upload' && (
+            {(busy === 'upload' || busy === 'retry') && (
               <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center gap-2 text-white text-center px-6">
                 <Loader2 size={24} className="animate-spin" />
                 <span className="text-[13px] font-semibold">Finding the person…</span>
@@ -104,11 +104,21 @@ export function DepthFacePanel({ settings, save, supported }: { settings: LumoSe
           {face.hasPhoto && !face.cutout && (
             <div className="flex items-start gap-2 rounded-xl px-3 py-2 text-[12.5px] bg-amber-500/10 text-amber-800 dark:text-amber-300">
               <AlertTriangle size={14} className="mt-0.5 shrink-0" />
-              <span>
-                {face.cutoutAvailable
-                  ? "The Pi couldn't find a person in this photo, so the time sits on top. Try a photo where one person stands out from the background."
-                  : 'The Pi doesn\'t have the cutout tool yet, so the time sits on top. Re-run deploy/install_pi.sh on the Pi to add it.'}
-              </span>
+              <div className="space-y-1.5 min-w-0">
+                <p>
+                  {!face.cutoutAvailable
+                    ? "The Pi's cutout tool won't load, so the time sits on top. Run sudo deploy/install_pi.sh on the Pi, then try the cutout again."
+                    : face.cutoutError === 'no person found in this photo'
+                      ? "The Pi couldn't find a person in this photo, so the time sits on top. Try a photo where one person stands out from the background."
+                      : "The cutout didn't work on the Pi, so the time sits on top."}
+                </p>
+                {(face.cutoutError || face.cutoutProblem) && (
+                  <p className="font-mono text-[11px] break-words opacity-80">{face.cutoutProblem || face.cutoutError}</p>
+                )}
+                <button className={btnQuiet} disabled={!!busy} onClick={() => run('retry', depthApi.retryCutout, "Couldn't redo the cutout")}>
+                  <RotateCcw size={14} /> Try the cutout again
+                </button>
+              </div>
             </div>
           )}
 
@@ -132,10 +142,10 @@ export function DepthFacePanel({ settings, save, supported }: { settings: LumoSe
                   onChange={v => run('change', () => depthApi.update({ placement: v }), "Couldn't move the time")}
                   options={[{ id: 'auto', label: 'Auto' }, { id: 'top', label: 'Top' }, { id: 'middle', label: 'Middle' }, { id: 'bottom', label: 'Bottom' }]} />
               </Row>
-              <Row title="Photo" hint="Which part of a tall photo shows">
+              <Row title="Photo" hint={face.photoPosition === 'auto' ? 'Auto frames the person, head near the top' : 'Which part of a tall photo shows'}>
                 <Segmented<DepthPhotoPosition> size="sm" value={face.photoPosition}
                   onChange={v => run('change', () => depthApi.update({ photoPosition: v }), "Couldn't move the photo")}
-                  options={[{ id: 'top', label: 'Top' }, { id: 'center', label: 'Middle' }, { id: 'bottom', label: 'Bottom' }]} />
+                  options={[{ id: 'auto', label: 'Auto' }, { id: 'top', label: 'Top' }, { id: 'center', label: 'Middle' }, { id: 'bottom', label: 'Bottom' }]} />
               </Row>
             </>
           )}

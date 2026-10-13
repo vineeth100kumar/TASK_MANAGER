@@ -117,6 +117,62 @@ class DepthTest(unittest.TestCase):
                 self.assertAlmostEqual((x1 - x0) / (y1 - y0), depth.WIDTH / depth.HEIGHT, places=1)
                 self.assertTrue(0 <= x0 < x1 <= size[0] and 0 <= y0 < y1 <= size[1])
 
+    def test_auto_crop_puts_the_head_near_the_top(self):
+        # A tall photo with the person low down: a plain top crop would show only the wall.
+        photo = Image.new("RGB", (600, 1200), (40, 90, 200))
+        mask = Image.new("L", photo.size, 0)
+        ImageDraw.Draw(mask).rectangle((200, 500, 400, 1200), fill=255)
+        box = depth._crop_box(photo.size, "auto", mask.getbbox())
+        ch = box[3] - box[1]
+        self.assertAlmostEqual((500 - box[1]) / ch, depth.HEAD_TOP, places=2)
+        self.assertEqual(depth._crop_box(photo.size, "auto"), depth._crop_box(photo.size, "top"))
+        # A wide photo centres on the person instead of the middle.
+        x0, _, x1, _ = depth._crop_box((2000, 500), "auto", (1500, 100, 1700, 500))
+        self.assertEqual((x0 + x1) // 2, 1600)
+        self.assertEqual(depth._crop_box((2000, 500), "auto", (1900, 100, 2000, 500))[2], 2000)
+
+    def test_auto_keeps_the_time_on_top_behind_a_head(self):
+        photo = Image.new("RGB", (600, 1200), (40, 90, 200))
+        mask = Image.new("L", photo.size, 0)
+        ImageDraw.Draw(mask).ellipse((240, 500, 360, 640), fill=255)
+        ImageDraw.Draw(mask).rectangle((180, 640, 420, 1200), fill=255)
+        depth.set_photo(photo, mask, NOW)
+        frame = depth.render(NOW, True)
+        self.assertEqual(frame["placement"], "top")
+        self.assertGreater(frame["coverage"], 0)
+        self.assertLessEqual(frame["coverage"], depth.COVERAGE_WARN)
+
+    def test_a_failed_cutout_says_why(self):
+        photo, _ = photo_and_mask()
+        with mock.patch.object(depth, "cutout_problem", return_value=None), \
+                mock.patch.object(depth, "make_mask", side_effect=MemoryError("out of memory")):
+            mask, error = depth.cut_out(photo)
+        self.assertIsNone(mask)
+        self.assertIn("out of memory", error)
+        meta = depth.set_photo(photo, None, NOW, error)
+        self.assertFalse(meta["cutout"])
+        self.assertIn("out of memory", depth.load()["cutoutError"])
+        with mock.patch.object(depth, "cutout_problem", return_value=None), \
+                mock.patch.object(depth, "make_mask", return_value=Image.new("L", photo.size, 0)):
+            self.assertEqual(depth.cut_out(photo), (None, "no person found in this photo"))
+        with mock.patch.object(depth, "cutout_problem", return_value="rembg won't load (ImportError: x)"):
+            self.assertEqual(depth.cut_out(photo)[1], "rembg won't load (ImportError: x)")
+
+    def test_retry_cutout_on_the_kept_photo(self):
+        photo, mask = photo_and_mask()
+        depth.set_photo(photo, None, NOW, "boom")
+        depth.update({"placement": "bottom"})
+        with mock.patch.object(depth, "cut_out", return_value=(None, "still broken")):
+            meta = depth.retry_cutout(NOW)
+        self.assertEqual((meta["cutoutError"], meta["placement"]), ("still broken", "bottom"))
+        with mock.patch.object(depth, "cut_out", return_value=(mask, None)):
+            meta = depth.retry_cutout(NOW)
+        self.assertTrue(meta["cutout"])
+        self.assertIsNone(meta["cutoutError"])
+        depth.clear()
+        with self.assertRaises(ValueError):
+            depth.retry_cutout(NOW)
+
     def test_twelve_hour_time(self):
         self.assertEqual(depth.time_text(datetime.datetime(2026, 10, 13, 0, 5), False), "12:05")
         self.assertEqual(depth.time_text(datetime.datetime(2026, 10, 13, 18, 30), False), "6:30")

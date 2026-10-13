@@ -38,6 +38,17 @@ class Report(unittest.TestCase):
     def setUp(self):
         system_health.workers.clear()
 
+    def test_depth_face_cutout_error_is_a_problem(self):
+        data = system_health.report(
+            db_with(""), web_app=True, auth=True, password_gate=True, radar_enabled=True,
+            backups=lambda: {"lastBackupAt": RECENT, "count": 3},
+            phone=lambda: {"available": True, "connected": False},
+            clock=lambda: {"enabled": True, "connected": True},
+            depth_face=lambda: {"hasPhoto": True, "cutout": False, "cutoutError": "MemoryError: out of memory"},
+        )
+        self.assertEqual(data["depthFace"]["cutoutError"], "MemoryError: out of memory")
+        self.assertIn("The depth face's photo has no cutout: MemoryError: out of memory.", data["problems"])
+
     def test_phone_connected_without_ble_is_a_problem(self):
         phone = {"available": True, "connected": True, "deviceName": "VK", "notifications": [{"message": "private"}],
                  "link": {"ble": False, "nowPlaying": "not asked", "subscribed": [], "lastError": None},

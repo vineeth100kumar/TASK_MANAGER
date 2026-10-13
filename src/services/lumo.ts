@@ -114,14 +114,16 @@ export const lumoApi = {
 };
 
 // The depth face (desk/depth.py on the Pi): a photo with the time tucked
-// behind the person. A preview in Sage for now; the clock doesn't show it yet.
+// behind the person. LUMO shows it on firmware 2.9; Sage shows the same preview.
 export type DepthPlacement = 'auto' | 'top' | 'middle' | 'bottom';
-export type DepthPhotoPosition = 'top' | 'center' | 'bottom';
+export type DepthPhotoPosition = 'auto' | 'top' | 'center' | 'bottom';
 
 export interface DepthFace {
   hasPhoto: boolean;
   cutout: boolean;              // the person was found and cut out
   cutoutAvailable: boolean;     // the Pi has the cutout tool installed
+  cutoutProblem: string | null; // why the cutout tool won't load, if it won't
+  cutoutError: string | null;   // why the last cutout failed, if it did
   placement: DepthPlacement;
   photoPosition: DepthPhotoPosition;
   updatedAt: string | null;
@@ -141,6 +143,7 @@ export const depthApi = {
   upload: (image: string) => post<{ depth: DepthFace }>('/api/desk/depth/photo', { image }).then(d => d.depth),
   update: (change: Partial<Pick<DepthFace, 'placement' | 'photoPosition'>>) =>
     call<{ depth: DepthFace }>('/api/desk/depth', { method: 'PUT', body: JSON.stringify(change) }).then(d => d.depth),
+  retryCutout: () => post<{ depth: DepthFace }>('/api/desk/depth/cutout', {}).then(d => d.depth),
   remove: () => call<{ depth: DepthFace }>('/api/desk/depth', { method: 'DELETE' }).then(d => d.depth),
 };
 
