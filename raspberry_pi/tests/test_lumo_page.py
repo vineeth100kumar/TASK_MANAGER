@@ -65,6 +65,24 @@ class RepeatDays(unittest.TestCase):
         self.assertTrue(a.once)
         self.assertEqual(Alarms.rolled(a, at(7, 1)), {"remindAt": None})
 
+    def test_the_clock_list_carries_each_alarms_days(self):
+        alarms = Alarms(TZ)
+        alarms.load([with_days(alarm("work", 7, 0), [0, 1, 2, 3, 4]), with_days(alarm("once", 9, 30), []),
+                     alarm("far", 6, 0, day=10), with_days(alarm("off", 8, 0, remind=""), [2])])
+        self.assertEqual(alarms.for_clock(at(6, 0)), [
+            {"h": 7, "m": 0, "w": 2, "d": 0b0011111},   # weekdays
+            {"h": 9, "m": 30, "w": 2, "d": 0},          # once: rung, then dropped
+            {"h": 6, "m": 0, "w": 5, "d": 127},         # three days out: still sent
+        ])
+
+    def test_alarm_sound_cycles_match_the_firmware(self):
+        # src/components/lumo/alarmSounds.ts is made from tones.h by lumo/tools/alarm_sounds.py.
+        shapes = (Path(__file__).resolve().parents[2] / "src" / "components" / "lumo" / "alarmSounds.ts").read_text()
+        from desk.alarms import TONE_CYCLE_MS, TONES
+        for tone in TONES:
+            self.assertIn(f"  {tone}: {{ cycleMs: {TONE_CYCLE_MS[tone]},", shapes)
+        self.assertIn("chime", settings.ALARM_TONES)
+
     def test_tone_volume_and_snooze_are_checked(self):
         a = Alarm(with_days(alarm(), [2], tone="rising", volume=40, snoozeMinutes=9), TZ)
         self.assertEqual((a.tone, a.volume, a.snooze), ("rising", 40, 9))
@@ -275,7 +293,10 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
     async def test_device_actions(self):
         self.assertTrue(await self.desk.device_do("identify"))
         self.assertTrue(await self.desk.device_do("tone", "chirp", 30))
-        self.assertEqual(self.link.last("TONE"), {"cmd": "TONE", "tone": "chirp", "volume": 30, "seconds": 4})
+        # One cycle, then quiet; older firmware plays it for the cycle's length, rounded up.
+        self.assertEqual(self.link.last("TONE"), {"cmd": "TONE", "tone": "chirp", "volume": 30, "cycles": 1, "seconds": 2})
+        self.assertTrue(await self.desk.device_do("tone", "dawn", 50))
+        self.assertEqual(self.link.last("TONE")["seconds"], 5)
         with self.assertRaises(ValueError):
             await self.desk.device_do("explode")
 

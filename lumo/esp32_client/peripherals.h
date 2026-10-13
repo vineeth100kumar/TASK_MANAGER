@@ -28,7 +28,8 @@ enum Haptic { HAP_TICK, HAP_HOLD, HAP_TAP, HAP_NOTIFY, HAP_REMINDER, HAP_SUCCESS
 void     hapticInit(uint8_t strength);                 // strength 0-100, 0 = silent effects off
 void     hapticPlay(Haptic h);                         // HAP_ALARM loops until hapticOff()
 void     hapticRing(AlarmTone tone, uint8_t volume);   // an alarm's sound, looped until hapticOff()
-void     hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds);   // a few seconds of it
+void     hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds, bool once);   // one cycle, or a few seconds
+AlarmTone hapticToneNamed(const char* name, AlarmTone fallback);   // "pulse", "chime"... (tones.h)
 bool     hapticPlayNamed(const char* name);            // "tick", "notify", "pulse"...; false if unknown
 void     hapticPulse(uint16_t ms);
 void     hapticSetStrength(uint8_t pct);

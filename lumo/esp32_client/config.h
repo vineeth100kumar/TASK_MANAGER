@@ -101,7 +101,8 @@
 #define ALARM_TONE_HZ      2700   // the buzzer's loudest pitch (Classic; the others move around it)
 #define ALARM_TONE_DUTY    50     // % on-time at full volume (a square wave is loudest at 50)
 #define ALARM_START_PCT    25     // first beeps at this % of full volume...
-#define ALARM_BUILD_MS     20000  // ...building to full over this long
+#define ALARM_BUILD_MS     20000  // ...building to full over this long (Pulse; each sound has its own, see tones.h)
+#define ALARM_URGENT_MS    120000 // still ringing after this much sound: the pauses between cycles halve
 
 // ===================== BUTTON VOLTAGE THRESHOLDS =====================
 #define V_OK    0.15f
@@ -120,7 +121,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.10.0"
+#define FW_VERSION "2.11.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -142,14 +143,19 @@ enum ClockStyle   { CLOCK_DIGITAL, CLOCK_MINIMAL, CLOCK_ANALOG,
                     CLOCK_DEPTH };
 
 // Alarms the clock rings by itself while it can't reach Sage.
-#define MAX_LOCAL_ALARMS 4
+#define MAX_LOCAL_ALARMS 8
 #define LOCAL_RING_MINUTES 10
 #define LOCAL_LATE_MINUTES 3    // an offline alarm still rings this many minutes late (the link can take ~35 s to be known dead)
-// w is the day it rings on, 0 Monday ... 6 Sunday, or -1 for any day.
-struct LocalAlarm { uint8_t h, m; int8_t w; };
+// w is the day it next rings on, 0 Monday ... 6 Sunday, or -1 for any day.
+// d is the days it repeats on (bit 0 Monday ... bit 6 Sunday); 0 rings once,
+// on day w, and is then dropped. So a clock cut off from Sage for days still
+// rings a weekday alarm every weekday.
+struct LocalAlarm { uint8_t h, m; int8_t w; uint8_t d; };
 
-// The alarm's sound, chosen per alarm in Sage (ALARM_RING's "tone").
-enum AlarmTone    { TONE_PULSE, TONE_CLASSIC, TONE_RISING, TONE_CHIRP };
+// The alarm's sound, chosen per alarm in Sage (ALARM_RING's "tone"). The
+// sounds themselves are in tones.h.
+enum AlarmTone    { TONE_PULSE, TONE_CLASSIC, TONE_RISING, TONE_CHIRP,
+                    TONE_CHIME, TONE_DAWN, TONE_MELODY, TONE_URGENT, TONE_COUNT };
 // The timer kept by Sage (TIMER's "state").
 enum ToolState    { TOOL_IDLE, TOOL_RUNNING, TOOL_PAUSED, TOOL_DONE };
 #define MAX_WORLD_CLOCKS 3

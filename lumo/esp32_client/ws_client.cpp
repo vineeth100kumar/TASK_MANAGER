@@ -123,14 +123,6 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   storeSaveClock(s);
 }
 
-static AlarmTone toneNamed(const char* name, AlarmTone fallback) {
-  if (!strcmp(name, "pulse"))   return TONE_PULSE;
-  if (!strcmp(name, "classic")) return TONE_CLASSIC;
-  if (!strcmp(name, "rising"))  return TONE_RISING;
-  if (!strcmp(name, "chirp"))   return TONE_CHIRP;
-  return fallback;
-}
-
 static void handleTextMessage(const String& payload) {
   if (!statePtr) return;
   LumoState& s = *statePtr;
@@ -166,9 +158,9 @@ static void handleTextMessage(const String& payload) {
     uint8_t n = 0;
     for (JsonObject a : doc["list"].as<JsonArray>()) {
       if (n >= MAX_LOCAL_ALARMS) break;
-      int h = a["h"] | -1, m = a["m"] | -1, w = a["w"] | -1;
+      int h = a["h"] | -1, m = a["m"] | -1, w = a["w"] | -1, d = a["d"] | 0;
       if (h < 0 || h > 23 || m < 0 || m > 59) continue;
-      list[n++] = { (uint8_t)h, (uint8_t)m, (int8_t)(w >= 0 && w <= 6 ? w : -1) };
+      list[n++] = { (uint8_t)h, (uint8_t)m, (int8_t)(w >= 0 && w <= 6 ? w : -1), (uint8_t)(d & 0x7F) };
     }
     uint8_t snooze = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     if (n != s.local_alarm_count || snooze != s.snooze_minutes ||
@@ -337,17 +329,19 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
     strlcpy(s.alarm_label, doc["label"] | "", sizeof(s.alarm_label));
-    s.alarm_tone   = toneNamed(doc["tone"] | "", s.alarm_tone);
+    s.alarm_tone   = hapticToneNamed(doc["tone"] | "", s.alarm_tone);
     s.alarm_volume = constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100);
     s.snooze_minutes = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     s.alarm_ringing = true;
     s.local_ringing = false;   // Sage has it now
   }
   else if (strcmp(cmd, "TONE") == 0) {
-    // A few seconds of an alarm sound, to choose one in Sage.
-    hapticPreview(toneNamed(doc["tone"] | "", s.alarm_tone),
+    // An alarm sound, to choose one in Sage: one cycle of it ("cycles": 1,
+    // Sage 2.11 on), else a few seconds.
+    hapticPreview(hapticToneNamed(doc["tone"] | "", s.alarm_tone),
                   constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100),
-                  constrain((int)(doc["seconds"] | 4), 1, 15));
+                  constrain((int)(doc["seconds"] | 4), 1, 15),
+                  (int)(doc["cycles"] | 0) > 0);
   }
   else if (strcmp(cmd, "TIMER") == 0) {
     const char* st = doc["state"] | "idle";

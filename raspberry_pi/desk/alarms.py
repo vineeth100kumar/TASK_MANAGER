@@ -26,8 +26,14 @@ from zoneinfo import ZoneInfo
 
 LABEL = "alarm"
 EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
-# The buzzer's alarm patterns (see HP_TONE_* in the firmware's peripherals.cpp).
-TONES = ("pulse", "classic", "rising", "chirp")
+# The buzzer's alarm sounds (the firmware's tones.h). Firmware before 2.11
+# has only the first four and plays its default for the others.
+TONES = ("pulse", "classic", "rising", "chirp", "chime", "dawn", "melody", "urgent")
+# How long one cycle of each sound runs (lumo/tools/alarm_sounds.py prints
+# them; tests check them against src/components/lumo/alarmSounds.ts).
+# Firmware 2.11 plays a preview once; older firmware gets this many seconds.
+TONE_CYCLE_MS = {"pulse": 1300, "classic": 1310, "rising": 1600, "chirp": 1169,
+                 "chime": 2740, "dawn": 4580, "melody": 2630, "urgent": 1290}
 # An alarm whose time passed while the Pi was off should ring tomorrow, not
 # the moment the power comes back. Anything older than this is rolled forward.
 GRACE_SECONDS = 300
@@ -117,7 +123,12 @@ class Alarms:
 
     def load(self, items: Iterable[dict]) -> None:
         self.alarms = [Alarm(i, self.tz) for i in items if is_alarm(i)]
-        self._rung &= {a.key for a in self.alarms}
+        keys = {a.key: a for a in self.alarms}
+        self._rung &= set(keys)
+        # The ringing alarm, as it is now (a new label or sound), or None when
+        # it was deleted, switched off or set for another time while ringing.
+        if self.ringing:
+            self.ringing = keys.get(self.ringing.key)
 
     def missed(self, now: datetime.datetime) -> List[Alarm]:
         """Alarms that should have rung a while ago, to roll forward."""
@@ -142,6 +153,28 @@ class Alarms:
         until = now + datetime.timedelta(hours=hours)
         soon = sorted((a for a in self.alarms if a.rings_at and now < a.rings_at <= until), key=lambda a: a.rings_at)
         return soon[:limit]
+
+    def for_clock(self, now: datetime.datetime, limit: int = 8) -> List[dict]:
+        """The ALARMS list: what the clock rings by itself while it can't
+        reach the Pi, soonest first. h:m on day w (0 is Monday) is the next
+        ring; d is the days it repeats on (bit 0 Monday), 0 for a one-off,
+        which firmware 2.11 rings once and drops, so the list stays right
+        however long the Pi is gone. A snoozed alarm is two entries: the
+        snooze, once, and the alarm on its days. Older firmware reads h, m
+        and w only, and keeps the first four."""
+        entries = []
+        for a in self.alarms:
+            if not a.rings_at or a.rings_at <= now:
+                continue
+            repeats = sum(1 << d for d in a.days)
+            snoozed = (a.rings_at.hour, a.rings_at.minute) != (a.h, a.m)
+            entries.append((a.rings_at, {"h": a.rings_at.hour, "m": a.rings_at.minute, "w": a.rings_at.weekday(),
+                                         "d": 0 if snoozed else repeats}))
+            if snoozed and repeats:
+                after = next_occurrence(a.h, a.m, a.rings_at, a.days)
+                entries.append((after, {"h": a.h, "m": a.m, "w": after.weekday(), "d": repeats}))
+        entries.sort(key=lambda e: e[0])
+        return [e[1] for e in entries[:limit]]
 
     def next(self, now: datetime.datetime) -> Optional[Alarm]:
         """The alarm that rings soonest, for the clock face."""
