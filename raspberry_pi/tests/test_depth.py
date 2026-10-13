@@ -159,15 +159,13 @@ class DepthTest(unittest.TestCase):
             self.assertEqual(depth.cut_out(photo)[1], "rembg won't load (ImportError: x)")
 
     def test_a_missing_runtime_is_a_problem(self):
-        real = __import__("importlib").import_module
-
-        def fake(name, *a, **k):
-            if name == "onnxruntime":
-                raise ModuleNotFoundError("No module named 'onnxruntime'")
-            return mock.MagicMock() if name == "rembg" else real(name, *a, **k)
-
-        with mock.patch("importlib.import_module", side_effect=fake):
-            self.assertIn("onnxruntime won't load", depth.cutout_problem())
+        # rembg calls sys.exit when onnxruntime is missing; that must not escape.
+        with mock.patch.dict(sys.modules, {"onnxruntime": None}):
+            self.assertIn("the cutout tool won't load", depth.cutout_problem())
+        photo, _ = photo_and_mask()
+        with mock.patch.object(depth, "cutout_problem", return_value=None), \
+                mock.patch.object(depth, "make_mask", side_effect=SystemExit(1)):
+            self.assertEqual(depth.cut_out(photo), (None, "SystemExit: 1"))
 
     def test_retry_cutout_on_the_kept_photo(self):
         photo, mask = photo_and_mask()
