@@ -79,11 +79,12 @@ def cutout_problem() -> Optional[str]:
     """Why the cutout can't run on this Pi, or None when it can."""
     import importlib
     importlib.invalidate_caches()  # rembg may have been installed since Sage started
-    try:
-        import rembg  # noqa: F401
-        return None
-    except Exception as e:
-        return f"rembg won't load ({e.__class__.__name__}: {e})"[:300]
+    for name in ("rembg", "onnxruntime"):  # rembg loads without its runtime but can't run
+        try:
+            importlib.import_module(name)
+        except Exception as e:
+            return f"{name} won't load ({e.__class__.__name__}: {e})"[:300]
+    return None
 
 
 def cutout_available() -> bool:
