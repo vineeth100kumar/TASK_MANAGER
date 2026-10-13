@@ -120,7 +120,10 @@ class V:
 class FakeChar:
     def __init__(self, fail_notify=None, fail_write=None):
         self.fail_notify, self.fail_write = fail_notify, fail_write
-        self.notified, self.writes = 0, []
+        self.notified, self.stopped, self.writes = 0, 0, []
+
+    async def call_stop_notify(self):
+        self.stopped += 1
 
     async def call_start_notify(self):
         self.notified += 1
@@ -191,6 +194,29 @@ class Subscribing(unittest.TestCase):
         ams.fail_write = None
         asyncio.run(link._subscribe(objects, dev))
         self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
+
+    def test_invalid_state_restarts_the_songs_notify(self):
+        """BlueZ said Notifying=yes but the phone answered AMS 0xA0 (not
+        listening): stop and start the notify so BlueZ tells the phone again."""
+        dev = "/org/bluez/hci0/dev_X"
+        path = f"{dev}/service1/char0"
+        ams = FakeChar(fail_write="Operation failed with ATT error: 0xa0")
+        objects = {path: {"org.bluez.GattCharacteristic1": {"UUID": V(phone_link.AMS_ENTITY_UPDATE), "Notifying": V(True)}}}
+        link = phone_link.PhoneLink()
+        props = FakeProps()
+
+        async def char(_path):
+            return FakeObj(ams, props)
+        link._char = char
+        with mock.patch.object(phone_link, "AMS_SETTLE", 0):
+            asyncio.run(link._subscribe(objects, dev))
+            self.assertEqual((ams.stopped, ams.notified), (0, 0))  # BlueZ said it was on
+            self.assertTrue(link._ams_not_listening)
+            ams.fail_write = None
+            asyncio.run(link._subscribe(objects, dev))
+        self.assertEqual((ams.stopped, ams.notified), (1, 1))
+        self.assertFalse(link._ams_not_listening)
+        self.assertEqual(link.link["nowPlaying"], "asked")
 
 
 class Resubscribing(unittest.TestCase):

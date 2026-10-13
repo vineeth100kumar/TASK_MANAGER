@@ -53,6 +53,8 @@ ATTR_REQUEST = bytes([0]) + bytes([1]) + struct.pack("<H", 64) + bytes([3]) + st
 
 # AMS entities and attributes.
 AMS_PLAYER, AMS_TRACK = 0, 2
+# Seconds to let the phone take a fresh notify before asking it for songs.
+AMS_SETTLE = 1.0
 COMMANDS = {"play": 0, "pause": 1, "toggle": 2, "next": 3, "previous": 4}
 
 Broadcast = Callable[[dict], Awaitable[None]]
@@ -71,6 +73,8 @@ HINTS = {
                      "the phone has to reconnect to the Pi's 'Sage Companion' over BLE",
     "0x0e": "the phone refused the request (ATT 'Unlikely Error'); usually the phone is still setting up "
             "encryption or hasn't allowed the Pi to see notifications and media",
+    "0xa0": "the phone doesn't think the Pi is listening for songs yet (AMS 'Invalid State'); "
+            "the Pi turns the songs subscription off and on and asks again",
     "0x05": "the phone wants the Pi paired again (insufficient authentication)",
     "0x0f": "the link isn't encrypted yet (insufficient encryption)",
     "in progress": "BlueZ is still starting this from an earlier try",
@@ -167,6 +171,7 @@ class PhoneLink:
         self._adv_exported = False
         self._adv_last_try = 0.0
         self._subscribed_at = 0.0
+        self._ams_not_listening = False  # the phone answered AMS 0xA0 last time
         self.media_at = 0.0  # when the phone last sent a song detail (epoch s)
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
@@ -412,14 +417,25 @@ class PhoneLink:
         # first failure after a restart made every retry fail the same way and
         # the clock stopped getting songs.
         # Data Source must be listening before Notification Source starts.
+        if AMS_ENTITY_UPDATE in self._chars and self._ams_not_listening:
+            # The phone said the Pi isn't listening for songs (AMS 0xA0) while
+            # BlueZ says it is: BlueZ kept an old subscription and didn't tell
+            # the phone again. Stopping and starting makes BlueZ write it anew.
+            await self._try(f"turning off {CHAR_NAMES[AMS_ENTITY_UPDATE]}", self._chars[AMS_ENTITY_UPDATE].call_stop_notify())
+            notifying[AMS_ENTITY_UPDATE] = False
+        started_ams = False
         for uuid in (ANCS_DATA_SOURCE, ANCS_NOTIFICATION_SOURCE, AMS_ENTITY_UPDATE):
             if uuid in self._chars and not notifying.get(uuid):
                 await self._try(f"turning on {CHAR_NAMES.get(uuid, uuid)}", self._chars[uuid].call_start_notify())
+                started_ams = started_ams or uuid == AMS_ENTITY_UPDATE
         if AMS_ENTITY_UPDATE in self._chars:
+            if started_ams:
+                await asyncio.sleep(AMS_SETTLE)  # the phone answers 0xA0 to a request sent straight after
             for entity in (bytes([AMS_PLAYER, 0, 1, 2]), bytes([AMS_TRACK, 0, 1, 2, 3])):
                 what = "asking for the player" if entity[0] == AMS_PLAYER else "asking for the track"
                 if not await self._try(f"{what} on {CHAR_NAMES[AMS_ENTITY_UPDATE]}",
                                        self._chars[AMS_ENTITY_UPDATE].call_write_value(entity, {})):
+                    self._ams_not_listening = "0xa0" in str((self.link.get("lastError") or {}).get("error", "")).lower()
                     self._set_link(nowPlaying="failed, retrying in 5 s")
                     # Without this request the phone never sends songs, so
                     # forget the subscription and ask again on the next tick
@@ -427,6 +443,7 @@ class PhoneLink:
                     self._chars.clear()
                     return
         self._subscribed_at = time.time()
+        self._ams_not_listening = False
         self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
         self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
                           + ", ".join(self.link["subscribed"]) + ". Now playing will update on the next song change.")
