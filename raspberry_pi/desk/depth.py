@@ -31,8 +31,10 @@ import io
 import json
 import logging
 import os
+import signal
+import subprocess
 import sys
-import threading
+import time
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -69,22 +71,82 @@ TIME_SIZE = 104
 DATE_SIZE = 14
 _TIME_TOP = {"top": 14, "middle": 58, "bottom": 104}
 
-_session = None
-_session_lock = threading.Lock()
 
 
 # --- the cutout ---------------------------------------------------------
 
-def cutout_problem() -> Optional[str]:
-    """Why the cutout can't run on this Pi, or None when it can."""
-    import importlib
-    importlib.invalidate_caches()  # rembg may have been installed since Sage started
+# rembg and its runtime are native code; on the Pi a bad build crashed Python
+# outright (a bus error), which no `except` can catch and which took Sage down
+# with it. So they only ever load in a child process: a crash there fails the
+# cutout, never Sage.
+CHECK_TIMEOUT = 180
+CUTOUT_TIMEOUT = 900  # the first cutout downloads the model
+_problem: Optional[str] = None
+_checked_at = 0.0
+
+
+def _run_child(args: list, timeout: int) -> Optional[str]:
+    """Run this file as a child with `args`; None if it worked, else why not."""
     try:
-        import onnxruntime  # noqa: F401  rembg's runtime; without it rembg calls sys.exit
-        from rembg import new_session, remove  # noqa: F401  the names make_mask needs
-    except (Exception, SystemExit) as e:
-        return f"the cutout tool won't load: {_why(e)}"
-    return None
+        done = subprocess.run(
+            # -P: don't put desk/ on the child's path, where run.py and friends could shadow modules
+            # -X faulthandler: a crash prints where it happened.
+            [sys.executable, "-P", "-X", "faulthandler", str(Path(__file__).resolve()), *args],
+                              capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return f"timed out after {timeout} s"
+    except OSError as e:
+        return f"couldn't start Python ({e})"
+    if done.returncode == 0:
+        return None
+    lines = [l for l in (done.stderr or "").strip().splitlines() if l.strip()]
+    last = lines[-1].strip() if lines else ""
+    if done.returncode < 0:
+        # faulthandler lists the crashed thread's frames, most recent first
+        frames = [l.strip() for l in lines if l.strip().startswith('File "') and '"<frozen' not in l]
+        last = frames[0] if frames else last
+        try:
+            name = signal.Signals(-done.returncode).name
+        except ValueError:
+            name = f"signal {-done.returncode}"
+        return (f"crashed ({name})" + (f": {last}" if last else ""))[:400]
+    return (last or f"exited with code {done.returncode}")[:400]
+
+
+def cutout_problem(refresh: bool = False) -> Optional[str]:
+    """Why the cutout can't run on this Pi, or None when it can. Checked in a
+    child process and remembered for ten minutes (it takes a few seconds)."""
+    global _problem, _checked_at
+    if refresh or not _checked_at or time.monotonic() - _checked_at > 600:
+        why = _run_child(["check"], CHECK_TIMEOUT)
+        _problem = f"the cutout tool won't load: {why}" if why else None
+        _checked_at = time.monotonic()
+    return _problem
+
+
+def cutout_available() -> bool:
+    return cutout_problem() is None
+
+
+def make_mask(photo) -> "Image.Image":
+    """The person in `photo` as a greyscale mask (white = person), made in a
+    child process. Raises RuntimeError with the reason when that fails. The
+    first call downloads the model (about 170 MB), so it can take a while."""
+    DEPTH_DIR.mkdir(parents=True, exist_ok=True)
+    src, out = DEPTH_DIR / "cutout-in.png", DEPTH_DIR / "cutout-out.png"
+    try:
+        photo.convert("RGB").save(src)
+        why = _run_child(["cutout", str(src), str(out)], CUTOUT_TIMEOUT)
+        if why:
+            raise RuntimeError(why)
+        with Image.open(out) as mask:
+            return mask.convert("L")
+    finally:
+        for f in (src, out):
+            try:
+                f.unlink()
+            except FileNotFoundError:
+                pass
 
 
 def _why(e: BaseException) -> str:
@@ -96,32 +158,18 @@ def _why(e: BaseException) -> str:
     return text[:400]
 
 
-def cutout_available() -> bool:
-    return cutout_problem() is None
-
-
-def make_mask(photo) -> Optional["Image.Image"]:
-    """The person in `photo` as a greyscale mask (white = person). Raises
-    when rembg can't load or run. The first call loads the model (and the very
-    first one downloads it, about 170 MB), so it can take a while."""
-    global _session
-    from rembg import new_session, remove
-    with _session_lock:
-        if _session is None:
-            _session = new_session(MODEL)
-        mask = remove(photo.convert("RGB"), session=_session, only_mask=True, post_process_mask=True)
-    return mask.convert("L")
-
-
 def cut_out(photo) -> Tuple[Optional["Image.Image"], Optional[str]]:
     """make_mask that never raises: (mask, None) or (None, why it failed),
     so the photo is kept either way and Sage can say what went wrong."""
-    problem = cutout_problem()
+    problem = cutout_problem(refresh=True)
     if problem:
         return None, problem
     try:
         mask = make_mask(photo)
-    except (Exception, SystemExit) as e:  # a failed model download, too little memory, a broken install
+    except RuntimeError as e:  # a failed model download, too little memory, a broken install
+        log.warning("depth cutout failed: %s", e)
+        return None, str(e)
+    except Exception as e:
         log.exception("depth cutout failed")
         return None, _why(e)
     if mask.getextrema()[1] < 128:
@@ -436,3 +484,18 @@ def describe(now: datetime.datetime, hour24: bool) -> dict:
                 "height": HEIGHT,
             }
     return out
+
+
+def _child_main(args: list) -> int:
+    """The child process: `check` loads rembg, `cutout IN OUT` writes IN's mask to OUT."""
+    import onnxruntime  # noqa: F401  rembg's runtime; without it rembg calls sys.exit
+    from rembg import new_session, remove
+    if args[:1] == ["cutout"]:
+        photo = Image.open(args[1]).convert("RGB")
+        mask = remove(photo, session=new_session(MODEL), only_mask=True, post_process_mask=True)
+        mask.convert("L").save(args[2])
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(_child_main(sys.argv[1:]))

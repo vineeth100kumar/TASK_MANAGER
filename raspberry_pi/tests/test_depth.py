@@ -158,14 +158,24 @@ class DepthTest(unittest.TestCase):
         with mock.patch.object(depth, "cutout_problem", return_value="rembg won't load (ImportError: x)"):
             self.assertEqual(depth.cut_out(photo)[1], "rembg won't load (ImportError: x)")
 
-    def test_a_missing_runtime_is_a_problem(self):
-        # rembg calls sys.exit when onnxruntime is missing; that must not escape.
-        with mock.patch.dict(sys.modules, {"onnxruntime": None}):
-            self.assertIn("the cutout tool won't load", depth.cutout_problem())
-        photo, _ = photo_and_mask()
-        with mock.patch.object(depth, "cutout_problem", return_value=None), \
-                mock.patch.object(depth, "make_mask", side_effect=SystemExit(1)):
-            self.assertEqual(depth.cut_out(photo), (None, "SystemExit: 1"))
+    def test_the_cutout_tool_crashing_never_takes_sage_down(self):
+        # On the Pi rembg's native code crashed Python with a bus error, so it
+        # only loads in a child process; here the child dies the same way.
+        crash = mock.Mock(returncode=-7, stderr="Fatal Python error: Bus error\n")
+        with mock.patch.object(depth.subprocess, "run", return_value=crash):
+            self.assertIn("crashed (SIGBUS)", depth.cutout_problem(refresh=True))
+            photo, _ = photo_and_mask()
+            mask, error = depth.cut_out(photo)
+        self.assertIsNone(mask)
+        self.assertIn("SIGBUS", error)
+        failed = mock.Mock(returncode=1, stderr="Traceback...\nImportError: cannot import name 'new_session'\n")
+        with mock.patch.object(depth.subprocess, "run", return_value=failed):
+            self.assertIn("ImportError: cannot import name 'new_session'", depth.cutout_problem(refresh=True))
+        with mock.patch.object(depth.subprocess, "run", side_effect=depth.subprocess.TimeoutExpired("python", 5)):
+            self.assertIn("timed out", depth.cutout_problem(refresh=True))
+        with mock.patch.object(depth.subprocess, "run", return_value=mock.Mock(returncode=0, stderr="")):
+            self.assertIsNone(depth.cutout_problem(refresh=True))
+            self.assertIsNone(depth.cutout_problem())  # remembered, no second child
 
     def test_retry_cutout_on_the_kept_photo(self):
         photo, mask = photo_and_mask()
