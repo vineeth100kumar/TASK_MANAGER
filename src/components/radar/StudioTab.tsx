@@ -4,6 +4,7 @@ import { RADAR_EVENT, RadarSignal, ResearchJob, ResearchList, researchApi, timeA
 import { Dossier, Idea } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { Panel, ScoreRing, eyebrow, primaryButton } from './parts';
+import { Select } from '../common/Select';
 
 interface StudioTabProps {
   seedTheme: string;
@@ -109,11 +110,11 @@ export function StudioTab({ seedTheme, signals, dossiers, ideas, onOpenIdea, onO
               className="w-full bg-transparent outline-none text-[14px] text-gray-900 dark:text-white placeholder:text-gray-400" />
           </label>
           <div className="flex gap-2">
-            <select value={depth} onChange={e => setDepth(e.target.value as 'brief' | 'memo')} aria-label="Depth"
+            <Select value={depth} onChange={v => setDepth(v as 'brief' | 'memo')} aria-label="Depth"
               className="px-3 py-2.5 rounded-2xl text-[13px] font-semibold text-gray-600 dark:text-gray-300 surface-item outline-none">
               <option value="brief">Brief</option>
               <option value="memo">Partner memo</option>
-            </select>
+            </Select>
             <button type="submit" disabled={starting || theme.trim().length < 3 || left === 0} className={`${primaryButton} !rounded-2xl !px-4`}>
               {starting ? <LoaderCircle size={14} className="animate-spin" /> : <Sparkles size={14} />} {busy ? 'Queue' : 'Research'}
             </button>

@@ -5,6 +5,9 @@ import { api } from '../../services/api';
 import { WorkItem } from '../../services/types';
 import { FOCUS_LIMIT } from '../../services/constants';
 import { useToast } from '../../context/ToastContext';
+import { formatDateRange } from '../../utils/dateUtils';
+import { withTime } from '../../utils/reminders';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface Props {
   onClose: () => void;
@@ -12,6 +15,7 @@ interface Props {
 }
 
 export function MorningPickThree({ onClose, onNavigateView }: Props) {
+  useEscapeKey(onClose);
   const [candidates, setCandidates] = useState<WorkItem[]>([]);
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [saving, setSaving] = useState(false);
@@ -70,13 +74,13 @@ export function MorningPickThree({ onClose, onNavigateView }: Props) {
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim"
         onClick={onClose}
       >
         <motion.div
           initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          className="w-full max-w-md mx-4 mb-4 sm:mb-0 bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl overflow-hidden"
+          className="w-full max-w-md mx-4 mb-4 sm:mb-0 bg-white dark:bg-[#1c1c1e] rounded-3xl shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8)] ring-1 ring-black/5 dark:ring-white/10 overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           <div className="px-6 pt-6 pb-4 flex items-center gap-3">
@@ -84,14 +88,14 @@ export function MorningPickThree({ onClose, onNavigateView }: Props) {
               <Sun className="w-6 h-6 text-amber-500" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Pick your 3</h2>
-              <p className="text-sm text-zinc-500">What matters most today?</p>
+              <h2 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">Pick your 3</h2>
+              <p className="text-sm text-gray-500">What matters most today?</p>
             </div>
           </div>
 
           <div className="px-6 pb-2 max-h-[50vh] overflow-y-auto">
             {candidates.length === 0 && (
-              <p className="text-sm text-zinc-400 py-8 text-center">Nothing due today — enjoy the space.</p>
+              <p className="text-sm text-gray-400 py-8 text-center">Nothing due today — enjoy the space.</p>
             )}
             {candidates.map(item => {
               const selected = picked.has(item.id);
@@ -101,20 +105,20 @@ export function MorningPickThree({ onClose, onNavigateView }: Props) {
                   onClick={() => toggle(item.id)}
                   className={`w-full flex items-center gap-3 px-3 py-3 rounded-xl mb-1 text-left transition-colors ${
                     selected
-                      ? 'bg-indigo-50 dark:bg-indigo-900/30 ring-1 ring-indigo-300 dark:ring-indigo-700'
-                      : 'hover:bg-zinc-50 dark:hover:bg-zinc-800'
+                      ? 'bg-blue-50 dark:bg-blue-500/10 ring-1 ring-blue-300 dark:ring-blue-500/40'
+                      : 'hover:bg-gray-50 dark:hover:bg-white/[0.05]'
                   }`}
                 >
                   <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center flex-shrink-0 transition-colors ${
-                    selected ? 'bg-indigo-500 border-indigo-500 text-white' : 'border-zinc-300 dark:border-zinc-600'
+                    selected ? 'bg-blue-600 border-blue-600 text-white' : 'border-gray-300 dark:border-gray-600'
                   }`}>
                     {selected && <Check className="w-4 h-4" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{item.title}</p>
+                    <p className="text-sm font-medium text-gray-900 dark:text-white truncate">{item.title}</p>
                     {item.dueDate && (
-                      <p className="text-xs text-zinc-400 mt-0.5">
-                        {item.dueTime ? `${item.dueDate} ${item.dueTime}` : item.dueDate}
+                      <p className="text-xs text-gray-400 mt-0.5">
+                        {withTime(formatDateRange(null, item.dueDate), item.dueTime)}
                       </p>
                     )}
                   </div>
@@ -124,14 +128,14 @@ export function MorningPickThree({ onClose, onNavigateView }: Props) {
             })}
           </div>
 
-          <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-            <button onClick={onClose} className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+          <div className="px-6 py-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+            <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
               Skip
             </button>
             <button
               onClick={confirm}
               disabled={saving || picked.size === 0}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-medium bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 transition-colors"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-600/25 disabled:opacity-40 font-semibold transition-colors"
             >
               {saving ? 'Saving…' : `Focus on ${picked.size}`}
               <ChevronRight className="w-4 h-4" />

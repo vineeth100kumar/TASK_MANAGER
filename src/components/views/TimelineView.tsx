@@ -1,6 +1,7 @@
 import { Flag, Calendar as CalendarIcon, CheckCircle2, Circle, Clock, MapPin, Bell, ChevronRight, Target } from 'lucide-react';
 import { PRIORITIES } from '../../services/constants';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
+import { formatClock } from '../../utils/reminders';
 
 interface TimelineViewProps {
   tasks: any[];
@@ -163,12 +164,12 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
                           )}
                           {item.startAt && (
                             <span className="text-xs font-semibold text-purple-600 dark:text-purple-400">
-                              {new Date(item.startAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {formatClock(item.startAt)}
                             </span>
                           )}
                           {item.remindAt && (
                             <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
-                              {new Date(item.remindAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              {formatClock(item.remindAt)}
                             </span>
                           )}
                           {item.priority && item.entityType === 'task' && (

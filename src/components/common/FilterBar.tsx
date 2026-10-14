@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { api } from '../../services/api';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { Select } from './Select';
 
 interface FilterBarProps {
   filters: any;
@@ -55,25 +56,25 @@ export function FilterBar({ filters, setFilters, entityTypeCounts = {} }: Filter
       </div>
 
       {/* Priority Dropdown Filter */}
-      <select value={currentPriority} onChange={e => setFilters({ ...filters, priority: e.target.value })}
+      <Select value={currentPriority} onChange={v => setFilters({ ...filters, priority: v })}
         className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/5 text-gray-700 dark:text-gray-300 outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 font-semibold">
         {priorities.map(p => <option key={p.id} value={p.id} className="text-gray-900">{p.label}</option>)}
-      </select>
+      </Select>
 
       {/* Status Dropdown Filter */}
-      <select value={currentStatus} onChange={e => setFilters({ ...filters, status: e.target.value })}
+      <Select value={currentStatus} onChange={v => setFilters({ ...filters, status: v })}
         className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/5 text-gray-700 dark:text-gray-300 outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 font-semibold">
         {statuses.map(s => <option key={s.id} value={s.id} className="text-gray-900">{s.label}</option>)}
-      </select>
+      </Select>
 
       {/* Tag filter: only once some item has a tag */}
       {(tags.length > 0 || currentTag) && (
-        <select value={currentTag} onChange={e => setFilters({ ...filters, tag: e.target.value })} aria-label="Filter by tag"
+        <Select value={currentTag} onChange={v => setFilters({ ...filters, tag: v })} aria-label="Filter by tag"
           className="px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/5 text-gray-700 dark:text-gray-300 outline-none cursor-pointer focus:ring-2 focus:ring-blue-500 font-semibold">
           <option value="" className="text-gray-900">All tags</option>
           {currentTag && !tags.some(t => t.tag === currentTag) && <option value={currentTag} className="text-gray-900">#{currentTag}</option>}
           {tags.map(t => <option key={t.tag} value={t.tag} className="text-gray-900">#{t.tag} ({t.count})</option>)}
-        </select>
+        </Select>
       )}
 
       {/* Reset filters if any active */}

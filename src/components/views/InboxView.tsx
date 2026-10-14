@@ -16,6 +16,9 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { formatDateRange } from '../../utils/dateUtils';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 import { InboxTriage } from './InboxTriage';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface InboxViewProps {
   lifeContext?: LifeContext;
@@ -28,6 +31,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   // Celebrate inbox zero only when it was reached during this visit.
   const hadItems = useRef(false);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
+  const closeClarify = React.useCallback(() => setClarifyingItem(null), []);
+  useEscapeKey(closeClarify, !!clarifyingItem);
   const [isTriaging, setIsTriaging] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -161,7 +166,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           }}
           className="px-4 py-2.5 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
-          <Plus size={14} /> Add Item (N)
+          <Plus size={14} /> Add item <kbd className="ml-0.5 px-1.5 rounded-md bg-white/20 text-[10.5px] font-semibold leading-[18px]">N</kbd>
         </button>
         </div>
       </div>
@@ -275,7 +280,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <Sparkles size={15} />
                   <span>Quick Clarify</span>
                 </div>
-                <button onClick={() => setClarifyingItem(null)} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+                <button type="button" onClick={() => setClarifyingItem(null)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
               </div>
 
               <div>
@@ -311,10 +316,10 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Project / Area</label>
-                    <select 
+                    <Select 
                       value={targetProjectId || targetAreaId}
-                      onChange={e => {
-                        const val = e.target.value;
+                      onChange={v => {
+                        const val = v;
                         const isProj = projects.some(p => p.id === val);
                         if (isProj) {
                           setTargetProjectId(val);
@@ -333,15 +338,14 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                       <optgroup label="Life Areas">
                         {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </optgroup>
-                    </select>
+                    </Select>
                   </div>
 
                   <div>
                     <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Target Date</label>
-                    <input 
-                      type="date"
+                    <DatePicker
                       value={targetDueDate}
-                      onChange={e => setTargetDueDate(e.target.value)}
+                      onChange={v => setTargetDueDate(v)}
                       className="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/10 text-xs font-semibold outline-none dark:text-white"
                     />
                   </div>

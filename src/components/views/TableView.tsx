@@ -57,8 +57,8 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                   <td className="px-6 py-4 text-gray-500 text-xs font-semibold">
                     {task.project?.name || task.area?.name || 'General'}
                   </td>
-                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.dueDate ? formatDisplayDate(task.dueDate) : '-'}</td>
-                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.estimated || '-'}</td>
+                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.dueDate ? formatDisplayDate(task.dueDate) : <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
+                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.estimated || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
                 </tr>
               );
             })}

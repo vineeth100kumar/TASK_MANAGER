@@ -125,7 +125,7 @@ export function SyncDiagnosticsModal({ onClose }: SyncDiagnosticsModalProps) {
             <Database size={20} className="text-blue-500" />
             <h2 className="font-bold text-lg text-gray-900 dark:text-white">Data & Sync Diagnostics</h2>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
         </div>
 
         {/* Tab Navigator */}

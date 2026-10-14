@@ -3,6 +3,8 @@ import { Lightbulb, Moon, Vibrate } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
 import { FACES } from './ClockTab';
 import { Panel, Row, Segmented, Slider, Toggle, selectCls } from './parts';
+import { Select } from '../common/Select';
+import { TimePicker } from '../common/TimePicker';
 
 const MODES: { id: string; name: string; hint: string; swatch: string }[] = [
   { id: 'AUTO', name: 'Auto', hint: 'Each face and screen has its own calm light', swatch: 'bg-gradient-to-br from-sky-400 via-amber-300 to-rose-400' },
@@ -45,18 +47,18 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
           <div className="grid grid-cols-2 gap-3">
             <label className="space-y-1 block">
               <span className="text-[13px] font-medium text-gray-500">From</span>
-              <input type="time" value={n.start} onChange={e => e.target.value && save({ night: { start: e.target.value } })} className={`${selectCls} w-full tabular-nums`} />
+              <TimePicker clearable={false} value={n.start} onChange={v => v && save({ night: { start: v } })} className={`${selectCls} w-full tabular-nums`} />
             </label>
             <label className="space-y-1 block">
               <span className="text-[13px] font-medium text-gray-500">Until</span>
-              <input type="time" value={n.end} onChange={e => e.target.value && save({ night: { end: e.target.value } })} className={`${selectCls} w-full tabular-nums`} />
+              <TimePicker clearable={false} value={n.end} onChange={v => v && save({ night: { end: v } })} className={`${selectCls} w-full tabular-nums`} />
             </label>
           </div>
           <Row title="Face at night">
-            <select className={selectCls} value={n.face} onChange={e => save({ night: { face: e.target.value } })}>
+            <Select className={selectCls} value={n.face} onChange={v => save({ night: { face: v } })}>
               <option value="">Keep the usual face</option>
               {FACES.map(f => <option key={f.id} value={f.id}>{f.name}</option>)}
-            </select>
+            </Select>
           </Row>
           <div className="space-y-2">
             <div className="text-[13px] font-medium text-gray-500">Ring at night</div>
