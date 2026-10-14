@@ -14,6 +14,8 @@ from desk.link import ClockLink, load_token
 
 log = logging.getLogger("desk")
 
+BIND_RETRY = 5   # seconds between tries to open the clock's port
+
 link: Optional[ClockLink] = None
 desk: Optional[Desk] = None
 
@@ -28,10 +30,16 @@ async def run(now: Callable[[], datetime.datetime], events, phone) -> None:
     notifier.clock_reminder = desk.clock_reminder
     jobs = asyncio.create_task(desk.run())
     try:
-        await link.serve()
-    except OSError as e:
-        # Most likely LUMO's old server still holds the port.
-        log.error("Desk clock link could not start: %s", e)
+        while True:
+            try:
+                await link.serve()
+                break
+            except OSError as e:
+                # The port is still held (Sage restarting while the old one
+                # lets go, or LUMO's old server): keep trying, so the clock
+                # can always get back in.
+                log.error("Desk clock link could not start: %s; trying again in %ss", e, BIND_RETRY)
+                await asyncio.sleep(BIND_RETRY)
     finally:
         notifier.clock_reminder = None
         jobs.cancel()

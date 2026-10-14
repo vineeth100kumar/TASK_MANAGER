@@ -34,6 +34,7 @@
 #define LINK_PING_MS        10000   // a ping this often
 #define LINK_DEAD_MS        35000   // nothing from the Pi for this long: the link is gone
 #define LINK_HELLO_MS       10000   // the Pi must accept the pairing code within this
+#define LINK_CONNECT_MS     3000    // reaching the Pi and its handshake, each give up after this
 #define LINK_RETRY_MIN_MS   1000    // first retry after a drop...
 #define LINK_RETRY_MAX_MS   30000   // ...doubling up to this (with a little randomness)
 #define WIFI_REJOIN_MS      20000   // Wi-Fi gone this long: join the network again
@@ -121,7 +122,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.11.0"
+#define FW_VERSION "2.12.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

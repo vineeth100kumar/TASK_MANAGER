@@ -166,6 +166,10 @@ class ClockLink:
         text = f"{error or ''} {reason}".lower()
         if "keepalive" in text or "ping timeout" in text:
             return "the clock stopped answering pings"
+        if code == 1002:
+            # Firmware before 2.12: its websocket library lost its place when
+            # Wi-Fi split a frame, which a burst after connecting always did.
+            return "the clock's firmware misread the data (protocol error; update to 2.12)"
         if code in (None, 1006):
             return "the connection broke without a goodbye (Wi-Fi or power)"
         if code in (1000, 1001):

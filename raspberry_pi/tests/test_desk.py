@@ -302,6 +302,7 @@ class Pairing(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ClockLink._why(Sock(1011, "keepalive ping timeout"), None), "the clock stopped answering pings")
         self.assertIn("without a goodbye", ClockLink._why(Sock(None), None))
         self.assertEqual(ClockLink._why(Sock(4000, "odd"), None), "closed with code 4000 (odd)")
+        self.assertIn("update to 2.12", ClockLink._why(Sock(1002), None))
 
     async def test_a_failing_handler_keeps_the_connection(self):
         async def broken(_button):
