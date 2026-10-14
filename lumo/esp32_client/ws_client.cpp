@@ -6,16 +6,15 @@
 #include "store.h"
 
 #include <WiFi.h>
-#include <ArduinoWebsockets.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <esp_system.h>
 
 static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 
-using namespace websockets;
+#include "lumo_socket.h"
 
-static WebsocketsClient client;
+static LumoSocket client;   // our own websocket client (lumo_socket.h says why)
 static LumoState* statePtr = nullptr;
 static bool isConnected = false;
 
@@ -123,12 +122,12 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   storeSaveClock(s);
 }
 
-static void handleTextMessage(const String& payload) {
+static void handleTextMessage(const char* payload, size_t len) {
   if (!statePtr) return;
   LumoState& s = *statePtr;
 
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, payload);
+  DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
     Serial.printf("[WS] JSON parse error: %s\n", err.c_str());
     return;
@@ -387,7 +386,7 @@ static void handleTextMessage(const String& payload) {
   }
   else if (strcmp(cmd, "REBOOT") == 0) {
     Serial.println("[WS] Restarting, as Sage asked");
-    client.close();
+    client.close(1001);
     delay(300);
     ESP.restart();
   }
@@ -448,51 +447,55 @@ void wsInit(LumoState& state) {
   statePtr = &state;
   clockSetUtcOffset(state.utc_off);
 
-  client.onMessage([](WebsocketsMessage msg) {
+  client.onText = [](const char* text, size_t len) {
     lastHeard = millis();
-    if (msg.isText()) {
-      handleTextMessage(msg.data());
-    } else if (msg.isBinary()) {
-      handleBinaryMessage((const uint8_t*)msg.c_str(), msg.length());
-    }
-  });
+    handleTextMessage(text, len);
+  };
+  client.onBinary = [](const uint8_t* data, size_t len) {
+    lastHeard = millis();
+    handleBinaryMessage(data, len);
+  };
+  client.onPing = []() { lastHeard = millis(); };
+  client.onPong = []() {
+    lastHeard = millis();
+    rttMs = (int)(millis() - lastPingSent);
+  };
+  client.onClose = [](uint16_t code) {
+    if (!isConnected) return;   // linkDown already said why
+    char why[40];
+    if (statePtr && statePtr->pair_refused) strlcpy(why, "Sage refused the pairing code", sizeof(why));
+    else if (code == 1006) strlcpy(why, "the link broke", sizeof(why));
+    else snprintf(why, sizeof(why), "closed (%u)", code);
+    linkDown(why);
+  };
+}
 
-  client.onEvent([](WebsocketsEvent event, String data) {
-    if (event == WebsocketsEvent::ConnectionOpened) {
-      Serial.println("[WS] Connected to Pi server!");
-      isConnected = true;
-      openedAt = lastHeard = lastPingSent = millis();
-      // The first frame must be HELLO with the pairing code, or Sage hangs up.
-      // It also says why the link went last time, and what the clock did on
-      // its own meanwhile.
-      JsonDocument hello;
-      hello["evt"] = "HELLO";
-      hello["token"] = DESK_TOKEN;
-      hello["fw"] = FW_VERSION;
-      hello["reconnects"] = reconnects;
-      if (lastDrop[0]) hello["drop"] = lastDrop;
-      if (!everPaired) hello["boot"] = bootReason();
-      if (pendingCount) {
-        JsonArray list = hello["offline"].to<JsonArray>();
-        for (uint8_t i = 0; i < pendingCount; i++) {
-          JsonObject r = list.add<JsonObject>();
-          r["a"] = pending[i].a;
-          if (pending[i].h >= 0) { r["h"] = pending[i].h; r["m"] = pending[i].m; }
-          r["ago"] = (millis() - pending[i].at) / 1000UL;
-        }
-      }
-      char buf[512];
-      serializeJson(hello, buf, sizeof(buf));
-      client.send(buf);
-    } else if (event == WebsocketsEvent::ConnectionClosed) {
-      if (isConnected) linkDown(statePtr && statePtr->pair_refused ? "Sage refused the pairing code" : "the Pi closed the link");
-    } else if (event == WebsocketsEvent::GotPing) {
-      lastHeard = millis();
-    } else if (event == WebsocketsEvent::GotPong) {
-      lastHeard = millis();
-      rttMs = (int)(millis() - lastPingSent);
+// The socket is open: the first frame must be HELLO with the pairing code,
+// or Sage hangs up. It also says why the link went last time, and what the
+// clock did on its own meanwhile.
+static void sayHello() {
+  Serial.println("[WS] Connected to Pi server!");
+  isConnected = true;
+  openedAt = lastHeard = lastPingSent = millis();
+  JsonDocument hello;
+  hello["evt"] = "HELLO";
+  hello["token"] = DESK_TOKEN;
+  hello["fw"] = FW_VERSION;
+  hello["reconnects"] = reconnects;
+  if (lastDrop[0]) hello["drop"] = lastDrop;
+  if (!everPaired) hello["boot"] = bootReason();
+  if (pendingCount) {
+    JsonArray list = hello["offline"].to<JsonArray>();
+    for (uint8_t i = 0; i < pendingCount; i++) {
+      JsonObject r = list.add<JsonObject>();
+      r["a"] = pending[i].a;
+      if (pending[i].h >= 0) { r["h"] = pending[i].h; r["m"] = pending[i].m; }
+      r["ago"] = (millis() - pending[i].at) / 1000UL;
     }
-  });
+  }
+  char buf[512];
+  serializeJson(hello, buf, sizeof(buf));
+  client.sendText(buf);
 }
 
 static String piAddress() {
@@ -522,7 +525,9 @@ void wsConnect() {
   }
   String host = piAddress();
   Serial.printf("[WS] Connecting to ws://%s:%d%s\n", host.c_str(), PI_WS_PORT, PI_WS_PATH);
-  if (!client.connect(host, PI_WS_PORT, PI_WS_PATH)) {
+  if (client.connect(host.c_str(), PI_WS_PORT, PI_WS_PATH, LINK_CONNECT_MS)) {
+    sayHello();
+  } else {
     if (piIpKnown) piIpFails++;
     Serial.println("[WS] The Pi didn't answer");
   }
@@ -539,7 +544,7 @@ static void sendStatus() {
            "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\",\"rtt\":%d,\"wifiDrops\":%u}",
            WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), millis() / 1000UL,
            (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str(), rttMs, (unsigned)wifiDrops);
-  client.send(json);
+  client.sendText(json);
 }
 
 // The router dropped the clock, or the clock lost the router: join again,
@@ -559,7 +564,7 @@ static void wifiWatch() {
     Serial.println("[WiFi] Lost the network");
     if (isConnected) {
       linkDown("Wi-Fi lost");
-      client.close();
+      client.close(1001);
     }
     return;
   }
@@ -590,10 +595,10 @@ void wsPoll() {
     bool paired = statePtr && statePtr->paired;
     if (now - lastHeard > LINK_DEAD_MS) {
       linkDown("no reply to pings");
-      client.close();
+      client.close(1001);
     } else if (!paired && now - openedAt > LINK_HELLO_MS) {
       linkDown("no answer to the pairing code");
-      client.close();
+      client.close(1008);
     } else if (now - lastPingSent >= LINK_PING_MS) {
       lastPingSent = now;
       client.ping();
@@ -623,7 +628,7 @@ unsigned long wsDownFor() {
 
 void wsSend(const char* json) {
   if (isConnected) {
-    client.send(json);
+    client.sendText(json);
   }
 }
 
@@ -632,7 +637,7 @@ void wsReportOffline(const char* action, int h, int m) {
     char json[96];
     if (h >= 0) snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"h\":%d,\"m\":%d,\"ago\":0}", action, h, m);
     else snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"ago\":0}", action);
-    client.send(json);
+    client.sendText(json);
     return;
   }
   if (pendingCount == sizeof(pending) / sizeof(pending[0])) {   // keep the newest
