@@ -18,6 +18,8 @@ The clock only draws and reports button presses; this decides what it shows:
   a time as the song reaches them (LYRIC).
 - Welcome back: when the phone comes home after a while out, a card says
   so (Settings: welcome) with what's on today and the next alarm.
+- Firmware updates over Wi-Fi (ota.py): a build GitHub made from a merged
+  change goes to the clock when it isn't busy.
 - Weather and the Pi's vitals.
 - The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
   ring them itself while it can't reach the Pi. Firmware 2.10 says what it
@@ -42,6 +44,7 @@ import item_actions
 import notifier
 from desk import ambient, art, depth, settings as desk_settings, song, today
 from desk.alarms import TONE_CYCLE_MS, Alarms, is_alarm
+from desk.ota import ALARM_MARGIN_MINUTES, FirmwareUpdates
 from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
 
@@ -77,6 +80,7 @@ class Desk:
         vitals: Optional[ambient.Vitals] = None,
         settings: Optional[dict] = None,
         morning_line: Callable[[], Optional[str]] = lambda: None,
+        ota: Optional[FirmwareUpdates] = None,
     ) -> None:
         self.link = link
         self.now = now
@@ -131,6 +135,8 @@ class Desk:
         self._depth_lock = asyncio.Lock()
         link.on_depth_need = self.depth_need
         link.on_offline = self.offline_reports
+        self.ota = ota or FirmwareUpdates(link, busy=self.update_blocker, auto=lambda: self.settings["updates"]["auto"])
+        self.ota.on_change = self.announce
 
     # --- Sage's items ---
 
@@ -701,7 +707,22 @@ class Desk:
             "ringing": {"id": ringing.id, "label": ringing.title, "since": int(self.ringing_since * 1000)} if ringing else None,
             "timer": self.timer.describe(),
             "stopwatch": self.stopwatch.describe(),
+            "updates": self.ota.status(),
         }
+
+    def update_blocker(self) -> str:
+        """Why the clock shouldn't take a firmware update right now ("" if it can)."""
+        if self.alarms.ringing:
+            return "an alarm is ringing"
+        if self.timer.state in ("running", "done"):
+            return "a timer is running"
+        if self.controller.card:
+            return "a card is waiting for an answer"
+        now = self.now()
+        alarm = self.alarms.next(now)
+        if alarm and (alarm.rings_at - now).total_seconds() < ALARM_MARGIN_MINUTES * 60:
+            return "an alarm is due soon"
+        return ""
 
     async def announce(self) -> None:
         await self.broadcast({"type": "DESK_STATE", "state": self.state()})
@@ -779,4 +800,5 @@ class Desk:
             self._every(REFRESH_EVERY, self.refresh),
             self._every(WEATHER_EVERY, self.update_weather),
             self._every(2, self.ambient),
+            self._every(30, self.ota.tick),
         )

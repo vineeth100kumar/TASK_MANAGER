@@ -178,7 +178,7 @@ export function LumoView() {
       )}
       {tab === 'clock' && settings && <ClockTab settings={settings} save={save} toolsSupported={toolsSupported} depthSupported={depthSupported} />}
       {tab === 'lights' && settings && <LightsTab settings={settings} save={save} night={!!live?.night} toolsSupported={toolsSupported} />}
-      {tab === 'device' && <DeviceTab status={status} settings={settings} save={save} onChange={loadStatus} />}
+      {tab === 'device' && <DeviceTab status={status} updates={live?.updates ?? status?.state?.updates ?? null} settings={settings} save={save} onChange={loadStatus} />}
     </div>
   );
 }

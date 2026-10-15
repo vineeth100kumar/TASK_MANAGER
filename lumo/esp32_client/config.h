@@ -12,15 +12,21 @@
 // ===================== WIFI + PI SERVER =====================
 // The Wi-Fi name, password and the Pi's address live in secrets.h, which is
 // gitignored so they never end up in the repository again. Copy
-// secrets.example.h to secrets.h and fill it in before flashing.
+// secrets.example.h to secrets.h and fill it in before flashing by USB.
+//
+// LUMO keeps them in flash too (store.cpp, storeNetLoad), so a build without
+// secrets.h still knows them: that's the build GitHub makes for updates over
+// Wi-Fi (ota.cpp). The very first flash must be by USB with secrets.h.
 #if __has_include("secrets.h")
 #include "secrets.h"
-#else
-#error "Missing esp32_client/secrets.h: copy secrets.example.h to secrets.h and set your Wi-Fi details."
-#endif
-
 #ifndef DESK_TOKEN
 #error "Add DESK_TOKEN to secrets.h (see secrets.example.h): the pairing code from Sage on the Pi."
+#endif
+#else
+#define WIFI_SSID   ""
+#define WIFI_PASS   ""
+#define PI_HOSTNAME ""
+#define DESK_TOKEN  ""
 #endif
 
 // ===================== PI SERVER =====================
@@ -122,7 +128,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.12.0"
+#define FW_VERSION "2.13.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

@@ -3,7 +3,7 @@ settings.py - the desk clock's settings, changed from Sage.
 
 Which screens UP and DOWN step through, what every button does on each screen,
 the alarm's snooze and ring length, the lights, how strong the haptics are,
-how the clock shows the time, and the welcome back message. They live in Sage's metadata table (key `deskSettings`) next to the
+how the clock shows the time, the welcome back message and firmware updates. They live in Sage's metadata table (key `deskSettings`) next to the
 notification preferences, and reach the clock the moment they are saved.
 
 A button map is a set of layers. While an alarm rings the `alarm` layer
@@ -71,6 +71,9 @@ DEFAULTS: Dict[str, Any] = {
     # When the phone comes home after at least `awayMinutes` out, the clock
     # shows `message` with what's on today.
     "welcome": {"enabled": True, "message": "Welcome back to your room", "awayMinutes": 15},
+    # Install firmware GitHub built from a merged change as soon as the clock
+    # isn't busy (desk/ota.py; firmware 2.13+).
+    "updates": {"auto": True},
     "buttons": {
         "locked": False,
         "map": {
@@ -228,6 +231,11 @@ def merge(current: dict, update: dict) -> dict:
             out["welcome"]["message"] = message.strip()
         if "awayMinutes" in welcome:
             out["welcome"]["awayMinutes"] = _int(welcome["awayMinutes"], "welcome.awayMinutes", 5, 720)
+
+    if "updates" in update:
+        updates = _section(update["updates"], "updates")
+        if "auto" in updates:
+            out["updates"]["auto"] = _bool(updates["auto"], "updates.auto")
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")

@@ -496,6 +496,16 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.phone_presence(True)
         self.assertNotIn("NOTIF", self.link.cmds())
 
+    async def test_no_firmware_update_near_an_alarm_or_while_busy(self):
+        await self.desk.refresh()
+        self.assertEqual(self.desk.update_blocker(), "")            # 6:00, alarm at 7:00
+        self.clock = at(6, 55)
+        self.assertEqual(self.desk.update_blocker(), "an alarm is due soon")
+        self.clock = at(8, 0)
+        await self.desk.timer_do("start", 60)
+        self.assertEqual(self.desk.update_blocker(), "a timer is running")
+        self.assertIn("updates", self.desk.state())
+
     async def test_welcome_waits_for_a_reminder_card(self):
         await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
         self.phone.last_seen = time.time() - 60 * 60

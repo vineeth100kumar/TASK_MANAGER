@@ -1508,6 +1508,23 @@ async def desk_device(req: DeskAction):
     return {"success": True, **desk_run.status(desk.ENABLED)}
 
 
+class DeskFirmware(BaseModel):
+    action: str  # check or install
+
+
+@app.post("/api/desk/firmware")
+async def desk_firmware(req: DeskFirmware):
+    """Firmware updates over Wi-Fi (desk/ota.py): check GitHub now, or install the newest build now."""
+    desk_run = _desk_running()
+    try:
+        problem = await desk_run.firmware(req.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if problem and req.action == "install":
+        raise HTTPException(status_code=409, detail=problem)
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
 # The depth face (desk/depth.py): a photo with the time behind the person.
 # LUMO shows it when the Depth face is picked (firmware 2.9).
 class DepthPhoto(BaseModel):

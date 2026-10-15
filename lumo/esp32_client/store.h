@@ -9,3 +9,12 @@ void storeLoad(LumoState& s);
 void storeSaveClock(const LumoState& s);
 void storeSaveAlarms(const LumoState& s);
 void storeSaveHaptics(const LumoState& s);
+
+// The Wi-Fi name and password, the Pi's address and the pairing code. A build
+// with secrets.h uses its values and saves them; a build without (an update
+// over Wi-Fi) uses the saved ones. Call before joining Wi-Fi.
+extern char netSsid[33];
+extern char netPass[65];
+extern char netHost[64];
+extern char netToken[16];
+void storeNetLoad();

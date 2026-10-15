@@ -7,6 +7,7 @@
 #include "ws_client.h"
 #include "clockkeeper.h"
 #include "store.h"
+#include "ota.h"
 #include "faces.h"
 
 static LumoState lumoState;
@@ -187,7 +188,8 @@ void setup() {
   tft.print("Connecting to Wi-Fi...");
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  storeNetLoad();
+  WiFi.begin(netSsid, netPass);
 
   unsigned long startAttempt = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
@@ -215,6 +217,7 @@ void setup() {
 
 void loop() {
   wsPoll();
+  if (otaPoll()) displayDrawScreen(currentScreen, lumoState, true);   // the update failed: back to the screen
   hapticUpdate();
   // Type "buzz" in the serial monitor to test the motor with no shaping.
   if (Serial.available()) {

@@ -2,8 +2,8 @@
 // Pi is, which firmware it runs, a remote for its buttons, and finding,
 // restarting and locking it.
 import { useState } from 'react';
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, KeyRound, Lock, MapPin, Power, Radio, Wifi } from 'lucide-react';
-import { LumoLink, LumoSettings, LumoSettingsUpdate, LumoStatus, lumoApi } from '../../services/lumo';
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, KeyRound, Lock, MapPin, Power, Radio, RefreshCw, Wifi } from 'lucide-react';
+import { LumoLink, LumoSettings, LumoSettingsUpdate, LumoStatus, LumoUpdates, lumoApi } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 import { Panel, Row, Toggle, btnQuiet } from './parts';
 
@@ -91,8 +91,8 @@ function bars(rssi?: number): number {
   return rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
 }
 
-export function DeviceTab({ status, settings, save, onChange }: {
-  status: LumoStatus | null; settings: LumoSettings | null; save: (u: LumoSettingsUpdate) => void; onChange: () => void;
+export function DeviceTab({ status, updates, settings, save, onChange }: {
+  status: LumoStatus | null; updates: LumoUpdates | null; settings: LumoSettings | null; save: (u: LumoSettingsUpdate) => void; onChange: () => void;
 }) {
   const { showToast } = useToast();
   const [confirmRestart, setConfirmRestart] = useState(false);
@@ -155,7 +155,10 @@ export function DeviceTab({ status, settings, save, onChange }: {
       {status?.link && <LinkPanel link={status.link} />}
 
       <Panel icon={<Cpu size={16} className="text-blue-600" />} title="Firmware">
-        {status?.updateAvailable ? (
+        {updates && (updates.canUpdate || updates.state !== 'idle') ? (
+          <OverTheAir updates={updates} firmware={status?.firmware ?? null} auto={settings?.updates?.auto ?? true}
+            setAuto={on => save({ updates: { auto: on } })} act={act} />
+        ) : status?.updateAvailable ? (
           <div className="space-y-3">
             <div className="rounded-2xl bg-blue-500/10 text-blue-800 dark:text-blue-200 px-4 py-3 text-[13.5px]">
               <div className="font-semibold flex items-center gap-2"><Download size={15} /> Firmware {status.latestFirmware} is ready</div>
@@ -166,6 +169,7 @@ export function DeviceTab({ status, settings, save, onChange }: {
               <li>Plug LUMO in with USB and pick its port.</li>
               <li>Press Upload. LUMO restarts and reconnects by itself.</li>
             </ol>
+            <p className="text-[12px] text-gray-400">From firmware 2.13, LUMO updates itself over Wi-Fi whenever a change is merged on GitHub, so this is the last time you need the cable.</p>
           </div>
         ) : (
           <p className="text-[13.5px] text-gray-600 dark:text-gray-300">
@@ -214,6 +218,49 @@ export function DeviceTab({ status, settings, save, onChange }: {
           <span className="font-mono text-[14px] text-gray-700 dark:text-gray-200">{status?.port ?? 8765}</span>
         </Row>
       </Panel>
+    </div>
+  );
+}
+
+// Firmware 2.13+: GitHub builds each merged firmware change and the Pi sends
+// it to LUMO over Wi-Fi, by itself when automatic updates are on.
+function OverTheAir({ updates: u, firmware, auto, setAuto, act }: {
+  updates: LumoUpdates; firmware: string | null; auto: boolean; setAuto: (on: boolean) => void;
+  act: (fn: () => Promise<unknown>, done?: string) => Promise<void>;
+}) {
+  const box = 'rounded-2xl px-4 py-3 text-[13.5px]';
+  return (
+    <div className="space-y-3">
+      {u.state === 'updating' ? (
+        <div className={`${box} bg-blue-500/10 text-blue-800 dark:text-blue-200`}>
+          <div className="font-semibold flex items-center gap-2"><RefreshCw size={15} className="animate-spin" /> Updating to v{u.target}</div>
+          <div className="mt-0.5">LUMO shows the progress and restarts by itself.</div>
+        </div>
+      ) : u.state === 'failed' ? (
+        <div className={`${box} bg-red-500/10 text-red-700 dark:text-red-300`}>
+          <div className="font-semibold">The update to v{u.target} didn't go through</div>
+          <div className="mt-0.5">{u.error}. LUMO kept v{firmware}.</div>
+        </div>
+      ) : u.newer && u.latest ? (
+        <div className={`${box} bg-blue-500/10 text-blue-800 dark:text-blue-200`}>
+          <div className="font-semibold flex items-center gap-2"><Download size={15} /> v{u.latest} is ready</div>
+          {u.waiting && <div className="mt-0.5">Waiting: {u.waiting}.</div>}
+        </div>
+      ) : null}
+      <p className="text-[13.5px] text-gray-600 dark:text-gray-300">
+        LUMO is on <b>v{firmware || '?'}</b>
+        {u.latest ? <>; the newest build is <b>v{u.latest}</b>{u.latestSha ? ` (${u.latestSha})` : ''}.</> : '.'}
+        {u.checkError && <span className="block text-[12px] text-amber-600 dark:text-amber-400 mt-1">{u.checkError}</span>}
+      </p>
+      <Row title="Update automatically" hint="When a firmware change is merged on GitHub, LUMO installs it as soon as it isn't busy">
+        <Toggle on={auto} onChange={setAuto} label="Update automatically" />
+      </Row>
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => act(() => lumoApi.firmware('check'), 'Checked GitHub')} className={btnQuiet}><RefreshCw size={15} /> Check now</button>
+        {u.newer && u.state !== 'updating' && (
+          <button onClick={() => act(() => lumoApi.firmware('install'), 'Sending the update to LUMO')} className={btnQuiet}><Download size={15} /> Update now</button>
+        )}
+      </div>
     </div>
   );
 }

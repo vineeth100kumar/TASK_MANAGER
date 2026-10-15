@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include "display.h"
+#include "store.h"
 #include "anim.h"
 #include "clockkeeper.h"
 #include "faces.h"
@@ -903,6 +904,32 @@ void displayAlarmTick(const LumoState& s) {
   drawAlarmFrame(pulse);
 }
 
+void displayUpdateScreen(const char* version, int pct, const char* error) {
+  static const int BAR_X = 40, BAR_W = 240, BAR_H = 8;
+  const int barY = SY(170);
+  if (pct <= 0) {
+    tft.fillScreen(COLOR_BG_STEALTH);
+    centerText("LUMO", SY(92), COLOR_WHITE, &FreeSans24pt7b);
+    char line[40];
+    snprintf(line, sizeof(line), "v" FW_VERSION "  >  v%s", version && version[0] ? version : "?");
+    centerText(line, SY(122), COLOR_MUTED, &FreeSans9pt7b);
+    if (pct < 0) {
+      centerText("Update failed", SY(160), COLOR_RED_PULSE, &FreeSans12pt7b);
+      centerText(error && error[0] ? error : "unknown error", SY(200), COLOR_MUTED, &FreeSans9pt7b);
+      tft.setFont(NULL);
+      return;
+    }
+    centerText("Updating", SY(152), COLOR_WHITE, &FreeSans12pt7b);
+    centerText("Keep LUMO plugged in", SY(230), COLOR_MUTED, &FreeSans9pt7b);
+  }
+  drawProgressBar(BAR_X, barY, BAR_W, BAR_H, pct / 100.0f, COLOR_ACCENT, COLOR_BG_BLACK);
+  tft.fillRect(0, barY + 12, 320, 18, COLOR_BG_STEALTH);
+  char p[8];
+  snprintf(p, sizeof(p), "%d%%", max(pct, 0));
+  centerText(p, barY + 26, COLOR_ACCENT, &FreeSans9pt7b);
+  tft.setFont(NULL);
+}
+
 // Connecting: the eyes and caption are drawn once; only three dots breathe.
 static bool connNeedsStatic = true;
 
@@ -924,7 +951,7 @@ void displayConnectingTick(const LumoState& s) {
     } else {
       centerText("Connecting", SY(168), COLOR_WHITE, &FreeSans12pt7b);
       char ipBuf[40];
-      snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
+      snprintf(ipBuf, sizeof(ipBuf), "%s", netHost[0] ? netHost : "No Wi-Fi details: flash by USB");
       centerText(ipBuf, SY(222), COLOR_MUTED, &FreeSans9pt7b);
     }
     tft.setFont(NULL);

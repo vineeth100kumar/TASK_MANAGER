@@ -178,6 +178,11 @@ def clock_part(state: dict) -> dict:
     wifi = state.get("wifi")
     if isinstance(wifi, dict) and wifi.get("rssi") is not None:
         out["rssi"] = wifi["rssi"]
+    updates = (state.get("state") or {}).get("updates")
+    if isinstance(updates, dict):
+        # Firmware updates over Wi-Fi (desk/ota.py): the newest GitHub build and how the last install went.
+        out["updates"] = {k: updates.get(k) for k in ("latest", "latestSha", "ready", "newer", "canUpdate", "state",
+                                                      "target", "error", "waiting", "checkError")}
     return out
 
 
@@ -224,6 +229,11 @@ def problems(data: dict) -> List[str]:
             out.append(f"The desk clock's link dropped {link.get('drops24h')} times in the last day (last: {last}).")
         if (link.get("quietSeconds") or 0) > CLOCK_QUIET_SECONDS:
             out.append(f"The desk clock hasn't been heard from for {link['quietSeconds']} s although it counts as connected.")
+        updates = clock.get("updates") or {}
+        if updates.get("state") == "failed":
+            out.append(f"The desk clock's update to {updates.get('target')} failed: {updates.get('error')}.")
+        if updates.get("checkError"):
+            out.append(f"Checking for LUMO firmware: {updates['checkError']}.")
         if isinstance(clock.get("rssi"), (int, float)) and clock["rssi"] < -78:
             out.append(f"The desk clock's Wi-Fi signal is weak ({clock['rssi']} dBm), which can drop the link.")
     face = data.get("depthFace", {})

@@ -1,0 +1,90 @@
+# Builds LUMO's firmware (lumo/esp32_client) for updates over Wi-Fi.
+#
+# Pull requests: the firmware must compile and fit the spare app partition.
+# Merged on a branch a Pi runs: the build is published as a release whose
+# notes are a JSON manifest. Sage on the Pi finds it (raspberry_pi/desk/ota.py),
+# downloads it, and sends it to the clock when it isn't busy.
+#
+# The build has no secrets.h: LUMO keeps its Wi-Fi details and pairing code in
+# flash from its last USB flash (store.cpp, storeNetLoad).
+name: LUMO firmware
+
+on:
+  pull_request:
+    paths: ['lumo/esp32_client/**', '.github/workflows/lumo-firmware.yml']
+  push:
+    branches: [main, claude/project-thread-clc1ti]
+    paths: ['lumo/esp32_client/**', '.github/workflows/lumo-firmware.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumo-firmware-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # ESP32C3 Dev Module, as in lumo/README.md. The default partition scheme has
+  # two 1.25 MB app slots, so one can be written while the other runs.
+  FQBN: esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160,PartitionScheme=default
+  ESP32_CORE: '3.0.7'
+  ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  APP_SLOT_BYTES: 1310720
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+
+      - name: Install the ESP32 core and libraries
+        run: |
+          arduino-cli core update-index --additional-urls "$ESP32_INDEX"
+          arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$ESP32_INDEX"
+          arduino-cli lib install "Adafruit GFX Library" "Adafruit ILI9341" "Adafruit NeoPixel" "ArduinoJson@7.2.1"
+
+      - name: Build
+        run: |
+          test ! -e lumo/esp32_client/secrets.h
+          arduino-cli compile --fqbn "$FQBN" --additional-urls "$ESP32_INDEX" --output-dir build --warnings default lumo/esp32_client
+          ls -l build
+
+      - name: Check it fits and describe it
+        id: describe
+        run: |
+          version=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' lumo/esp32_client/config.h)
+          [ -n "$version" ] || { echo "::error::FW_VERSION not found in config.h"; exit 1; }
+          bin=build/esp32_client.ino.bin
+          size=$(stat -c %s "$bin")
+          echo "LUMO firmware $version: $size of $APP_SLOT_BYTES bytes"
+          [ "$size" -le "$APP_SLOT_BYTES" ] || { echo "::error::The firmware ($size bytes) is too big to update over Wi-Fi"; exit 1; }
+          if [ "${{ github.event_name }}" = "pull_request" ]; then branch="${{ github.base_ref }}"; else branch="${GITHUB_REF_NAME}"; fi
+          asset="lumo-$version.bin"
+          cp "$bin" "$asset"
+          jq -n --arg version "$version" --arg branch "$branch" --arg sha "$GITHUB_SHA" \
+                --arg md5 "$(md5sum "$asset" | cut -d' ' -f1)" --argjson size "$size" --arg asset "$asset" \
+                '{version: $version, branch: $branch, sha: $sha, md5: $md5, size: $size, asset: $asset}' > manifest.json
+          cat manifest.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumo-${{ steps.describe.outputs.version }}
+          path: |
+            ${{ steps.describe.outputs.asset }}
+            manifest.json
+
+      - name: Publish for Sage
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="lumo-fw-${{ steps.describe.outputs.version }}-${GITHUB_SHA::7}"
+          gh release create "$tag" "${{ steps.describe.outputs.asset }}" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "LUMO firmware ${{ steps.describe.outputs.version }} (${GITHUB_REF_NAME})" \
+            --notes-file manifest.json

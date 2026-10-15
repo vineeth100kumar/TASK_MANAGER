@@ -12,7 +12,9 @@
 #   deploy/ changed                           -> nothing automatic; re-run install_pi.sh
 #
 # Sage also drives the desk clock (raspberry_pi/desk/); the clock's firmware
-# (lumo/esp32_client/) is flashed by hand and never restarts anything.
+# (lumo/esp32_client/) is built by GitHub (.github/workflows/lumo-firmware.yml)
+# and Sage sends it to the clock over Wi-Fi (raspberry_pi/desk/ota.py), so a
+# firmware change restarts nothing here either.
 #
 # The commit that was last deployed completely is remembered in
 # .git/sage-deployed. If a step fails (a network blip during pip or npm, a

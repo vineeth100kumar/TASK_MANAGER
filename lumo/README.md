@@ -31,8 +31,7 @@ Install the following via the Arduino IDE Library Manager:
 1. `Adafruit ILI9341` (by Adafruit)
 2. `Adafruit GFX Library` (by Adafruit)
 3. `Adafruit NeoPixel` (by Adafruit)
-4. `ArduinoWebsockets` (by Gil Maimon)
-5. `ArduinoJson` (v7 by Benoit Blanchon)
+4. `ArduinoJson` (v7 by Benoit Blanchon)
 
 *(Note: `TJpg_Decoder` is not needed on the ESP32. The Raspberry Pi converts all Spotify album art directly to raw RGB565 bitmaps before transmission).*
 
@@ -48,6 +47,31 @@ Or from a terminal with `arduino-cli` (same settings):
 ```bash
 arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160 esp32_client
 ```
+
+Keep the Partition Scheme on **Default 4MB with spiffs**: it has the two app
+slots that updates over Wi-Fi need. `ArduinoWebsockets` is no longer used
+(firmware 2.12 has its own client).
+
+### Updates over Wi-Fi (firmware 2.13 and later)
+
+Flash 2.13 by USB once, with `secrets.h`. LUMO saves its Wi-Fi details and
+pairing code in flash, and from then on every firmware change merged on
+GitHub reaches it by itself:
+
+1. GitHub builds the firmware (`.github/workflows/lumo-firmware.yml`, no
+   `secrets.h` needed) and publishes it as a release for that branch.
+2. Sage on the Pi checks every 15 minutes, downloads the newest build for the
+   branch it runs and checks its MD5 (`raspberry_pi/desk/ota.py`).
+3. When LUMO isn't busy (no alarm ringing or due in the next 10 minutes, no
+   timer, no card waiting), Sage sends it the update. LUMO shows "Updating"
+   with a progress bar, checks the download and restarts on the new version.
+   A failed download leaves the old firmware running, and Sage tries again
+   later (three times, then it waits for **Update now**).
+
+The LUMO page's Device tab shows the newest build, what an update is waiting
+for, and has **Update automatically**, **Check now** and **Update now**. Each
+change still needs a higher `FW_VERSION` in `config.h`: LUMO only takes a
+newer version.
 
 ---
 

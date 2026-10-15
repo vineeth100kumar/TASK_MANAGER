@@ -131,6 +131,18 @@ async def device(action: str, tone: str = "", volume: int = 0) -> bool:
     return await desk.device_do(action, tone, volume)
 
 
+async def firmware(action: str) -> str:
+    """check: look on GitHub for a newer build now. install: send the newest
+    build to the clock now (even after failures). Returns "" or why not."""
+    if action == "check":
+        await desk.ota.check()
+        await desk.announce()
+        return desk.ota.check_error
+    if action == "install":
+        return await desk.ota.start(force=True)
+    raise ValueError(f"Unknown firmware action {action!r}.")
+
+
 async def press(button: str) -> bool:
     """Press one of the clock's buttons from Sage. False when the desk isn't running."""
     if desk is None:
