@@ -25,10 +25,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # ESP32C3 Dev Module, as in lumo/README.md, with the Minimal SPIFFS scheme:
-  # two 1.9 MB app slots, so one can be written while the other runs. (The
-  # default scheme's 1.25 MB slots leave 2.13.0 only 28 KB to grow.) LUMO
-  # stores nothing in SPIFFS.
+  # ESP32C3 Dev Module, as in lumo/README.md. The flash layout comes from
+  # lumo/esp32_client/partitions.csv (two 1.9 MB app slots, so one can be
+  # written while the other runs); min_spiffs is the stock scheme with the
+  # same slots, so the size check below matches it.
   FQBN: esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160,PartitionScheme=min_spiffs
   ESP32_CORE: '3.0.7'
   ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json

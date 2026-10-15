@@ -166,7 +166,7 @@ export function DeviceTab({ status, updates, settings, save, onChange }: {
             </div>
             <ol className="list-decimal pl-5 space-y-1 text-[13px] text-gray-600 dark:text-gray-300">
               <li>Open the <b>lumo_fw2</b> sketch in the Arduino IDE, with the files from Sage's <b>lumo/esp32_client</b> folder.</li>
-              <li>Plug LUMO in with USB and pick its port. Under Tools, set Partition Scheme to <b>Minimal SPIFFS (1.9MB APP with OTA)</b>.</li>
+              <li>Plug LUMO in with USB and pick its port. Keep <b>partitions.csv</b> in the sketch folder; it sets the flash layout for updates over Wi-Fi.</li>
               <li>Press Upload. LUMO restarts and reconnects by itself.</li>
             </ol>
             <p className="text-[12px] text-gray-400">From firmware 2.13, LUMO updates itself over Wi-Fi whenever a change is merged on GitHub, so this is the last time you need the cable.</p>
