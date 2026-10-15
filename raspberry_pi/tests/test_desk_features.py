@@ -9,6 +9,7 @@ import datetime
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -55,6 +56,7 @@ class FakePhone:
         self.home = home
         self.media = {"title": "", "artist": "", "playing": False}
         self.commands = []
+        self.last_seen = 0.0
 
     async def send_command(self, command):
         self.commands.append(command)
@@ -473,6 +475,33 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
     async def test_system_screen_gets_vitals(self):
         await self.desk.controller.show_screen("SYSTEM")
         self.assertEqual(self.link.sent[-1]["cmd"], "SYSTEM_STATS")
+
+    async def test_welcome_back_after_a_while_out(self):
+        await self.desk.refresh()
+        self.phone.last_seen = time.time() - 40 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        card = self.link.last("NOTIF")
+        self.assertEqual(card["title"], "Welcome back to your room")
+        self.assertEqual(card["body"], "1 thing on today, next alarm 07:00")
+
+    async def test_no_welcome_after_a_short_trip_when_off_or_after_a_restart(self):
+        self.phone.last_seen = time.time() - 6 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        await self.desk.phone_presence(True)   # Sage started with the phone already home
+        self.desk.settings["welcome"]["enabled"] = False
+        self.phone.last_seen = time.time() - 60 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        self.assertNotIn("NOTIF", self.link.cmds())
+
+    async def test_welcome_waits_for_a_reminder_card(self):
+        await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
+        self.phone.last_seen = time.time() - 60 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        self.assertEqual(self.link.last("NOTIF")["title"], "Gym")
 
 
 if __name__ == "__main__":

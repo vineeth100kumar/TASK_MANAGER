@@ -3,7 +3,7 @@ settings.py - the desk clock's settings, changed from Sage.
 
 Which screens UP and DOWN step through, what every button does on each screen,
 the alarm's snooze and ring length, the lights, how strong the haptics are,
-and how the clock shows the time. They live in Sage's metadata table (key `deskSettings`) next to the
+how the clock shows the time, and the welcome back message. They live in Sage's metadata table (key `deskSettings`) next to the
 notification preferences, and reach the clock the moment they are saved.
 
 A button map is a set of layers. While an alarm rings the `alarm` layer
@@ -47,6 +47,8 @@ LIGHT_MODES = ("AUTO", "WARM", "BREATHE", "AURORA", "PHOTO", "OFF")
 # The buzzer's alarm patterns (firmware 2.8; older firmware always pulses).
 ALARM_TONES = TONES   # desk/alarms.py
 MAX_WORLD_CLOCKS = 3
+# The welcome message is a card's title, which shows about this many letters.
+WELCOME_LEN = 27
 
 DEFAULTS: Dict[str, Any] = {
     # The timer, stopwatch and world screens are added from the LUMO page, as
@@ -66,6 +68,9 @@ DEFAULTS: Dict[str, Any] = {
     # 2.7+), and whether to knock on each button press and twice for a
     # notification or reminder (firmware 2.8+). The alarm always rings.
     "haptics": {"strength": 70, "buttons": True, "notifications": True},
+    # When the phone comes home after at least `awayMinutes` out, the clock
+    # shows `message` with what's on today.
+    "welcome": {"enabled": True, "message": "Welcome back to your room", "awayMinutes": 15},
     "buttons": {
         "locked": False,
         "map": {
@@ -211,6 +216,18 @@ def merge(current: dict, update: dict) -> dict:
         for name in ("buttons", "notifications"):
             if name in haptics:
                 out["haptics"][name] = _bool(haptics[name], f"haptics.{name}")
+
+    if "welcome" in update:
+        welcome = _section(update["welcome"], "welcome")
+        if "enabled" in welcome:
+            out["welcome"]["enabled"] = _bool(welcome["enabled"], "welcome.enabled")
+        if "message" in welcome:
+            message = welcome["message"]
+            if not isinstance(message, str) or not message.strip() or len(message.strip()) > WELCOME_LEN:
+                raise ValueError(f"welcome.message must be 1 to {WELCOME_LEN} characters.")
+            out["welcome"]["message"] = message.strip()
+        if "awayMinutes" in welcome:
+            out["welcome"]["awayMinutes"] = _int(welcome["awayMinutes"], "welcome.awayMinutes", 5, 720)
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")

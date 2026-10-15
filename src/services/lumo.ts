@@ -100,6 +100,7 @@ export interface LumoSettings {
   world: { zones: string[] };
   night: { enabled: boolean; start: string; end: string; face: string; lightsMode: string; brightness: number };
   haptics: { strength: number; buttons: boolean; notifications: boolean };
+  welcome: { enabled: boolean; message: string; awayMinutes: number };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
 
