@@ -3,6 +3,42 @@
 #include "store.h"
 
 static const char* NS = "lumo";
+static const char* NET_NS = "lumonet";
+
+char netSsid[33]  = "";
+char netPass[65]  = "";
+char netHost[64]  = "";
+char netToken[16] = "";
+
+void storeNetLoad() {
+  // secrets.example.h's placeholder counts as no secrets.h.
+  bool compiled = WIFI_SSID[0] && strcmp(WIFI_SSID, "YOUR_WIFI_SSID") != 0;
+  Preferences p;
+  if (compiled) {
+    strlcpy(netSsid, WIFI_SSID, sizeof(netSsid));
+    strlcpy(netPass, WIFI_PASS, sizeof(netPass));
+    strlcpy(netHost, PI_HOSTNAME, sizeof(netHost));
+    strlcpy(netToken, DESK_TOKEN, sizeof(netToken));
+    if (!p.begin(NET_NS, false)) return;
+    // Written only when something changed, so a restart costs no flash wear.
+    if (p.getString("ssid", "") != netSsid) p.putString("ssid", netSsid);
+    if (p.getString("pass", "") != netPass) p.putString("pass", netPass);
+    if (p.getString("host", "") != netHost) p.putString("host", netHost);
+    if (p.getString("token", "") != netToken) p.putString("token", netToken);
+    p.end();
+    return;
+  }
+  if (!p.begin(NET_NS, true)) {
+    Serial.println("[NET] No Wi-Fi details saved: flash once by USB with secrets.h");
+    return;
+  }
+  p.getString("ssid", netSsid, sizeof(netSsid));
+  p.getString("pass", netPass, sizeof(netPass));
+  p.getString("host", netHost, sizeof(netHost));
+  p.getString("token", netToken, sizeof(netToken));
+  p.end();
+  Serial.printf("[NET] Using the saved Wi-Fi details (%s)\n", netSsid);
+}
 
 void storeLoad(LumoState& s) {
   Preferences p;

@@ -1,5 +1,6 @@
-// The LUMO page's light ring, night mode and haptics.
-import { Lightbulb, Moon, Vibrate } from 'lucide-react';
+// The LUMO page's light ring, night mode, haptics and welcome back message.
+import { useEffect, useState } from 'react';
+import { Home, Lightbulb, Moon, Vibrate } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
 import { FACES } from './ClockTab';
 import { Panel, Row, Segmented, Slider, Toggle, selectCls } from './parts';
@@ -14,6 +15,9 @@ const MODES: { id: string; name: string; hint: string; swatch: string }[] = [
   { id: 'PHOTO', name: 'Photo', hint: "The main colour of your depth photo (warm white when there isn't one)", swatch: 'bg-gradient-to-br from-amber-400 via-pink-400 to-sky-400' },
   { id: 'OFF', name: 'Off', hint: 'The ring stays dark', swatch: 'bg-gray-700' },
 ];
+
+const AWAY_CHOICES = [5, 15, 30, 60, 120, 240];
+const awayLabel = (m: number) => (m < 60 ? `${m} minutes` : `${m / 60} hour${m === 60 ? '' : 's'}`);
 
 const pct = (v: number) => `${Math.round((v / 255) * 100)}%`;
 
@@ -83,6 +87,43 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
         </Row>
         <p className="text-[12px] text-gray-400">Only alarms and timers make a sound; everything else is a silent knock.</p>
       </Panel>
+
+      <WelcomePanel settings={settings} save={save} />
     </div>
+  );
+}
+
+// When your phone reconnects to Sage's Bluetooth after you've been out, LUMO
+// shows this message with what's on today.
+function WelcomePanel({ settings, save }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void }) {
+  const w = settings.welcome;
+  const [message, setMessage] = useState(w.message);
+  useEffect(() => setMessage(w.message), [w.message]);
+  const commit = () => {
+    const text = message.trim();
+    if (!text) setMessage(w.message);
+    else if (text !== w.message) save({ welcome: { message: text } });
+  };
+  const away = AWAY_CHOICES.includes(w.awayMinutes) ? AWAY_CHOICES : [...AWAY_CHOICES, w.awayMinutes].sort((a, b) => a - b);
+  return (
+    <Panel icon={<Home size={16} className="text-emerald-500" />} title="Welcome back"
+      right={<Toggle on={w.enabled} onChange={on => save({ welcome: { enabled: on } })} label="Welcome back" />}>
+      <p className="text-[13px] text-gray-500 dark:text-gray-400">
+        When your phone connects to Sage's Bluetooth after you've been out, LUMO greets you with what's on today and your next alarm.
+      </p>
+      <div className={`space-y-3 ${w.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+        <label className="space-y-1 block">
+          <span className="text-[13px] font-medium text-gray-500">Message</span>
+          <input value={message} maxLength={27} onChange={e => setMessage(e.target.value)} onBlur={commit}
+            onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
+            className={`${selectCls} w-full`} aria-label="Welcome message" />
+        </label>
+        <Row title="After you've been out for" hint="Shorter trips don't get a greeting">
+          <Select className={selectCls} value={String(w.awayMinutes)} onChange={v => save({ welcome: { awayMinutes: Number(v) } })}>
+            {away.map(m => <option key={m} value={String(m)}>{awayLabel(m)}</option>)}
+          </Select>
+        </Row>
+      </div>
+    </Panel>
   );
 }

@@ -107,6 +107,13 @@ class ClockLink:
         self.on_button: Optional[Button] = None
         self.on_depth_need: Optional[Ready] = None   # the clock opened the depth face (2.9)
         self.on_offline: Optional[Offline] = None    # what the clock did while cut off (2.10)
+        self.on_connect: Optional[Ready] = None      # just paired, before the redraw (desk/ota.py)
+        # Firmware 2.13 takes updates over Wi-Fi; its HELLO says so ("ota"), and
+        # why the last one failed ("otaError"). local_ip is the Pi's address as
+        # the clock reached it, which the clock can fetch the update from.
+        self.can_ota = False
+        self.ota_error = ""
+        self.local_ip = ""
         # The link's story: connects and drops, newest last, and when it went down.
         self.history: deque = deque(maxlen=HISTORY)
         self.drop_times: deque = deque(maxlen=200)
@@ -228,8 +235,12 @@ class ClockLink:
         self.fw = str(first.get("fw") or "")
         self.clock_said = {k: first[k] for k in ("drop", "reconnects", "boot")
                            if isinstance(first.get(k), (int, str)) and not isinstance(first.get(k), bool)}
+        self.can_ota = bool(first.get("ota"))
+        self.ota_error = str(first.get("otaError") or "")[:80]
         remote = getattr(socket, "remote_address", None)
         self.address = str(remote[0]) if isinstance(remote, tuple) and remote else ""
+        local = getattr(socket, "local_address", None)
+        self.local_ip = str(local[0]) if isinstance(local, tuple) and local else ""
         self.connected_at = self.last_seen = time.time()
         self.info = {}
         if previous is not None and previous is not socket:
@@ -253,6 +264,8 @@ class ClockLink:
         offline = first.get("offline")
         if isinstance(offline, list) and offline and self.on_offline:
             await self._call(self.on_offline, [r for r in offline if isinstance(r, dict)][:8])
+        if self.on_connect:
+            await self._call(self.on_connect)
         if self.on_ready:
             await self._call(self.on_ready)
 

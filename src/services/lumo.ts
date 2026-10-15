@@ -53,6 +53,26 @@ export interface LumoState {
   ringing: { id: string; label: string; since: number } | null;
   timer: LumoTimer;
   stopwatch: LumoStopwatch;
+  updates?: LumoUpdates;
+}
+
+// Firmware updates over Wi-Fi (desk/ota.py on the Pi): GitHub builds every
+// merged firmware change and the Pi sends it to LUMO (firmware 2.13+).
+export interface LumoUpdates {
+  branch: string;
+  canUpdate: boolean;        // connected, on firmware that takes updates over Wi-Fi
+  latest: string | null;     // the newest build for the Pi's branch
+  latestSha: string | null;
+  latestAt: string | null;
+  ready: boolean;            // downloaded and checked
+  newer: boolean;            // newer than what LUMO runs
+  state: 'idle' | 'updating' | 'done' | 'failed';
+  target: string | null;
+  error: string | null;
+  waiting: string | null;    // why an available update hasn't gone yet
+  checkedAt: number | null;
+  checkError: string | null;
+  history: { at: number; version: string; result: 'done' | 'failed'; detail: string }[];
 }
 
 export interface LumoLinkEvent {
@@ -100,6 +120,8 @@ export interface LumoSettings {
   world: { zones: string[] };
   night: { enabled: boolean; start: string; end: string; face: string; lightsMode: string; brightness: number };
   haptics: { strength: number; buttons: boolean; notifications: boolean };
+  welcome: { enabled: boolean; message: string; awayMinutes: number };
+  updates: { auto: boolean };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
 
@@ -133,6 +155,7 @@ export const lumoApi = {
   stopwatch: (action: string) => post<LumoStatus>('/api/desk/stopwatch', { action }),
   device: (action: 'identify' | 'restart' | 'tone', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
+  firmware: (action: 'check' | 'install') => post<LumoStatus>('/api/desk/firmware', { action }),
 };
 
 // The depth face (desk/depth.py on the Pi): a photo with the time tucked

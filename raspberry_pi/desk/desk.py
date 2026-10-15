@@ -16,6 +16,10 @@ The clock only draws and reports button presses; this decides what it shows:
   previous, play/pause and next. Each song is looked up once (song.py): its
   genre, tempo and a few facts (SONG_INFO), and its lyrics, sent a line at
   a time as the song reaches them (LYRIC).
+- Welcome back: when the phone comes home after a while out, a card says
+  so (Settings: welcome) with what's on today and the next alarm.
+- Firmware updates over Wi-Fi (ota.py): a build GitHub made from a merged
+  change goes to the clock when it isn't busy.
 - Weather and the Pi's vitals.
 - The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
   ring them itself while it can't reach the Pi. Firmware 2.10 says what it
@@ -40,6 +44,7 @@ import item_actions
 import notifier
 from desk import ambient, art, depth, settings as desk_settings, song, today
 from desk.alarms import TONE_CYCLE_MS, Alarms, is_alarm
+from desk.ota import ALARM_MARGIN_MINUTES, FirmwareUpdates
 from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
 
@@ -75,6 +80,7 @@ class Desk:
         vitals: Optional[ambient.Vitals] = None,
         settings: Optional[dict] = None,
         morning_line: Callable[[], Optional[str]] = lambda: None,
+        ota: Optional[FirmwareUpdates] = None,
     ) -> None:
         self.link = link
         self.now = now
@@ -108,6 +114,10 @@ class Desk:
         self.alarms = Alarms(now().tzinfo)
         self.ringing_since = 0.0
         self.today: List[str] = []
+        self.today_count = 0   # Sage's items in the Today list (not Radar's line)
+        # When the phone was last seen before it went away; None while it's
+        # home, or when Sage started with it already gone.
+        self.phone_left_at: Optional[float] = None
         self.weather: Optional[dict] = None
         self.sent_alarms: Optional[dict] = None
         self.track: Optional[tuple] = None
@@ -125,6 +135,8 @@ class Desk:
         self._depth_lock = asyncio.Lock()
         link.on_depth_need = self.depth_need
         link.on_offline = self.offline_reports
+        self.ota = ota or FirmwareUpdates(link, busy=self.update_blocker, auto=lambda: self.settings["updates"]["auto"])
+        self.ota.on_change = self.announce
 
     # --- Sage's items ---
 
@@ -185,6 +197,7 @@ class Desk:
         if missed:
             self.alarms.load(await asyncio.to_thread(self.items))
         lines = today.lines(items, now, now.tzinfo)
+        self.today_count = len(lines)
         # Radar's line (one trend, one market move) in the morning, when it's
         # switched on in Settings > Radar and there's room under the tasks.
         if now.hour < 12 and len(lines) < today.MAX_ITEMS:
@@ -234,6 +247,8 @@ class Desk:
             self._spawn(self.show_notification(event.get("notification") or {}))
         elif kind == "PHONE_MEDIA":
             self._spawn(self.show_media(event.get("media") or {}))
+        elif kind == "PHONE_STATUS":
+            self._spawn(self._guard(self.phone_presence(bool(event.get("home")))))
 
     async def _refresh_after_burst(self) -> None:
         await asyncio.sleep(0.5)  # a sync batch can send several events at once
@@ -277,6 +292,34 @@ class Desk:
             return
         await self._card_surface()
         await self.controller.show_card(note.get("app") or "iPhone", note.get("title") or "", note.get("message") or "")
+
+    async def phone_presence(self, home: bool) -> None:
+        """PHONE_STATUS: the phone left (it's been gone a few minutes, see
+        phone_link.AWAY_AFTER) or came back. Back after at least the
+        welcome's awayMinutes, the clock says welcome back."""
+        if not home:
+            if self.phone_left_at is None:
+                self.phone_left_at = getattr(self.phone, "last_seen", 0) or time.time()
+            return
+        left_at, self.phone_left_at = self.phone_left_at, None
+        welcome = self.settings["welcome"]
+        if left_at is None or not welcome["enabled"] or time.time() - left_at < welcome["awayMinutes"] * 60:
+            return
+        # A reminder waiting for an answer, or a ringing alarm, comes first.
+        if self.controller.card or self.alarms.ringing or not self.link.connected:
+            return
+        log.info("Phone back after %d min; welcoming you", (time.time() - left_at) // 60)
+        await self._card_surface()
+        await self.controller.show_card("Sage", welcome["message"], self.welcome_line())
+
+    def welcome_line(self) -> str:
+        """What's on: today's items and the next alarm."""
+        n = self.today_count
+        parts = [f"{n} thing{'s' if n != 1 else ''} on today" if n else "Nothing else on today"]
+        alarm = self.next_alarm()
+        if alarm:
+            parts.append(f"next alarm {alarm[0]:02d}:{alarm[1]:02d}")
+        return ", ".join(parts)
 
     async def show_media(self, media: dict) -> None:
         track = (media.get("title") or "", media.get("artist") or "")
@@ -664,7 +707,22 @@ class Desk:
             "ringing": {"id": ringing.id, "label": ringing.title, "since": int(self.ringing_since * 1000)} if ringing else None,
             "timer": self.timer.describe(),
             "stopwatch": self.stopwatch.describe(),
+            "updates": self.ota.status(),
         }
+
+    def update_blocker(self) -> str:
+        """Why the clock shouldn't take a firmware update right now ("" if it can)."""
+        if self.alarms.ringing:
+            return "an alarm is ringing"
+        if self.timer.state in ("running", "done"):
+            return "a timer is running"
+        if self.controller.card:
+            return "a card is waiting for an answer"
+        now = self.now()
+        alarm = self.alarms.next(now)
+        if alarm and (alarm.rings_at - now).total_seconds() < ALARM_MARGIN_MINUTES * 60:
+            return "an alarm is due soon"
+        return ""
 
     async def announce(self) -> None:
         await self.broadcast({"type": "DESK_STATE", "state": self.state()})
@@ -742,4 +800,5 @@ class Desk:
             self._every(REFRESH_EVERY, self.refresh),
             self._every(WEATHER_EVERY, self.update_weather),
             self._every(2, self.ambient),
+            self._every(30, self.ota.tick),
         )

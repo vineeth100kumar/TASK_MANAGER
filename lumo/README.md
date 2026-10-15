@@ -31,8 +31,7 @@ Install the following via the Arduino IDE Library Manager:
 1. `Adafruit ILI9341` (by Adafruit)
 2. `Adafruit GFX Library` (by Adafruit)
 3. `Adafruit NeoPixel` (by Adafruit)
-4. `ArduinoWebsockets` (by Gil Maimon)
-5. `ArduinoJson` (v7 by Benoit Blanchon)
+4. `ArduinoJson` (v7 by Benoit Blanchon)
 
 *(Note: `TJpg_Decoder` is not needed on the ESP32. The Raspberry Pi converts all Spotify album art directly to raw RGB565 bitmaps before transmission).*
 
@@ -40,7 +39,7 @@ Install the following via the Arduino IDE Library Manager:
 1. Open `esp32_client/esp32_client.ino` in the Arduino IDE.
 2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS`, `PI_HOSTNAME` (the Pi's IP) and `DESK_TOKEN` (the six-digit pairing code `deploy/install_pi.sh` prints). `secrets.h` is gitignored, so your password stays off GitHub. A clock with the wrong code shows "Not paired".
 3. Select board: **ESP32C3 Dev Module**.
-4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**.
+4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**. Leave Partition Scheme on Default: `partitions.csv` sets the layout (see below).
 5. Upload the sketch to your ESP32-C3.
 
 Or from a terminal with `arduino-cli` (same settings):
@@ -48,6 +47,34 @@ Or from a terminal with `arduino-cli` (same settings):
 ```bash
 arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160 esp32_client
 ```
+
+Keep `partitions.csv` next to the `.ino`: the ESP32 core uses it instead of the
+Partition Scheme menu (leave that on Default). Its two 1.9 MB app slots are
+what updates over Wi-Fi write to, with room to grow (the default scheme's
+1.25 MB slots are nearly full). LUMO's saved settings and alarms live in NVS,
+which keeps its place. `ArduinoWebsockets` is no longer used
+(firmware 2.12 has its own client).
+
+### Updates over Wi-Fi (firmware 2.13 and later)
+
+Flash 2.13 by USB once, with `secrets.h`. LUMO saves its Wi-Fi details and
+pairing code in flash, and from then on every firmware change merged on
+GitHub reaches it by itself:
+
+1. GitHub builds the firmware (`.github/workflows/lumo-firmware.yml`, no
+   `secrets.h` needed) and publishes it as a release for that branch.
+2. Sage on the Pi checks every 15 minutes, downloads the newest build for the
+   branch it runs and checks its MD5 (`raspberry_pi/desk/ota.py`).
+3. When LUMO isn't busy (no alarm ringing or due in the next 10 minutes, no
+   timer, no card waiting), Sage sends it the update. LUMO shows "Updating"
+   with a progress bar, checks the download and restarts on the new version.
+   A failed download leaves the old firmware running, and Sage tries again
+   later (three times, then it waits for **Update now**).
+
+The LUMO page's Device tab shows the newest build, what an update is waiting
+for, and has **Update automatically**, **Check now** and **Update now**. Each
+change still needs a higher `FW_VERSION` in `config.h`: LUMO only takes a
+newer version.
 
 ---
 

@@ -4,6 +4,7 @@
 #include "display.h"
 #include "clockkeeper.h"
 #include "store.h"
+#include "ota.h"
 
 #include <WiFi.h>
 #include <ArduinoJson.h>
@@ -17,6 +18,7 @@ static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 static LumoSocket client;   // our own websocket client (lumo_socket.h says why)
 static LumoState* statePtr = nullptr;
 static bool isConnected = false;
+static bool paused = false;   // updating over Wi-Fi: no reconnecting meanwhile
 
 // ---------------------------------------------------------------------
 //  Keeping the link up. Anything from the Pi (a message, its ping, the
@@ -384,6 +386,11 @@ static void handleTextMessage(const char* payload, size_t len) {
     neoPing(255, 255, 255);
     hapticPlay(HAP_SUCCESS);
   }
+  else if (strcmp(cmd, "OTA") == 0) {
+    // A new firmware on the Pi: fetched and flashed from loop() (ota.cpp).
+    // Never while an alarm rings; Sage doesn't ask then either.
+    if (!s.alarm_ringing && !s.local_ringing) otaRequest(doc["url"] | "", doc["version"] | "");
+  }
   else if (strcmp(cmd, "REBOOT") == 0) {
     Serial.println("[WS] Restarting, as Sage asked");
     client.close(1001);
@@ -479,11 +486,13 @@ static void sayHello() {
   openedAt = lastHeard = lastPingSent = millis();
   JsonDocument hello;
   hello["evt"] = "HELLO";
-  hello["token"] = DESK_TOKEN;
+  hello["token"] = netToken;
   hello["fw"] = FW_VERSION;
   hello["reconnects"] = reconnects;
   if (lastDrop[0]) hello["drop"] = lastDrop;
   if (!everPaired) hello["boot"] = bootReason();
+  hello["ota"] = 1;   // takes updates over Wi-Fi (the OTA command)
+  if (otaLastError()[0]) hello["otaError"] = otaLastError();
   if (pendingCount) {
     JsonArray list = hello["offline"].to<JsonArray>();
     for (uint8_t i = 0; i < pendingCount; i++) {
@@ -500,12 +509,12 @@ static void sayHello() {
 
 static String piAddress() {
   IPAddress ip;
-  if (ip.fromString(PI_HOSTNAME)) return String(PI_HOSTNAME);
+  if (ip.fromString(netHost)) return String(netHost);
   if (piIpKnown && piIpFails < 2) return piIp.toString();
-  IPAddress found = MDNS.queryHost(PI_HOSTNAME, 2000);
+  IPAddress found = MDNS.queryHost(netHost, 2000);
   if (found != INADDR_NONE && found[0] != 0) {
     piIpFails = 0;
-    if (!piIpKnown || found != piIp) Serial.printf("[WS] mDNS: %s is %s\n", PI_HOSTNAME, found.toString().c_str());
+    if (!piIpKnown || found != piIp) Serial.printf("[WS] mDNS: %s is %s\n", netHost, found.toString().c_str());
     piIp = found;
     piIpKnown = true;
     return piIp.toString();
@@ -515,7 +524,7 @@ static String piAddress() {
     return piIp.toString();
   }
   Serial.println("[WS] mDNS lookup failed; trying the name as it is");
-  return String(PI_HOSTNAME);
+  return String(netHost);
 }
 
 void wsConnect() {
@@ -576,12 +585,12 @@ static void wifiWatch() {
     delay(100);
     WiFi.mode(WIFI_STA);
     WiFi.setSleep(false);
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.begin(netSsid, netPass);
   } else if (now - lastJoin > WIFI_REJOIN_MS) {
     Serial.println("[WiFi] Joining again");
     lastJoin = now;
     WiFi.disconnect();
-    WiFi.begin(WIFI_SSID, WIFI_PASS);
+    WiFi.begin(netSsid, netPass);
   }
 }
 
@@ -606,7 +615,7 @@ void wsPoll() {
     return;
   }
 
-  if (WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
+  if (!paused && WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
     Serial.printf("[WS] Reconnecting (next wait: %lu ms)...\n", retryMs);
     wsConnect();
     if (!isConnected) {
@@ -616,6 +625,19 @@ void wsPoll() {
       nextTryAt = millis() + retryMs * 3 / 4 + random(retryMs / 2 + 1);
     }
   }
+}
+
+void wsPause() {
+  paused = true;
+  if (isConnected) {
+    linkDown("updating");
+    client.close(1001);
+  }
+}
+
+void wsResume() {
+  paused = false;
+  nextTryAt = millis();
 }
 
 bool wsConnected() {
