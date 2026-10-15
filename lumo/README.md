@@ -39,17 +39,19 @@ Install the following via the Arduino IDE Library Manager:
 1. Open `esp32_client/esp32_client.ino` in the Arduino IDE.
 2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS`, `PI_HOSTNAME` (the Pi's IP) and `DESK_TOKEN` (the six-digit pairing code `deploy/install_pi.sh` prints). `secrets.h` is gitignored, so your password stays off GitHub. A clock with the wrong code shows "Not paired".
 3. Select board: **ESP32C3 Dev Module**.
-4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**.
+4. Set Flash Mode to **DIO**, CPU Frequency to **160MHz** and Partition Scheme to **Minimal SPIFFS** (see below).
 5. Upload the sketch to your ESP32-C3.
 
 Or from a terminal with `arduino-cli` (same settings):
 
 ```bash
-arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160 esp32_client
+arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160,PartitionScheme=min_spiffs esp32_client
 ```
 
-Keep the Partition Scheme on **Default 4MB with spiffs**: it has the two app
-slots that updates over Wi-Fi need. `ArduinoWebsockets` is no longer used
+Set the Partition Scheme to **Minimal SPIFFS (1.9MB APP with OTA/190KB SPIFFS)**:
+its two 1.9 MB app slots are what updates over Wi-Fi write to, with room to
+grow (the default scheme's 1.25 MB slots are nearly full). LUMO's saved
+settings and alarms live in NVS, which this doesn't touch. `ArduinoWebsockets` is no longer used
 (firmware 2.12 has its own client).
 
 ### Updates over Wi-Fi (firmware 2.13 and later)
