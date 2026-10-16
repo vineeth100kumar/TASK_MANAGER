@@ -138,6 +138,14 @@ class Store(unittest.TestCase):
         self.assertIsNotNone(alarm_store.remove(item["id"]))
         self.assertTrue(self.saved(item["id"])["deletedAt"])
 
+    def test_an_alarm_sent_back_as_read_saves(self):
+        item, _ = alarm_store.create({"label": "Gym", "time": "06:30", "days": [0, 2, 4]}, at(9, 0))
+        shown = alarm_store.describe(item, TZ)
+        saved, _ = alarm_store.update(item["id"], {**shown, "tone": "chime"}, at(9, 0), TZ)
+        self.assertEqual(alarm_store.describe(saved, TZ)["tone"], "chime")
+        with self.assertRaises(ValueError):
+            alarm_store.update(item["id"], {"colour": "red"}, at(9, 0), TZ)
+
     def test_a_label_change_leaves_a_snooze_alone(self):
         item, _ = alarm_store.create({"time": "07:00"}, at(6, 0))
         item_actions.set_fields(item["id"], {"remindAt": "2026-10-07T07:05"}, "desk")
