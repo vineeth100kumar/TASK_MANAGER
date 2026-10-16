@@ -54,7 +54,7 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
   const snoozed = isSnoozedNow(item);
 
   return (
-    <div className={`relative pl-4 pr-3 py-3 rounded-2xl surface-item is-interactive flex items-center gap-3 group ${completing ? 'is-completing' : ''} ${snoozed ? 'opacity-70' : ''}`}>
+    <div className={`relative has-[[aria-expanded=true]]:z-30 pl-4 pr-3 py-3 rounded-2xl surface-item is-interactive flex items-center gap-3 group ${completing ? 'is-completing' : ''} ${snoozed ? 'opacity-70' : ''}`}>
       <span className={`absolute left-1.5 top-3 bottom-3 w-1 rounded-full ${p.bar}`} aria-hidden />
       <CompleteButton checked={completing} saving={saving} onComplete={onComplete} />
       <div className="min-w-0 flex-1 cursor-pointer" onClick={onOpen}>
@@ -81,7 +81,7 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
       >
         <Star size={16} className={item.isFocus ? 'fill-current' : ''} />
       </button>
-      <div className="md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
+      <div className="md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 has-[[aria-expanded=true]]:!opacity-100 transition-opacity">
         <SnoozeMenu itemId={item.id} onSnoozed={onSnoozed} />
       </div>
     </div>

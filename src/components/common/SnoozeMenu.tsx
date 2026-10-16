@@ -72,6 +72,8 @@ export function SnoozeMenu({ itemId, onSnoozed, className = '' }: SnoozeMenuProp
     <div className={`relative inline-block ${className}`} onClick={(e) => e.stopPropagation()}>
       <button 
         onClick={() => setIsOpen(!isOpen)}
+        aria-expanded={isOpen}
+        aria-haspopup="menu"
         className="p-1.5 rounded-lg text-gray-400 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors"
         title="Snooze item"
         aria-label="Snooze item"

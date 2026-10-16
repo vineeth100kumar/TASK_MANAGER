@@ -8,6 +8,8 @@ import { motion } from 'framer-motion';
 export function Fold({ children, gap = 8 }: { children: React.ReactNode; gap?: number }) {
   return (
     <motion.div
+      // A row with an open menu sits above the rows after it.
+      className="relative has-[[aria-expanded=true]]:z-30"
       layout="position"
       initial={{ opacity: 0, height: 0, overflow: 'hidden' }}
       animate={{ opacity: 1, height: 'auto', transitionEnd: { overflow: 'visible' } }}
