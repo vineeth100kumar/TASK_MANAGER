@@ -82,6 +82,10 @@ static const char* resetName() {
     case ESP_RST_WDT:      return "watchdog";
     case ESP_RST_BROWNOUT: return "brownout (power dipped)";
     case ESP_RST_EXT:      return "reset button";
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    case ESP_RST_USB:      return "USB (a computer opened the serial port, or the reset button)";
+#endif
+    case ESP_RST_DEEPSLEEP: return "woke from sleep";
     default:               return "other";
   }
 }
