@@ -7,10 +7,12 @@ import { CaptureGuide } from './CaptureGuide';
 import { BluetoothSettings } from './BluetoothSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
+import { ModeSettings } from './ModeSettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 
 const SETTINGS_TABS = [
   { id: 'attention', label: 'Notifications' },
+  { id: 'modes', label: 'Modes' },
   { id: 'capture', label: 'Shortcuts' },
   { id: 'bluetooth', label: 'Bluetooth' },
   { id: 'clock', label: 'Desk Clock' },
@@ -32,7 +34,7 @@ interface SettingsModalProps {
 
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
+  const [activeTab, setActiveTab] = useState<'attention' | 'modes' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -229,6 +231,9 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
 
         {/* Tab 2: Setup guide for Siri, Share Sheet, Home Screen and email capture */}
         {activeTab === 'capture' && <CaptureGuide publicUrl={publicUrl} />}
+
+        {/* Work and Chill: what shows, and switching by home and away */}
+        {activeTab === 'modes' && <ModeSettings />}
 
         {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
         {activeTab === 'bluetooth' && <BluetoothSettings />}

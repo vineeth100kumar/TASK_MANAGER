@@ -20,6 +20,7 @@ import { Fold } from '../common/Fold';
 import { TaskRow } from '../common/TaskRow';
 import { ReminderPrompt } from '../common/ReminderPrompt';
 import { RadarBriefCard } from '../radar/RadarBriefCard';
+import { HiddenWorkLine } from '../common/HiddenWorkLine';
 
 interface DashboardViewProps {
   workspaceId: string;
@@ -193,6 +194,9 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
       </div>
 
       <ReminderPrompt />
+
+      {/* Chill mode: work is out of sight, never lost. */}
+      <HiddenWorkLine scope="today" />
 
       {/* The one list */}
       <section className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3" aria-label="Today's tasks">

@@ -4,6 +4,7 @@ import { ArrowUp, Bell, Calendar, Check, Clock, Flag, Loader2, Pencil, Repeat, R
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { Project, Area, WorkItem, LifeContext } from '../../services/types';
+import { getLifeMode } from '../../services/lifeMode';
 import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { TimePicker } from '../common/TimePicker';
@@ -149,7 +150,10 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
       setBatch(batchId, x => ({ ...x, saved: null }));
       onChanged(); loadItems();
     };
-    say(`Saved ${all.length} item${all.length === 1 ? '' : 's'}${updated ? ` · ${updated} updated` : ''}${habits ? ` · ${habits} habit${habits === 1 ? '' : 's'}` : ''}`, { batch: batchId, undo });
+    // Chill hides work: say so, so a saved work item isn't taken for lost.
+    const hiddenWork = getLifeMode().mode === 'chill'
+      ? b.cards.filter(c => c.include && c.kind !== 'habit' && c.lifeContext !== 'personal').length : 0;
+    say(`Saved ${all.length} item${all.length === 1 ? '' : 's'}${updated ? ` · ${updated} updated` : ''}${habits ? ` · ${habits} habit${habits === 1 ? '' : 's'}` : ''}${hiddenWork ? ` · ${hiddenWork} work, hidden while you're in Chill` : ''}`, { batch: batchId, undo });
     onChanged(); loadItems();
     setBusy(false);
   };
