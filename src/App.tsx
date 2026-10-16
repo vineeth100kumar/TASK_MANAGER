@@ -9,7 +9,7 @@ import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { refreshSubscription } from './services/pushNotifications';
-import { loadLifeMode, getLifeMode, useLifeMode } from './services/lifeMode';
+import { loadLifeMode, getLifeMode, setLifeMode, useLifeMode } from './services/lifeMode';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -31,6 +31,7 @@ import {
   prefetchViews,
 } from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
+import { ModePrompt } from './components/common/ModePrompt';
 
 function MainApp() {
   // Global State
@@ -200,6 +201,12 @@ function MainApp() {
         if (e.key === 'n' || e.key === 'N' || e.key === 'c' || e.key === 'C') {
           e.preventDefault();
           setIsCreateModalOpen(true);
+        } else if (e.key === 'm' || e.key === 'M') {
+          // Work <-> Chill from anywhere.
+          e.preventDefault();
+          const next = getLifeMode().mode === 'chill' ? 'work' : 'chill';
+          setLifeMode(next).then(() => showToast(next === 'chill' ? 'Chill mode: personal only' : 'Work mode: everything shows', 'info'))
+            .catch(() => showToast("Couldn't reach the Pi to change the mode", 'error'));
         } else if (e.key === '?') {
           e.preventDefault();
           setIsShortcutsOpen(open => !open);
@@ -562,6 +569,7 @@ function MainApp() {
       </Suspense>
 
       <PhoneCorner />
+      <ModePrompt />
 
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
       <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-16 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">

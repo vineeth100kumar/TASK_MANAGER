@@ -15,6 +15,7 @@ const GROUPS: { title: string; rows: { keys: string[]; what: string }[] }[] = [
     rows: [
       { keys: ['N'], what: 'New item' },
       { keys: ['C'], what: 'New item (same as N)' },
+      { keys: ['M'], what: 'Switch Work / Chill' },
       { keys: ['/'], what: 'Search' },
       { keys: [mod, 'K'], what: 'Search' },
       { keys: ['?'], what: 'This sheet' },
