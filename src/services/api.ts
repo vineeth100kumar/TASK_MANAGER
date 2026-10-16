@@ -15,6 +15,7 @@ import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/re
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
+import { stageOf, statusesFor } from './projectTypes';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 
 export interface LocalState {
@@ -311,9 +312,15 @@ export const api = {
       entityType?: string;
       priority?: string;
       tag?: string;
+      stage?: string;
     }): Promise<WorkItem[]> => {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt);
+
+      if (filters?.stage) {
+        const projects = state.projects.filter(Boolean);
+        items = items.filter(i => stageOf(i, statusesFor(i.projectId, projects)).id === filters.stage);
+      }
 
       if (filters?.tag) {
         items = items.filter(i => (i.labels || []).includes(filters.tag as string));
@@ -486,7 +493,8 @@ export const api = {
       return hydrateWorkItem(updated);
     },
 
-    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number): Promise<WorkItem> => {
+    /** stage: the project type's own status (see projectTypes.ts); left out, the stored one stays. */
+    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number, stage?: string | null): Promise<WorkItem> => {
       await initializeStore();
       const index = state.workItems.findIndex(i => i && i.id === id);
       if (index === -1) throw new Error('Item not found');
@@ -499,6 +507,7 @@ export const api = {
       const updated: WorkItem = {
         ...existing,
         status: toStatus as any,
+        stage: stage !== undefined ? stage : (existing.stage ?? null),
         blockedReason: isNowBlocked ? (existing.blockedReason || 'Waiting on external input') : (toStatus === 'done' ? null : existing.blockedReason),
         // Kept through "done", so undoing it still knows who you were waiting on.
         waitingFor: isNowBlocked && !existing.waitingFor ? {

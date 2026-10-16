@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch } from 'lucide-react';
 import { api } from '../../services/api';
-import { STATUSES, PRIORITIES, WORK_ITEM_TYPES, ALLOWED_TRANSITIONS, LABELS } from '../../services/constants';
+import { PRIORITIES, WORK_ITEM_TYPES, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
@@ -12,6 +12,7 @@ import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
 import { RepeatSelect } from '../common/RepeatSelect';
 import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
+import { stageOf, statusesFor } from '../../services/projectTypes';
 import { TimePicker, DateTimePicker } from '../common/TimePicker';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
@@ -188,8 +189,8 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
      </>
   );
 
-  const allowedStatuses = [task.status, ...(ALLOWED_TRANSITIONS[task.status as keyof typeof ALLOWED_TRANSITIONS] || [])];
-  if (!allowedStatuses.includes('done')) allowedStatuses.push('done');
+  // The statuses of the item's project type (Idea, Scripting… for content).
+  const taskStatuses = statusesFor(task.projectId, api.sync.getState().projects);
 
   return (
     <>
@@ -242,8 +243,8 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                     <>
                       <PropertyRow icon={Circle} label="Status">
                         <Select align="end" className="prop-control" 
-                          value={task.status} onChange={handleStatusChange}>
-                          {Object.values(STATUSES).filter(s => allowedStatuses.includes(s.id)).map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                          value={stageOf(task, taskStatuses).id} onChange={handleStatusChange}>
+                          {taskStatuses.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
                         </Select>
                       </PropertyRow>
 

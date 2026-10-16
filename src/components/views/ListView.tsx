@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { withTime, formatClock } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
-import { STATUSES, PRIORITIES } from '../../services/constants';
+import { PRIORITIES } from '../../services/constants';
+import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/projectTypes';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
@@ -21,9 +22,11 @@ interface ListViewProps {
   onSelect: (id: string) => void;
   selectedId: string | null;
   onTransition: (task: WorkItem, toStatus: string) => void;
+  /** Groups: a project's own statuses, or the usual four. */
+  statuses?: StatusStage[];
 }
 
-export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
+export function ListView({ tasks, onSelect, selectedId, onTransition, statuses = DEFAULT_STATUSES }: ListViewProps) {
   const { showToast } = useToast();
   // Ticks spin briefly, then fill; the status change follows once the pop has played.
   const [pressed, setPressed] = useState<Set<string>>(() => new Set());
@@ -167,8 +170,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
       {renderGroup('Reminders', reminderTasks, 'bg-emerald-500')}
       {renderGroup('Milestones', milestoneTasks, 'bg-orange-500')}
       
-      {Object.values(STATUSES).map(status => {
-        const statusTasks = issueTasks.filter(t => t.status === status.id);
+      {statuses.map(status => {
+        const statusTasks = issueTasks.filter(t => stageOf(t, statuses).id === status.id);
         return renderGroup(status.label, statusTasks, status.dot);
       })}
     </div>

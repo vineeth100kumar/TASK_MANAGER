@@ -4,7 +4,7 @@ import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motio
 import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
-import { STATUSES, FOCUS_LIMIT } from './services/constants';
+import { FOCUS_LIMIT } from './services/constants';
 import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
@@ -31,7 +31,7 @@ import {
 } from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
-import { projectTypeInfo } from './services/projectTypes';
+import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
 function MainApp() {
   // Global State
@@ -47,7 +47,7 @@ function MainApp() {
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' });
+  const [filters, setFilters] = useState<{ search: string; entityType: string; priority: string; status: string; tag: string; stage?: string }>({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' });
   // Work and personal show together unless the sidebar filter narrows to one.
   const [lifeFilter, setLifeFilterState] = useState<LifeFilter>(() => {
     try {
@@ -282,22 +282,26 @@ function MainApp() {
   }, [activeView]);
 
   // Mutations with Universal Undo
-  const handleTransitionStatus = async (item: any, newStatus: string) => {
+  // newStatus is a base status ('done') or one of the project type's own (see
+  // projectTypes.ts); both store as a base status plus the stage shown.
+  const handleTransitionStatus = async (item: any, picked: string) => {
     const oldItem = { ...item };
-    setWorkItems(prev => prev.map(t => t.id === item.id ? { ...t, status: newStatus } : t));
+    const statuses = statusesFor(item.projectId, api.sync.getState().projects);
+    const { status: newStatus, stage } = resolveStage(picked, statuses);
+    setWorkItems(prev => prev.map(t => t.id === item.id ? { ...t, status: newStatus, stage } : t));
     try {
-      await api.workItems.transitionStatus(item.id, newStatus, item.version);
+      await api.workItems.transitionStatus(item.id, newStatus, item.version, stage);
       
       // Provide Universal 8-Second Undo on State Changes
       if (newStatus === 'done') haptic(12);
       showToast(
-        newStatus === 'done' ? doneMessage(countDoneToday()) : `Moved to ${(STATUSES as any)[newStatus]?.label || newStatus}`, 
+        newStatus === 'done' ? doneMessage(countDoneToday()) : `Moved to ${statuses.find(x => x.id === stage)?.label || newStatus}`, 
         'success',
         {
           label: 'Undo',
           group: newStatus === 'done' ? 'done' : undefined,
           onAction: async () => {
-            await api.workItems.transitionStatus(item.id, oldItem.status, oldItem.version);
+            await api.workItems.transitionStatus(item.id, oldItem.status, oldItem.version, oldItem.stage ?? null);
             showToast('Action undone');
             fetchWorkItems(false);
           }
@@ -378,11 +382,13 @@ function MainApp() {
     const project = api.sync.getState().projects.find(p => p && p.id === id);
     setActiveView('tasks');
     setActiveWorkspace(id);
-    // Stage chips filter by tag; one project's stage shouldn't empty the next.
-    if (filters.tag) setFilters({ ...filters, tag: '' });
+    // A status chip belongs to one project's type; don't carry it to the next.
+    if (filters.stage) setFilters({ ...filters, stage: '' });
     if (project && !window.matchMedia('(max-width: 767px)').matches) setPresentationMode(projectTypeInfo(project).view);
   };
   const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
+  // A project's board and list group by its type's statuses; elsewhere, the usual four.
+  const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
 
   return (
     <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
@@ -449,7 +455,7 @@ function MainApp() {
             ) : (
               <div>
                 {isProjectPage && (
-                  <ProjectTypeBar projectId={activeWorkspace} tag={filters.tag || ''} onTag={tag => setFilters({ ...filters, tag })} />
+                  <ProjectTypeBar projectId={activeWorkspace} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
                 )}
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} />
@@ -461,7 +467,7 @@ function MainApp() {
                     </div>
                     <h3 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white mb-1.5">No items found</h3>
                     <p className="text-[14px] text-gray-500 max-w-sm text-center leading-relaxed">
-                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all' || filters.tag) ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
+                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all' || filters.tag || filters.stage) ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
                     <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition-all active:scale-[0.98] flex items-center gap-2">
                       <Plus size={16} /> Add Item <span className="ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white/20">N</span>
@@ -471,8 +477,8 @@ function MainApp() {
                   <AnimatePresence mode="wait">
                     <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
-                        {presentationMode === 'list' && <ListView tasks={workItems} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} statuses={pageStatuses} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'branches' && (
                           <ProjectBranchesView
                             items={workItems}

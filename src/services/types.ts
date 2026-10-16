@@ -58,6 +58,8 @@ export interface WorkItem {
   lifeContext?: LifeContext;
   type: string; // task, bug, feature, improvement, meeting, reminder, milestone
   status: TaskStatus;
+  /** The project type's own status (e.g. 'editing'); status keeps the base. See projectTypes.ts. */
+  stage?: string | null;
   priority: TaskPriority;
   
   // Categorization
