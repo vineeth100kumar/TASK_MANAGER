@@ -264,15 +264,23 @@ export interface Idea {
   paybackMonths: number | null;
   salesCycleWeeks: number | null;
   moat: { network: number; switching: number; data: number; cost: number; regulatory: number };
-  ratings: { whyNow: number; pain: number; money: number };
+  ratings: { whyNow: number; pain: number; money: number; fit?: number };
   score: number;
-  scoreParts: { whyNow: number; pain: number; money: number; moat: number; safety: number };
+  // fit is there for ideas made after My edge (out of 15; the others shrink to fit).
+  scoreParts: { whyNow: number; pain: number; money: number; moat: number; safety: number; fit?: number };
   risks: IdeaRisk[];
   playbook: IdeaPhase[];
   tags: string[];
   sources: number[];
   starred: boolean;
   projectId: string | null;
+  // Kept from a Lab spark: no dossier, score or playbook until it's researched.
+  stage?: 'spark';
+  sparkId?: string;
+  fit?: number;        // 0-10, how well it suits My edge
+  fitWhy?: string;
+  angle?: string;
+  clue?: { label: string; title: string; link: string };
   lifeContext?: LifeContext;
   createdAt: string;
   updatedAt: string;

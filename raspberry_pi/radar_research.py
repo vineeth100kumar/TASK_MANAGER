@@ -579,7 +579,7 @@ def clean_idea(raw: dict, source_count: int) -> dict:
         "paybackMonths": _num(economics.get("paybackMonths"), 0, 120),
         "salesCycleWeeks": _num(economics.get("salesCycleWeeks"), 0, 104),
         "moat": {k: int(_num(moat.get(k), 0, 10, 0)) for k in MOAT_KEYS},
-        "ratings": {k: int(_num(ratings.get(k), 0, 10, 5)) for k in ("whyNow", "pain", "money")},
+        "ratings": {k: int(_num(ratings.get(k), 0, 10, 5)) for k in ("whyNow", "pain", "money", "fit") if k != "fit" or k in ratings},
         "tags": tags,
         "sources": _refs(raw.get("sources"), source_count),
         "playbook": playbook,
@@ -602,10 +602,23 @@ def clean_risks(raw: Any) -> List[dict]:
 
 def score(idea: dict) -> Tuple[int, dict]:
     """Out of 100: why now 25, pain 20, money 20, moat 20, safety 15 (less 3
-    per High risk). The parts are kept so the Idea page can show them."""
+    per High risk). The parts are kept so the Idea page can show them.
+
+    With a fit rating (how well it suits My edge, see sparks.py) fit takes 15:
+    why now 20, pain 20, money 15, moat 15, safety 15 (less 3 per High), fit 15."""
     r = idea["ratings"]
     moat_avg = sum(idea["moat"].values()) / len(MOAT_KEYS)
     highs = sum(1 for risk in idea.get("risks", []) if risk["severity"] == "High")
+    if "fit" in r:
+        parts = {
+            "whyNow": round(r["whyNow"] * 2.0, 1),
+            "pain": round(r["pain"] * 2.0, 1),
+            "money": round(r["money"] * 1.5, 1),
+            "moat": round(moat_avg * 1.5, 1),
+            "safety": max(0, 15 - 3 * highs),
+            "fit": round(r["fit"] * 1.5, 1),
+        }
+        return int(round(min(100, sum(parts.values())))), parts
     parts = {
         "whyNow": round(r["whyNow"] * 2.5, 1),
         "pain": round(r["pain"] * 2.0, 1),
@@ -659,14 +672,15 @@ def prompt_market(theme: str, depth: str, sources: List[dict], pains: List[dict]
     )
 
 
-def prompt_ideas(theme: str, market: dict, pains: List[dict], sources: List[dict]) -> str:
+def prompt_ideas(theme: str, market: dict, pains: List[dict], sources: List[dict], edge: Optional[List[str]] = None) -> str:
+    founder = ("The founder (rate fit for this person):\n" + "\n".join(edge) + "\n\n") if edge else ""
     chain = "\n".join(f"- {l.get('layer')}: {l.get('players')} (gap: {l.get('gap')})" for l in market.get("valueChain", []))
     pain_lines = "\n".join(f"- {p['text'][:200]}" for p in pains[:8]) or "- (none found)"
     titles = "\n".join(f"[{i}] {s['title']}" for i, s in enumerate(sources, 1))
     tags = ", ".join(radar.TAG_ORDER)
     return (
         f'Theme: "{theme}"\n\nMarket: {market.get("macro", "")}\nWhy now: {market.get("whyNow", "")}\n'
-        f"Value chain:\n{chain}\n\nComplaints:\n{pain_lines}\n\nSources:\n{titles}\n\n"
+        f"Value chain:\n{chain}\n\nComplaints:\n{pain_lines}\n\nSources:\n{titles}\n\n{founder}"
         "Propose 3 distinct startup ideas a solo founder could start in 90 days, each attacking a "
         "different gap. Numbers are your best estimates for a B2B product. Ratings and moat scores "
         "are 0-10 and must differ between ideas where the ideas differ. JSON:\n"
@@ -678,7 +692,7 @@ def prompt_ideas(theme: str, market: dict, pains: List[dict], sources: List[dict
         f'    "tags": ["one or two of: {tags}"],\n'
         '    "economics": {"acvUsd": 18000, "grossMarginPct": 70, "paybackMonths": 7, "salesCycleWeeks": 4},\n'
         '    "moat": {"network": 0, "switching": 0, "data": 0, "cost": 0, "regulatory": 0},\n'
-        '    "ratings": {"whyNow": 0, "pain": 0, "money": 0},\n'
+        + ('    "ratings": {"whyNow": 0, "pain": 0, "money": 0, "fit": 0},\n' if edge else '    "ratings": {"whyNow": 0, "pain": 0, "money": 0},\n') +
         '    "playbook": [\n'
         '      {"name": "Customer discovery", "weeks": [1, 2], "steps": ["Interview 10 ...", "..."]},\n'
         '      {"name": "...", "weeks": [3, 6], "steps": ["..."]},\n'
@@ -888,7 +902,7 @@ class Pipeline:
         }
         await _announce(self.job)
 
-        data, raw = await ask_json(self.job, prompt_ideas(self.job["theme"], self.market, self.pains, self.sources), "ideas", 5000)
+        data, raw = await ask_json(self.job, prompt_ideas(self.job["theme"], self.market, self.pains, self.sources, _edge()), "ideas", 5000)
         ideas = [clean_idea(i, count) for i in (data or {}).get("ideas", []) if isinstance(i, dict)][:3]
         if not ideas:
             self.raw.append(raw)
@@ -961,6 +975,15 @@ class Pipeline:
         if refused:
             raise RuntimeError(f"Sage refused to save the results: {refused[0].get('reason')}")
         job.update(status=status, ideaIds=dossier["ideaIds"], noteId=note_id)
+
+
+def _edge() -> List[str]:
+    import sparks  # sparks imports this module, so not at the top
+
+    try:
+        return sparks.edge_lines()
+    except Exception:
+        return []
 
 
 def _op(table: str, record: dict) -> dict:

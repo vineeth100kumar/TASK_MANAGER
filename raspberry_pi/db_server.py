@@ -25,6 +25,7 @@ import markets
 import prices
 import radar
 import radar_research
+import sparks
 import system_health
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
@@ -474,6 +475,7 @@ async def startup_event():
     if radar.ENABLED:
         _background(radar.collector.run(events.broadcast))
         _background(markets.collector.run())
+        _background(sparks.run())
 
 
 @app.get("/api/health")
@@ -1444,6 +1446,10 @@ app.include_router(radar_research.router)
 # Radar's Markets board (markets.py): a year of daily closes per symbol, and why things moved.
 markets.connect(DB_PATH, events.broadcast)
 app.include_router(markets.router)
+
+# Radar Lab (sparks.py): each morning's business-idea sparks, matched to My edge.
+sparks.connect(DB_PATH, events.broadcast)
+app.include_router(sparks.router)
 
 
 if (DIST_DIR / "index.html").is_file():

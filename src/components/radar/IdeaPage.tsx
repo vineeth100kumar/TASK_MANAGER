@@ -1,11 +1,12 @@
 import { useState } from 'react';
-import { ChevronLeft, GitBranch, Target, Star, ShieldAlert, Users, Link2, LoaderCircle, Gauge } from 'lucide-react';
+import { ChevronLeft, GitBranch, Target, Star, ShieldAlert, Users, Link2, LoaderCircle, Gauge, FlaskConical, Sparkles, ExternalLink } from 'lucide-react';
 import { api } from '../../services/api';
-import { money } from '../../services/radar';
+import { money, researchApi, sparksApi } from '../../services/radar';
 import { turnIntoProject, focusFirstStep } from '../../services/ideaProject';
 import { Dossier, Idea } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { MoatRadar, Panel, ScoreRing, Tag, chipButton, eyebrow, primaryButton } from './parts';
+import { FitBadge } from './LabTab';
 
 const SEVERITY: Record<string, string> = {
   High: 'text-red-600 bg-red-500/10',
@@ -13,9 +14,13 @@ const SEVERITY: Record<string, string> = {
   Low: 'text-emerald-600 bg-emerald-500/10',
 };
 
-// What the score is made of, out of each part's maximum.
+// What the score is made of, out of each part's maximum. Ideas researched
+// with My edge also score fit, and the other parts give up points for it.
 const PARTS: [keyof Idea['scoreParts'], string, number][] = [
   ['whyNow', 'Why now', 25], ['pain', 'Pain', 20], ['money', 'Money', 20], ['moat', 'Moat', 20], ['safety', 'Safety', 15],
+];
+const PARTS_WITH_FIT: [keyof Idea['scoreParts'], string, number][] = [
+  ['whyNow', 'Why now', 20], ['pain', 'Pain', 20], ['money', 'Money', 15], ['moat', 'Moat', 15], ['safety', 'Safety', 15], ['fit', 'Fit', 15],
 ];
 
 const PHASE_DOTS = ['bg-purple-500', 'bg-sky-500', 'bg-emerald-500', 'bg-orange-500'];
@@ -26,9 +31,78 @@ interface IdeaPageProps {
   onBack: () => void;
   onOpenProject: (projectId: string) => void;
   onOpenDossier: (id: string) => void;
+  onResearchStarted: () => void;
 }
 
-export function IdeaPage({ idea, dossier, onBack, onOpenProject, onOpenDossier }: IdeaPageProps) {
+// A kept spark: no research yet, so no numbers, just the idea and where it came from.
+function SparkIdeaPage({ idea, onBack, onResearchStarted }: { idea: Idea; onBack: () => void; onResearchStarted: () => void }) {
+  const { showToast } = useToast();
+  const [working, setWorking] = useState(false);
+
+  const research = async () => {
+    setWorking(true);
+    try {
+      if (idea.sparkId) await sparksApi.research(idea.sparkId);
+      else await researchApi.start(`${idea.name}: ${idea.oneLiner}`.slice(0, 200), 'brief');
+      showToast('Research started');
+      onResearchStarted();
+    } catch (e: any) {
+      showToast(e.message || "Couldn't start research", 'error');
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  return (
+    <div className="space-y-4 md:space-y-6">
+      <div className="hero p-5 md:p-7 rounded-3xl">
+        <div className="eyebrow text-gray-500 dark:text-gray-400 mb-2 min-w-0">
+          <button onClick={onBack} className="flex items-center gap-1 shrink-0 uppercase hover:text-gray-900 dark:hover:text-white"><ChevronLeft size={14} /> Ideas</button>
+          <span className="truncate">· kept from a Lab spark</span>
+        </div>
+        <h1 className="text-display text-[28px] md:text-[40px] font-semibold leading-[1.05]">{idea.name}</h1>
+        <p className="text-[14.5px] text-gray-500 dark:text-gray-400 mt-1.5">{idea.oneLiner}</p>
+        <div className="flex gap-1.5 mt-3 flex-wrap items-center">
+          {typeof idea.fit === 'number' && <FitBadge fit={idea.fit} why={idea.fitWhy} />}
+          {idea.angle && <span className="text-[10.5px] font-semibold px-1.5 py-0.5 rounded-md text-purple-600 bg-purple-500/10 dark:text-purple-300">{idea.angle}</span>}
+          {idea.tags.map(t => <Tag key={t} tag={t} />)}
+        </div>
+        <div className="flex gap-2 mt-5 flex-wrap">
+          <button onClick={research} disabled={working} className={primaryButton} title="Studio's 5-step research: a dossier, scores and a 90-day playbook">
+            {working ? <LoaderCircle size={14} className="animate-spin" /> : <FlaskConical size={14} />} Research this
+          </button>
+          <button onClick={() => api.ideas.update(idea.id, { starred: !idea.starred })} aria-pressed={idea.starred} className={chipButton}>
+            <Star size={14} className={`text-amber-500 ${idea.starred ? 'fill-amber-500' : ''}`} /> {idea.starred ? 'Starred' : 'Star'}
+          </button>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <Panel icon={<Users size={18} className="text-blue-500" />} title="Who buys, and why you">
+          {idea.icp && <p className="text-[13.5px] text-gray-800 dark:text-gray-200"><span className="font-semibold">First buyer:</span> {idea.icp}</p>}
+          {idea.fitWhy && <p className="text-[13.5px] text-gray-800 dark:text-gray-200"><span className="font-semibold">Why it fits:</span> {idea.fitWhy}</p>}
+        </Panel>
+        <Panel icon={<Sparkles size={18} className="text-amber-500" />} title="Where it came from">
+          {idea.whyNow && <p className="text-[13.5px] text-gray-800 dark:text-gray-200"><span className="font-semibold">What changed:</span> {idea.whyNow}</p>}
+          {idea.clue && (
+            <p className="text-[12.5px] text-gray-500">
+              {idea.clue.label}:{' '}
+              {idea.clue.link
+                ? <a href={idea.clue.link} target="_blank" rel="noopener noreferrer" className="font-medium text-blue-600 dark:text-blue-400 hover:underline">{idea.clue.title} <ExternalLink size={11} className="inline" /></a>
+                : idea.clue.title}
+            </p>
+          )}
+        </Panel>
+      </div>
+    </div>
+  );
+}
+
+export function IdeaPage(props: IdeaPageProps) {
+  if (props.idea.stage === 'spark') return <SparkIdeaPage idea={props.idea} onBack={props.onBack} onResearchStarted={props.onResearchStarted} />;
+  return <ResearchedIdeaPage {...props} />;
+}
+
+function ResearchedIdeaPage({ idea, dossier, onBack, onOpenProject, onOpenDossier }: IdeaPageProps) {
   const { showToast } = useToast();
   const [working, setWorking] = useState<'' | 'project' | 'focus'>('');
   const sources = dossier?.sources || [];
@@ -123,7 +197,7 @@ export function IdeaPage({ idea, dossier, onBack, onOpenProject, onOpenDossier }
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
         <Panel className="lg:col-span-4" icon={<Gauge size={18} className="text-emerald-500" />} title="Score" note="how the 100 adds up">
           <div className="space-y-2">
-            {PARTS.map(([key, label, max]) => {
+            {(idea.scoreParts?.fit !== undefined ? PARTS_WITH_FIT : PARTS).map(([key, label, max]) => {
               const value = idea.scoreParts?.[key] ?? 0;
               return (
                 <div key={key} className="flex items-center gap-2.5">
