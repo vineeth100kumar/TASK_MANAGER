@@ -1,5 +1,6 @@
 import { api } from '../services/api';
 import { LifeContext } from '../services/types';
+import { contextOf } from './taskLists';
 
 const sameLocalDay = (iso: string, day: Date) => {
   const d = new Date(iso);
@@ -11,7 +12,7 @@ export function countDoneToday(lifeContext?: LifeContext): number {
   const today = new Date();
   return api.sync.getState().workItems.filter(i =>
     i && !i.deletedAt && i.status === 'done' && i.completedAt && sameLocalDay(i.completedAt, today) &&
-    (!lifeContext || (i.lifeContext || 'work') === lifeContext)
+    (!lifeContext || contextOf(i) === lifeContext)
   ).length;
 }
 
@@ -56,7 +57,7 @@ export function weekActivity(lifeContext?: LifeContext): WeekDay[] {
   const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - ((now.getDay() + 6) % 7));
   const items = api.sync.getState().workItems.filter(i =>
     i && !i.deletedAt && i.status === 'done' && i.completedAt &&
-    (!lifeContext || (i.lifeContext || 'work') === lifeContext)
+    (!lifeContext || contextOf(i) === lifeContext)
   );
   return Array.from({ length: 7 }, (_, k) => {
     const date = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + k);
