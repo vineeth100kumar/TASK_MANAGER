@@ -105,7 +105,7 @@ def _twelve() -> Optional[dict]:
 def phone_part(state: dict) -> dict:
     """The phone link without notification text: is the BLE link up, what it
     subscribed to, the last error, and the song with when it last changed."""
-    out = {k: state.get(k) for k in ("available", "connected", "deviceName", "lastSeen", "error") if k in state}
+    out = {k: state.get(k) for k in ("available", "connected", "home", "deviceName", "lastSeen", "lifeMode", "error") if k in state}
     link = state.get("link") or {}
     if link:
         out["ble"] = link.get("ble")

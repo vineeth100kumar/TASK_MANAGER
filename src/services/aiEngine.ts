@@ -87,6 +87,28 @@ export const aiEngine = {
         return res.json();
     },
 
+    // A goal broken into a plan, or a plan changed by a follow-up. Groq only.
+    chatPlan: async (payload: {
+        mode: 'plan' | 'plan_edit';
+        message: string;
+        today: string;
+        planMode: 'new' | 'existing' | 'steps';
+        target?: string;
+        targetItems?: string[];
+        typeHint?: string;
+        days?: number | null;
+        plan?: { name: string; type: string; phases: string[]; tasks: { title: string; phase: number; days: number; priority: string }[] };
+    }, signal?: AbortSignal): Promise<{ engine: string; plan: any }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
+            method: 'POST',
+            signal,
+            headers: piHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
+
     getDailyBriefing: async (tasksJson: string) => {
         const res = await fetch(getAiUrl('/api/daily-briefing'), {
             method: 'POST',

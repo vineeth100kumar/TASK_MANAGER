@@ -15,7 +15,9 @@ import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/re
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
+import { stageOf, statusesFor } from './projectTypes';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
+import { contextOf, inContext, isAlarm, isOpen, isSnoozedNow, isOnToday, compareToday, compareInbox, checkVisibility, VisibilityCheck } from '../utils/taskLists';
 
 export interface LocalState {
   workItems: WorkItem[];
@@ -298,7 +300,7 @@ export const api = {
       await initializeStore();
       const counts = new Map<string, number>();
       for (const item of state.workItems) {
-        if (!item || item.deletedAt || (lifeContext && (item.lifeContext || 'work') !== lifeContext)) continue;
+        if (!item || item.deletedAt || (lifeContext && contextOf(item) !== lifeContext)) continue;
         for (const tag of item.labels || []) counts.set(tag, (counts.get(tag) || 0) + 1);
       }
       return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
@@ -311,16 +313,22 @@ export const api = {
       entityType?: string;
       priority?: string;
       tag?: string;
+      stage?: string;
     }): Promise<WorkItem[]> => {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt);
+
+      if (filters?.stage) {
+        const projects = state.projects.filter(Boolean);
+        items = items.filter(i => stageOf(i, statusesFor(i.projectId, projects)).id === filters.stage);
+      }
 
       if (filters?.tag) {
         items = items.filter(i => (i.labels || []).includes(filters.tag as string));
       }
 
       if (filters?.lifeContext) {
-        items = items.filter(i => i && (i.lifeContext || 'work') === filters.lifeContext);
+        items = items.filter(i => i && contextOf(i) === filters.lifeContext);
       }
 
       if (filters?.projectId && filters.projectId !== 'all') {
@@ -432,6 +440,9 @@ export const api = {
         location: payload.location || null,
         labels: payload.labels || [],
         customFields: payload.customFields || {},
+        // A planned task names the one before it, and starts in its project type's first status.
+        ...(payload.dependsOn?.length ? { dependsOn: payload.dependsOn } : {}),
+        ...((payload as any).stage ? { stage: (payload as any).stage } : {}),
         version: 1,
         completedAt: null,
         deletedAt: null,
@@ -486,7 +497,8 @@ export const api = {
       return hydrateWorkItem(updated);
     },
 
-    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number): Promise<WorkItem> => {
+    /** stage: the project type's own status (see projectTypes.ts); left out, the stored one stays. */
+    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number, stage?: string | null): Promise<WorkItem> => {
       await initializeStore();
       const index = state.workItems.findIndex(i => i && i.id === id);
       if (index === -1) throw new Error('Item not found');
@@ -499,6 +511,7 @@ export const api = {
       const updated: WorkItem = {
         ...existing,
         status: toStatus as any,
+        stage: stage !== undefined ? stage : (existing.stage ?? null),
         blockedReason: isNowBlocked ? (existing.blockedReason || 'Waiting on external input') : (toStatus === 'done' ? null : existing.blockedReason),
         // Kept through "done", so undoing it still knows who you were waiting on.
         waitingFor: isNowBlocked && !existing.waitingFor ? {
@@ -612,7 +625,7 @@ export const api = {
         key: (payload.key || 'PROJ').toUpperCase(),
         color: payload.color || 'bg-indigo-500',
         sequence: state.projects.length + 1,
-        type: 'standard',
+        type: payload.type || 'other',
         description: payload.description || '',
         createdAt: now,
         updatedAt: now
@@ -969,7 +982,7 @@ export const api = {
       s.completed = completed;
       await persist('subtasks', s);
       return s;
-    },
+        },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
       await removeRecord('subtasks', id);
@@ -988,9 +1001,22 @@ export const api = {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt && needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => i && (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => i && contextOf(i) === lifeContext);
       }
       return items.map(hydrateWorkItem);
+    },
+
+    // Everything open, across every project, area and section. Snoozed items
+    // stay listed (marked) so nothing open is ever out of sight.
+    all: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; done: WorkItem[]; check: VisibilityCheck }> => {
+      await initializeStore();
+      const today = localDateString();
+      const live = state.workItems.filter(i => i && !i.deletedAt).map(hydrateWorkItem);
+      const items = live.filter(i => isOpen(i) && inContext(i, lifeContext) && !isAlarm(i)).sort(compareInbox(today));
+      const done = live.filter(i => i.status === 'done' && inContext(i, lifeContext) && !isAlarm(i))
+        .sort((a, b) => (b.completedAt || b.updatedAt || '').localeCompare(a.completedAt || a.updatedAt || ''));
+      const check = checkVisibility(live, new Set(items.map(i => i.id)), lifeContext);
+      return { items, done, check };
     },
 
     clarify: async (id: string, updates: Partial<WorkItem>): Promise<WorkItem> => {
@@ -1007,7 +1033,7 @@ export const api = {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => contextOf(i) === lifeContext);
       }
       return items.sort((a, b) => (a.focusOrder || 0) - (b.focusOrder || 0)).map(hydrateWorkItem);
     },
@@ -1066,7 +1092,7 @@ export const api = {
       await initializeStore();
       let items = state.workItems.filter(i => i && !i.deletedAt && i.waitingFor && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => contextOf(i) === lifeContext);
       }
       return items.map(hydrateWorkItem);
     },
@@ -1089,6 +1115,32 @@ export const api = {
     }
   },
 
+  // Today: one list of everything due, overdue, starting today or starred,
+  // ordered overdue first, then priority, then time.
+  today: {
+    list: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; snoozed: WorkItem[] }> => {
+      await initializeStore();
+      const today = localDateString();
+      const candidates = state.workItems
+        .filter(i => i && isOpen(i) && inContext(i, lifeContext) && !isAlarm(i))
+        .map(hydrateWorkItem)
+        .filter(i => isOnToday(i, today))
+        .sort(compareToday(today));
+      return {
+        items: candidates.filter(i => !isSnoozedNow(i)),
+        snoozed: candidates.filter(i => isSnoozedNow(i))
+      };
+    },
+
+    // What Chill mode hides: open work items, and those of them on Today.
+    hiddenWork: async (): Promise<{ today: number; open: number }> => {
+      await initializeStore();
+      const today = localDateString();
+      const work = state.workItems.filter(i => i && isOpen(i) && contextOf(i) === 'work' && !isAlarm(i)).map(hydrateWorkItem);
+      return { today: work.filter(i => isOnToday(i, today)).length, open: work.length };
+    }
+  },
+
   attention: {
     getTodayAttention: async (lifeContext?: LifeContext): Promise<any> => {
       await initializeStore();
@@ -1098,7 +1150,7 @@ export const api = {
 
       const items = state.workItems.filter(i => 
         i && !i.deletedAt && 
-        (!lifeContext || (i.lifeContext || 'work') === lifeContext)
+        (!lifeContext || contextOf(i) === lifeContext)
       );
 
       // Filter active (not completed, not actively snoozed past now)

@@ -2,14 +2,17 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine, Radar, AlarmClock } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, Coffee, Briefcase } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
 import { DatePicker } from '../common/DatePicker';
+import { ProjectTypePicker } from '../common/ProjectTypePicker';
+import { groupProjectsByType, projectTypeId } from '../../services/projectTypes';
 
 interface SidebarProps {
   isSidebarOpen: boolean;
@@ -25,6 +28,8 @@ interface SidebarProps {
   setIsTrashOpen?: (open: boolean) => void;
   setIsDiagnosticsOpen?: (open: boolean) => void;
   setIsSettingsOpen?: (open: boolean) => void;
+  /** Opens a project; App picks the view its type suits. */
+  onOpenProject?: (id: string) => void;
 }
 
 const COLOR_OPTIONS = [
@@ -46,8 +51,10 @@ export function Sidebar({
   lifeContext, setLifeContext,
   setIsTrashOpen,
   setIsDiagnosticsOpen,
-  setIsSettingsOpen
+  setIsSettingsOpen,
+  onOpenProject
 }: SidebarProps) {
+  const lifeMode = useLifeMode();
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -93,6 +100,43 @@ export function Sidebar({
   const [newProjName, setNewProjName] = useState('');
   const [newProjKey, setNewProjKey] = useState('');
   const [newProjColor, setNewProjColor] = useState('bg-indigo-500');
+  const [newProjType, setNewProjType] = useState('other');
+  // Set while the project form edits an existing project instead of making one.
+  const [editingProjId, setEditingProjId] = useState<string | null>(null);
+  const openNewProject = () => {
+    setEditingProjId(null);
+    setNewProjName(''); setNewProjKey(''); setNewProjColor('bg-indigo-500'); setNewProjType('other');
+    setIsAddProjectOpen(true);
+  };
+  const openEditProject = (project: Project) => {
+    setEditingProjId(project.id);
+    setNewProjName(project.name || ''); setNewProjKey(project.key || ''); setNewProjColor(project.color || 'bg-indigo-500');
+    setNewProjType(projectTypeId(project));
+    setIsAddProjectOpen(true);
+  };
+  // The project page's Edit button asks for the form by id.
+  useEffect(() => {
+    const onEdit = (e: Event) => {
+      const id = (e as CustomEvent<string>).detail;
+      const project = api.sync.getState().projects.find(p => p && p.id === id);
+      if (project) openEditProject(project);
+    };
+    window.addEventListener('sage:edit-project', onEdit);
+    return () => window.removeEventListener('sage:edit-project', onEdit);
+  }, []);
+  // Type groups the user folded away in the sidebar, kept on this device.
+  const [foldedTypes, setFoldedTypes] = useState<string[]>(() => {
+    try { return JSON.parse(localStorage.getItem('sage-folded-project-types') || '[]'); } catch { return []; }
+  });
+  const toggleTypeFold = (id: string) => setFoldedTypes(prev => {
+    const next = prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id];
+    try { localStorage.setItem('sage-folded-project-types', JSON.stringify(next)); } catch { /* private mode */ }
+    return next;
+  });
+  const openProject = (id: string) => {
+    if (onOpenProject) onOpenProject(id); else { setActiveView('tasks'); setActiveWorkspace(id); }
+    if (window.innerWidth < 768) setIsSidebarOpen(false);
+  };
   const [isCreatingProj, setIsCreatingProj] = useState(false);
 
   // New Area Form
@@ -141,17 +185,32 @@ export function Sidebar({
     if (!newProjName.trim() || !newProjKey.trim()) return;
     setIsCreatingProj(true);
     try {
+      if (editingProjId) {
+        // Items keep the keys they were given; new ones use the new key.
+        const saved = await api.projects.update(editingProjId, {
+          name: newProjName.trim(),
+          key: newProjKey.trim().toUpperCase(),
+          color: newProjColor,
+          type: newProjType
+        });
+        setIsAddProjectOpen(false);
+        setEditingProjId(null);
+        await loadNavData();
+        showToast(`Saved "${saved.name}"`);
+        return;
+      }
       const created = await api.projects.create({
         name: newProjName.trim(),
         key: newProjKey.trim().toUpperCase(),
-        color: newProjColor
+        color: newProjColor,
+        type: newProjType
       });
       setNewProjName('');
       setNewProjKey('');
+      setNewProjType('other');
       setIsAddProjectOpen(false);
       await loadNavData();
-      setActiveView('tasks');
-      setActiveWorkspace(created.id);
+      openProject(created.id);
       showToast(`Project "${created.name}" created!`);
     } catch (err: any) {
       showToast(err.message || 'Failed to create project', 'error');
@@ -272,6 +331,26 @@ export function Sidebar({
 
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
+            {/* Work or Chill, always here. Chill shows personal only, so the
+                All/Work/Personal filter below waits for Work mode. */}
+            <div className="space-y-1.5">
+              <div role="radiogroup" aria-label="Mode" className="grid grid-cols-2 gap-1.5">
+                {(['work', 'chill'] as const).map(m => {
+                  const active = lifeMode.mode === m;
+                  const Icon = m === 'work' ? Briefcase : Coffee;
+                  return (
+                    <button key={m} role="radio" aria-checked={active} onClick={() => { if (!active) setLifeMode(m).catch(() => showToast("Couldn't reach the Pi to change the mode", 'error')); }}
+                      className={`flex items-center justify-center gap-2 h-10 rounded-xl text-[13.5px] font-semibold transition-colors ${active
+                        ? (m === 'chill' ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/30' : 'bg-blue-600 text-white shadow-sm shadow-blue-600/30')
+                        : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-gray-300 ring-1 ring-black/5 dark:ring-white/10 hover:bg-white dark:hover:bg-white/10'}`}>
+                      <Icon size={15} /> {m === 'work' ? 'Work' : 'Chill'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="px-1 text-[11.5px] text-gray-500 dark:text-gray-400 truncate" title={describeLifeMode(lifeMode)}>{describeLifeMode(lifeMode)} · <kbd className="kbd">M</kbd></p>
+            </div>
+            {lifeMode.mode === 'chill' ? null : (
             <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
               {(['all', 'work', 'personal'] as const).map(ctx => {
                 const active = lifeContext === ctx;
@@ -284,6 +363,7 @@ export function Sidebar({
                 );
               })}
             </div>
+            )}
 
             <div className="space-y-0.5">
               {[ 
@@ -362,26 +442,53 @@ export function Sidebar({
                 <div className="space-y-1">
                   <div className="px-3 flex items-center justify-between mb-2">
                     <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">Projects</h4>
-                    <button onClick={() => setIsAddProjectOpen(true)} className="text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md p-1 transition-colors" title="Add Project" aria-label="Add Project"><Plus size={16}/></button>
+                    <button onClick={openNewProject} className="text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md p-1 transition-colors" title="Add Project" aria-label="Add Project"><Plus size={16}/></button>
                   </div>
-                  {projects.map((project) => {
-                    const isActive = activeView === 'tasks' && activeWorkspace === project.id;
-                    return (
-                      <div key={project.id} className="relative group/proj">
-                        <button onClick={() => { setActiveView('tasks'); setActiveWorkspace(project.id); if(window.innerWidth < 768) setIsSidebarOpen(false); }}
-                          aria-current={isActive ? 'page' : undefined}
-                          className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
-                          {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
-                          <div className={`relative w-2 h-2 rounded-full ring-[3px] ring-black/[0.04] dark:ring-white/[0.06] ${project.color || 'bg-indigo-500'}`} />
-                          <span className="relative text-[14px] truncate flex-1 text-left font-medium">{project.name}</span>
-                          <span className="relative text-[10px] font-semibold tracking-wide text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
-                        </button>
-                        <button onClick={(e) => handleDeleteProject(project.id, project.name, e)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover/proj:opacity-100 transition-opacity" title="Delete Project">
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    )
-                  })}
+                  {(() => {
+                    const groups = groupProjectsByType(projects);
+                    // One kind of project needs no headings; several get one each.
+                    const showHeads = groups.length > 1;
+                    return groups.map(({ type, projects: inGroup }) => {
+                      const folded = showHeads && foldedTypes.includes(type.id);
+                      const TypeIcon = type.icon;
+                      const hasActive = inGroup.some(p => activeView === 'tasks' && activeWorkspace === p.id);
+                      return (
+                        <div key={type.id} className={showHeads ? 'pt-1' : ''}>
+                          {showHeads && (
+                            <button type="button" onClick={() => toggleTypeFold(type.id)} aria-expanded={!folded}
+                              className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11.5px] font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors group/type">
+                              <span className={`w-4 h-4 rounded-[5px] grid place-items-center ${type.chip}`}><TypeIcon size={10} strokeWidth={2.4} /></span>
+                              <span>{type.label}</span>
+                              <span className="text-gray-400 font-medium tabular-nums">{inGroup.length}</span>
+                              {folded && hasActive && <span className="w-1.5 h-1.5 rounded-full bg-blue-500" aria-hidden />}
+                              <ChevronDown size={12} className={`ml-auto opacity-0 group-hover/type:opacity-100 transition-transform ${folded ? '-rotate-90 opacity-100' : ''}`} />
+                            </button>
+                          )}
+                          {!folded && inGroup.map((project) => {
+                            const isActive = activeView === 'tasks' && activeWorkspace === project.id;
+                            return (
+                              <div key={project.id} className="relative group/proj">
+                                <button onClick={() => openProject(project.id)}
+                                  aria-current={isActive ? 'page' : undefined}
+                                  className={`relative w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                                  {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
+                                  <div className={`relative w-2 h-2 rounded-full ring-[3px] ring-black/[0.04] dark:ring-white/[0.06] ${project.color || 'bg-indigo-500'}`} />
+                                  <span className="relative text-[14px] truncate flex-1 text-left font-medium">{project.name}</span>
+                                  <span className="relative text-[10px] font-semibold tracking-wide text-gray-400 group-hover/proj:opacity-0 transition-opacity">{project.key}</span>
+                                </button>
+                                <button onClick={(e) => { e.stopPropagation(); openEditProject(project); }} className="absolute right-8 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-lg opacity-0 group-hover/proj:opacity-100 focus:opacity-100 transition-opacity" title="Edit project" aria-label={`Edit ${project.name}`}>
+                                  <Pencil size={13} />
+                                </button>
+                                <button onClick={(e) => handleDeleteProject(project.id, project.name, e)} className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 text-gray-400 hover:text-red-500 rounded-lg opacity-0 group-hover/proj:opacity-100 transition-opacity" title="Delete Project">
+                                  <Trash2 size={13} />
+                                </button>
+                              </div>
+                              )
+                          })}
+                        </div>
+                      );
+                    });
+                  })()}
                   {projects.length === 0 && (
                     <div className="text-xs text-gray-400 px-3 py-2">No projects yet. Click + to add one.</div>
                   )}
@@ -493,7 +600,7 @@ export function Sidebar({
             <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
               className="bg-white dark:bg-[#1c1c1e] w-full max-w-md rounded-3xl shadow-2xl p-6 relative z-10 space-y-4 border border-gray-100 dark:border-white/10">
               <div className="flex justify-between items-center">
-                <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">New Project</h3>
+                <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">{editingProjId ? 'Edit Project' : 'New Project'}</h3>
                 <button type="button" onClick={() => setIsAddProjectOpen(false)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18} /></button>
               </div>
               <form onSubmit={handleCreateProject} className="space-y-4">
@@ -501,8 +608,12 @@ export function Sidebar({
                   <label className="field-label mb-1.5">Project Name</label>
                   <input autoFocus type="text" placeholder="e.g. Website Redesign, Mobile App" value={newProjName} onChange={e => {
                     setNewProjName(e.target.value);
-                    if (!newProjKey) setNewProjKey(e.target.value.substring(0, 4).toUpperCase());
+                    if (!newProjKey && !editingProjId) setNewProjKey(e.target.value.substring(0, 4).toUpperCase());
                   }} className="field" required />
+                </div>
+                <div>
+                  <label className="field-label mb-1.5">Type</label>
+                  <ProjectTypePicker value={newProjType} onChange={setNewProjType} projects={projects} />
                 </div>
                 <div className="grid grid-cols-2 gap-4">
                   <div>
@@ -512,7 +623,7 @@ export function Sidebar({
                   <div>
                     <label className="field-label mb-1.5">Color</label>
                     <div className="flex gap-1.5 pt-1.5 flex-wrap">
-                      {COLOR_OPTIONS.slice(0, 5).map(c => (
+                      {COLOR_OPTIONS.map(c => (
                         <button type="button" key={c} onClick={() => setNewProjColor(c)} aria-label={`Colour ${c.replace('bg-', '').replace('-500', '')}`} aria-pressed={newProjColor === c}
                           className={`w-6 h-6 rounded-full transition-transform ${c} ${newProjColor === c ? 'ring-2 ring-offset-2 ring-blue-500 ring-offset-white dark:ring-offset-[#1c1c1e] scale-110' : 'opacity-70 hover:opacity-100 hover:scale-105'}`} />
                       ))}
@@ -522,7 +633,7 @@ export function Sidebar({
                 <div className="flex justify-end gap-2 pt-2">
                   <button type="button" onClick={() => setIsAddProjectOpen(false)} className="px-4 py-2 rounded-xl text-sm font-semibold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5 transition-colors">Cancel</button>
                   <button type="submit" disabled={isCreatingProj || !newProjName.trim()} className="px-5 py-2 rounded-xl text-sm font-semibold bg-blue-600 hover:bg-blue-700 text-white flex items-center gap-2 shadow-sm shadow-blue-600/20 transition-colors disabled:opacity-50">
-                    {isCreatingProj ? <Loader2 size={16} className="animate-spin" /> : 'Create Project'}
+                    {isCreatingProj ? <Loader2 size={16} className="animate-spin" /> : editingProjId ? 'Save' : 'Create Project'}
                   </button>
                 </div>
               </form>

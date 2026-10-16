@@ -8,6 +8,7 @@
 import { getPiApiKey } from './piBackend';
 import { RADAR_EVENT } from './radar';
 import { LUMO_EVENT } from './lumo';
+import { applyLifeModeEvent, loadLifeMode } from './lifeMode';
 
 export type LiveEvent =
   | { type: 'SYNC_APPLIED'; serverRevision: number }
@@ -61,6 +62,11 @@ export class LiveStream {
       if (event?.type === 'AUTH_OK') {
         this.retryMs = 1000;
         this.setConnected(true);
+        // A mode change may have been missed while disconnected.
+        loadLifeMode();
+      } else if (event?.type === 'LIFE_MODE') {
+        // Work or Chill changed: arriving, leaving, or a pick on another device.
+        applyLifeModeEvent(event);
       } else if (event?.type === 'SYNC_APPLIED' || event?.type === 'SYNC_CLEARED') {
         this.onEvent(event);
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {

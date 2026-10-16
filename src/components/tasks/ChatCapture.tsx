@@ -4,6 +4,7 @@ import { ArrowUp, Bell, Calendar, Check, Clock, Flag, Loader2, Pencil, Repeat, R
 import { api } from '../../services/api';
 import { aiEngine } from '../../services/aiEngine';
 import { Project, Area, WorkItem, LifeContext } from '../../services/types';
+import { getLifeMode } from '../../services/lifeMode';
 import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { TimePicker } from '../common/TimePicker';
@@ -15,11 +16,16 @@ import {
   Command, Ops, Target, looksLikeEdit, parseCommands, applyToCard, itemUpdates, describe, itemName,
 } from '../../utils/chatCommands';
 import { formatShortDate, parseQuickAdd } from '../../utils/quickAddParser';
+import { projectTypeInfo } from '../../services/projectTypes';
 import { formatTime } from '../../utils/reminders';
+import { ProjectPlan, basePlan, looksLikePlan, looksLikePlanEdit, localPlanEdit, planFromAi, templatePlan, deadlineDays, fitTo, ordered, planDiff } from '../../utils/projectPlan';
+import { savePlan } from '../../services/planProject';
+import { PlanCard, PlanState, BreakDownButton } from './PlanCard';
 
 const KINDS: CardKind[] = ['task', 'reminder', 'event', 'habit'];
 const PRIORITY_CYCLE = ['medium', 'high', 'urgent', 'low'] as const;
 const AI_TIMEOUT_MS = 15000;
+const PLAN_TIMEOUT_MS = 45000; // the bigger Groq models take a while to write a whole plan
 
 const COLOR_HEX: Record<string, string> = {
   'bg-blue-500': '#3b82f6', 'bg-purple-500': '#a855f7', 'bg-pink-500': '#ec4899', 'bg-amber-500': '#f59e0b',
@@ -35,7 +41,7 @@ type Saved =
 
 type Turn =
   | { id: string; role: 'me'; text: string }
-  | { id: string; role: 'sage'; text: string; batch?: string; undo?: () => Promise<void>; undone?: boolean;
+  | { id: string; role: 'sage'; text: string; batch?: string; plan?: string; undo?: () => Promise<void>; undone?: boolean;
       // Deleting something saved asks first.
       confirm?: { yes: string; run: () => Promise<void>; state?: 'yes' | 'no' } };
 
@@ -60,6 +66,11 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
   const [input, setInput] = useState('');
   const [busy, setBusy] = useState(false);
   const [aiReady, setAiReady] = useState<boolean | null>(null);
+  const [engine, setEngine] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Record<string, PlanState>>({});
+  const plansRef = useRef(plans);
+  plansRef.current = plans;
+  const lastPlan = useRef<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastBatch = useRef<string | null>(null);
@@ -73,9 +84,9 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     loadItems();
     api.workItems.allTags().then(t => setTags(t.map(x => x.tag)));
     // Is the Pi there to ask? Without it the parser and matcher still work.
-    aiEngine.chatCaptureEngine().then(() => setAiReady(true)).catch(() => setAiReady(false));
+    aiEngine.chatCaptureEngine().then(e => { setAiReady(true); setEngine(e); }).catch(() => setAiReady(false));
   }, []);
-  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [turns, batches]);
+  useEffect(() => { endRef.current?.scrollIntoView({ block: 'end', behavior: 'smooth' }); }, [turns, batches, plans]);
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 60); }, []);
 
   const ctx: CaptureContext = useMemo(() => ({ projects, areas, items, tags, lifeContext }), [projects, areas, items, tags, lifeContext]);
@@ -84,7 +95,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
 
   const aiLists = () => ({
     today: new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-    projects: projects.map(p => ({ id: p.id, name: p.name, key: p.key || '', branches: (p.branches || []).filter(b => !b.mergedAt).map(b => ({ id: b.id, name: b.name })) })),
+    projects: projects.map(p => ({ id: p.id, name: p.name, key: p.key || '', type: projectTypeInfo(p).label, branches: (p.branches || []).filter(b => !b.mergedAt).map(b => ({ id: b.id, name: b.name })) })),
     areas: areas.map(a => ({ id: a.id, name: a.name })),
     openItems: items.filter(i => !(i.labels || []).includes('alarm')).slice(0, 60).map(i => ({ id: i.id, key: i.key, title: i.title, project: projectName(i.projectId || null) || areaName(i.areaId || null) })),
     tags: tags.slice(0, 40),
@@ -145,7 +156,10 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
       setBatch(batchId, x => ({ ...x, saved: null }));
       onChanged(); loadItems();
     };
-    say(`Saved ${all.length} item${all.length === 1 ? '' : 's'}${updated ? ` · ${updated} updated` : ''}${habits ? ` · ${habits} habit${habits === 1 ? '' : 's'}` : ''}`, { batch: batchId, undo });
+    // Chill hides work: say so, so a saved work item isn't taken for lost.
+    const hiddenWork = getLifeMode().mode === 'chill'
+      ? b.cards.filter(c => c.include && c.kind !== 'habit' && c.lifeContext !== 'personal').length : 0;
+    say(`Saved ${all.length} item${all.length === 1 ? '' : 's'}${updated ? ` · ${updated} updated` : ''}${habits ? ` · ${habits} habit${habits === 1 ? '' : 's'}` : ''}${hiddenWork ? ` · ${hiddenWork} work, hidden while you're in Chill` : ''}`, { batch: batchId, undo });
     onChanged(); loadItems();
     setBusy(false);
   };
@@ -353,11 +367,100 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     return false;
   };
 
+  // --- Plans: a goal broken into a project, stages and dated tasks ---
+
+  const setPlan = (id: string, fn: (p: PlanState) => PlanState) => setPlans(prev => (prev[id] ? { ...prev, [id]: fn(prev[id]) } : prev));
+  const groqOn = () => aiReady !== false && engine !== 'local';
+  const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+  const planForAi = (p: ProjectPlan) => ({
+    name: p.name, type: p.type, phases: p.phases,
+    tasks: ordered(p).filter(t => t.include).map(t => ({ title: t.title, phase: t.phase, days: t.days, priority: t.priority })),
+  });
+  const askPlan = async (payload: Parameters<typeof aiEngine.chatPlan>[0]) => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), PLAN_TIMEOUT_MS);
+    try { return await aiEngine.chatPlan(payload, ctrl.signal); } finally { clearTimeout(timer); }
+  };
+
+  const startPlan = async (message: string) => {
+    const base = basePlan(message, ctx);
+    const id = base.id;
+    lastPlan.current = id;
+    lastBatch.current = null;
+    setPlans(prev => ({ ...prev, [id]: { id, plan: base, loading: true, saved: false } }));
+    setTurns(t => [...t, { id: tid(), role: 'sage', text: '', plan: id }]);
+    const days = base.mode === 'steps' ? null : deadlineDays(message, base.start);
+    let plan: ProjectPlan | null = null;
+    if (groqOn()) {
+      try {
+        const res = await askPlan({
+          mode: 'plan', message, today: today(), planMode: base.mode, typeHint: base.type, days,
+          target: base.mode === 'new' ? '' : base.name,
+          targetItems: base.mode === 'existing' ? items.filter(i => i.projectId === base.projectId).slice(0, 40).map(i => i.title) : [],
+        });
+        plan = planFromAi(res.plan, base);
+      } catch { /* the template below */ }
+    }
+    if (!plan) plan = templatePlan(base);
+    if (days) plan = fitTo(plan, days);
+    setPlan(id, p => ({ ...p, plan: plan!, loading: false }));
+    showPlan(id);
+  };
+
+  // A plan is taller than the chat: show it from its top, not its bottom.
+  const showPlan = (id: string) => setTimeout(() => document.getElementById(`plan-turn-${id}`)?.scrollIntoView({ block: 'start', behavior: 'smooth' }), 120);
+
+  const editPlan = async (id: string, message: string) => {
+    const current = plansRef.current[id].plan;
+    const local = localPlanEdit(message, current);
+    if (local) { setPlan(id, p => ({ ...p, plan: local.plan })); say(local.said); bringPlanDown(id); showPlan(id); return; }
+    if (!groqOn()) {
+      say(`I can't make that change without Groq. Try "drop the logo step", "add buy a mic to Make" or "make it 3 weeks", or tap the plan.`);
+      return;
+    }
+    setPlan(id, p => ({ ...p, loading: true }));
+    let next: ProjectPlan | null = null;
+    try {
+      const res = await askPlan({ mode: 'plan_edit', message, today: today(), planMode: current.mode, plan: planForAi(current) });
+      next = planFromAi(res.plan, current);
+    } catch { /* said below */ }
+    setPlan(id, p => ({ ...p, loading: false, plan: next || p.plan }));
+    say(next ? planDiff(current, next) : `Groq couldn't change the plan just now. Try again, or tap the plan to change it.`);
+    if (next) { bringPlanDown(id); showPlan(id); }
+  };
+
+  // The plan follows the conversation, so the latest version sits under the last reply.
+  const bringPlanDown = (id: string) => setTurns(ts => {
+    const at = ts.findIndex(x => x.role === 'sage' && x.plan === id && !x.text);
+    return at < 0 || at === ts.length - 1 ? ts : [...ts.slice(0, at), ...ts.slice(at + 1), ts[at]];
+  });
+
+  const savePlanTurn = async (id: string) => {
+    const st = plansRef.current[id];
+    if (!st || st.saved || st.loading || busy) return;
+    setBusy(true);
+    try {
+      const done = await savePlan(st.plan, projects);
+      setPlan(id, p => ({ ...p, saved: true }));
+      say(done.said, {
+        undo: async () => { await done.undo(); setPlan(id, p => ({ ...p, saved: false })); onChanged(); loadItems(); },
+      });
+      onChanged(); loadItems();
+    } catch (e: any) {
+      say(`Couldn't save the plan: ${e?.message || e}. Nothing was kept.`);
+    }
+    setBusy(false);
+  };
+
   const send = async () => {
     const message = input.trim();
     if (!message || busy) return;
     setInput('');
     setTurns(t => [...t, { id: tid(), role: 'me', text: message }]);
+    const plan = lastPlan.current ? plansRef.current[lastPlan.current] : null;
+    if (plan && !plan.saved && !plan.loading && looksLikePlanEdit(message)) { await editPlan(plan.id, message); return; }
+    // "make a plan for …" starts like an edit but asks for a plan.
+    if (looksLikePlan(message)) { await startPlan(message); return; }
     if (looksLikeEdit(message)) {
       setBusy(true);
       let handled = false;
@@ -365,12 +468,16 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
       setBusy(false);
       if (handled) return;
     }
+    await startBatch(message);
+  };
 
+  const startBatch = async (message: string) => {
     const cards = buildCards(message, ctx);
     if (cards.length === 0) { say(`Tell me what to add, like "call Sam tomorrow 5pm".`); return; }
     const batchId = `b${Date.now()}`;
     lastBatch.current = batchId;
     lastTarget.current = null;
+    lastPlan.current = null;
     const unsure = cards.some(c => c.unsure) || cards.length === 1 && /\b(?:and|also)\b/i.test(message) && message.length > 60;
     const checking = unsure && aiReady !== false;
     setBatches(prev => ({ ...prev, [batchId]: { id: batchId, cards, saved: null, checking, touched: false } }));
@@ -394,8 +501,10 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       const last = lastBatch.current ? batchesRef.current[lastBatch.current] : null;
-      // Enter on an empty box saves the cards waiting below.
-      if (!input.trim() && last && !last.saved) saveBatch(last.id);
+      const plan = lastPlan.current ? plansRef.current[lastPlan.current] : null;
+      // Enter on an empty box saves the cards (or plan) waiting below.
+      if (!input.trim() && plan && !plan.saved) savePlanTurn(plan.id);
+      else if (!input.trim() && last && !last.saved) saveBatch(last.id);
       else send();
     }
   };
@@ -410,10 +519,19 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
             className="ml-auto max-w-[85%] sm:max-w-[78%] w-fit bg-blue-600 text-white px-3.5 py-2.5 rounded-[18px] rounded-br-md text-[14px] leading-snug font-medium whitespace-pre-wrap">
             {t.text}
           </motion.div>
+        ) : t.plan && !t.text ? (
+          plans[t.plan] ? (
+            <motion.div key={t.id} id={`plan-turn-${t.plan}`} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5 items-start scroll-mt-2">
+              <SageMark />
+              <PlanCard state={plans[t.plan]} busy={busy} projectName={projectName(plans[t.plan].plan.projectId)}
+                onChange={plan => setPlan(t.plan!, p => ({ ...p, plan }))} onSave={() => savePlanTurn(t.plan!)}
+                onAsItems={() => { const goal = plans[t.plan!].plan.goal; setPlans(prev => { const { [t.plan!]: _gone, ...rest } = prev; return rest; }); lastPlan.current = null; setTurns(ts => ts.filter(x => x.id !== t.id)); startBatch(goal); }} />
+            </motion.div>
+          ) : null
         ) : t.batch && !t.text ? (
           <BatchTurn key={t.id} batch={batches[t.batch]} projects={projects} areas={areas} busy={busy}
             onSave={() => saveBatch(t.batch!)} onCard={(cid, patch) => updateCard(t.batch!, cid, patch)}
-            onOpenForm={onOpenForm} />
+            onOpenForm={onOpenForm} onBreakDown={text => startPlan(text)} />
         ) : (
           <motion.div key={t.id} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} className="flex gap-2.5 items-start">
             <SageMark />
@@ -484,12 +602,13 @@ function EmptyHints({ onPick }: { onPick: (t: string) => void }) {
     'tmrw 10am call the vendor about the ci4 sonar parts',
     'remind me to pay rent on the 1st every month',
     'gym mon wed fri 7am',
+    'I want to launch a YouTube channel about LUMO',
   ];
   return (
     <div className="py-6 text-center">
       <div className="mx-auto mb-3 h-10 w-10 rounded-2xl bg-blue-50 dark:bg-blue-500/10 grid place-items-center text-blue-600 dark:text-blue-400"><Sparkles size={18} /></div>
       <p className="text-[14px] font-semibold text-gray-900 dark:text-white">Type it the way you'd say it</p>
-      <p className="text-[12.5px] text-gray-500 dark:text-gray-400 mt-1">Several things at once is fine. You'll see each one before it saves.</p>
+      <p className="text-[12.5px] text-gray-500 dark:text-gray-400 mt-1">Several things at once is fine. A big goal becomes a plan. You'll see it all before it saves.</p>
       <div className="mt-4 flex flex-wrap justify-center gap-1.5">
         {hints.map(h => (
           <button key={h} type="button" onClick={() => onPick(h)} className="text-[12px] font-medium px-2.5 py-1 rounded-full bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10">{h}</button>
@@ -499,9 +618,10 @@ function EmptyHints({ onPick }: { onPick: (t: string) => void }) {
   );
 }
 
-function BatchTurn({ batch, projects, areas, busy, onSave, onCard, onOpenForm }: {
+function BatchTurn({ batch, projects, areas, busy, onSave, onCard, onOpenForm, onBreakDown }: {
   batch: Batch | undefined; projects: Project[]; areas: Area[]; busy: boolean;
   onSave: () => void; onCard: (cardId: string, patch: Partial<CaptureCard>) => void; onOpenForm: (text: string) => void;
+  onBreakDown: (text: string) => void;
 }) {
   if (!batch) return null;
   const included = batch.cards.filter(c => c.include);
@@ -532,6 +652,7 @@ function BatchTurn({ batch, projects, areas, busy, onSave, onCard, onOpenForm }:
             {batch.cards.length === 1 && (
               <button type="button" onClick={() => onOpenForm(batch.cards[0].text)} className="h-9 px-3 rounded-xl text-[13px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10">Edit in form</button>
             )}
+            {batch.cards.length === 1 && batch.cards[0].kind === 'task' && <BreakDownButton onClick={() => onBreakDown(`break down ${batch.cards[0].text}`)} />}
             <span className="ml-auto text-[11px] text-gray-400 hidden sm:block">Tap any chip to change it</span>
           </div>
         )}
