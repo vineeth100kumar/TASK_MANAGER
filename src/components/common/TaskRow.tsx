@@ -81,9 +81,8 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
       >
         <Star size={16} className={item.isFocus ? 'fill-current' : ''} />
       </button>
-      <div className="md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 has-[[aria-expanded=true]]:!opacity-100 transition-opacity">
-        <SnoozeMenu itemId={item.id} onSnoozed={onSnoozed} />
-      </div>
+      {/* Always shown: a hover-only clock was invisible on phones and easy to miss on desktop. */}
+      <SnoozeMenu itemId={item.id} onSnoozed={onSnoozed} className="shrink-0" />
     </div>
   );
 }
