@@ -4,6 +4,7 @@ import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { RadarSettings as Settings, radarAvailable, radarSettingsApi } from '../../services/radar';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
+import { EdgeEditor } from '../radar/EdgeEditor';
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
   return (
@@ -117,6 +118,17 @@ export function RadarSettings() {
         <Toggle on={settings.india} onChange={india => save({ india })} label="India news and markets" />
       </Row>
       <PricesKey />
+      <div className="p-4 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2.5">
+        <p className="text-[13.5px] font-semibold text-gray-900 dark:text-white">My edge</p>
+        <p className="text-[12px] text-gray-500 dark:text-gray-400">What you know and already have. The Lab's sparks and Studio's research rate every idea on how well it fits this.</p>
+        <EdgeEditor key={JSON.stringify(settings.edge)} edge={settings.edge} onSaved={edge => setSettings({ ...settings, edge })} />
+      </div>
+      <Row title="Sparks each morning" detail="How many business-idea sparks the Lab makes at 7:00. One AI call makes the whole batch.">
+        <Select value={String(settings.sparksPerDay)} onChange={v => save({ sparksPerDay: Number(v) as Settings['sparksPerDay'] })}
+          className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-[13px] font-semibold">
+          {[3, 5, 10].map(n => <option key={n} value={String(n)}>{n}</option>)}
+        </Select>
+      </Row>
       <Row title="Radar brief on Today" detail="Three signals, the biggest market move and the hottest topic, on the Today screen.">
         <Toggle on={settings.brief} onChange={brief => save({ brief })} label="Radar brief on Today" />
       </Row>

@@ -702,7 +702,15 @@ def signals(region: str = "", tag: str = "", limit: int = 60, now: Optional[date
 # a day. engine: which AI researches first, Groq (free) or Claude (paid).
 # lumoLine: a Radar line on the desk clock's Tasks screen in the morning.
 # india: Indian news sources and markets (on unless switched off).
-DEFAULT_SETTINGS = {"brief": False, "dailyCap": 5, "engine": "groq", "lumoLine": False, "india": True}
+# edge: "My edge", what the user knows and has, so Sparks and research fit them
+# (sparks.py). sparksPerDay: how many Sparks the Lab gets each morning.
+EDGE_KEYS = ("skills", "assets", "place", "budget", "hours")
+EDGE_LIMIT = 300
+SPARKS_PER_DAY = (3, 5, 10)
+DEFAULT_SETTINGS = {
+    "brief": False, "dailyCap": 5, "engine": "groq", "lumoLine": False, "india": True,
+    "edge": {k: "" for k in EDGE_KEYS}, "sparksPerDay": 5,
+}
 
 
 def get_settings() -> dict:
@@ -711,13 +719,16 @@ def get_settings() -> dict:
         rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM radar_settings")}
     finally:
         conn.close()
-    out = dict(DEFAULT_SETTINGS)
+    out = json.loads(json.dumps(DEFAULT_SETTINGS))
     for key, raw in rows.items():
         if key in out:
             try:
                 out[key] = json.loads(raw)
             except ValueError:
                 pass
+    if not isinstance(out["edge"], dict):
+        out["edge"] = dict(DEFAULT_SETTINGS["edge"])
+    out["edge"] = {k: str(out["edge"].get(k) or "") for k in EDGE_KEYS}
     return out
 
 
@@ -735,6 +746,15 @@ def update_settings(changes: dict) -> dict:
     cap = changes.get("dailyCap")
     if isinstance(cap, (int, float)) and not isinstance(cap, bool):
         clean["dailyCap"] = max(0, min(50, int(cap)))
+    if changes.get("sparksPerDay") in SPARKS_PER_DAY and not isinstance(changes.get("sparksPerDay"), bool):
+        clean["sparksPerDay"] = int(changes["sparksPerDay"])
+    edge = changes.get("edge")
+    if isinstance(edge, dict):
+        merged = dict(get_settings()["edge"])
+        for key in EDGE_KEYS:
+            if isinstance(edge.get(key), (str, int, float)) and not isinstance(edge.get(key), bool):
+                merged[key] = re.sub(r"\s+", " ", str(edge[key])).strip()[:EDGE_LIMIT]
+        clean["edge"] = merged
     if clean:
         conn = _db()
         try:
