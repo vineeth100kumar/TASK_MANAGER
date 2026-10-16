@@ -230,7 +230,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           </p>
         </div>
       ) : (
-        <div className="stagger -mb-2">
+        <div className="relative has-[[aria-expanded=true]]:z-30 stagger -mb-2">
           <AnimatePresence initial={false}>
           {items.map((item) => (
             <Fold key={item.id}>

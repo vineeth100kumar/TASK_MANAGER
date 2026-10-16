@@ -195,7 +195,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
       <ReminderPrompt />
 
       {/* The one list */}
-      <section className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3" aria-label="Today's tasks">
+      <section className="relative has-[[aria-expanded=true]]:z-30 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3" aria-label="Today's tasks">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <CalendarCheck size={18} className="text-blue-500" />
