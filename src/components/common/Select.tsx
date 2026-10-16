@@ -2,7 +2,7 @@ import { Children, Fragment, isValidElement, useEffect, useId, useMemo, useRef, 
 import { Check, ChevronDown } from 'lucide-react';
 import { Popover } from './Popover';
 
-interface Opt { value: string; label: string; disabled?: boolean; group?: string }
+interface Opt { value: string; label: string; disabled?: boolean; group?: string; icon?: ReactNode }
 
 function textOf(node: ReactNode): string {
   if (node == null || typeof node === 'boolean') return '';
@@ -22,7 +22,8 @@ function readOptions(children: ReactNode, group?: string, out: Opt[] = []): Opt[
     else if (child.type === 'optgroup') readOptions(props.children, props.label, out);
     else if (child.type === 'option') {
       const label = textOf(props.children);
-      out.push({ value: String(props.value ?? label), label, disabled: props.disabled, group });
+      // data-icon: an optional icon drawn before the label, in the list and on the trigger.
+      out.push({ value: String(props.value ?? label), label, disabled: props.disabled, group, icon: props['data-icon'] });
     }
   });
   return out;
@@ -111,7 +112,7 @@ export function Select({ value, onChange, children, className = '', placeholder,
         onClick={() => (open ? setOpen(false) : openList())}
         onKeyDown={e => { if (e.key === 'ArrowDown' || e.key === 'ArrowUp') { e.preventDefault(); openList(); } }}
         className={`select-trigger ${className}`} data-open={open || undefined}>
-        {icon}
+        {icon ?? shown?.icon}
         <span className={`flex-1 min-w-0 truncate ${shown ? '' : 'select-placeholder'}`}>{shown ? shown.label : placeholder}</span>
         <ChevronDown size={14} strokeWidth={2.25} className={`select-chevron shrink-0 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} aria-hidden />
       </button>
@@ -130,6 +131,7 @@ export function Select({ value, onChange, children, className = '', placeholder,
                   onPointerMove={() => !o.disabled && active !== i && setActive(i)}
                   onClick={() => choose(o)}
                   className={`select-option ${i === active ? 'is-active' : ''} ${isSel ? 'is-selected' : ''} ${o.disabled ? 'opacity-40 cursor-default' : 'cursor-pointer'}`}>
+                  {o.icon}
                   <span className="flex-1 min-w-0 truncate">{o.label || ' '}</span>
                   {isSel && <Check size={15} strokeWidth={2.5} className="shrink-0 text-blue-600 dark:text-blue-400" aria-hidden />}
                 </div>

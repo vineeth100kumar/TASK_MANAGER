@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { withTime, formatClock } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
-import { STATUSES, PRIORITIES } from '../../services/constants';
+import { PRIORITIES } from '../../services/constants';
+import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/projectTypes';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
@@ -21,9 +22,11 @@ interface ListViewProps {
   onSelect: (id: string) => void;
   selectedId: string | null;
   onTransition: (task: WorkItem, toStatus: string) => void;
+  /** Groups: a project's own statuses, or the usual four. */
+  statuses?: StatusStage[];
 }
 
-export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
+export function ListView({ tasks, onSelect, selectedId, onTransition, statuses = DEFAULT_STATUSES }: ListViewProps) {
   const { showToast } = useToast();
   // Ticks spin briefly, then fill; the status change follows once the pop has played.
   const [pressed, setPressed] = useState<Set<string>>(() => new Set());
@@ -47,12 +50,12 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
     }
   };
 
-  const renderGroup = (title: string, groupTasks: any[], colorDot?: string) => {
+  const renderGroup = (title: string, groupTasks: any[], colorDot?: string, stage?: StatusStage) => {
     if (groupTasks.length === 0) return null;
     return (
       <div key={title} className="mb-10">
         <div className="flex items-center gap-2 mb-3 px-2">
-          {colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
+          {stage ? <stage.icon size={15} strokeWidth={2.2} className={stage.tint} aria-hidden /> : colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
           <h4 className="font-semibold text-[13.5px] tracking-[-0.01em] text-gray-900 dark:text-white capitalize">{title}</h4>
           <span className="text-[11px] font-semibold tabular-nums text-gray-500 bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full">{groupTasks.length}</span>
         </div>
@@ -167,9 +170,9 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
       {renderGroup('Reminders', reminderTasks, 'bg-emerald-500')}
       {renderGroup('Milestones', milestoneTasks, 'bg-orange-500')}
       
-      {Object.values(STATUSES).map(status => {
-        const statusTasks = issueTasks.filter(t => t.status === status.id);
-        return renderGroup(status.label, statusTasks, status.dot);
+      {statuses.map(status => {
+        const statusTasks = issueTasks.filter(t => stageOf(t, statuses).id === status.id);
+        return renderGroup(status.label, statusTasks, status.dot, status);
       })}
     </div>
   );

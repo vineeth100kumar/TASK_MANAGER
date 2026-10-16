@@ -1,4 +1,6 @@
-import { STATUSES, PRIORITIES } from '../../services/constants';
+import { PRIORITIES } from '../../services/constants';
+import { api } from '../../services/api';
+import { stageOf, statusesFor } from '../../services/projectTypes';
 import { Flag, Check } from 'lucide-react';
 import { formatDisplayDate } from '../../utils/dateUtils';
 
@@ -9,6 +11,7 @@ interface TableViewProps {
 }
 
 export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
+  const projects = api.sync.getState().projects;
   return (
     <div className="bg-white dark:bg-[#1c1c1e] rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden max-w-7xl mx-auto">
       <div className="overflow-x-auto custom-scrollbar">
@@ -27,6 +30,7 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
           <tbody className="divide-y divide-gray-100 dark:divide-white/5 text-[14px] font-medium">
             {tasks.map(task => {
               const isDone = task.status === 'done';
+              const stage = stageOf(task, statusesFor(task.projectId, projects));
               return (
                 <tr key={task.id} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)} className="hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer outline-none focus:bg-blue-50 dark:focus:bg-white/10 group">
                   <td className="px-6 py-4 text-gray-400 font-bold">
@@ -44,8 +48,8 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                   <td className={`px-6 py-4 truncate max-w-[300px] font-semibold ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</td>
                   <td className="px-6 py-4">
                     <span className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${(STATUSES as any)[task.status]?.dot || 'bg-gray-400'}`} />
-                      {(STATUSES as any)[task.status]?.label || task.status}
+                      <stage.icon size={14} strokeWidth={2.2} className={stage.tint} aria-hidden />
+                      {stage.label}
                     </span>
                   </td>
                   <td className="px-6 py-4">
