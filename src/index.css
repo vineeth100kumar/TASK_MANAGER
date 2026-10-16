@@ -62,6 +62,19 @@
 @keyframes sheet-up {
   from { transform: translateY(100%); }
 }
+@keyframes hop {
+  0% { transform: translateY(0) scale(1); }
+  35% { transform: translateY(-4px) scale(1.12); }
+  70% { transform: translateY(1px) scale(0.97); }
+  100% { transform: none; }
+}
+@keyframes drift {
+  from { transform: translate3d(-6%, -4%, 0) scale(1); }
+  to { transform: translate3d(6%, 4%, 0) scale(1.08); }
+}
+@keyframes view-in {
+  from { opacity: 0; transform: translateY(6px); }
+}
 @keyframes breathe {
   0%, 100% { opacity: 0.55; }
   50% { opacity: 1; }
@@ -196,6 +209,24 @@
   [role="button"] {
     cursor: pointer;
   }
+
+  /* Every button sinks a little under your finger and springs back, so taps
+     feel physical. Rows and cards (surface-item) get a gentler press below,
+     and buttons that set their own active:scale keep it. Excalidraw's
+     toolbar is left alone. */
+  button:not(:disabled):not(.surface-item, .check-ring),
+  [role="button"]:not(.surface-item) {
+    transition-property: scale, color, background-color, border-color, box-shadow, opacity;
+    transition-duration: 160ms;
+    transition-timing-function: var(--ease-spring), ease, ease, ease, ease, ease;
+  }
+  button:not(:disabled):not(.surface-item, .check-ring):active,
+  [role="button"]:not(.surface-item):active {
+    scale: 0.96;
+    transition-duration: 60ms;
+  }
+  .excalidraw button:not(:disabled):not(.surface-item, .check-ring):active,
+  .excalidraw [role="button"]:not(.surface-item):active { scale: none; }
 
   @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after {
@@ -386,6 +417,52 @@
   .stagger > *:nth-child(6) { animation-delay: 200ms; }
   .stagger > *:nth-child(7) { animation-delay: 240ms; }
   .stagger > *:nth-child(n+8) { animation-delay: 280ms; }
+
+  /* A new page slides up into place (App.tsx keys it by view). */
+  .view-enter { animation: view-in 240ms var(--ease-out-expo) backwards; }
+
+  /* Counts pop when they change (keyed by the number). */
+  .count-badge { animation: badge-in 420ms var(--ease-spring) backwards; }
+
+  /* Sidebar icons lean in when you point at them. */
+  .nav-icon { transition: transform 260ms var(--ease-spring), color 150ms; }
+  .group:hover .nav-icon { transform: rotate(-8deg) scale(1.1); }
+  [aria-current="page"] .nav-icon { transform: none; }
+
+  /* The phone tab you just picked hops. */
+  .tab-hop { animation: hop 420ms var(--ease-spring); }
+
+  /* Rows press in gently (big cards shouldn't shrink much). */
+  .surface-item.is-interactive:active {
+    transform: translateY(0) scale(0.995);
+    transition-duration: 60ms;
+  }
+
+  /* A soft light follows the pointer across rows and cards (App.tsx sets
+     --mx/--my on the one under the pointer). Mouse and trackpad only. */
+  @media (hover: hover) and (pointer: fine) {
+    .surface-item.is-interactive:hover {
+      background-image: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgb(59 130 246 / 0.06), transparent 70%);
+    }
+    [data-context="personal"] .surface-item.is-interactive:hover {
+      background-image: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgb(249 115 22 / 0.07), transparent 70%);
+    }
+    .dark .surface-item.is-interactive:hover {
+      background-image: radial-gradient(220px circle at var(--mx, 50%) var(--my, 50%), rgb(255 255 255 / 0.05), transparent 70%);
+    }
+  }
+
+  /* The hero's colour wash drifts slowly, so the top of each page breathes. */
+  .hero::after {
+    content: "";
+    position: absolute;
+    inset: -20%;
+    z-index: -2;
+    pointer-events: none;
+    background: radial-gradient(30% 45% at 30% 30%, var(--hero-a), transparent 70%);
+    opacity: 0.6;
+    animation: drift 16s ease-in-out infinite alternate;
+  }
 
   /* Placeholder block while content loads. */
   .skeleton {

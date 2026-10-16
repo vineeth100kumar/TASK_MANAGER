@@ -13,6 +13,7 @@ import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { useCachedState } from '../../hooks/useCachedState';
 import { formatDateRange } from '../../utils/dateUtils';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 import { InboxTriage } from './InboxTriage';
@@ -26,8 +27,7 @@ interface InboxViewProps {
 }
 
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
-  const [items, setItems] = useState<WorkItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
+  const [items, setItems, loaded] = useCachedState<WorkItem[]>(`inbox:${lifeContext || 'all'}`, []);
   // Celebrate inbox zero only when it was reached during this visit.
   const hadItems = useRef(false);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
@@ -49,9 +49,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
   const loadInbox = async () => {
     try {
       const inboxItems = await api.inbox.list(lifeContext);
-      setItems(inboxItems);
       if (inboxItems.length > 0) hadItems.current = true;
-      setLoaded(true);
+      setItems(inboxItems);
       const [projs, ars] = await Promise.all([
         api.projects.list(),
         api.areas.list()
@@ -143,10 +142,10 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             <span>Universal Inbox</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {items.length === 0 ? 'Inbox zero' : `${items.length} ${items.length === 1 ? 'thing' : 'things'} to sort`}
+            {!loaded ? 'Inbox' : items.length === 0 ? 'Inbox zero' : `${items.length} ${items.length === 1 ? 'thing' : 'things'} to sort`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
-            {items.length === 0 ? 'Everything you captured has a home.' : items.length > 3 ? 'Process inbox takes them one at a time. Most take a few seconds each.' : 'Decide what each one is, or keep it here for later.'}
+            {!loaded ? '\u00a0' : items.length === 0 ? 'Everything you captured has a home.' : items.length > 3 ? 'Process inbox takes them one at a time. Most take a few seconds each.' : 'Decide what each one is, or keep it here for later.'}
           </p>
         </div>
 

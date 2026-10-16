@@ -7,6 +7,7 @@ import { WorkItem, LifeContext } from '../../services/types';
 import { useCompletion } from '../../hooks/useCompletion';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { useCachedState } from '../../hooks/useCachedState';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { DatePicker } from '../common/DatePicker';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
@@ -17,7 +18,7 @@ interface WaitingForViewProps {
 }
 
 export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProps) {
-  const [items, setItems] = useState<WorkItem[]>([]);
+  const [items, setItems, loaded] = useCachedState<WorkItem[]>(`waiting:${lifeContext || 'all'}`, []);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const closeAdd = React.useCallback(() => setIsAddOpen(false), []);
   useEscapeKey(closeAdd, isAddOpen);
@@ -101,7 +102,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
             <span>Waiting For & Delegations</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
+            {!loaded ? 'Waiting for' : items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
             Track questions asked, tasks delegated, and documents pending someone else's reply.
@@ -117,7 +118,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
       </div>
 
       {/* Waiting Items List */}
-      {items.length === 0 ? (
+      {!loaded ? null : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
           <div className="w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
             <UserCheck size={24} />
