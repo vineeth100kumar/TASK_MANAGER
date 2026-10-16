@@ -379,7 +379,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     try {
       const res = await askAi({ mode: 'split', message, ...aiLists() });
       if (res.items?.length) {
-        const merged = mergeAiItems(res.items, ctx);
+        const merged = mergeAiItems(res.items, ctx, new Date(), cards);
         setBatch(batchId, b => (b.touched || b.saved ? { ...b, checking: false } : { ...b, cards: merged.length ? merged : b.cards, checking: false }));
         return;
       }

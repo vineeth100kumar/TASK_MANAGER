@@ -68,6 +68,11 @@ class TestSplit(unittest.TestCase):
         out = self.answer([{"text": "Tomorrow at 9: sonar pinout", "title": "Sonar pinout"}])
         self.assertEqual(out["items"][0]["text"], "Sonar pinout")
 
+    def test_rewritten_text_keeps_typed_timing(self):
+        req = request(message="remind me 10 before to log off from work at 6.45 pm")
+        out = self.answer([{"text": "Log off from work", "title": "Log off from work", "when": "at 6.45 pm, 10 before, at 9am"}], req)
+        self.assertEqual(out["items"][0]["text"], "Log off from work at 6.45 pm 10 before")
+
     def test_garbage_gives_no_items(self):
         with mock.patch.object(chat_capture, "_answer", return_value=("I can't help with that", "local")):
             self.assertEqual(chat_capture.capture(request())["items"], [])

@@ -79,11 +79,12 @@ class ChatCaptureRequest(BaseModel):
 
 SPLIT_PROMPT = """You sort one message from Vineeth into items for his task manager, Sage.
 Answer with JSON only, in this shape:
-{"items": [{"text": "...", "title": "...", "kind": "task", "project": null, "branch": null, "area": null, "context": "work", "same_as": null, "tags": []}]}
+{"items": [{"text": "...", "title": "...", "when": "", "kind": "task", "project": null, "branch": null, "area": null, "context": "work", "same_as": null, "tags": []}]}
 
 For every separate thing to do or remember, one item:
 - text: the exact words of the message that belong to this item, copied without changes, including any day, time or repeat words.
 - title: a short clean title, without the day, time, repeat or project words.
+- when: the day, time, repeat and "remind me N before" words for this item exactly as he typed them (like "at 6.45 pm" or "10 before"), or "".
 - kind: task, reminder (he said "remind me"), event (a meeting or appointment at a time) or habit (something he wants to do regularly to build a routine).
 - project and branch: copied exactly from the projects list, or null.
 - area: copied exactly from the areas list, or null. Areas are personal life areas.
@@ -251,6 +252,12 @@ def _clean_split(raw: dict, req: ChatCaptureRequest) -> List[dict]:
         # The app re-reads dates from `text`, so it has to be words he actually typed.
         if text and _norm(text) not in message:
             text = ""
+        # Timing words he typed for this item, so a rewritten text still keeps "at 6.45 pm".
+        base = text or title
+        when = [w for w in re.split(r"\s*,\s*", str(it.get("when") or "").strip())
+                if w and _norm(w) in message and _norm(w) not in _norm(base)]
+        if when:
+            text = " ".join([base] + when)
         out = {"text": text or title, "title": title or text}
         kind = _norm(it.get("kind"))
         if kind in KINDS:

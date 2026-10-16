@@ -335,11 +335,34 @@ export interface AiItem {
   projectId?: string; branchId?: string; areaId?: string; sameAsId?: string; tags?: string[];
 }
 
+/** Groq sometimes rewrites the words and drops "at 6.45 pm"; keep the day, time, repeat and lead the parser already read. */
+function borrowTiming(card: CaptureCard, it: AiItem, count: number, local: CaptureCard[]) {
+  // A parser card that holds several of the AI's items can't say whose time it is.
+  if (!local.length || local.length < count) return;
+  let src: CaptureCard | undefined = count === 1 && local.length === 1 ? local[0] : undefined;
+  if (!src) {
+    const mine = new Set(keyWords(`${it.text || ''} ${it.title || ''}`));
+    let best = 0;
+    for (const c of local) {
+      const hits = keyWords(c.text).filter(w => mine.has(w)).length;
+      if (hits > best) { best = hits; src = c; }
+    }
+  }
+  if (!src) return;
+  if (!card.date && src.date) { card.date = src.date; card.why = card.why.concat(src.why.filter(w => !card.why.includes(w))); }
+  if (!card.time && src.time) card.time = src.time;
+  if (!card.repeatRule && src.repeatRule) { card.repeatRule = src.repeatRule; card.repeatLabel = src.repeatLabel; }
+  if (card.leadMinutes == null && src.leadMinutes != null) card.leadMinutes = src.leadMinutes;
+  if (!card.priorityGiven && src.priorityGiven) { card.priority = src.priority; card.priorityGiven = true; }
+  card.tags = Array.from(new Set([...card.tags, ...src.tags]));
+}
+
 /** Rebuilds the cards from the AI's split, keeping what the parser read for dates and times. */
-export function mergeAiItems(ai: AiItem[], ctx: CaptureContext, now: Date = new Date()): CaptureCard[] {
+export function mergeAiItems(ai: AiItem[], ctx: CaptureContext, now: Date = new Date(), local: CaptureCard[] = []): CaptureCard[] {
   const cards: CaptureCard[] = [];
   for (const it of ai) {
     const card = buildCard({ text: it.text || it.title, follows: false }, ctx, now);
+    borrowTiming(card, it, ai.length, local);
     // Clean the AI's title the same way, so an echoed "remind me ... at 6.45 pm" loses its timing words.
     if (it.title) card.title = buildCard({ text: it.title, follows: false }, ctx, now).title || tidyTitle(it.title, null);
     if (it.kind && !(card.kind === 'reminder' && it.kind === 'task')) card.kind = it.kind;
