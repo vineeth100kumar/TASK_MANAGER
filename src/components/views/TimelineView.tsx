@@ -2,6 +2,7 @@ import { Flag, Calendar as CalendarIcon, CheckCircle2, Circle, Clock, MapPin, Be
 import { PRIORITIES } from '../../services/constants';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
 import { formatClock } from '../../utils/reminders';
+import { dayOf } from '../../services/items';
 
 interface TimelineViewProps {
   tasks: any[];
@@ -14,13 +15,8 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
   // Group all items with dates chronologically
   const todayStr = getTodayString();
 
-  // Helper to extract sort date
-  const getItemDate = (t: any): string | null => {
-    if (t.entityType === 'milestone') return t.dueDate || t.startDate || null;
-    if (t.entityType === 'event') return t.startAt ? t.startAt.slice(0, 10) : null;
-    if (t.entityType === 'reminder') return t.remindAt ? t.remindAt.slice(0, 10) : null;
-    return t.dueDate || t.startDate || null;
-  };
+  // The same day Calendar uses (items.ts), so the two never disagree.
+  const getItemDate = (t: any): string | null => dayOf(t);
 
   // Group items by date
   const dateMap = new Map<string, any[]>();
@@ -58,13 +54,13 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
             <Target size={18} className="text-blue-600 dark:text-blue-400" />
             <h3 className="font-bold text-[15px] text-gray-900 dark:text-white">Milestones & Key Checkpoints</h3>
             <span className="text-xs bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 font-bold px-2.5 py-0.5 rounded-full ml-auto">
-              {milestones.filter(m => m.status === 'done' || m.status === 'achieved').length}/{milestones.length} Reached
+              {milestones.filter(m => m.status === 'done').length}/{milestones.length} Reached
             </span>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3.5">
             {milestones.map(m => {
-              const isReached = m.status === 'done' || m.status === 'achieved';
+              const isReached = m.status === 'done';
               const targetDate = m.dueDate || m.startDate;
               return (
                 <div key={m.id} onClick={() => onSelect(m.id)}
@@ -118,7 +114,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
 
                 <div className="space-y-2.5">
                   {items.map(item => {
-                    const isDone = item.status === 'done' || item.status === 'achieved';
+                    const isDone = item.status === 'done';
                     return (
                       <div key={item.id} onClick={() => onSelect(item.id)}
                         className={`p-4 rounded-2xl bg-white dark:bg-[#1c1c1e] border border-black/5 dark:border-white/5 hover:border-blue-200 dark:hover:border-white/20 shadow-sm cursor-pointer transition-all flex items-center justify-between gap-4 group/card`}>

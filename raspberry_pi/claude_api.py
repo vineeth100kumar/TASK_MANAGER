@@ -25,6 +25,8 @@ from html import escape
 from typing import Any, Awaitable, Callable, List, Optional
 
 from fastapi import APIRouter, Request
+
+import item_shape
 from fastapi.responses import JSONResponse, Response
 
 TOKEN = os.getenv("SAGE_CLAUDE_TOKEN", "").strip()
@@ -128,8 +130,10 @@ def list_records(table: str, q: str = "", status: str = "", due_by: str = "", li
         needle = q.lower()
         records = [r for r in records if needle in json.dumps(r, ensure_ascii=False).lower()]
     if status:
+        # Compared in the one shape, so "in_review" counts as in_progress, as in the app.
         wanted = {s.strip() for s in status.split(",") if s.strip()}
-        records = [r for r in records if r.get("status") in wanted]
+        types = item_shape.project_types(_rows("projects")) if table == "workItems" else {}
+        records = [r for r in records if (item_shape.status_of(r, types.get(r.get("projectId")))[0] if table == "workItems" else r.get("status")) in wanted]
     if due_by:
         records = [r for r in records if r.get("dueDate") and str(r["dueDate"]) <= due_by]
     records.sort(key=lambda r: str(r.get("updatedAt") or r.get("createdAt") or ""), reverse=True)
@@ -164,8 +168,9 @@ def overview() -> dict:
     counts = {}
     for table in sorted(TABLES):
         counts[table] = len(_rows(table))
-    items = _rows("workItems") if "workItems" in TABLES else []
-    open_items = [i for i in items if i.get("status") != "done" and not i.get("deletedAt")]
+    types = item_shape.project_types(_rows("projects")) if "projects" in TABLES else {}
+    items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in _rows("workItems")] if "workItems" in TABLES else []
+    open_items = [i for i in items if item_shape.is_open(i)]
 
     def brief(i: dict) -> dict:
         return {k: i.get(k) for k in ("id", "title", "status", "priority", "dueDate", "dueTime", "projectId") if i.get(k) is not None}
@@ -239,7 +244,8 @@ async def _write(table: str, record_id: str, operation: str, payload: Optional[d
 
 
 _DEFAULTS = {
-    "workItems": {"entityType": "task", "type": "task", "status": "todo", "priority": "medium",
+    # entityType and type are worked out from what was sent (item_shape.kind_of).
+    "workItems": {"status": "todo", "priority": "medium",
                   "description": "", "isFocus": False, "version": 1},
 }
 
@@ -253,8 +259,7 @@ def _next_key(record: dict) -> str:
             prefix = project["key"]
     elif record.get("areaId"):
         prefix = "LIFE"
-    count = sum(1 for i in _rows("workItems") if str(i.get("key") or "").startswith(prefix))
-    return f"{prefix}-{count + 1}"
+    return item_shape.next_key(_rows("workItems"), prefix)
 
 
 async def create_record(table: str, fields: dict) -> dict:
@@ -271,6 +276,14 @@ async def create_record(table: str, fields: dict) -> dict:
             raise ApiError(400, "A work item needs a title")
         record.setdefault("isInbox", not record.get("dueDate") and not record.get("projectId"))
         record.setdefault("source", CLIENT_ID)
+        # Written in the one shape the app reads (item_shape.py), so a milestone
+        # isn't stored with type "task" and every item has its context and labels.
+        record["entityType"] = item_shape.kind_of(record)
+        if "type" not in fields:
+            record["type"] = record["entityType"]
+        record["lifeContext"] = item_shape.context_of(record)
+        record.setdefault("labels", [])
+        record.setdefault("branchId", None)
         if not record.get("key"):
             record["key"] = _next_key(record)
     if table == "notes":

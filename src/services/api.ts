@@ -15,8 +15,8 @@ import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/re
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
-import { stageOf, statusesFor } from './projectTypes';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
+import { normalizeItem, nextKey, selectItems, isLive, type ItemFilters, type Selection } from './items';
 import { contextOf, inContext, isAlarm, isOpen, isSnoozedNow, isOnToday, compareToday, compareInbox, checkVisibility, VisibilityCheck } from '../utils/taskLists';
 
 export interface LocalState {
@@ -132,29 +132,24 @@ async function initializeStore(): Promise<void> {
 // Start async initialization immediately
 initializeStore().catch(console.error);
 
-function hydrateWorkItem(item: WorkItem): WorkItem {
-  if (!item) return item;
-  
+// Every live item, read into the one shape (see items.ts). Lists start here.
+function liveItems(): WorkItem[] {
+  const projects = state.projects.filter(Boolean);
+  return state.workItems.filter(isLive).map(i => normalizeItem(i, projects));
+}
+
+function hydrateWorkItem(raw: WorkItem): WorkItem {
+  if (!raw) return raw;
+  const item = normalizeItem(raw, state.projects.filter(Boolean));
+
   const project = item.projectId ? (state.projects || []).find(p => p && p.id === item.projectId) || null : null;
   const area = item.areaId ? (state.areas || []).find(a => a && a.id === item.areaId) || null : null;
   const labelsList = Array.isArray(item.labels) ? item.labels.map(lId => LABELS.find(l => l.id === lId)).filter(Boolean) : [];
   const subtasksForItem = (state.subtasks || []).filter(s => s && s.workItemId === item.id);
   const commentsForItem = (state.comments || []).filter(c => c && c.workItemId === item.id && !c.deletedAt);
 
-  const cleanStartDate = toInputDateValue(item.startDate);
-  const cleanDueDate = toInputDateValue(item.dueDate);
-  const cleanStartAt = toInputDateTimeValue(item.startAt);
-  const cleanEndAt = toInputDateTimeValue(item.endAt);
-  const cleanRemindAt = toInputDateTimeValue(item.remindAt);
-
   return {
     ...item,
-    status: (item.status as string) === 'in_review' ? 'in_progress' : item.status,
-    startDate: cleanStartDate || null,
-    dueDate: cleanDueDate || null,
-    startAt: cleanStartAt || null,
-    endAt: cleanEndAt || null,
-    remindAt: cleanRemindAt || null,
     project,
     area,
     labelsList,
@@ -299,71 +294,26 @@ export const api = {
     allTags: async (lifeContext?: LifeContext): Promise<{ tag: string; count: number }[]> => {
       await initializeStore();
       const counts = new Map<string, number>();
-      for (const item of state.workItems) {
-        if (!item || item.deletedAt || (lifeContext && contextOf(item) !== lifeContext)) continue;
+      for (const item of liveItems()) {
+        if (lifeContext && contextOf(item) !== lifeContext) continue;
         for (const tag of item.labels || []) counts.set(tag, (counts.get(tag) || 0) + 1);
       }
       return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     },
-    list: async (filters?: {
-      projectId?: string;
-      lifeContext?: LifeContext;
-      status?: string;
-      search?: string;
-      entityType?: string;
-      priority?: string;
-      tag?: string;
-      stage?: string;
-    }): Promise<WorkItem[]> => {
-      await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt);
-
-      if (filters?.stage) {
-        const projects = state.projects.filter(Boolean);
-        items = items.filter(i => stageOf(i, statusesFor(i.projectId, projects)).id === filters.stage);
-      }
-
-      if (filters?.tag) {
-        items = items.filter(i => (i.labels || []).includes(filters.tag as string));
-      }
-
-      if (filters?.lifeContext) {
-        items = items.filter(i => i && contextOf(i) === filters.lifeContext);
-      }
-
-      if (filters?.projectId && filters.projectId !== 'all') {
-        items = items.filter(i => i.projectId === filters.projectId || i.areaId === filters.projectId);
-      }
-
-      if (filters?.entityType && filters.entityType !== 'all') {
-        items = items.filter(i => (i.entityType || 'task') === filters.entityType);
-      }
-
-      if (filters?.priority && filters.priority !== 'all') {
-        items = items.filter(i => i.priority === filters.priority);
-      }
-
-      if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'open') {
-          items = items.filter(i => i.status !== 'done');
-        } else if (filters.status === 'done') {
-          items = items.filter(i => i.status === 'done');
-        } else {
-          items = items.filter(i => i.status === filters.status);
-        }
-      }
-
-      if (filters?.search) {
-        const q = filters.search.toLowerCase();
-        items = items.filter(i =>
-          (i.title || '').toLowerCase().includes(q) ||
-          (i.key || '').toLowerCase().includes(q) ||
-          (i.description && i.description.toLowerCase().includes(q))
-        );
-      }
-
-      return items.map(hydrateWorkItem);
+    list: async (filters?: ItemFilters & { projectId?: string; lifeContext?: LifeContext }): Promise<WorkItem[]> => {
+      return (await api.workItems.query(filters)).items;
     },
+
+    /** What a project page (or All Items) shows, and how many were left out and why. */
+    query: async (filters?: ItemFilters & { projectId?: string; lifeContext?: LifeContext }): Promise<Selection> => {
+      await initializeStore();
+      const { projectId, lifeContext, ...rest } = filters || {};
+      const sel = selectItems(liveItems(), { projectId, lifeContext, filters: rest }, state.projects.filter(Boolean));
+      return { ...sel, items: sel.items.map(hydrateWorkItem) };
+    },
+
+    /** Every live item in the one shape, right now (for strips and counts that can't wait). */
+    snapshot: (): WorkItem[] => liveItems(),
 
     getDeleted: async (): Promise<WorkItem[]> => {
       await initializeStore();
@@ -390,9 +340,8 @@ export const api = {
         prefix = 'LIFE';
       }
 
-      // Items added through the Claude connector may have no key.
-      const count = state.workItems.filter(i => i && (i.key || '').startsWith(prefix)).length + 1;
-      const key = `${prefix}-${count}`;
+      // One past the highest number in use; older items may have no key at all.
+      const key = nextKey(state.workItems, prefix);
 
       // Auto-infer quick wins from action verbs if not explicitly set
       // Whole words only, so "task", "context" or "checkout" don't count.
@@ -999,7 +948,7 @@ export const api = {
   inbox: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => i && contextOf(i) === lifeContext);
       }
@@ -1011,7 +960,7 @@ export const api = {
     all: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; done: WorkItem[]; check: VisibilityCheck }> => {
       await initializeStore();
       const today = localDateString();
-      const live = state.workItems.filter(i => i && !i.deletedAt).map(hydrateWorkItem);
+      const live = liveItems().map(hydrateWorkItem);
       const items = live.filter(i => isOpen(i) && inContext(i, lifeContext) && !isAlarm(i)).sort(compareInbox(today));
       const done = live.filter(i => i.status === 'done' && inContext(i, lifeContext) && !isAlarm(i))
         .sort((a, b) => (b.completedAt || b.updatedAt || '').localeCompare(a.completedAt || a.updatedAt || ''));
@@ -1031,7 +980,7 @@ export const api = {
   focus: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => i.isFocus && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => contextOf(i) === lifeContext);
       }
@@ -1044,7 +993,7 @@ export const api = {
       if (!item) throw new Error('Item not found');
 
       const nextFocus = !item.isFocus;
-      if (nextFocus && state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done').length >= FOCUS_LIMIT) {
+      if (nextFocus && liveItems().filter(i => i.isFocus && i.status !== 'done').length >= FOCUS_LIMIT) {
         throw new Error(`Focus is full (${FOCUS_LIMIT}). Finish one or take one out first.`);
       }
       return api.workItems.updateDetails(id, {
@@ -1090,7 +1039,7 @@ export const api = {
   waitingFor: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.waitingFor && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => i.waitingFor && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
         items = items.filter(i => contextOf(i) === lifeContext);
       }
@@ -1121,8 +1070,8 @@ export const api = {
     list: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; snoozed: WorkItem[] }> => {
       await initializeStore();
       const today = localDateString();
-      const candidates = state.workItems
-        .filter(i => i && isOpen(i) && inContext(i, lifeContext) && !isAlarm(i))
+      const candidates = liveItems()
+        .filter(i => isOpen(i) && inContext(i, lifeContext) && !isAlarm(i))
         .map(hydrateWorkItem)
         .filter(i => isOnToday(i, today))
         .sort(compareToday(today));
@@ -1136,7 +1085,7 @@ export const api = {
     hiddenWork: async (): Promise<{ today: number; open: number }> => {
       await initializeStore();
       const today = localDateString();
-      const work = state.workItems.filter(i => i && isOpen(i) && contextOf(i) === 'work' && !isAlarm(i)).map(hydrateWorkItem);
+      const work = liveItems().filter(i => isOpen(i) && contextOf(i) === 'work' && !isAlarm(i)).map(hydrateWorkItem);
       return { today: work.filter(i => isOnToday(i, today)).length, open: work.length };
     }
   },
@@ -1148,10 +1097,7 @@ export const api = {
       const today = localDateString(now);
       const nowIso = now.toISOString();
 
-      const items = state.workItems.filter(i => 
-        i && !i.deletedAt && 
-        (!lifeContext || contextOf(i) === lifeContext)
-      );
+      const items = liveItems().filter(i => !lifeContext || contextOf(i) === lifeContext);
 
       // Filter active (not completed, not actively snoozed past now)
       const activeItems = items.filter(i => {

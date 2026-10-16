@@ -22,6 +22,8 @@ import { WaitingForView } from './components/views/WaitingForView';
 import { ListView } from './components/views/ListView';
 import { BoardView } from './components/views/BoardView';
 import { FilterBar } from './components/common/FilterBar';
+import { ShownLine } from './components/common/ShownLine';
+import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
@@ -74,6 +76,9 @@ function MainApp() {
   
   // Data State
   const [workItems, setWorkItems] = useState<any[]>([]);
+  // How many of the page's items are on screen, and why the rest aren't.
+  const [shown, setShown] = useState<Shown>({ total: 0, shown: 0, hidden: {} });
+  const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
@@ -234,8 +239,15 @@ function MainApp() {
   const fetchWorkItems = useCallback(async (_showLoading?: boolean) => {
     const seq = ++fetchSeq.current;
     try {
-      const data = await api.workItems.list({ ...filters, projectId: activeWorkspace, lifeContext });
-      if (seq === fetchSeq.current) setWorkItems(data);
+      const scope = { ...filters, projectId: activeWorkspace, lifeContext };
+      const [sel, everyKind] = await Promise.all([api.workItems.query(scope), api.workItems.query({ ...scope, entityType: 'all' })]);
+      if (seq === fetchSeq.current) {
+        setWorkItems(sel.items);
+        setShown(sel.count);
+        const counts: Record<string, number> = { all: everyKind.items.length };
+        for (const i of everyKind.items) counts[i.entityType] = (counts[i.entityType] || 0) + 1;
+        setTypeCounts(counts);
+      }
     } catch (e) {
       showToast("Failed to load work items.", "error");
     } finally {
@@ -470,10 +482,16 @@ function MainApp() {
             ) : (
               <div>
                 {isProjectPage && (
-                  <ProjectTypeBar projectId={activeWorkspace} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
+                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
                 )}
                 {/* Global Quick Filter Bar */}
-                <FilterBar filters={filters} setFilters={setFilters} />
+                <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
+                <ShownLine
+                  count={presentationMode === 'calendar' || presentationMode === 'timeline' ? onlyDated({ items: workItems, count: shown }).count : shown}
+                  lifeContext={lifeContext}
+                  onShowBoth={() => setLifeFilter('all')}
+                  onShowList={() => setPresentationMode('list')}
+                />
 
                 {workItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-20 stagger">
@@ -493,7 +511,7 @@ function MainApp() {
                     <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
                         {presentationMode === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} statuses={pageStatuses} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'branches' && (
                           <ProjectBranchesView
                             items={workItems}
@@ -504,7 +522,7 @@ function MainApp() {
                           />
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}
-                        {presentationMode === 'table' && <TableView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'table' && <TableView tasks={workItems} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'calendar' && <CalendarView tasks={workItems} onSelect={setSelectedItemId} />}
                       </LayoutGroup>
                     </motion.div>

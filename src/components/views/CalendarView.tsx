@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
 import { formatTime } from '../../utils/reminders';
+import { dayOf } from '../../services/items';
 
 interface CalendarViewProps {
   tasks: any[];
@@ -21,33 +22,27 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
       }
     };
 
+    // A start-to-due range covers every day in it; anything else sits on its
+    // one day (items.ts dayOf), whatever kind it is.
     tasks.forEach(task => {
-      if (task.entityType === 'task' || task.entityType === 'milestone') {
-        const start = task.startDate;
-        const due = task.dueDate;
-        
-        if (start && due && start <= due) {
-          const curr = parseDateString(start);
-          const end = parseDateString(due);
-          if (curr && end) {
-            while (curr <= end) {
-              const y = curr.getFullYear();
-              const m = String(curr.getMonth() + 1).padStart(2, '0');
-              const d = String(curr.getDate()).padStart(2, '0');
-              pushTask(`${y}-${m}-${d}`, task);
-              curr.setDate(curr.getDate() + 1);
-            }
+      const start = task.startDate;
+      const due = task.dueDate;
+      if (start && due && start < due && task.entityType !== 'event' && task.entityType !== 'reminder') {
+        const curr = parseDateString(start);
+        const end = parseDateString(due);
+        if (curr && end) {
+          while (curr <= end) {
+            const y = curr.getFullYear();
+            const m = String(curr.getMonth() + 1).padStart(2, '0');
+            const d = String(curr.getDate()).padStart(2, '0');
+            pushTask(`${y}-${m}-${d}`, task);
+            curr.setDate(curr.getDate() + 1);
           }
-        } else if (start) {
-          pushTask(start, task);
-        } else if (due) {
-          pushTask(due, task);
+          return;
         }
-      } else if (task.entityType === 'event' && task.startAt) {
-        pushTask(task.startAt.slice(0, 10), task);
-      } else if (task.entityType === 'reminder' && task.remindAt) {
-        pushTask(task.remindAt.slice(0, 10), task);
       }
+      const day = dayOf(task);
+      if (day) pushTask(day, task);
     });
     return dates;
   };

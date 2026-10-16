@@ -8,11 +8,8 @@ export const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, mediu
 
 const dayOf = (s: string | null | undefined) => (s ? s.slice(0, 10) : '');
 
-// Older or imported records can say "Personal" or "life"; anything else is work.
-export function contextOf(i: Pick<WorkItem, 'lifeContext'>): LifeContext {
-  const c = String(i.lifeContext || '').toLowerCase();
-  return c === 'personal' || c === 'life' ? 'personal' : 'work';
-}
+import { contextOf } from '../services/items';
+export { contextOf };
 
 export const inContext = (i: WorkItem, ctx?: LifeContext) => !ctx || contextOf(i) === ctx;
 
