@@ -969,6 +969,10 @@ export const api = {
       s.completed = completed;
       await persist('subtasks', s);
       return s;
+    },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      await removeRecord('subtasks', id);
     }
   },
 
