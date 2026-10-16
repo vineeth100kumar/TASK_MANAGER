@@ -50,12 +50,12 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
     }
   };
 
-  const renderGroup = (title: string, groupTasks: any[], colorDot?: string) => {
+  const renderGroup = (title: string, groupTasks: any[], colorDot?: string, stage?: StatusStage) => {
     if (groupTasks.length === 0) return null;
     return (
       <div key={title} className="mb-10">
         <div className="flex items-center gap-2 mb-3 px-2">
-          {colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
+          {stage ? <stage.icon size={15} strokeWidth={2.2} className={stage.tint} aria-hidden /> : colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
           <h4 className="font-semibold text-[13.5px] tracking-[-0.01em] text-gray-900 dark:text-white capitalize">{title}</h4>
           <span className="text-[11px] font-semibold tabular-nums text-gray-500 bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full">{groupTasks.length}</span>
         </div>
@@ -172,7 +172,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
       
       {statuses.map(status => {
         const statusTasks = issueTasks.filter(t => stageOf(t, statuses).id === status.id);
-        return renderGroup(status.label, statusTasks, status.dot);
+        return renderGroup(status.label, statusTasks, status.dot, status);
       })}
     </div>
   );

@@ -39,7 +39,7 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
         return (
           <div key={status.id} className={`flex flex-col ${statuses.length > 4 ? 'w-[272px]' : 'w-[320px]'} shrink-0 snap-start`} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, status.id)}>
             <div className="flex items-center gap-2 mb-3 px-2 sticky top-0 py-2 z-10">
-              <div className="p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.06]"><div className={`w-2 h-2 rounded-full ${status.dot}`} /></div>
+              <div className={`p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] ${status.tint}`}><status.icon size={14} strokeWidth={2.2} aria-hidden /></div>
               <h3 className="font-semibold text-[14px] tracking-[-0.01em]">{status.label}</h3>
               <span className="text-[11px] font-semibold tabular-nums bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full text-gray-500">{columnTasks.length}</span>
             </div>

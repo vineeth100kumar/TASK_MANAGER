@@ -244,7 +244,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       <PropertyRow icon={Circle} label="Status">
                         <Select align="end" className="prop-control" 
                           value={stageOf(task, taskStatuses).id} onChange={handleStatusChange}>
-                          {taskStatuses.map(s => <option key={s.id} value={s.id}>{s.label}</option>)}
+                          {taskStatuses.map(s => <option key={s.id} value={s.id} data-icon={<s.icon size={14} strokeWidth={2.2} className={`shrink-0 ${s.tint}`} aria-hidden />}>{s.label}</option>)}
                         </Select>
                       </PropertyRow>
 

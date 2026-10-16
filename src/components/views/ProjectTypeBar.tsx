@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Pencil } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { projectTypeInfo, stageOf } from '../../services/projectTypes';
@@ -42,6 +43,11 @@ export function ProjectTypeBar({ projectId, stage, onStage }: { projectId: strin
       <div className="flex items-center gap-2.5 shrink-0">
         <ProjectTypeMenu project={project} projects={data.projects} onChange={changeType} />
         <span className="text-[12.5px] text-gray-500 tabular-nums">{open} open · {done} done</span>
+        <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('sage:edit-project', { detail: project.id }))}
+          className="flex items-center gap-1 h-7 px-2 rounded-full text-[12px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          title="Edit name, key, colour and type">
+          <Pencil size={12} /> Edit
+        </button>
       </div>
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0" role="group" aria-label="Statuses">
         {type.statuses.map((st, i) => {
@@ -55,7 +61,7 @@ export function ProjectTypeBar({ projectId, stage, onStage }: { projectId: strin
                 className={`flex items-center gap-1.5 h-7 pl-2.5 pr-2 rounded-full text-[12.5px] font-semibold transition-colors ${on
                   ? type.chip + ' ring-1 ring-inset ring-current/25'
                   : 'bg-gray-100 dark:bg-white/5 text-gray-600 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/10'}`}>
-                <span className={`w-1.5 h-1.5 rounded-full ${st.dot}`} aria-hidden />
+                <st.icon size={13} strokeWidth={2.2} className={on ? '' : st.tint} aria-hidden />
                 {st.label}
                 <span className={`min-w-4 text-center text-[11px] tabular-nums ${n ? '' : 'opacity-40'}`}>{n}</span>
               </button>

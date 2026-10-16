@@ -48,7 +48,7 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                   <td className={`px-6 py-4 truncate max-w-[300px] font-semibold ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</td>
                   <td className="px-6 py-4">
                     <span className="flex items-center gap-2">
-                      <div className={`w-2 h-2 rounded-full ${stage.dot}`} />
+                      <stage.icon size={14} strokeWidth={2.2} className={stage.tint} aria-hidden />
                       {stage.label}
                     </span>
                   </td>
