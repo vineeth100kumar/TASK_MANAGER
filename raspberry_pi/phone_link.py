@@ -43,6 +43,7 @@ ANCS_DATA_SOURCE = "22eac6e9-24d6-4bb5-be44-b36ace7c7bfb"
 AMS_SERVICE = "89d3502b-0f36-433a-8ef4-c502ad55f8dc"
 AMS_REMOTE_COMMAND = "9b3c81d8-57b1-4a8a-b8df-0e56f7ca51c2"
 AMS_ENTITY_UPDATE = "2f7cabce-808d-411f-9a0c-bb92ba96c102"
+AMS_ENTITY_ATTRIBUTE = "c6b2f38c-23ab-46d8-a6ab-a3a870bbd5d7"
 
 CATEGORIES = [
     "other", "incoming call", "missed call", "voicemail", "social", "schedule",
@@ -55,6 +56,12 @@ ATTR_REQUEST = bytes([0]) + bytes([1]) + struct.pack("<H", 64) + bytes([3]) + st
 AMS_PLAYER, AMS_TRACK = 0, 2
 # Seconds to let the phone take a fresh notify before asking it for songs.
 AMS_SETTLE = 1.0
+# The phone sends a song's details only when they change, so a Pi that
+# subscribes mid-song hears "playing" but no title. After this many seconds
+# of that it reads the details itself, then tries again after each wait.
+TITLE_WAIT = 3.0
+TITLE_RETRY = (15.0, 60.0, 300.0)
+TRACK_ATTRS = ((2, "title"), (0, "artist"), (1, "album"), (3, "duration"))
 COMMANDS = {"play": 0, "pause": 1, "toggle": 2, "next": 3, "previous": 4}
 
 Broadcast = Callable[[dict], Awaitable[None]]
@@ -66,6 +73,7 @@ CHAR_NAMES = {
     ANCS_DATA_SOURCE: "notification details (ANCS Data Source)",
     AMS_REMOTE_COMMAND: "media buttons (AMS Remote Command)",
     AMS_ENTITY_UPDATE: "now playing (AMS Entity Update)",
+    AMS_ENTITY_ATTRIBUTE: "song details (AMS Entity Attribute)",
 }
 # What a BlueZ or ATT error usually means here, for the log.
 HINTS = {
@@ -173,6 +181,9 @@ class PhoneLink:
         self._subscribed_at = 0.0
         self._ams_not_listening = False  # the phone answered AMS 0xA0 last time
         self.media_at = 0.0  # when the phone last sent a song detail (epoch s)
+        self._title_since = 0.0  # since when the phone has been playing with no title (epoch s)
+        self._title_tries = 0
+        self._title_next = 0.0
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
@@ -331,6 +342,8 @@ class PhoneLink:
             self._chars.clear()
         if not self._chars:
             await self._subscribe(objects, phone_path)
+        if self._chars:
+            await self._check_title()
 
     def _stale_reason(self, objects: dict, device_path: str) -> str:
         """Why the songs subscription is no longer live, or "" when it is.
@@ -401,7 +414,7 @@ class PhoneLink:
             if not char or not path.startswith(device_path + "/"):
                 continue
             uuid = char["UUID"].value.lower()
-            if uuid not in {ANCS_NOTIFICATION_SOURCE, ANCS_CONTROL_POINT, ANCS_DATA_SOURCE, AMS_REMOTE_COMMAND, AMS_ENTITY_UPDATE}:
+            if uuid not in CHAR_NAMES:
                 continue
             obj = await self._char(path)
             self._chars[uuid] = obj.get_interface("org.bluez.GattCharacteristic1")
@@ -447,6 +460,68 @@ class PhoneLink:
         self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
         self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
                           + ", ".join(self.link["subscribed"]) + ". Now playing will update on the next song change.")
+
+    async def _check_title(self) -> None:
+        """Playing with no title: read the song from the phone, or the clock
+        says "Nothing playing" until the next song. Seen after a Pi restart
+        mid-song: the player details came, the track's never did."""
+        if not (self.media.get("playing") and not self.media.get("title")):
+            self._title_since, self._title_tries = 0.0, 0
+            return
+        now = time.time()
+        if not self._title_since:
+            self._title_since, self._title_next = now, now + TITLE_WAIT
+        if now < self._title_next:
+            return
+        self._title_next = now + TITLE_RETRY[min(self._title_tries, len(TITLE_RETRY) - 1)]
+        self._title_tries += 1
+        self._set_link(nowPlaying="playing with no song title; reading it from the phone")
+        if await self._read_track():
+            return
+        # No Entity Attribute (or it refused): asking for the track again
+        # makes some phones send its details.
+        update = self._chars.get(AMS_ENTITY_UPDATE)
+        if update:
+            await self._try(f"asking for the track again on {CHAR_NAMES[AMS_ENTITY_UPDATE]}",
+                            update.call_write_value(bytes([AMS_TRACK, 0, 1, 2, 3]), {}))
+
+    async def _read_track(self) -> bool:
+        """AMS Entity Attribute: write the entity and attribute, then read
+        the value back. True when a title came back."""
+        char = self._chars.get(AMS_ENTITY_ATTRIBUTE)
+        if not char:
+            return False
+        got: Dict[str, bytes] = {}
+        for attr, name in TRACK_ATTRS:
+            step = f"reading the song's {name} from {CHAR_NAMES[AMS_ENTITY_ATTRIBUTE]}"
+
+            async def read(attr=attr, name=name):
+                await char.call_write_value(bytes([AMS_TRACK, attr]), {})
+                got[name] = bytes(await char.call_read_value({}))
+            if not await self._try(step, read()):
+                break
+        title = got.get("title", b"").decode("utf-8", errors="replace")
+        if not title:
+            self.say("title", f"{self.link.get('phone')} says it is playing but gave no song title; "
+                              f"trying again in {int(self._title_next - time.time())} s")
+            return False
+        for attr, name in TRACK_ATTRS:
+            if name in got:
+                self._set_track(attr, got[name].decode("utf-8", errors="replace"))
+        self.media_at = time.time()
+        self._set_link(nowPlaying="asked")
+        self.say("title", f"read the song from {self.link.get('phone')}: {title}")
+        await self._emit({"type": "PHONE_MEDIA", "media": self.media})
+        return True
+
+    def _set_track(self, attr: int, value: str) -> None:
+        if attr in (0, 1, 2):
+            self.media[("artist", "album", "title")[attr]] = value
+        elif attr == 3:
+            try:
+                self.media["duration"] = float(value or 0)
+            except ValueError:
+                self.media["duration"] = 0.0
 
     async def _try(self, step: str, call) -> bool:
         try:
@@ -534,13 +609,8 @@ class PhoneLink:
                 except ValueError:
                     self.media["elapsed"] = None
                 self.media["elapsedAt"] = time.time()
-            elif entity == AMS_TRACK and attr in (0, 1, 2):
-                self.media[("artist", "album", "title")[attr]] = value
-            elif entity == AMS_TRACK and attr == 3:
-                try:
-                    self.media["duration"] = float(value or 0)
-                except ValueError:
-                    self.media["duration"] = 0.0
+            elif entity == AMS_TRACK:
+                self._set_track(attr, value)
             await self._emit({"type": "PHONE_MEDIA", "media": self.media})
 
     @staticmethod

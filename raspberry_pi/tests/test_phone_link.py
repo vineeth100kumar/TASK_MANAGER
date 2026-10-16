@@ -118,9 +118,13 @@ class V:
 
 
 class FakeChar:
-    def __init__(self, fail_notify=None, fail_write=None):
+    def __init__(self, fail_notify=None, fail_write=None, values=None):
         self.fail_notify, self.fail_write = fail_notify, fail_write
         self.notified, self.stopped, self.writes = 0, 0, []
+        self.values = values or {}  # AMS Entity Attribute: (entity, attr) -> value
+
+    async def call_read_value(self, options):
+        return self.values.get(tuple(self.writes[-1]), b"")
 
     async def call_stop_notify(self):
         self.stopped += 1
@@ -241,6 +245,53 @@ class Resubscribing(unittest.TestCase):
             self.assertEqual(link._stale_reason(objects(True), dev), "")
             self.assertIn("no longer notifying", link._stale_reason(objects(False), dev))
             self.assertIn("gone", link._stale_reason({}, dev))
+
+
+class MissingTitle(unittest.TestCase):
+    """The Pi subscribed mid-song (a restart, a BLE drop): the phone sent the
+    player ("playing", the app) but not the track, and the clock said
+    "Nothing playing". The Pi reads the song itself."""
+
+    def setUp(self):
+        self.link = phone_link.PhoneLink()
+        self.sent = []
+
+        async def broadcast(event):
+            self.sent.append(event)
+        self.link.broadcast = broadcast
+        self.ams = FakeChar()
+        self.attr = FakeChar(values={(2, 2): b"Clocks", (2, 0): b"Coldplay", (2, 1): b"A Rush of Blood", (2, 3): b"307.5"})
+        self.link._chars = {phone_link.AMS_ENTITY_UPDATE: self.ams, phone_link.AMS_ENTITY_ATTRIBUTE: self.attr}
+
+    def check_at(self, t):
+        with mock.patch.object(phone_link.time, "time", return_value=t):
+            asyncio.run(self.link._check_title())
+
+    def test_reads_the_song_when_playing_with_no_title(self):
+        asyncio.run(self.link._on_value(phone_link.AMS_ENTITY_UPDATE, bytes([0, 0, 0]) + b"YouTube Music"))
+        asyncio.run(self.link._on_value(phone_link.AMS_ENTITY_UPDATE, bytes([0, 1, 0]) + b"1,1.0,40"))
+        self.check_at(1000)
+        self.assertEqual(self.attr.writes, [])  # gives the phone a moment first
+        self.check_at(1004)
+        media = self.sent[-1]["media"]
+        self.assertEqual((media["title"], media["artist"], media["duration"]), ("Clocks", "Coldplay", 307.5))
+        self.assertEqual(self.link.link["nowPlaying"], "asked")
+        self.check_at(1010)  # has a title now: nothing more to ask
+        self.assertEqual(len(self.attr.writes), 4)
+
+    def test_no_title_back_asks_again_later(self):
+        self.attr.values = {}
+        self.link.media["playing"] = True
+        self.check_at(1000)
+        self.check_at(1004)
+        self.assertEqual(self.ams.writes, [bytes([2, 0, 1, 2, 3])])  # asked for the track again
+        self.check_at(1010)
+        self.assertEqual(len(self.ams.writes), 1)  # waits before the next try
+        self.check_at(1020)
+        self.assertEqual(len(self.ams.writes), 2)
+        self.link.media["playing"] = False
+        self.check_at(1100)
+        self.assertEqual(self.link._title_tries, 0)
 
 
 class Logging(unittest.TestCase):
