@@ -433,6 +433,9 @@ export const api = {
         location: payload.location || null,
         labels: payload.labels || [],
         customFields: payload.customFields || {},
+        // A planned task names the one before it, and starts in its project type's first status.
+        ...(payload.dependsOn?.length ? { dependsOn: payload.dependsOn } : {}),
+        ...((payload as any).stage ? { stage: (payload as any).stage } : {}),
         version: 1,
         completedAt: null,
         deletedAt: null,
@@ -970,6 +973,10 @@ export const api = {
       s.completed = completed;
       await persist('subtasks', s);
       return s;
+        },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      await removeRecord('subtasks', id);
     }
   },
 
