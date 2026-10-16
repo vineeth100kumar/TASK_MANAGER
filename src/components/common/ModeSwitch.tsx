@@ -6,7 +6,7 @@
 
 import { motion } from 'framer-motion';
 import { Briefcase, Coffee, Home } from 'lucide-react';
-import { LifeMode, describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
+import { LifeMode, describeLifeMode, lifeModeError, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useToast } from '../../context/ToastContext';
 
 export function ModeSwitch() {
@@ -19,8 +19,8 @@ export function ModeSwitch() {
     try {
       await setLifeMode(mode);
       showToast(mode === 'chill' ? 'Chill mode: personal only. Work is hidden, not gone.' : 'Work mode: everything shows', 'info');
-    } catch {
-      showToast("Couldn't reach the Pi to change the mode", 'error');
+    } catch (e) {
+      showToast(lifeModeError(e), 'error');
     }
   };
 

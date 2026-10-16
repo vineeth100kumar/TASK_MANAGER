@@ -78,17 +78,35 @@ export async function loadLifeMode(): Promise<void> {
   }
 }
 
+// Why a change didn't stick, in words. A 404 means the Pi answered but is
+// still running Sage from before Work and Chill existed (it hasn't restarted
+// onto the new code), which reads very differently from the Pi being off.
+const failure = (status: number): string => {
+  if (status === 404) return "The Pi is running an older Sage without Work and Chill. Restart Sage on the Pi to update it";
+  if (status === 401) return 'The Pi turned the mode change down: sign in again or check the Pi key in Settings';
+  return `The Pi couldn't change the mode (error ${status})`;
+};
+
 async function put(update: Record<string, unknown>): Promise<void> {
   const base = piBackendUrl();
   if (!base) return;
-  const res = await fetch(`${base}/api/life-mode`, {
-    method: 'PUT',
-    headers: piHeaders({ 'Content-Type': 'application/json' }),
-    body: JSON.stringify(update),
-  });
-  if (!res.ok) throw new Error('Could not change the mode');
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/life-mode`, {
+      method: 'PUT',
+      headers: piHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(update),
+    });
+  } catch {
+    throw new Error("Couldn't reach the Pi to change the mode");
+  }
+  if (!res.ok) throw new Error(failure(res.status));
   set(fromPi(await res.json()));
 }
+
+// The toast text for a failed change.
+export const lifeModeError = (e: unknown): string =>
+  e instanceof Error && e.message ? e.message : "Couldn't reach the Pi to change the mode";
 
 export async function setLifeMode(mode: LifeMode): Promise<void> {
   const before = state.mode;

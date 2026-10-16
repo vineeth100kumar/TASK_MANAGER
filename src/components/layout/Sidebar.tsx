@@ -6,7 +6,7 @@ import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText,
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
-import { describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
+import { describeLifeMode, lifeModeError, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
@@ -339,7 +339,7 @@ export function Sidebar({
                   const active = lifeMode.mode === m;
                   const Icon = m === 'work' ? Briefcase : Coffee;
                   return (
-                    <button key={m} role="radio" aria-checked={active} onClick={() => { if (!active) setLifeMode(m).catch(() => showToast("Couldn't reach the Pi to change the mode", 'error')); }}
+                    <button key={m} role="radio" aria-checked={active} onClick={() => { if (!active) setLifeMode(m).catch(e => showToast(lifeModeError(e), 'error')); }}
                       className={`flex items-center justify-center gap-2 h-10 rounded-xl text-[13.5px] font-semibold transition-colors ${active
                         ? (m === 'chill' ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/30' : 'bg-blue-600 text-white shadow-sm shadow-blue-600/30')
                         : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-gray-300 ring-1 ring-black/5 dark:ring-white/10 hover:bg-white dark:hover:bg-white/10'}`}>

@@ -9,7 +9,7 @@ import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { refreshSubscription } from './services/pushNotifications';
-import { loadLifeMode, getLifeMode, setLifeMode, useLifeMode } from './services/lifeMode';
+import { loadLifeMode, getLifeMode, lifeModeError, setLifeMode, useLifeMode } from './services/lifeMode';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -213,7 +213,7 @@ function MainApp() {
           e.preventDefault();
           const next = getLifeMode().mode === 'chill' ? 'work' : 'chill';
           setLifeMode(next).then(() => showToast(next === 'chill' ? 'Chill mode: personal only' : 'Work mode: everything shows', 'info'))
-            .catch(() => showToast("Couldn't reach the Pi to change the mode", 'error'));
+            .catch(e => showToast(lifeModeError(e), 'error'));
         } else if (e.key === '?') {
           e.preventDefault();
           setIsShortcutsOpen(open => !open);

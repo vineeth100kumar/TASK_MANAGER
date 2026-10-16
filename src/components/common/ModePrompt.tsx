@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Briefcase, Coffee, Home, MapPin } from 'lucide-react';
-import { LifeMode, describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
+import { LifeMode, describeLifeMode, lifeModeError, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useToast } from '../../context/ToastContext';
 
 export const ASK_EVERY_MS = 3 * 60 * 60 * 1000;
@@ -40,7 +40,7 @@ export function ModePrompt() {
     markAsked();
     setOpen(false);
     if (mode === state.mode) return;
-    try { await setLifeMode(mode); } catch { showToast("Couldn't reach the Pi to change the mode", 'error'); }
+    try { await setLifeMode(mode); } catch (e) { showToast(lifeModeError(e), 'error'); }
   };
 
   useEffect(() => {

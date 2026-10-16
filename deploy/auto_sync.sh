@@ -60,15 +60,18 @@ deploy_changes() {
     as_user "$REPO/deploy/install_depth.sh" "$REPO" || log "optional depth-face packages failed to install"
   fi
 
+  # Sage restarts before the new web app goes in: a new app on an old server
+  # calls routes the server doesn't have yet (the Work/Chill switch failed that
+  # way). If the restart fails, the old app stays with the old server.
+  if grep -q '^raspberry_pi/' <<<"$changed"; then
+    log "restarting sage"; restart_unit sage || { log "sage restart failed"; return 1; }
+  fi
+
   if grep -qE '^(src/|public/|index\.html$|package(-lock)?\.json$|vite\.config\.|tailwind\.config\.|postcss\.config\.|\.env\.production$)' <<<"$changed"; then
     if grep -qE '^package(-lock)?\.json$' <<<"$changed" && command -v npm >/dev/null; then
       (cd "$REPO" && as_user npm ci --silent) || { log "npm ci failed"; return 1; }
     fi
     build_web || return 1
-  fi
-
-  if grep -q '^raspberry_pi/' <<<"$changed"; then
-    log "restarting sage"; restart_unit sage || return 1
   fi
   if grep -q '^deploy/' <<<"$changed"; then
     log "deploy/ changed; run 'sudo deploy/install_pi.sh' to apply it"
