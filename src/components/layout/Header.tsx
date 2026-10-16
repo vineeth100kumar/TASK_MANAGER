@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, AlertTriangle, WifiOff, GitBranch } from 'lucide-react';
 import { api } from '../../services/api';
 import { SyncEngineStatus } from '../../services/syncEngine';
+import { ModeSwitch } from '../common/ModeSwitch';
 
 const VIEWS = [
   { id: 'list', icon: LayoutList, label: 'List' },
@@ -143,6 +144,9 @@ export function Header({
       </div>
       
       <div className="flex items-center gap-2 md:gap-3 justify-end">
+        {/* Work or Chill: on every screen size, phones included. */}
+        <ModeSwitch />
+
         {/* Interactive Sync Diagnostics Badge */}
         <SyncBadge onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} />
 

@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, Coffee, Briefcase } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
@@ -53,6 +54,7 @@ export function Sidebar({
   setIsSettingsOpen,
   onOpenProject
 }: SidebarProps) {
+  const lifeMode = useLifeMode();
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -329,6 +331,26 @@ export function Sidebar({
 
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
+            {/* Work or Chill, always here. Chill shows personal only, so the
+                All/Work/Personal filter below waits for Work mode. */}
+            <div className="space-y-1.5">
+              <div role="radiogroup" aria-label="Mode" className="grid grid-cols-2 gap-1.5">
+                {(['work', 'chill'] as const).map(m => {
+                  const active = lifeMode.mode === m;
+                  const Icon = m === 'work' ? Briefcase : Coffee;
+                  return (
+                    <button key={m} role="radio" aria-checked={active} onClick={() => { if (!active) setLifeMode(m).catch(() => showToast("Couldn't reach the Pi to change the mode", 'error')); }}
+                      className={`flex items-center justify-center gap-2 h-10 rounded-xl text-[13.5px] font-semibold transition-colors ${active
+                        ? (m === 'chill' ? 'bg-orange-500 text-white shadow-sm shadow-orange-500/30' : 'bg-blue-600 text-white shadow-sm shadow-blue-600/30')
+                        : 'bg-white/70 dark:bg-white/5 text-gray-600 dark:text-gray-300 ring-1 ring-black/5 dark:ring-white/10 hover:bg-white dark:hover:bg-white/10'}`}>
+                      <Icon size={15} /> {m === 'work' ? 'Work' : 'Chill'}
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="px-1 text-[11.5px] text-gray-500 dark:text-gray-400 truncate" title={describeLifeMode(lifeMode)}>{describeLifeMode(lifeMode)} · <kbd className="kbd">M</kbd></p>
+            </div>
+            {lifeMode.mode === 'chill' ? null : (
             <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
               {(['all', 'work', 'personal'] as const).map(ctx => {
                 const active = lifeContext === ctx;
@@ -341,6 +363,7 @@ export function Sidebar({
                 );
               })}
             </div>
+            )}
 
             <div className="space-y-0.5">
               {[ 

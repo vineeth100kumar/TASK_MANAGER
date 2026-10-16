@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Radar, Newspaper, FlaskConical, Lightbulb, Archive, RefreshCw, AlertTriangle, Server, LineChart } from 'lucide-react';
+import { Radar, Newspaper, FlaskConical, Lightbulb, Archive, RefreshCw, AlertTriangle, Server, LineChart, Sparkles } from 'lucide-react';
 import { api } from '../../services/api';
 import { Dossier, Idea } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -12,11 +12,13 @@ import { IdeasTab } from '../radar/IdeasTab';
 import { IdeaPage } from '../radar/IdeaPage';
 import { VaultTab } from '../radar/VaultTab';
 import { MarketsTab } from '../radar/MarketsTab';
+import { LabTab } from '../radar/LabTab';
 
-type Tab = 'signals' | 'markets' | 'studio' | 'ideas' | 'vault';
+type Tab = 'signals' | 'lab' | 'markets' | 'studio' | 'ideas' | 'vault';
 
 const TABS: { id: Tab; name: string; icon: typeof Newspaper }[] = [
   { id: 'signals', name: 'Signals', icon: Newspaper },
+  { id: 'lab', name: 'Lab', icon: Sparkles },
   { id: 'markets', name: 'Markets', icon: LineChart },
   { id: 'studio', name: 'Studio', icon: FlaskConical },
   { id: 'ideas', name: 'Ideas', icon: Lightbulb },
@@ -139,7 +141,8 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
   if (idea) {
     return (
       <div className="max-w-6xl mx-auto">
-        <IdeaPage idea={idea} dossier={dossiers.find(d => d.id === idea.dossierId)} onBack={() => setIdeaId(null)} onOpenProject={onOpenProject} onOpenDossier={openDossier} />
+        <IdeaPage idea={idea} dossier={dossiers.find(d => d.id === idea.dossierId)} onBack={() => setIdeaId(null)} onOpenProject={onOpenProject} onOpenDossier={openDossier}
+          onResearchStarted={() => setTab('studio')} />
       </div>
     );
   }
@@ -156,6 +159,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
   const down = summary?.sources.filter(s => !s.ok) || [];
   const tagline = error ? `Can't reach the Pi right now (${error}).`
     : tab === 'signals' ? (summary ? summary.headline : 'Loading the latest signals…')
+    : tab === 'lab' ? 'Small business ideas from the last day of news and markets, matched to what you know and have.'
     : tab === 'markets' ? 'Every industry at a glance, and the likely reason it moved.'
     : tab === 'studio' ? 'Give it a theme. It reads the news, the web and Hacker News, then drafts and red-teams three ideas.'
     : tab === 'ideas' ? `${ideas.length} idea${ideas.length === 1 ? '' : 's'}, best first. Numbers are AI estimates.`
@@ -208,6 +212,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
           sentIds={sentIds} onInbox={sendToInbox} onResearch={research}
           topIdeas={ideas.slice(0, 3)} onOpenIdea={openIdea} onAllIdeas={() => setTab('ideas')} />
       ))}
+      {tab === 'lab' && <LabTab ideas={ideas} onOpenIdea={openIdea} onResearchStarted={() => setTab('studio')} />}
       {tab === 'markets' && <MarketsTab ideas={ideas} onOpenIdea={openIdea} onResearch={research} />}
       {tab === 'studio' && <StudioTab seedTheme={seedTheme} signals={signals} dossiers={dossiers} ideas={ideas} onOpenIdea={openIdea} onOpenDossier={openDossier} />}
       {tab === 'ideas' && <IdeasTab ideas={ideas} dossiers={dossiers} onOpenIdea={openIdea} onStudio={() => setTab('studio')} />}

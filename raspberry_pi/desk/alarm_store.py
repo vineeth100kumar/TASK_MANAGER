@@ -23,6 +23,7 @@ from desk.alarms import LABEL, TONES, Alarm, clean_days, next_occurrence, option
 
 SOURCE = "lumo"
 LABEL_LEN = 40
+READ_ONLY = {"id", "nextRing", "snoozed"}
 _TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
 
@@ -46,6 +47,9 @@ def _check(spec: Any, partial: bool) -> Dict[str, Any]:
     """The fields of `spec` that check out. Raises ValueError for the person."""
     if not isinstance(spec, dict):
         raise ValueError("An alarm must be an object.")
+    # What describe() adds is only shown, never set: an alarm sent back as it
+    # was read (the page's editor does that) saves its own fields.
+    spec = {k: v for k, v in spec.items() if k not in READ_ONLY}
     unknown = set(spec) - {"label", "time", "days", "enabled", "tone", "volume", "snoozeMinutes"}
     if unknown:
         raise ValueError(f"Unknown alarm field: {', '.join(sorted(unknown))}.")

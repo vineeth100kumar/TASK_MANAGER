@@ -19,12 +19,14 @@ import backup
 import claude_api
 import desk
 import item_actions
+import life_mode
 import phone_link
 import quick_add
 import markets
 import prices
 import radar
 import radar_research
+import sparks
 import system_health
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
@@ -468,12 +470,14 @@ async def startup_event():
     _background(notifier.scheduler())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
+    _background(life_mode.run(events.broadcast))
     if desk.ENABLED:
         from desk import run as desk_run
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
     if radar.ENABLED:
         _background(radar.collector.run(events.broadcast))
         _background(markets.collector.run())
+        _background(sparks.run())
 
 
 @app.get("/api/health")
@@ -1239,6 +1243,37 @@ def phone_state():
     return {"success": True, **phone_link.link.snapshot()}
 
 
+# --- Work mode and Chill mode (see life_mode.py) ---
+# Chill shows only personal items and holds work reminders; Auto follows the
+# phone's home/away. Changes go out on /ws as LIFE_MODE.
+def _phone_presence():
+    link = phone_link.link
+    return bool(link.available and link.last_seen), bool(link.home)
+
+
+life_mode.presence = _phone_presence
+
+
+def _life_mode_state() -> dict:
+    return {"success": True, **life_mode.current(), "held": len(life_mode.held()), "phoneLink": phone_link.link.available}
+
+
+@app.get("/api/life-mode")
+def life_mode_state():
+    return _life_mode_state()
+
+
+@app.put("/api/life-mode")
+async def life_mode_update(update: Dict[str, Any]):
+    try:
+        life_mode.update_settings(update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    state = _life_mode_state()
+    await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return state
+
+
 @app.post("/api/phone/notifications")
 async def phone_add_notification(item: PhoneNotification):
     """Shows a notification as if the phone sent it. Handy for trying the
@@ -1653,7 +1688,7 @@ def _claude_health() -> dict:
         password_gate=access_gate.enabled,
         radar_enabled=radar.ENABLED,
         backups=backup.status,
-        phone=phone_link.link.snapshot,
+        phone=lambda: {**phone_link.link.snapshot(), "lifeMode": life_mode.current()},
         clock=_clock_status,
         depth_face=_depth_status,
     )
@@ -1681,6 +1716,10 @@ app.include_router(radar_research.router)
 # Radar's Markets board (markets.py): a year of daily closes per symbol, and why things moved.
 markets.connect(DB_PATH, events.broadcast)
 app.include_router(markets.router)
+
+# Radar Lab (sparks.py): each morning's business-idea sparks, matched to My edge.
+sparks.connect(DB_PATH, events.broadcast)
+app.include_router(sparks.router)
 
 
 if (DIST_DIR / "index.html").is_file():

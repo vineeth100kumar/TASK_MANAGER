@@ -258,7 +258,11 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
   onSave: (d: AlarmDraft) => Promise<void>; onCancel: () => void; onDelete?: () => Promise<void>;
 }) {
   const { showToast } = useToast();
-  const [d, setD] = useState<AlarmDraft>({ ...draft });
+  // Only the fields an alarm is saved with (an existing alarm also carries id, nextRing and snoozed).
+  const [d, setD] = useState<AlarmDraft>({
+    label: draft.label, time: draft.time, days: draft.days, enabled: draft.enabled,
+    tone: draft.tone, volume: draft.volume, snoozeMinutes: draft.snoozeMinutes,
+  });
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const set = (patch: Partial<AlarmDraft>) => setD(prev => ({ ...prev, ...patch }));
