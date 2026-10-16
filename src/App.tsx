@@ -492,6 +492,7 @@ function MainApp() {
           <CreateTaskModal 
             onClose={() => setIsCreateModalOpen(false)} 
             onCreate={handleCreateWorkItem} 
+            onChanged={() => fetchWorkItems(false)}
             workspaceId={activeWorkspace !== 'all' ? activeWorkspace : (api.sync.getState().projects[0]?.id || '')} 
             lifeContext={lifeContext} 
             defaultFocus={activeView === 'focus'}

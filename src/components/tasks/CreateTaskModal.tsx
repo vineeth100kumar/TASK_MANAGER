@@ -11,6 +11,7 @@ import { RepeatSelect } from '../common/RepeatSelect';
 import { Select } from '../common/Select';
 import { DatePicker, formatPickedDate } from '../common/DatePicker';
 import { TimePicker, DateTimePicker } from '../common/TimePicker';
+import { ChatCapture } from './ChatCapture';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -26,6 +27,7 @@ const SMART_PARSE_KEY = 'sage-smart-parse';
 const LAST_CONTEXT_KEY = 'sage-last-context';
 const MORE_OPTIONS_KEY = 'sage-add-more-options';
 const KEEP_ADDING_KEY = 'sage-keep-adding';
+const ADD_MODE_KEY = 'sage-add-mode';
 // How long the save button shows its tick before the sheet closes or clears.
 const SAVED_HOLD_MS = 520;
 // True for that moment, so the footer's save button can show it.
@@ -127,9 +129,14 @@ interface CreateTaskModalProps {
   lifeContext?: LifeContext;
   // Opened from the Focus view: new tasks go straight into Focus.
   defaultFocus?: boolean;
+  // Chat saves on its own; this refreshes the lists behind the sheet.
+  onChanged?: () => void;
 }
 
-export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: filterContext, defaultFocus = false }: CreateTaskModalProps) {
+export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: filterContext, defaultFocus = false, onChanged }: CreateTaskModalProps) {
+  // Chat (type it in plain words) or the Form; the last one used opens next time.
+  const [mode, setModeState] = useState<'chat' | 'form'>(() => (readPref(ADD_MODE_KEY) === 'chat' && !defaultFocus ? 'chat' : 'form'));
+  const setMode = (m: 'chat' | 'form') => { setModeState(m); writePref(ADD_MODE_KEY, m); };
   // Work or personal: the filtered context if there is one, else whatever was used last.
   const [lifeContext, setLifeContext] = useState<LifeContext>(() => filterContext || (readPref(LAST_CONTEXT_KEY) === 'personal' ? 'personal' : 'work'));
   const [keepAdding, setKeepAdding] = useState(() => readPref(KEEP_ADDING_KEY) === 'on');
@@ -205,19 +212,31 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
         <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
             <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
-            {/* Work or personal, one tap; follows the sidebar filter when it narrows to one. */}
-            <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
+            <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Chat or form">
+              {(['chat', 'form'] as const).map(m => (
+                <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${mode === m ? 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
+                  {m === 'chat' ? <><Sparkles size={12} /> Chat</> : 'Form'}
+                </button>
+              ))}
+            </div>
+            {/* Work or personal, one tap; follows the sidebar filter when it narrows to one. Chat works it out per item. */}
+            {mode === 'form' && <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
               {(['work', 'personal'] as const).map(c => (
                 <button key={c} type="button" aria-pressed={lifeContext === c} onClick={() => setLifeContext(c)}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${lifeContext === c ? (c === 'personal' ? 'bg-white dark:bg-[#3a3a3c] text-orange-600 dark:text-orange-400 shadow-sm' : 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm') : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
                   {c === 'work' ? <Briefcase size={12} /> : <Sun size={12} />} {c === 'work' ? 'Work' : 'Personal'}
                 </button>
               ))}
-            </div>
+            </div>}
           </div>
           <button onClick={() => !isSubmitting && onClose()} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" disabled={isSubmitting} aria-label="Close"><X size={18}/></button>
         </div>
 
+        {mode === 'chat' ? (
+          <ChatCapture lifeContext={lifeContext} projects={projects} areas={areas} onChanged={() => onChanged?.()}
+            onOpenForm={text => { setTitle(text); setMode('form'); }} />
+        ) : <>
         <div className="px-6 pt-5 pb-2 shrink-0">
           <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5">
              {Object.entries(ENTITY_TYPES).map(([k, v]) => (
@@ -238,6 +257,7 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
           {entityType === 'milestone' && <MilestoneForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} />}
         </div>
         </SavedContext.Provider>
+        </>}
       </motion.div>
     </div>
   );

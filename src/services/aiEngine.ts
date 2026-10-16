@@ -59,6 +59,34 @@ export const aiEngine = {
     },
 
 
+    // Chat capture in New Item: only what the app couldn't place itself. Groq on the Pi,
+    // else the Pi's local model; the reply names come back as ids from the lists sent.
+    chatCaptureEngine: async (): Promise<string> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), { headers: piHeaders() });
+        if (!res.ok) throw new Error(await errorText(res));
+        return (await res.json()).engine;
+    },
+
+    chatCapture: async (payload: {
+        mode: 'split' | 'edit';
+        message: string;
+        today: string;
+        projects: { id: string; name: string; key: string; branches: { id: string; name: string }[] }[];
+        areas: { id: string; name: string }[];
+        openItems: { id: string; key: string; title: string; project: string }[];
+        tags: string[];
+        cards?: { title: string; kind: string; project: string; branch: string; area: string; context: string; when: string; priority: string }[];
+    }, signal?: AbortSignal): Promise<{ engine: string; items?: any[]; changes?: any[]; reply?: string }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
+            method: 'POST',
+            signal,
+            headers: piHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
+
     getDailyBriefing: async (tasksJson: string) => {
         const res = await fetch(getAiUrl('/api/daily-briefing'), {
             method: 'POST',

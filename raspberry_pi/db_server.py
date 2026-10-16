@@ -1035,6 +1035,21 @@ def canvas_think(req: canvas_thinker.CanvasThinkRequest):
         print(f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
 
+# --- Chat capture in New Item (see chat_capture.py) ---
+import chat_capture
+
+@app.get("/api/chat-capture")
+def chat_capture_status():
+    return {"success": True, "engine": chat_capture.engine()}
+
+@app.post("/api/chat-capture")
+def chat_capture_run(req: chat_capture.ChatCaptureRequest):
+    try:
+        return {"success": True, **chat_capture.capture(req)}
+    except Exception as e:
+        print(f"Chat capture failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Chat capture couldn't ask the AI: {e}")
+
 # --- Public link (see public_link.py) ---
 import public_link
 
