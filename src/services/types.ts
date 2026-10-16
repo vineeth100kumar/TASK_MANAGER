@@ -15,7 +15,7 @@ export interface Project {
   id: string;
   name: string;
   key: string;
-  type?: string; // not read anywhere; existing records hold 'standard'
+  type?: string; // technical | nontech | content | other | a custom name; see projectTypes.ts
   color: string;
   sequence: number;
   description?: string;
@@ -58,6 +58,8 @@ export interface WorkItem {
   lifeContext?: LifeContext;
   type: string; // task, bug, feature, improvement, meeting, reminder, milestone
   status: TaskStatus;
+  /** The project type's own status (e.g. 'editing'); status keeps the base. See projectTypes.ts. */
+  stage?: string | null;
   priority: TaskPriority;
   
   // Categorization
