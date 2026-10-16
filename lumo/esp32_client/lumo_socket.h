@@ -68,6 +68,8 @@ class LumoSocket {
   bool ping();
   void close(uint16_t code = 1000);
   bool isOpen() const { return open; }
+  // Why the last connect() failed ("" when it didn't), for the Pi to see.
+  const char* failure() const { return why; }
 
  private:
   bool sendFrame(uint8_t opcode, const uint8_t* data, size_t len);
@@ -77,4 +79,5 @@ class LumoSocket {
   WiFiClient tcp;
   WsParser   parser;
   bool       open = false;
+  const char* why = "";
 };

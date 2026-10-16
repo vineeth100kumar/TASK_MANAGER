@@ -10,6 +10,8 @@
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <esp_system.h>
+#include <esp_attr.h>
+#include <soc/soc_caps.h>
 
 static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 
@@ -37,6 +39,26 @@ static uint16_t      wifiDrops    = 0;
 static int           rttMs        = -1;  // how long the Pi took to answer the last ping
 static bool          everPaired   = false;
 static char          lastDrop[40] = "";  // why the link went last, told to the Pi on the way back
+static uint16_t      tries        = 0;   // tries to reach the Pi since the link went
+static char          tryFail[72]  = "";  // why the last of them failed
+static uint8_t       kicks        = 0;   // Wi-Fi rejoins because the Pi stayed out of reach
+static unsigned long lastKick     = 0;
+
+// Kept through a restart (not through a power cut): where loop() was, so a
+// watchdog or crash restart can tell Sage what LUMO was doing, and whether
+// LUMO restarted itself because the Pi stayed out of reach (only once per
+// outage, so a Pi that's off for the night doesn't restart LUMO all night).
+#define RTC_MAGIC 0x4C554D4FUL
+RTC_NOINIT_ATTR static uint32_t crumbMagic;
+RTC_NOINIT_ATTR static char     crumbAt[16];
+RTC_NOINIT_ATTR static uint32_t piRestartMagic;
+static char bootText[64] = "";
+static bool restartedForPi = false;
+
+void wsMark(const char* where) {
+  strlcpy(crumbAt, where, sizeof(crumbAt));
+  crumbMagic = RTC_MAGIC;
+}
 
 // The Pi's address: an IP in secrets.h is used as it is; an mDNS name is
 // looked up once and remembered, and only looked up again when that address
@@ -51,7 +73,7 @@ struct OfflineReport { char a[12]; int8_t h, m; unsigned long at; };
 static OfflineReport pending[6];
 static uint8_t pendingCount = 0;
 
-static const char* bootReason() {
+static const char* resetName() {
   switch (esp_reset_reason()) {
     case ESP_RST_POWERON:  return "power on";
     case ESP_RST_SW:       return "restarted";
@@ -61,9 +83,32 @@ static const char* bootReason() {
     case ESP_RST_WDT:      return "watchdog";
     case ESP_RST_BROWNOUT: return "brownout (power dipped)";
     case ESP_RST_EXT:      return "reset button";
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    case ESP_RST_USB:      return "USB (a computer opened the serial port, or the reset button)";
+#endif
+    case ESP_RST_DEEPSLEEP: return "woke from sleep";
     default:               return "other";
   }
 }
+
+// Why LUMO last started, worked out once at start (the marks change after).
+static void noteBoot() {
+  esp_reset_reason_t r = esp_reset_reason();
+  bool stuck = r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT;
+  restartedForPi = r == ESP_RST_SW && piRestartMagic == RTC_MAGIC;
+  if (restartedForPi) {
+    strlcpy(bootText, "restarted itself: Sage out of reach for 15 min", sizeof(bootText));
+  } else if (stuck && crumbMagic == RTC_MAGIC) {
+    crumbAt[sizeof(crumbAt) - 1] = '\0';
+    snprintf(bootText, sizeof(bootText), "%s (stuck in %s)", resetName(), crumbAt);
+  } else {
+    strlcpy(bootText, resetName(), sizeof(bootText));
+  }
+  piRestartMagic = 0;
+  wsMark("start");
+}
+
+static const char* bootReason() { return bootText; }
 
 static void linkDown(const char* why) {
   if (isConnected) Serial.printf("[WS] Link down: %s\n", why);
@@ -80,6 +125,10 @@ static void onPaired() {
   downSince = 0;
   retryMs = LINK_RETRY_MIN_MS;
   piIpFails = 0;
+  tries = 0;
+  tryFail[0] = '\0';
+  kicks = 0;
+  restartedForPi = false;   // a new outage may restart LUMO once again
   pendingCount = 0;      // Sage has them now
   lastDrop[0] = '\0';
 }
@@ -452,6 +501,7 @@ static void handleBinaryMessage(const uint8_t* data, size_t len) {
 
 void wsInit(LumoState& state) {
   statePtr = &state;
+  noteBoot();
   clockSetUtcOffset(state.utc_off);
 
   client.onText = [](const char* text, size_t len) {
@@ -489,6 +539,9 @@ static void sayHello() {
   hello["token"] = netToken;
   hello["fw"] = FW_VERSION;
   hello["reconnects"] = reconnects;
+  if (tries) hello["tries"] = tries;          // failed tries before this one got through
+  if (tryFail[0]) hello["tryFail"] = tryFail;
+  if (kicks) hello["kicks"] = kicks;
   if (lastDrop[0]) hello["drop"] = lastDrop;
   if (!everPaired) hello["boot"] = bootReason();
   hello["ota"] = 1;   // takes updates over Wi-Fi (the OTA command)
@@ -502,7 +555,7 @@ static void sayHello() {
       r["ago"] = (millis() - pending[i].at) / 1000UL;
     }
   }
-  char buf[512];
+  char buf[768];
   serializeJson(hello, buf, sizeof(buf));
   client.sendText(buf);
 }
@@ -532,13 +585,16 @@ void wsConnect() {
     Serial.println("[WS] WiFi not connected, skipping wsConnect");
     return;
   }
+  wsMark("connect");
   String host = piAddress();
   Serial.printf("[WS] Connecting to ws://%s:%d%s\n", host.c_str(), PI_WS_PORT, PI_WS_PATH);
   if (client.connect(host.c_str(), PI_WS_PORT, PI_WS_PATH, LINK_CONNECT_MS)) {
     sayHello();
   } else {
     if (piIpKnown) piIpFails++;
-    Serial.println("[WS] The Pi didn't answer");
+    if (tries < 60000) tries++;
+    snprintf(tryFail, sizeof(tryFail), "%s at %s", client.failure(), host.c_str());
+    Serial.printf("[WS] Try %u failed: %s\n", tries, tryFail);
   }
 }
 
@@ -594,7 +650,33 @@ static void wifiWatch() {
   }
 }
 
+// Wi-Fi says it's connected but the Pi stays out of reach: the connection
+// to the router can be stale (it happens after the router restarts, and with
+// a weak signal), so join again every LINK_KICK_MS, and if the Pi is still
+// away after LINK_REBOOT_MS restart LUMO, once per outage. Never while an
+// alarm rings or a timer runs.
+static void piWatch(unsigned long now) {
+  if (isConnected || paused || !downSince || WiFi.status() != WL_CONNECTED) return;
+  unsigned long away = now - downSince;
+  bool busy = statePtr && (statePtr->alarm_ringing || statePtr->local_ringing || statePtr->tm_state == TOOL_RUNNING);
+  if (away > LINK_REBOOT_MS && !restartedForPi && !busy) {
+    Serial.println("[WS] Sage out of reach for 15 min; restarting LUMO");
+    piRestartMagic = RTC_MAGIC;
+    delay(100);
+    ESP.restart();
+  }
+  if (away > LINK_KICK_MS && now - lastKick > LINK_KICK_MS) {
+    lastKick = now;
+    if (kicks < 255) kicks++;
+    piIpFails = 2;       // look the Pi up again too (its address may have changed)
+    Serial.printf("[WiFi] Sage out of reach for %lu s; joining the network again\n", away / 1000UL);
+    WiFi.disconnect();
+    WiFi.begin(netSsid, netPass);
+  }
+}
+
 void wsPoll() {
+  wsMark("link");
   wifiWatch();
   client.poll();
   sendStatus();
@@ -615,6 +697,7 @@ void wsPoll() {
     return;
   }
 
+  piWatch(now);
   if (!paused && WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
     Serial.printf("[WS] Reconnecting (next wait: %lu ms)...\n", retryMs);
     wsConnect();

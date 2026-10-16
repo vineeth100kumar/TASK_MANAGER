@@ -339,5 +339,69 @@ class Listening(unittest.IsolatedAsyncioTestCase):
         link._serving.cancel()
 
 
+class StuckOldConnection:
+    """A connection that died quietly: closing it takes the whole close timeout."""
+    close_code = None
+    close_reason = ""
+
+    def __init__(self):
+        self.closed = asyncio.Event()
+
+    async def close(self, code=1000, reason=""):
+        await asyncio.sleep(5)
+        self.closed.set()
+
+    async def send(self, data):
+        await asyncio.sleep(5)
+
+
+class LinkRecovery(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import socket
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Path(self.tmp.name) / "desk_link.json"
+        self.link = ClockLink("123456", store=self.store)
+        asyncio.get_running_loop().create_task(self.link.serve("127.0.0.1", self.port))
+        await asyncio.sleep(0.2)
+
+    async def asyncTearDown(self):
+        self.link._serving.cancel()
+        self.tmp.cleanup()
+
+    async def test_pairs_at_once_while_the_old_connection_is_still_closing(self):
+        """The clock gives up on a pairing that isn't answered in 10 s; a dead
+        old connection must not hold the new one's PAIRED for its close timeout."""
+        self.link.socket = StuckOldConnection()
+        async with connect(f"ws://127.0.0.1:{self.port}") as clock:
+            await clock.send(json.dumps({"evt": "HELLO", "token": "123456", "fw": "2.14.0"}))
+            reply = json.loads(await asyncio.wait_for(clock.recv(), 1))
+            self.assertEqual(reply, {"cmd": "PAIRED", "ok": True})
+
+    async def test_reports_the_failed_tries_and_keeps_the_history(self):
+        hello = {"evt": "HELLO", "token": "123456", "fw": "2.14.0", "drop": "the link broke",
+                 "tries": 4, "tryFail": "the Pi didn't answer at 192.168.1.5", "kicks": 1,
+                 "boot": "watchdog (stuck in connect)"}
+        async with connect(f"ws://127.0.0.1:{self.port}") as clock:
+            await clock.send(json.dumps(hello))
+            await asyncio.wait_for(clock.recv(), 1)
+        await asyncio.sleep(0.1)
+        health = self.link.health()
+        self.assertEqual(health["clockTries"], 4)
+        self.assertEqual(health["clockWifiRejoins"], 1)
+        connected = next(h for h in health["history"] if h["event"] == "connected")
+        self.assertIn("4 failed tries", connected["detail"])
+        self.assertIn("stuck in connect", connected["detail"])
+
+        # A Sage restart starts from the saved history.
+        again = ClockLink("123456", store=self.store)
+        events = [h["event"] for h in again.health()["history"]]
+        self.assertEqual(events[:3], ["sage started", "dropped", "connected"])
+        self.assertEqual(again.health()["drops24h"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()
