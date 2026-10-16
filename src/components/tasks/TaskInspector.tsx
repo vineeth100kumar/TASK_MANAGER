@@ -14,6 +14,7 @@ import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { stageOf, statusesFor } from '../../services/projectTypes';
 import { TimePicker, DateTimePicker } from '../common/TimePicker';
+import { SnoozeMenu } from '../common/SnoozeMenu';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -212,6 +213,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
             </div>
           </div>
           <div className="flex items-center gap-2">
+            {task.status !== 'done' && <SnoozeMenu itemId={task.id} onSnoozed={() => loadData()} />}
             <button onClick={() => { downloadTaskImage(task, task.project); showToast('Task picture (.png) downloaded!'); }} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download Task Picture (PNG)"><Camera size={17} /></button>
             <button onClick={handleDuplicate} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Duplicate Item"><Copy size={17} /></button>
             <button onClick={() => { if(window.confirm("Move item to trash?")) { onDelete(task.id); onClose(); } }} className="p-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500" aria-label="Delete item"><Trash2 size={18} /></button>
