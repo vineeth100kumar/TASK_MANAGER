@@ -26,11 +26,14 @@ import os
 import smtplib
 import sqlite3
 import ssl
+import time
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+import life_mode
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 DATA_DIR = Path(DB_PATH).resolve().parent
@@ -775,6 +778,31 @@ def _deliver(prefs: dict, message: dict, email: Optional[Tuple[str, str, str]]) 
     return delivered
 
 
+def _send_held(conn: sqlite3.Connection, prefs: dict, items: List[dict]) -> Optional[str]:
+    """Back in Work mode: one push for the work reminders Chill held back."""
+    held = life_mode.held()
+    if not held:
+        return None
+    open_ids = {i.get("id") for i in items}
+    waiting = [h for h in held if h.get("id") in open_ids]
+    if not waiting:
+        life_mode.clear_held()  # all done or deleted meanwhile
+        return None
+    message = {
+        "title": f"{_plural(len(waiting), 'work reminder')} from Chill",
+        "body": _list_titles(waiting),
+        "tag": "chill-held",
+        "url": "/?view=inbox",
+        "ttl": 6 * 3600,
+    }
+    if not _deliver(prefs, message, None):
+        return None
+    life_mode.clear_held()
+    key = f"chill-held:{int(time.time())}"
+    _mark_sent(conn, key)
+    return key
+
+
 def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
     """One pass of the scheduler. Returns the dedupe keys it sent (for tests)."""
     prefs = get_prefs()
@@ -788,6 +816,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
     sent: List[str] = []
     conn = _connect()
     try:
+        mode = life_mode.current()
+        chill = mode["mode"] == "chill"
+        today_iso = now.date().isoformat()
         if prefs["reminders"]:
             for item in items:
                 when = parse_when(item.get("remindAt"), tz)
@@ -795,6 +826,13 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     continue
                 key = f"remind:{item.get('id')}:{item.get('remindAt')}"
                 if _already_sent(conn, key):
+                    continue
+                # Chill mode: a work reminder waits for Work mode instead.
+                if chill and life_mode.hidden_in_chill(item) and not (
+                    mode["urgentThrough"] and life_mode.lets_through(item, today_iso)
+                ):
+                    life_mode.hold(item)
+                    _mark_sent(conn, key)
                     continue
                 message = reminder_message(item, tz, now)
                 if _taken_by_clock(item, message):
@@ -815,6 +853,17 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     _mark_sent(conn, key)
                     sent.append(key)
 
+            if not chill:
+                key = _send_held(conn, prefs, items)
+                if key:
+                    sent.append(key)
+
+        # In Chill the digests only talk about personal things.
+        hidden_work = 0
+        if chill:
+            shown = [i for i in items if not life_mode.hidden_in_chill(i)]
+            hidden_work = len(items) - len(shown)
+            items = shown
         due, overdue = plan_for_today(items, now, tz)
         day = now.date().isoformat()
 
@@ -828,6 +877,8 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 body = _list_titles(due or overdue)
                 if due and overdue:
                     body += f". Plus {len(overdue)} overdue."
+                if hidden_work:
+                    body += f". {hidden_work} work {'task waits' if hidden_work == 1 else 'tasks wait'} for Work mode."
                 message = {"title": title, "body": body, "tag": "morning-plan", "url": "/?ritual=morning", "ttl": 6 * 3600}
                 email = None
                 if prefs["email"]["morningPlan"]:

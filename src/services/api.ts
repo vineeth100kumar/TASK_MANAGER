@@ -1114,6 +1114,14 @@ export const api = {
         items: candidates.filter(i => !isSnoozedNow(i)),
         snoozed: candidates.filter(i => isSnoozedNow(i))
       };
+    },
+
+    // What Chill mode hides: open work items, and those of them on Today.
+    hiddenWork: async (): Promise<{ today: number; open: number }> => {
+      await initializeStore();
+      const today = localDateString();
+      const work = state.workItems.filter(i => i && isOpen(i) && contextOf(i) === 'work' && !isAlarm(i)).map(hydrateWorkItem);
+      return { today: work.filter(i => isOnToday(i, today)).length, open: work.length };
     }
   },
 

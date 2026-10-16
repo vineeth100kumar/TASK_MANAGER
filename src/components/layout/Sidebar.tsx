@@ -2,10 +2,11 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine, Radar, AlarmClock } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, PenLine, Radar, AlarmClock, Coffee } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
+import { describeLifeMode, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
@@ -48,6 +49,7 @@ export function Sidebar({
   setIsDiagnosticsOpen,
   setIsSettingsOpen
 }: SidebarProps) {
+  const lifeMode = useLifeMode();
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
@@ -272,6 +274,15 @@ export function Sidebar({
 
           <div className="px-4 py-2 flex-1 overflow-y-auto space-y-6 custom-scrollbar">
             
+            {/* Chill mode shows personal only, so the filter waits for Work mode. */}
+            {lifeMode.mode === 'chill' ? (
+              <button onClick={() => setLifeMode('work').catch(() => {})} title={describeLifeMode(lifeMode)}
+                className="w-full flex items-center gap-2 px-3 py-2 rounded-xl bg-orange-100/70 dark:bg-orange-950/30 text-orange-700 dark:text-orange-300 text-[12.5px] font-semibold text-left hover:bg-orange-100 dark:hover:bg-orange-950/50 transition-colors">
+                <Coffee size={14} className="shrink-0" />
+                <span className="flex-1">Chill: personal only</span>
+                <span className="text-[11.5px] opacity-75">Show work</span>
+              </button>
+            ) : (
             <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
               {(['all', 'work', 'personal'] as const).map(ctx => {
                 const active = lifeContext === ctx;
@@ -284,6 +295,7 @@ export function Sidebar({
                 );
               })}
             </div>
+            )}
 
             <div className="space-y-0.5">
               {[ 

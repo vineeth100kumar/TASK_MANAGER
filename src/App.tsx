@@ -9,6 +9,7 @@ import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { refreshSubscription } from './services/pushNotifications';
+import { loadLifeMode, getLifeMode, useLifeMode } from './services/lifeMode';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -57,11 +58,16 @@ function MainApp() {
     setLifeFilterState(f);
     try { localStorage.setItem('sage-life-filter', f); } catch { /* storage unavailable */ }
   }, []);
-  const lifeContext = lifeFilter === 'all' ? undefined : lifeFilter;
+  // Chill mode shows personal only, whatever the sidebar filter says; Work
+  // mode shows what the filter picks (see services/lifeMode.ts).
+  const { mode: lifeMode } = useLifeMode();
+  useEffect(() => { loadLifeMode(); }, []);
+  const viewFilter: LifeFilter = lifeMode === 'chill' ? 'personal' : lifeFilter;
+  const lifeContext = viewFilter === 'all' ? undefined : viewFilter;
   // Radar is work only; switching to Personal while on it goes back to Today.
   useEffect(() => {
-    if (lifeFilter === 'personal' && activeView === 'radar') setActiveView('dashboard');
-  }, [lifeFilter, activeView]);
+    if (viewFilter === 'personal' && activeView === 'radar') setActiveView('dashboard');
+  }, [viewFilter, activeView]);
   
   // Data State
   const [workItems, setWorkItems] = useState<any[]>([]);
@@ -362,7 +368,9 @@ function MainApp() {
       // Say where it went, so nobody wonders whether it saved.
       const today = new Date();
       const isToday = payload.dueDate === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      showToast(focusFull ? `Focus is full (${FOCUS_LIMIT}), so this is in your ${payload.dueDate ? 'list' : 'Inbox'}` : payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
+      // Chill hides work, so say where a work item went.
+      const hiddenInChill = getLifeMode().mode === 'chill' && payload.lifeContext !== 'personal';
+      showToast(hiddenInChill ? "Saved to Work. It's hidden while you're in Chill" : focusFull ? `Focus is full (${FOCUS_LIMIT}), so this is in your ${payload.dueDate ? 'list' : 'Inbox'}` : payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
       fetchWorkItems(false);
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -377,13 +385,13 @@ function MainApp() {
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
         isDarkMode={isDarkMode} setIsDarkMode={changeTheme}
-        lifeContext={lifeFilter} setLifeContext={setLifeFilter}
+        lifeContext={viewFilter} setLifeContext={setLifeFilter}
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
       />
 
-      <main data-context={lifeFilter} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={viewFilter} data-mode={lifeMode} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
@@ -405,7 +413,7 @@ function MainApp() {
           </div>
         ) : (
         <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <div key={`${activeView}:${lifeFilter}:${activeWorkspace}`} className="view-enter p-4 pb-28 md:p-8 min-h-full">
+          <div key={`${activeView}:${viewFilter}:${activeWorkspace}`} className="view-enter p-4 pb-28 md:p-8 min-h-full">
             <Suspense fallback={<PageSkeleton />}>
             {activeView === 'tasks' && isLoading ? (
               <PageSkeleton />

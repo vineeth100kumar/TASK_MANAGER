@@ -18,6 +18,8 @@ import { InboxTriage } from './InboxTriage';
 import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { HiddenWorkLine } from '../common/HiddenWorkLine';
+import { useLifeMode } from '../../services/lifeMode';
 
 interface InboxViewProps {
   lifeContext?: LifeContext;
@@ -25,6 +27,7 @@ interface InboxViewProps {
 }
 
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
+  const chill = useLifeMode().mode === 'chill';
   // The Inbox lists every open item in every project, area and section.
   const [items, setItems, loaded] = useCachedState<WorkItem[]>(`inbox-all:${lifeContext || 'all'}`, []);
   const [done, setDone] = useState<WorkItem[]>([]);
@@ -179,6 +182,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
         </div>
       </div>
 
+      {/* Chill mode: work is out of sight, never lost. */}
+      {!showDone && <HiddenWorkLine scope="open" />}
+
       {/* Open / Done */}
       {loaded && (
         <div className="flex items-center gap-1 p-1 rounded-xl bg-gray-100 dark:bg-white/5 w-fit text-[12.5px] font-semibold" role="tablist">
@@ -268,7 +274,9 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             {(check.alarms > 0 || check.otherContext > 0) && (
               <p className="opacity-80">
                 {[check.alarms > 0 && `${check.alarms} LUMO ${check.alarms === 1 ? 'alarm lives' : 'alarms live'} on the LUMO page`,
-                  check.otherContext > 0 && `${check.otherContext} more ${lifeContext === 'work' ? 'in Personal' : 'in Work'} (switch to All to see them)`]
+                  check.otherContext > 0 && (chill
+                    ? `${check.otherContext} more in Work, hidden in Chill (switch to Work to see them)`
+                    : `${check.otherContext} more ${lifeContext === 'work' ? 'in Personal' : 'in Work'} (switch to All to see them)`)]
                   .filter(Boolean).join('. ')}.
               </p>
             )}
