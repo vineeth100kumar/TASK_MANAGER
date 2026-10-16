@@ -5,7 +5,7 @@
 // the Pi's Bluetooth link (raspberry_pi/life_mode.py).
 
 import { Briefcase, Coffee, Home, MapPin } from 'lucide-react';
-import { LifeMode, describeLifeMode, setLifeMode, setLifeModeSettings, useLifeMode } from '../../services/lifeMode';
+import { LifeMode, describeLifeMode, lifeModeError, setLifeMode, setLifeModeSettings, useLifeMode } from '../../services/lifeMode';
 import { useToast } from '../../context/ToastContext';
 
 function Toggle({ on, onChange, label, disabled }: { on: boolean; onChange: (on: boolean) => void; label: string; disabled?: boolean }) {
@@ -39,7 +39,7 @@ export function ModeSettings() {
   const { showToast } = useToast();
   const onPi = state.source !== 'local';
 
-  const run = (p: Promise<void>) => p.catch(() => showToast("Couldn't reach the Pi", 'error'));
+  const run = (p: Promise<void>) => p.catch(e => showToast(lifeModeError(e), 'error'));
 
   return (
     <div className="space-y-3">
