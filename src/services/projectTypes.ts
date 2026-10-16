@@ -1,6 +1,6 @@
 import {
   Code2, Briefcase, Clapperboard, Folder, Tag, Circle, CirclePlay, Hourglass, CircleCheck, Archive, Hammer,
-  FlaskConical, OctagonPause, Rocket, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
+  FlaskConical, OctagonPause, Rocket, ShoppingCart, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
 } from 'lucide-react';
 import type { Project, TaskStatus, WorkItem } from './types';
 import { STATUSES } from './constants';
@@ -34,6 +34,9 @@ export interface StatusStage {
   icon: LucideIcon;
   /** Text colour for the icon. */
   tint: string;
+  /** Where an item lands when only its base status is known (a tick on Today, an
+   * older item); without one, the first status on that base. */
+  fallback?: boolean;
 }
 
 // Written out in full so Tailwind finds every class.
@@ -60,7 +63,9 @@ export const DEFAULT_STATUSES: StatusStage[] = [
 export const PROJECT_TYPES: ProjectTypeInfo[] = [
   { id: 'technical', label: 'Technical', hint: 'Code, hardware', icon: Code2,
     chip: 'text-sky-700 bg-sky-500/10 dark:text-sky-300 dark:bg-sky-400/15', view: 'branches',
-    statuses: [s('backlog', 'Backlog', 'todo', 'gray', Archive), s('building', 'Building', 'in_progress', 'sky', Hammer),
+    // Procurement: ordering parts or tools before the build can start.
+    statuses: [s('backlog', 'Backlog', 'todo', 'gray', Archive), s('procurement', 'Procurement', 'in_progress', 'amber', ShoppingCart),
+      { ...s('building', 'Building', 'in_progress', 'sky', Hammer), fallback: true },
       s('testing', 'Testing', 'in_progress', 'violet', FlaskConical), s('blocked', 'Blocked', 'blocked', 'red', OctagonPause),
       s('shipped', 'Shipped', 'done', 'emerald', Rocket)] },
   { id: 'nontech', label: 'Non-tech', hint: 'Errands, admin', icon: Briefcase,
@@ -118,17 +123,22 @@ export function normaliseTypeInput(text: string): string {
   return match ? match.id : t;
 }
 
+function onBase(base: string, statuses: StatusStage[]): StatusStage | undefined {
+  const all = statuses.filter(x => x.base === base);
+  return all.find(x => x.fallback) || all[0];
+}
+
 /** The status an item shows: its stored stage when that still matches its base
  * status, else the first status of its project's type with that base. A tick
  * from Today or LUMO only changes the base, and this keeps them in step. */
 export function stageOf(item: Pick<WorkItem, 'status' | 'stage'>, statuses: StatusStage[]): StatusStage {
   const stored = item.stage ? statuses.find(x => x.id === item.stage && x.base === item.status) : undefined;
-  return stored || statuses.find(x => x.base === item.status) || statuses[0];
+  return stored || onBase(item.status, statuses) || statuses[0];
 }
 
 /** Turns a picked status (a stage id, or a base status) into what to store. */
 export function resolveStage(value: string, statuses: StatusStage[]): { status: TaskStatus; stage: string } {
-  const hit = statuses.find(x => x.id === value) || statuses.find(x => x.base === value) || statuses[0];
+  const hit = statuses.find(x => x.id === value) || onBase(value, statuses) || statuses[0];
   return { status: hit.base, stage: hit.id };
 }
 

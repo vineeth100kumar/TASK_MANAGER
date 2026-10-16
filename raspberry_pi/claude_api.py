@@ -390,7 +390,7 @@ async def http_delete(table: str, record_id: str):
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
-workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
+workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
 dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
 projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
 notes (title, content), comments and subtasks (workItemId), activities, boards (drawings),
