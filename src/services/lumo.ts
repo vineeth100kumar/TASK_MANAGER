@@ -77,7 +77,7 @@ export interface LumoUpdates {
 
 export interface LumoLinkEvent {
   at: number;                // ms since epoch
-  event: 'connected' | 'dropped';
+  event: 'connected' | 'dropped' | 'sage started';
   detail: string;
 }
 
@@ -91,6 +91,9 @@ export interface LumoLink {
   rtt: number | null;        // the clock's last ping round trip, ms (firmware 2.10)
   clockReconnects: number | null;
   clockLastDrop: string | null;
+  clockTries?: number | null;          // failed tries before it got back (firmware 2.14)
+  clockLastTryFailure?: string | null;
+  clockWifiRejoins?: number | null;
   lastBoot: string | null;
   history: LumoLinkEvent[];  // newest first
 }

@@ -10,7 +10,7 @@ from typing import Callable, Optional
 import notifier
 from desk import settings as desk_settings
 from desk.desk import Desk
-from desk.link import ClockLink, load_token
+from desk.link import LINK_FILE, ClockLink, load_token
 
 log = logging.getLogger("desk")
 
@@ -24,7 +24,7 @@ async def run(now: Callable[[], datetime.datetime], events, phone) -> None:
     """events is Sage's EventHub (its listeners and broadcast), phone the
     phone_link.link that knows whether you're home and what's playing."""
     global link, desk
-    link = ClockLink(load_token())
+    link = ClockLink(load_token(), store=LINK_FILE)
     desk = Desk(link, now, phone, events.broadcast, settings=await asyncio.to_thread(desk_settings.load), morning_line=_radar_line)
     events.listeners.append(desk.on_event)
     notifier.clock_reminder = desk.clock_reminder

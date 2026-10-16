@@ -16,3 +16,6 @@ void wsReportOffline(const char* action, int h, int m);
 // Let go of Sage while an update downloads (ota.cpp), and come back after.
 void wsPause();
 void wsResume();
+// Notes where loop() is, kept through a watchdog restart so the next HELLO
+// can say where LUMO got stuck.
+void wsMark(const char* where);

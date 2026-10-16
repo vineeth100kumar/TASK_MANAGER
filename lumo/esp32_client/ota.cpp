@@ -43,6 +43,8 @@ bool otaPoll() {
   lastPct = -1;
   displayUpdateScreen(pendingVersion, 0, nullptr);
 
+  // A download takes longer than the loop watchdog allows; it has its own timeouts.
+  disableLoopWDT();
   WiFiClient net;
   httpUpdate.rebootOnUpdate(true);
   httpUpdate.onProgress(onProgress);
@@ -57,6 +59,7 @@ bool otaPoll() {
   Serial.printf("[OTA] Failed: %s\n", lastError);
   displayUpdateScreen(pendingVersion, -1, lastError);
   delay(4000);
+  enableLoopWDT();
   wsResume();
   return true;
 }

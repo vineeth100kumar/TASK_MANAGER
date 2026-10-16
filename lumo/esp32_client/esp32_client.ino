@@ -1,6 +1,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
+#include <esp_task_wdt.h>
 #include "config.h"
 #include "peripherals.h"
 #include "display.h"
@@ -211,13 +212,22 @@ void setup() {
   wsInit(lumoState);
   wsConnect();
 
+  // A loop() that gets stuck (it has happened: LUMO dropped off and never
+  // tried again) restarts LUMO after LOOP_WDT_MS instead of freezing, and
+  // the next HELLO tells Sage where it was stuck (wsMark).
+  esp_task_wdt_config_t wdt = { .timeout_ms = LOOP_WDT_MS, .idle_core_mask = 0, .trigger_panic = true };
+  if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+  enableLoopWDT();
+
   currentScreen = SCREEN_CONNECTING;
   displayDrawScreen(SCREEN_CONNECTING, lumoState, true);
 }
 
 void loop() {
   wsPoll();
+  wsMark("update");
   if (otaPoll()) displayDrawScreen(currentScreen, lumoState, true);   // the update failed: back to the screen
+  wsMark("screen");
   hapticUpdate();
   // Type "buzz" in the serial monitor to test the motor with no shaping.
   if (Serial.available()) {

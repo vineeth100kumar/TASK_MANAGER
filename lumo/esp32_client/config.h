@@ -45,6 +45,9 @@
 #define LINK_RETRY_MAX_MS   30000   // ...doubling up to this (with a little randomness)
 #define WIFI_REJOIN_MS      20000   // Wi-Fi gone this long: join the network again
 #define WIFI_RESET_MS       120000  // still gone after this: restart the Wi-Fi radio
+#define LINK_KICK_MS        120000  // Wi-Fi up but the Pi out of reach this long: join the network again (and every 2 min after)
+#define LINK_REBOOT_MS      900000  // still out of reach after 15 min: restart LUMO, once per outage
+#define LOOP_WDT_MS         30000   // loop() stuck this long: the watchdog restarts LUMO
 #define LINK_BADGE_MS       30000   // the clock face shows a small dot once Sage has been away this long
 #define CLOCK_NTP_AFTER_MS  600000  // no time from the Pi for 10 min: set the clock from internet time...
 #define CLOCK_NTP_EVERY_MS  900000  // ...every 15 min while that lasts
@@ -128,7 +131,7 @@
 #define SCREEN_HIDDEN_BOTTOM  24
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.13.0"
+#define FW_VERSION "2.14.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

@@ -24,6 +24,12 @@ settled before the clock is redrawn so nothing rings twice. Each connect and
 drop is kept in a short history (`history`) for the LUMO page and the health
 check.
 
+Firmware 2.14 also says how many tries it took to get back ("tries"), why the
+last failed try failed ("tryFail") and how often it rejoined the Wi-Fi because
+the Pi stayed out of reach ("kicks"); its "boot" says where it was stuck when
+the watchdog restarted it. The history is kept on disk (LINK_FILE), so a Sage
+restart, which itself drops the clock, doesn't wipe the story of the link.
+
 The token is made on first start and kept in Sage's data folder. It is shown
 in Sage's settings and typed into the clock's secrets.h once.
 """
@@ -45,12 +51,15 @@ BIND = os.getenv("SAGE_DESK_BIND", "0.0.0.0")
 PORT = int(os.getenv("SAGE_DESK_PORT", "8765"))
 DATA_DIR = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent
 TOKEN_FILE = Path(os.getenv("SAGE_DESK_TOKEN_FILE", str(DATA_DIR / "desk_token.txt")))
+LINK_FILE = Path(os.getenv("SAGE_DESK_LINK_FILE", str(DATA_DIR / "desk_link.json")))
 HELLO_TIMEOUT = 10
 # Close code for a clock that did not say hello with the right token.
 NOT_PAIRED = 4401
-# Pings: a clock that doesn't answer one within PING_TIMEOUT is gone.
+# Pings: a clock that doesn't answer one within PING_TIMEOUT is gone. The
+# clock itself waits 35 s; 20 s here rides out a weak Wi-Fi moment instead
+# of dropping a clock that is still there.
 PING_INTERVAL = 10
-PING_TIMEOUT = 10
+PING_TIMEOUT = 20
 # How many connects and drops are kept, and how many drops in a day make a
 # link "flaky" on the LUMO page.
 HISTORY = 40
@@ -95,8 +104,9 @@ def _parse(raw: Any) -> Optional[dict]:
 class ClockLink:
     """One clock at a time. A new clock that pairs replaces the old one."""
 
-    def __init__(self, token: str) -> None:
+    def __init__(self, token: str, store: Optional[Path] = None) -> None:
         self.token = token
+        self.store = store            # where the history is kept (run.py: LINK_FILE)
         self.socket: Any = None
         self.fw = ""
         self.address = ""
@@ -121,6 +131,35 @@ class ClockLink:
         self.clock_said: dict = {}    # the clock's own view from its HELLO: drop, reconnects, boot
         self._send_lock = asyncio.Lock()
         self._serving: Optional[asyncio.Future] = None
+        self._closing: set = set()    # old connections being closed in the background
+        if store:
+            self._load()
+            self._note("sage started", "Sage started (it drops the clock, which then reconnects)")
+
+    def _load(self) -> None:
+        try:
+            saved = json.loads(self.store.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            return
+        if not isinstance(saved, dict):
+            return
+        now = time.time()
+        for h in saved.get("history") or []:
+            if isinstance(h, dict) and isinstance(h.get("at"), (int, float)) and isinstance(h.get("event"), str):
+                self.history.append({"at": int(h["at"]), "event": h["event"], "detail": str(h.get("detail") or "")})
+        for t in saved.get("drops") or []:
+            if isinstance(t, (int, float)) and now - t < DAY:
+                self.drop_times.append(float(t))
+
+    def _save(self) -> None:
+        if not self.store:
+            return
+        try:
+            tmp = self.store.with_suffix(".tmp")
+            tmp.write_text(json.dumps({"history": list(self.history), "drops": list(self.drop_times)}), encoding="utf-8")
+            tmp.replace(self.store)
+        except OSError as e:
+            log.debug("Could not save the desk link history: %s", e)
 
     @property
     def connected(self) -> bool:
@@ -139,6 +178,7 @@ class ClockLink:
 
     def _note(self, event: str, detail: str = "") -> None:
         self.history.append({"at": int(time.time() * 1000), "event": event, "detail": detail})
+        self._save()
 
     def health(self, now: Optional[float] = None) -> dict:
         """How steady the link is: for the LUMO page and the health check."""
@@ -155,6 +195,9 @@ class ClockLink:
             "rtt": self.info.get("rtt"),
             "clockReconnects": self.clock_said.get("reconnects"),
             "clockLastDrop": self.clock_said.get("drop") or None,
+            "clockTries": self.clock_said.get("tries"),
+            "clockLastTryFailure": self.clock_said.get("tryFail") or None,
+            "clockWifiRejoins": self.clock_said.get("kicks"),
             "lastBoot": self.clock_said.get("boot") or None,
             "history": list(reversed(self.history))[:12],
         }
@@ -233,7 +276,7 @@ class ClockLink:
         previous = self.socket
         self.socket = socket
         self.fw = str(first.get("fw") or "")
-        self.clock_said = {k: first[k] for k in ("drop", "reconnects", "boot")
+        self.clock_said = {k: first[k] for k in ("drop", "reconnects", "boot", "tries", "tryFail", "kicks")
                            if isinstance(first.get(k), (int, str)) and not isinstance(first.get(k), bool)}
         self.can_ota = bool(first.get("ota"))
         self.ota_error = str(first.get("otaError") or "")[:80]
@@ -247,18 +290,26 @@ class ClockLink:
             # The Pi still held the old connection: it had died quietly.
             self.drop_times.append(time.time())
             self._note("dropped", "the clock came back on a new connection before the old one timed out")
-            try:
-                await previous.close(1000, "replaced")
-            except Exception:
-                pass
+            # Closed in the background: a dead connection takes its whole close
+            # timeout (10 s) to let go, and the clock gives up on a pairing that
+            # isn't answered in 10 s, so waiting here could lose the new one too.
+            task = asyncio.ensure_future(self._close_quietly(previous))
+            self._closing.add(task)
+            task.add_done_callback(self._closing.discard)
         detail = f"firmware {self.fw or 'unknown'}"
         if self.clock_said.get("drop"):
             detail += f"; the clock says it lost the Pi: {self.clock_said['drop']}"
+        if self.clock_said.get("tries"):
+            detail += f"; it took {self.clock_said['tries']} failed tries to get back"
+            if self.clock_said.get("tryFail"):
+                detail += f" (last: {self.clock_said['tryFail']})"
+        if self.clock_said.get("kicks"):
+            detail += f"; it rejoined the Wi-Fi {self.clock_said['kicks']} time(s) meanwhile"
         if self.clock_said.get("boot"):
             detail += f"; last restart: {self.clock_said['boot']}"
-        self._note("connected", detail)
         log.info("Desk clock paired (%s, %s)", detail, self.address or "unknown address")
         await self.send({"cmd": "PAIRED", "ok": True})
+        self._note("connected", detail)
         # What it did on its own comes first, so the redraw doesn't ring a
         # stopped alarm again.
         offline = first.get("offline")
@@ -297,6 +348,13 @@ class ClockLink:
             if self.socket is socket:
                 self.socket = None
                 self._dropped(socket, error)
+
+    @staticmethod
+    async def _close_quietly(socket: Any) -> None:
+        try:
+            await socket.close(1000, "replaced")
+        except Exception:
+            pass
 
     @staticmethod
     async def _call(callback: Callable[..., Awaitable[None]], *args: Any) -> None:

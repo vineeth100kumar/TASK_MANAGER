@@ -73,10 +73,10 @@ function LinkPanel({ link }: { link: LumoLink }) {
         <ul className="space-y-1.5">
           {link.history.slice(0, 6).map((h, i) => (
             <li key={`${h.at}-${i}`} className="flex gap-2 text-[12.5px] min-w-0">
-              <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${h.event === 'connected' ? 'bg-emerald-500' : 'bg-red-400'}`} />
+              <span className={`mt-1.5 w-1.5 h-1.5 rounded-full shrink-0 ${h.event === 'connected' ? 'bg-emerald-500' : h.event === 'dropped' ? 'bg-red-400' : 'bg-gray-300'}`} />
               <span className="text-gray-400 shrink-0 tabular-nums w-20">{ago(h.at)}</span>
               <span className="text-gray-700 dark:text-gray-200 min-w-0 break-words">
-                {h.event === 'connected' ? 'Connected' : 'Dropped'}{h.detail ? `: ${h.detail}` : ''}
+                {h.event === 'connected' ? 'Connected' : h.event === 'dropped' ? 'Dropped' : 'Sage restarted'}{h.detail && h.event !== 'sage started' ? `: ${h.detail}` : ''}
               </span>
             </li>
           ))}

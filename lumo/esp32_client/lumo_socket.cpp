@@ -137,7 +137,11 @@ bool LumoSocket::connect(const char* host, uint16_t port, const char* path, uint
   if (open) close(1000);
   tcp.stop();
   parser.begin(&LumoSocket::frame, this);
-  if (!tcp.connect(host, port, (int32_t)timeoutMs)) return false;
+  why = "";
+  if (!tcp.connect(host, port, (int32_t)timeoutMs)) {
+    why = "the Pi didn't answer (Sage not running, or not reachable on Wi-Fi)";
+    return false;
+  }
   tcp.setNoDelay(true);
 
   uint8_t nonce[16];
@@ -153,12 +157,22 @@ bool LumoSocket::connect(const char* host, uint16_t port, const char* path, uint
   // The answer must be "101 Switching Protocols"; the headers after it are skipped.
   unsigned long deadline = millis() + timeoutMs;
   char line[128];
-  if (!readLine(tcp, line, sizeof(line), deadline) || strncmp(line, "HTTP/1.1 101", 12) != 0) {
+  if (!readLine(tcp, line, sizeof(line), deadline)) {
+    why = "the Pi took the call but never answered the handshake";
+    tcp.stop();
+    return false;
+  }
+  if (strncmp(line, "HTTP/1.1 101", 12) != 0) {
+    why = "the Pi turned the handshake down";
     tcp.stop();
     return false;
   }
   do {
-    if (!readLine(tcp, line, sizeof(line), deadline)) { tcp.stop(); return false; }
+    if (!readLine(tcp, line, sizeof(line), deadline)) {
+      why = "the handshake was cut off";
+      tcp.stop();
+      return false;
+    }
   } while (line[0]);
   open = true;
   return true;
