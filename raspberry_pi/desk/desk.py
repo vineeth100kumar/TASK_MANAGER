@@ -323,8 +323,13 @@ class Desk:
 
     async def show_media(self, media: dict) -> None:
         track = (media.get("title") or "", media.get("artist") or "")
+        shown = track
+        if not track[0] and media.get("playing"):
+            # Playing, but the phone hasn't said what: name the app rather
+            # than let the clock say "Nothing playing".
+            shown = (media.get("app") or "Your phone", "Playing")
         await self.link.send({
-            "cmd": "SPOTIFY", "title": track[0], "artist": track[1],
+            "cmd": "SPOTIFY", "title": shown[0], "artist": shown[1],
             "progress_ms": 0, "duration_ms": 0, "playing": bool(media.get("playing")),
         })
         if track != self.track and track[0]:
@@ -578,6 +583,8 @@ class Desk:
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
+        if not self.track and (self.phone.media or {}).get("playing"):
+            await self.show_media(self.phone.media)  # playing, title not known yet
         if self.track:
             await self.show_media(self.phone.media)
             await self.send_cover()

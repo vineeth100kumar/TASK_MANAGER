@@ -307,6 +307,13 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Again"})
         self.assertEqual(self.link.last("NOTIF")["title"], "Gym")
 
+    async def test_playing_with_no_title_names_the_app(self):
+        await self.desk.show_media({"title": "", "artist": "", "app": "YouTube Music", "playing": True})
+        self.assertEqual((self.link.last("SPOTIFY")["title"], self.link.last("SPOTIFY")["artist"]), ("YouTube Music", "Playing"))
+        self.assertEqual(self.covers, [])  # not a song to look up
+        await self.desk.show_media({"title": "", "artist": "", "app": "YouTube Music", "playing": False})
+        self.assertEqual(self.link.last("SPOTIFY")["title"], "")
+
     async def test_music_shows_with_cover_and_buttons_control_it(self):
         media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
         await self.desk.show_media(media)
