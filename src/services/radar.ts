@@ -133,12 +133,23 @@ export interface ResearchList {
   engines: string[];
 }
 
+// "My edge": what the user knows and has, so sparks and research fit them.
+export interface RadarEdge {
+  skills: string;
+  assets: string;
+  place: string;
+  budget: string;
+  hours: string;
+}
+
 export interface RadarSettings {
   brief: boolean;
   dailyCap: number;
   engine: 'groq' | 'claude';
   lumoLine: boolean;
   india: boolean;
+  edge: RadarEdge;
+  sparksPerDay: 3 | 5 | 10;
 }
 
 export interface RadarBrief {
@@ -167,6 +178,62 @@ export const radarSettingsApi = {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(changes),
     })).settings,
+};
+
+// --- Lab: sparks (raspberry_pi/sparks.py) ---
+
+export interface SparkClue {
+  kind?: 'news' | 'market';
+  label: string;
+  title: string;
+  link: string;
+  tags?: string[];
+}
+
+export interface Spark {
+  id: string;
+  day: string;
+  createdAt: string;
+  state: 'new' | 'kept' | 'researched' | 'dismissed';
+  clue: SparkClue;
+  change: string;
+  idea: string;
+  pitch: string;
+  buyer: string;
+  angle: string;
+  fit: number;
+  fitWhy: string;
+  reason: string;
+  ideaId: string | null;
+  jobId: string | null;
+}
+
+export interface SparkList {
+  sparks: Spark[];
+  kept: Spark[];
+  today: string;
+  madeToday: boolean;
+  lastRun: { at: string; ok: boolean; error: string } | null;
+  running: boolean;
+  manualLeft: number;
+  perDay: number;
+  edge: RadarEdge;
+  edgeUsed: string[];
+  reasons: string[];
+}
+
+const post = <T,>(path: string, body?: unknown) => call<T>(path, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify(body ?? {}),
+});
+
+export const sparksApi = {
+  list: () => call<SparkList>('/api/radar/sparks'),
+  make: () => post<SparkList>('/api/radar/sparks/make'),
+  keep: async (id: string): Promise<Spark> => (await post<{ spark: Spark }>(`/api/radar/sparks/${id}/keep`)).spark,
+  research: async (id: string): Promise<ResearchJob> => (await post<{ job: ResearchJob }>(`/api/radar/sparks/${id}/research`)).job,
+  dismiss: async (id: string, reason: string): Promise<Spark> => (await post<{ spark: Spark }>(`/api/radar/sparks/${id}/dismiss`, { reason })).spark,
 };
 
 export const radarBrief = () => call<RadarBrief>('/api/radar/brief');

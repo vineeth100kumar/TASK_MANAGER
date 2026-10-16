@@ -72,8 +72,8 @@ export class LiveStream {
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
         // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
         window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
-      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS') {
-        // New headlines or prices, or a research run moving on (see RadarView).
+      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS' || event?.type === 'RADAR_SPARKS') {
+        // New headlines or prices, a research run moving on, or new sparks (see RadarView).
         window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
       } else if (event?.type === 'DESK_STATE') {
         // The desk clock's timer, stopwatch or ringing alarm changed (see LumoView).
