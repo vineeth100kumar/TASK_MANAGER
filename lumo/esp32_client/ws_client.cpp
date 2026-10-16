@@ -11,6 +11,7 @@
 #include <ESPmDNS.h>
 #include <esp_system.h>
 #include <esp_attr.h>
+#include <soc/soc_caps.h>
 
 static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 
