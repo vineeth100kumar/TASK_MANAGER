@@ -104,6 +104,29 @@ class ClaudeApiTests(unittest.TestCase):
         kept = client.post("/api/claude/workItems", json={"title": "Mine", "key": "OWN-7"}, headers=CLAUDE).json()["record"]
         self.assertEqual(kept["key"], "OWN-7")
 
+    def test_new_items_are_written_in_the_one_shape(self):
+        # A milestone sent the way Claude logs Sage progress: no type, labels or context.
+        m = client.post("/api/claude/workItems", json={"title": "Shipped", "entityType": "milestone", "status": "done"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((m["entityType"], m["type"], m["lifeContext"], m["labels"], m["branchId"]),
+                         ("milestone", "milestone", "work", [], None))
+        old_style = client.post("/api/claude/workItems", json={"title": "Call", "type": "meeting", "lifeContext": "Personal"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((old_style["entityType"], old_style["type"], old_style["lifeContext"]), ("event", "meeting", "personal"))
+
+    def test_keys_skip_past_the_highest_number(self):
+        project = client.post("/api/claude/projects", json={"name": "Gaps", "key": "G"}, headers=CLAUDE).json()["record"]
+        client.post("/api/claude/workItems", json={"title": "Five", "key": "G-5", "projectId": project["id"]}, headers=CLAUDE)
+        client.post("/api/claude/workItems", json={"title": "Keyless", "key": "", "projectId": project["id"]}, headers=CLAUDE)
+        nxt = client.post("/api/claude/workItems", json={"title": "Next", "projectId": project["id"]}, headers=CLAUDE).json()["record"]
+        self.assertEqual(nxt["key"], "G-7")
+
+    def test_overview_and_status_filter_read_old_statuses(self):
+        client.post("/api/claude/workItems", json={"title": "Reviewing", "status": "in_review"}, headers=CLAUDE)
+        client.post("/api/claude/workItems", json={"title": "Finished", "status": "Completed"}, headers=CLAUDE)
+        overview = client.get("/api/claude/overview", headers=CLAUDE).json()
+        self.assertEqual(overview["openItems"], 1)
+        doing = client.get("/api/claude/workItems", params={"status": "in_progress"}, headers=CLAUDE).json()
+        self.assertEqual([r["title"] for r in doing["records"]], ["Reviewing"])
+
     def test_list_filters_and_shortens(self):
         client.post("/api/claude/workItems", json={"title": "Buy milk", "status": "todo"}, headers=CLAUDE)
         client.post("/api/claude/workItems", json={"title": "Old thing", "status": "done"}, headers=CLAUDE)

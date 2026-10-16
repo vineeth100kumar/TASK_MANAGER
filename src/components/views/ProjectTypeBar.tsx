@@ -1,7 +1,8 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Pencil } from 'lucide-react';
 import { api } from '../../services/api';
-import type { Project } from '../../services/types';
+import type { LifeContext, Project } from '../../services/types';
+import { selectItems } from '../../services/items';
 import { projectTypeInfo, stageOf } from '../../services/projectTypes';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { useToast } from '../../context/ToastContext';
@@ -9,16 +10,19 @@ import { ProjectTypeMenu } from '../common/ProjectTypePicker';
 
 // The strip at the top of a project's page: its type (tap to change) and one
 // chip per status that type uses, with a count; a chip shows only that status.
-export function ProjectTypeBar({ projectId, stage, onStage }: { projectId: string; stage: string; onStage: (stage: string) => void }) {
+export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void }) {
   const { showToast } = useToast();
   const read = () => {
-    const state = api.sync.getState();
+    // The same items the page below starts from (before its filters), so
+    // these counts match the Board's columns and the List's groups.
+    const projects = api.sync.getState().projects.filter(Boolean) as Project[];
     return {
-      projects: state.projects.filter(Boolean) as Project[],
-      items: state.workItems.filter(i => i && !i.deletedAt && i.projectId === projectId),
+      projects,
+      items: selectItems(api.workItems.snapshot(), { projectId, lifeContext }, projects).items,
     };
   };
   const [data, setData] = useState(read);
+  useEffect(() => setData(read()), [projectId, lifeContext]);
   useDataChanges(() => setData(read()));
 
   const project = data.projects.find(p => p.id === projectId);

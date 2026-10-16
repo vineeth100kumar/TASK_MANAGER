@@ -51,6 +51,7 @@ export function FilterBar({ filters, setFilters, entityTypeCounts = {} }: Filter
           <button key={t.id} onClick={() => setFilters({ ...filters, entityType: t.id })}
             className={`px-3 py-1.5 rounded-lg whitespace-nowrap shrink-0 transition-all ${currentType === t.id ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm font-bold' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white'}`}>
             {t.label}
+            {entityTypeCounts.all != null && <span className="ml-1.5 tabular-nums opacity-60">{entityTypeCounts[t.id] || 0}</span>}
           </button>
         ))}
       </div>

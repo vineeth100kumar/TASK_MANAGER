@@ -62,7 +62,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
         
         <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
-            const dateStr = withTime(formatDateRange(task.startDate, task.dueDate), task.dueTime);
+            const dateStr = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
             const swipeable = task.entityType === 'task' && task.status !== 'done';
             return (
               <SwipeRow key={task.id}
@@ -123,7 +123,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                       <span key={tag} className="hidden sm:inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500">#{tag}</span>
                     ))}
                     {dateStr && (
-                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
+                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
                         <CalendarIcon size={14}/> {dateStr}
                       </span>
                     )}
@@ -157,21 +157,14 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
     );
   };
 
-  const eventTasks = tasks.filter(t => t.entityType === 'event');
-  const reminderTasks = tasks.filter(t => t.entityType === 'reminder');
-  const issueTasks = tasks.filter(t => t.entityType === 'task');
-  const milestoneTasks = tasks
-    .filter(t => t.entityType === 'milestone')
-    .sort((a, b) => (a.dueDate || a.startDate || '9999').localeCompare(b.dueDate || b.startDate || '9999'));
+  // Every kind (task, event, reminder, milestone) under its status, the same
+  // groups and counts as the Board and the status strip. Each row shows its kind.
+  const byDate = (a: WorkItem, b: WorkItem) => (a.dueDate || a.startDate || '9999').localeCompare(b.dueDate || b.startDate || '9999');
 
   return (
     <div className="max-w-5xl mx-auto pb-32">
-      {renderGroup('Events', eventTasks, 'bg-purple-500')}
-      {renderGroup('Reminders', reminderTasks, 'bg-emerald-500')}
-      {renderGroup('Milestones', milestoneTasks, 'bg-orange-500')}
-      
       {statuses.map(status => {
-        const statusTasks = issueTasks.filter(t => stageOf(t, statuses).id === status.id);
+        const statusTasks = tasks.filter(t => stageOf(t, statuses).id === status.id).sort(byDate);
         return renderGroup(status.label, statusTasks, status.dot, status);
       })}
     </div>

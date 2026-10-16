@@ -126,8 +126,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   };
 
   const handleExportICS = () => {
-    const state = api.sync.getState();
-    downloadICSFile(state.workItems);
+    downloadICSFile(api.workItems.snapshot());
     showToast('iCalendar (.ics) downloaded');
   };
 

@@ -32,6 +32,8 @@ from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+import item_shape
+
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 DATA_DIR = Path(DB_PATH).resolve().parent
 VAPID_KEY_FILE = DATA_DIR / "sage_vapid_private.pem"
@@ -446,7 +448,9 @@ def open_items() -> List[dict]:
             item = json.loads(payload)
         except ValueError:
             continue
-        if item.get("deletedAt") or item.get("status") == "done" or item.get("completedAt"):
+        # Status decides, as in the app; an old completedAt on a reopened item doesn't.
+        item = item_shape.normalize_item(item)
+        if not item_shape.is_open(item):
             continue
         items.append(item)
     return items
@@ -463,6 +467,7 @@ def completed_since(since_date: str) -> List[dict]:
             item = json.loads(payload)
         except ValueError:
             continue
+        item = item_shape.normalize_item(item)
         ca = item.get("completedAt") or ""
         if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt"):
             items.append(item)

@@ -6,6 +6,9 @@ import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/proj
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 
+// Milestones, events and reminders share the columns with tasks; a tag says which.
+const KIND_LABEL: Record<string, string> = { milestone: 'Milestone', event: 'Event', reminder: 'Reminder' };
+
 interface BoardViewProps {
   tasks: WorkItem[];
   onSelect: (id: string) => void;
@@ -45,7 +48,7 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
             </div>
             <div className={`flex flex-col gap-3 surface p-3 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
               {columnTasks.map(task => {
-                const dateText = withTime(formatDateRange(task.startDate, task.dueDate), task.dueTime);
+                const dateText = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
                 return (
                   <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
                     className="surface-item is-interactive p-4 rounded-2xl cursor-grab active:cursor-grabbing group outline-none focus:ring-2 focus:ring-blue-500/50">
@@ -58,13 +61,14 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
                           {task.status === 'done' && <Check size={10} strokeWidth={3} />}
                         </button>
                         <span className="text-[12px] font-semibold text-gray-400 uppercase">{task.key}</span>
+                        {task.entityType !== 'task' && <span className="text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 bg-black/[0.04] dark:bg-white/[0.06] px-1.5 py-0.5 rounded-md">{KIND_LABEL[task.entityType] || task.entityType}</span>}
                       </div>
                       <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />
                     </div>
                     <h4 className="text-[14.5px] font-semibold tracking-[-0.01em] mb-3 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">{task.title}</h4>
                     
                     {dateText && (
-                      <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-semibold ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-400'}`}>
+                      <div className={`flex items-center gap-1.5 mb-3 text-[11px] font-semibold ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-400'}`}>
                         <CalendarIcon size={12}/>
                         <span>{dateText}</span>
                       </div>
