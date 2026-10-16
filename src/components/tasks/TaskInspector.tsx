@@ -170,11 +170,20 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
     return () => window.removeEventListener('keydown', handleEsc);
   }, [onClose]);
 
+  // Same scrim and panel as the loaded view below, so React keeps them and the
+  // slide-in carries straight on into the details.
   if (loading || !task) return (
      <>
-       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 scrim z-40" />
-       <motion.aside initial={{ x: '100%' }} animate={{ x: 0 }} exit={{ x: '100%' }} className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] flex items-center justify-center shadow-2xl">
-         <Loader2 className="animate-spin text-gray-400" size={32} />
+       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40" />
+       <motion.aside role="dialog" aria-modal="true" aria-busy="true"
+         initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
+         className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl">
+         <div className="h-16 flex items-center px-6 border-b border-gray-100 dark:border-white/5 shrink-0"><div className="skeleton h-5 w-28 !rounded-full" /></div>
+         <div className="p-6 md:p-8 space-y-4">
+           <div className="skeleton h-9 w-3/4 !rounded-xl" />
+           <div className="skeleton h-4 w-1/2 !rounded-full" />
+           <div className="skeleton h-40 !rounded-2xl mt-6" />
+         </div>
        </motion.aside>
      </>
   );

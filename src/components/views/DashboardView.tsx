@@ -7,6 +7,7 @@ import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { useCachedState } from '../../hooks/useCachedState';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { HabitTodayCard } from '../habits/HabitViews';
@@ -15,6 +16,7 @@ import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { ProgressRing } from '../common/ProgressRing';
+import { CountUp } from '../common/CountUp';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
 import { ContextTag } from '../common/ContextTag';
@@ -31,7 +33,7 @@ interface DashboardViewProps {
 }
 
 export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
-  const [data, setData] = useState<any>(null);
+  const [data, setData] = useCachedState<any>(`today:${lifeContext || 'all'}`, null);
   const [time, setTime] = useState(new Date());
   const [aiBriefing, setAiBriefing] = useState<any>(null);
   const [isAiLoading, setIsAiLoading] = useState(false);
@@ -78,7 +80,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
         doneToday: 0
       });
     }
-  }, [lifeContext]);
+  }, [lifeContext, setData]);
 
   useEffect(() => {
     let day = getTodayString();
@@ -208,7 +210,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                   <Celebrate distance={46}><Check className="text-emerald-500 w-6 h-6 md:w-9 md:h-9" strokeWidth={3} /></Celebrate>
                 ) : (
                   <>
-                    <span className="text-[17px] md:text-[28px] font-semibold tracking-tight tabular-nums text-gray-900 dark:text-white">{doneToday}<span className="text-gray-400 font-normal">/{total}</span></span>
+                    <span className="text-[17px] md:text-[28px] font-semibold tracking-tight tabular-nums text-gray-900 dark:text-white"><CountUp value={doneToday} from={0} /><span className="text-gray-400 font-normal">/{total}</span></span>
                     <span className="hidden md:block text-[11px] font-medium text-gray-400 mt-1">done</span>
                   </>
                 )}

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motion';
 import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
@@ -20,24 +20,15 @@ import { FocusView } from './components/views/FocusView';
 import { WaitingForView } from './components/views/WaitingForView';
 import { ListView } from './components/views/ListView';
 import { BoardView } from './components/views/BoardView';
-import { TableView } from './components/views/TableView';
-import { CalendarView } from './components/views/CalendarView';
-import { TimelineView } from './components/views/TimelineView';
-import { NotesView } from './components/views/NotesView';
-import { NotesLock } from './components/notes/NotesLock';
-import { CanvasView } from './components/views/CanvasView';
-import { RadarView } from './components/views/RadarView';
-import { LumoView } from './components/views/LumoView';
-import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
-import { TrashModal } from './components/modals/TrashModal';
-import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
-import { SettingsModal } from './components/modals/SettingsModal';
 import { FilterBar } from './components/common/FilterBar';
-import { ShortcutSheet } from './components/modals/ShortcutSheet';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
-import { MorningPickThree } from './components/modals/MorningPickThree';
-import { EveningShutdown } from './components/modals/EveningShutdown';
+import {
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, ProjectBranchesView,
+  CalendarView, TimelineView, TableView,
+  SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown,
+  prefetchViews,
+} from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
 
 function MainApp() {
@@ -222,27 +213,58 @@ function MainApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetching
-  const fetchWorkItems = useCallback(async (showLoading = true) => {
-    if (showLoading) setIsLoading(true);
+  // Fetching. The list keeps showing while it refreshes; only the very first
+  // load shows placeholders. A slower, older request never overwrites a newer one.
+  const fetchSeq = useRef(0);
+  const fetchWorkItems = useCallback(async (_showLoading?: boolean) => {
+    const seq = ++fetchSeq.current;
     try {
       const data = await api.workItems.list({ ...filters, projectId: activeWorkspace, lifeContext });
-      setWorkItems(data);
+      if (seq === fetchSeq.current) setWorkItems(data);
     } catch (e) {
       showToast("Failed to load work items.", "error");
     } finally {
-      setIsLoading(false);
+      if (seq === fetchSeq.current) setIsLoading(false);
     }
   }, [filters, activeWorkspace, lifeContext, showToast]);
 
   fetchRef.current = fetchWorkItems;
 
-  useEffect(() => { 
-    const debounceTimer = setTimeout(() => {
-      fetchWorkItems(true);
-    }, 250);
+  // Switching project, Work/Personal or a filter reloads at once; only typing
+  // in search waits for a pause.
+  const lastSearch = useRef(filters.search);
+  useEffect(() => {
+    const typing = lastSearch.current !== filters.search;
+    lastSearch.current = filters.search;
+    if (!typing) { fetchWorkItems(); return; }
+    const debounceTimer = setTimeout(() => fetchWorkItems(), 200);
     return () => clearTimeout(debounceTimer);
-  }, [filters, activeWorkspace, lifeContext, fetchWorkItems]);
+  }, [filters.search, fetchWorkItems]);
+
+  // Fetch the other pages' code in the background once the first screen is up.
+  useEffect(() => { prefetchViews(); }, []);
+
+  // A new page starts at the top, not wherever the last one was scrolled to.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }); }, [activeView, activeWorkspace]);
+
+  // A soft light follows the pointer over rows and cards (see .surface-item in index.css).
+  useEffect(() => {
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    let frame = 0;
+    let last: PointerEvent | null = null;
+    const paint = () => {
+      frame = 0;
+      const el = (last?.target as Element | null)?.closest?.('.surface-item.is-interactive') as HTMLElement | null;
+      if (!el || !last) return;
+      const r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', `${last.clientX - r.left}px`);
+      el.style.setProperty('--my', `${last.clientY - r.top}px`);
+    };
+    const onMove = (e: PointerEvent) => { last = e; if (!frame) frame = requestAnimationFrame(paint); };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => { window.removeEventListener('pointermove', onMove); cancelAnimationFrame(frame); };
+  }, []);
 
   // Tapping a tag shows everything with it, in the list view.
   const filterByTag = (tag: string) => {
@@ -377,18 +399,16 @@ function MainApp() {
         {activeView === 'canvas' ? (
           // The canvas pans and zooms itself, so it fills the space instead of scrolling.
           <div className="relative flex-1 min-h-0 p-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:p-6">
-            <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
+            <Suspense fallback={<div className="skeleton h-full" />}>
+              <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
+            </Suspense>
           </div>
         ) : (
-        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <motion.div key={`${activeView}:${lifeFilter}:${activeWorkspace}`} className="p-4 pb-28 md:p-8 min-h-full"
-            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}>
-            {isLoading ? (
-              <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading your items">
-                <div className="skeleton h-36 md:h-44" />
-                <div className="grid md:grid-cols-2 gap-4"><div className="skeleton h-48" /><div className="skeleton h-48" /></div>
-                <div className="skeleton h-16 !rounded-2xl" />
-              </div>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <div key={`${activeView}:${lifeFilter}:${activeWorkspace}`} className="view-enter p-4 pb-28 md:p-8 min-h-full">
+            <Suspense fallback={<PageSkeleton />}>
+            {activeView === 'tasks' && isLoading ? (
+              <PageSkeleton />
             ) : activeView === 'notes' ? (
               <NotesLock><NotesView lifeContext={lifeContext} openNoteId={openNoteId} /></NotesLock>
             ) : activeView === 'radar' ? (
@@ -453,7 +473,8 @@ function MainApp() {
                 )}
               </div>
             )}
-          </motion.div>
+            </Suspense>
+          </div>
         </div>
         )}
 
@@ -474,16 +495,18 @@ function MainApp() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isShortcutsOpen && <ShortcutSheet onClose={() => setIsShortcutsOpen(false)} />}
+        {isShortcutsOpen && <Suspense key="shortcuts" fallback={null}><ShortcutSheet onClose={() => setIsShortcutsOpen(false)} /></Suspense>}
       </AnimatePresence>
 
       <AnimatePresence>
         {isSettingsOpen && (
-          <SettingsModal
-            onClose={() => setIsSettingsOpen(false)}
-            lifeContext={lifeContext}
-            onDataChanged={() => fetchWorkItems(false)}
-          />
+          <Suspense key="settings" fallback={null}>
+            <SettingsModal
+              onClose={() => setIsSettingsOpen(false)}
+              lifeContext={lifeContext}
+              onDataChanged={() => fetchWorkItems(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
@@ -501,27 +524,33 @@ function MainApp() {
 
       <AnimatePresence>
         {isTrashOpen && (
-          <TrashModal 
-            onClose={() => setIsTrashOpen(false)} 
-            onRestored={() => fetchWorkItems(false)} 
-          />
+          <Suspense key="trash" fallback={null}>
+            <TrashModal
+              onClose={() => setIsTrashOpen(false)}
+              onRestored={() => fetchWorkItems(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {isDiagnosticsOpen && (
-          <SyncDiagnosticsModal
-            onClose={() => setIsDiagnosticsOpen(false)}
-          />
+          <Suspense key="diagnostics" fallback={null}>
+            <SyncDiagnosticsModal
+              onClose={() => setIsDiagnosticsOpen(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
-      {isMorningOpen && (
-        <MorningPickThree onClose={() => setIsMorningOpen(false)} onNavigateView={setActiveView} />
-      )}
-      {isEveningOpen && (
-        <EveningShutdown onClose={() => setIsEveningOpen(false)} />
-      )}
+      <Suspense fallback={null}>
+        {isMorningOpen && (
+          <MorningPickThree onClose={() => setIsMorningOpen(false)} onNavigateView={setActiveView} />
+        )}
+        {isEveningOpen && (
+          <EveningShutdown onClose={() => setIsEveningOpen(false)} />
+        )}
+      </Suspense>
 
       <PhoneCorner />
 
@@ -548,6 +577,18 @@ function MainApp() {
         </AnimatePresence>
       </div>
 
+    </div>
+  );
+}
+
+// Placeholder while a page's data or code arrives (rarely seen: both are
+// usually ready before the page is).
+function PageSkeleton() {
+  return (
+    <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading">
+      <div className="skeleton h-36 md:h-44" />
+      <div className="grid md:grid-cols-2 gap-4"><div className="skeleton h-48" /><div className="skeleton h-48" /></div>
+      <div className="skeleton h-16 !rounded-2xl" />
     </div>
   );
 }

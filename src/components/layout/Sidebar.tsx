@@ -8,6 +8,7 @@ import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/typ
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
+import { prefetchView } from '../views/lazyViews';
 import { DatePicker } from '../common/DatePicker';
 
 interface SidebarProps {
@@ -333,15 +334,17 @@ export function Sidebar({
                     }
                     if(window.innerWidth < 768) setIsSidebarOpen(false); 
                   }}
+                    onPointerEnter={() => prefetchView(item.id)} onFocus={() => prefetchView(item.id)}
                     aria-current={isActive ? 'page' : undefined}
                     className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                     {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
                     <div className="relative flex items-center gap-3">
-                      <item.icon size={17} className={item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
+                      <item.icon size={17} className={'nav-icon ' + (item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'))} />
                       <span className="text-[14px]">{item.name}</span>
                     </div>
                     {item.count !== undefined && item.count > 0 && (
-                      <span className={`relative min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums text-center ${
+                      // Keyed by the count so it pops when the number changes.
+                      <span key={item.count} className={`count-badge relative min-w-5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold tabular-nums text-center ${
                         item.highlight 
                           ? 'bg-blue-600 text-white' 
                           : 'bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-gray-300'
