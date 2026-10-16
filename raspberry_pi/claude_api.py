@@ -153,6 +153,12 @@ def get_record(table: str, record_id: str) -> dict:
     return record
 
 
+def _project_type(p: dict) -> str:
+    """Older projects hold 'standard' or nothing, which the app shows as Other."""
+    t = (p.get("type") or "").strip()
+    return "other" if t in ("", "standard") else t
+
+
 def overview() -> dict:
     today = _today().isoformat()
     counts = {}
@@ -173,7 +179,7 @@ def overview() -> dict:
         "dueTodayOrOverdue": [brief(i) for i in due[:50]],
         "focus": [brief(i) for i in open_items if i.get("isFocus")][:20],
         "inbox": [brief(i) for i in open_items if i.get("isInbox")][:20],
-        "projects": [{"id": p.get("id"), "name": p.get("name")} for p in (_rows("projects") if "projects" in TABLES else [])],
+        "projects": [{"id": p.get("id"), "name": p.get("name"), "type": _project_type(p)} for p in (_rows("projects") if "projects" in TABLES else [])],
     }
 
 
@@ -386,7 +392,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, priority low|medium|high|urgent,
 dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
-projects (name, key, color), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
+projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
 notes (title, content), comments and subtasks (workItemId), activities, boards (drawings),
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,

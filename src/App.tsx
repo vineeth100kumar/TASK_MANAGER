@@ -30,6 +30,8 @@ import {
   prefetchViews,
 } from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
+import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { projectTypeInfo } from './services/projectTypes';
 
 function MainApp() {
   // Global State
@@ -370,6 +372,18 @@ function MainApp() {
     }
   };
 
+  // A project opens in the view its type suits (Branches for technical work,
+  // Board for content, List for errands). Phones keep the list.
+  const openProject = (id: string) => {
+    const project = api.sync.getState().projects.find(p => p && p.id === id);
+    setActiveView('tasks');
+    setActiveWorkspace(id);
+    // Stage chips filter by tag; one project's stage shouldn't empty the next.
+    if (filters.tag) setFilters({ ...filters, tag: '' });
+    if (project && !window.matchMedia('(max-width: 767px)').matches) setPresentationMode(projectTypeInfo(project).view);
+  };
+  const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
+
   return (
     <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
       <Sidebar 
@@ -381,6 +395,7 @@ function MainApp() {
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
+        onOpenProject={openProject}
       />
 
       <main data-context={lifeFilter} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
@@ -433,6 +448,9 @@ function MainApp() {
               />
             ) : (
               <div>
+                {isProjectPage && (
+                  <ProjectTypeBar projectId={activeWorkspace} tag={filters.tag || ''} onTag={tag => setFilters({ ...filters, tag })} />
+                )}
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} />
 

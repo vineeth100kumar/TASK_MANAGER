@@ -612,7 +612,7 @@ export const api = {
         key: (payload.key || 'PROJ').toUpperCase(),
         color: payload.color || 'bg-indigo-500',
         sequence: state.projects.length + 1,
-        type: 'standard',
+        type: payload.type || 'other',
         description: payload.description || '',
         createdAt: now,
         updatedAt: now

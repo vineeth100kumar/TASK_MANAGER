@@ -12,6 +12,7 @@ import {
   applyChanges, newItemPayload, matchUpdates, timesPerWeek,
 } from '../../utils/chatCapture';
 import { formatShortDate } from '../../utils/quickAddParser';
+import { projectTypeInfo } from '../../services/projectTypes';
 import { formatTime } from '../../utils/reminders';
 
 const KINDS: CardKind[] = ['task', 'reminder', 'event', 'habit'];
@@ -77,7 +78,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
 
   const aiLists = () => ({
     today: new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-    projects: projects.map(p => ({ id: p.id, name: p.name, key: p.key || '', branches: (p.branches || []).filter(b => !b.mergedAt).map(b => ({ id: b.id, name: b.name })) })),
+    projects: projects.map(p => ({ id: p.id, name: p.name, key: p.key || '', type: projectTypeInfo(p).label, branches: (p.branches || []).filter(b => !b.mergedAt).map(b => ({ id: b.id, name: b.name })) })),
     areas: areas.map(a => ({ id: a.id, name: a.name })),
     openItems: items.filter(i => !(i.labels || []).includes('alarm')).slice(0, 60).map(i => ({ id: i.id, key: i.key, title: i.title, project: projectName(i.projectId || null) || areaName(i.areaId || null) })),
     tags: tags.slice(0, 40),

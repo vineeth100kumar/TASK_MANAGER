@@ -115,6 +115,12 @@ class TestEngines(unittest.TestCase):
         for bit in ("Today is Fri 16 Oct 2026.", "- Ci4 Work (key C)", "- Sage (key S): Radar dashboard", "Areas: Fitness", "- C-13: Sonar Connector Pinout Labeling", "Tags: reels", "Message: tmrw morning"):
             self.assertIn(bit, text)
 
+    def test_prompt_lists_project_types(self):
+        req = request()
+        req.projects[0].type = "Content"
+        text = chat_capture._user_text(req)
+        self.assertIn(f"- {req.projects[0].name} (key {req.projects[0].key}, Content)", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -40,6 +40,7 @@ class CtxProject(BaseModel):
     id: str
     name: str
     key: str = ""
+    type: str = ""  # Technical, Non-tech, Content, Other or the user's own name
     branches: List[CtxBranch] = []
 
 
@@ -85,7 +86,7 @@ For every separate thing to do or remember, one item:
 - text: the exact words of the message that belong to this item, copied without changes, including any day, time or repeat words.
 - title: a short clean title, without the day, time, repeat or project words.
 - kind: task, reminder (he said "remind me"), event (a meeting or appointment at a time) or habit (something he wants to do regularly to build a routine).
-- project and branch: copied exactly from the projects list, or null.
+- project and branch: copied exactly from the projects list, or null. A project's type says what kind of work it holds, e.g. filming, editing or posting fits a Content project.
 - area: copied exactly from the areas list, or null. Areas are personal life areas.
 - context: work for projects, personal for areas and private errands.
 - same_as: the key of an open item that is the same piece of work, or null.
@@ -109,10 +110,11 @@ Never invent a project, branch or area that is not in the lists."""
 def _lists(req: ChatCaptureRequest) -> str:
     lines = [f"Today is {req.today}." if req.today else ""]
     if req.projects:
-        lines.append("Projects (with branches):")
+        lines.append("Projects (type, then branches):")
         for p in req.projects:
             branches = ", ".join(b.name for b in p.branches)
-            lines.append(f"- {p.name}" + (f" (key {p.key})" if p.key else "") + (f": {branches}" if branches else ""))
+            meta = ", ".join(x for x in (f"key {p.key}" if p.key else "", p.type) if x)
+            lines.append(f"- {p.name}" + (f" ({meta})" if meta else "") + (f": {branches}" if branches else ""))
     if req.areas:
         lines.append("Areas: " + ", ".join(a.name for a in req.areas))
     if req.openItems:

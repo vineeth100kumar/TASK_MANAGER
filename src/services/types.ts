@@ -15,7 +15,7 @@ export interface Project {
   id: string;
   name: string;
   key: string;
-  type?: string; // not read anywhere; existing records hold 'standard'
+  type?: string; // technical | nontech | content | other | a custom name; see projectTypes.ts
   color: string;
   sequence: number;
   description?: string;
