@@ -17,6 +17,9 @@ import { parseQuickAdd, QuickAddPriority, formatShortDate } from './quickAddPars
 import { formatTime } from './reminders';
 import { Project, Area, WorkItem, LifeContext } from '../services/types';
 
+const pad = (n: number) => String(n).padStart(2, '0');
+export const todayKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+
 export type CardKind = 'task' | 'reminder' | 'event' | 'habit';
 
 export interface CaptureContext {
@@ -52,20 +55,57 @@ export interface CaptureCard {
   include: boolean;
   why: string[];
   unsure: boolean;
+  leadMinutes: number | null; // remind this long before (0 = at the time)
+  description: string;
+  subtasks: string[];
+  done: boolean;
 }
 
 // Typed shortcuts the parser doesn't know, spelled out first.
-const SLANG: [RegExp, string][] = [
+const SLANG: [RegExp, string | ((...m: string[]) => string)][] = [
   [/\b(tmrw|tmrow|tmr|tmw|tomoz|tomo|2moro|tomorow|tommorow|tommorrow)\b/gi, 'tomorrow'],
   [/\b(tonite|2nite)\b/gi, 'tonight'],
   [/\b2day\b/gi, 'today'],
   [/\b(urgent|high|medium|low)\s+(priority|prio|pri)\b/gi, '!$1'],
   [/\b(priority|prio)\s+(urgent|high|medium|low)\b/gi, '!$2'],
+  // "6.45 pm" and "at 6.45" are times, written the British way.
+  [/\b(\d{1,2})\.([0-5]\d)\s*(a\.?m\.?|p\.?m\.?)(?![a-z])/gi, (_m: string, h: string, mm: string, ap: string) => `${h}:${mm}${ap.replace(/\./g, '').toLowerCase()}`],
+  [/\b(at|by|@|from|until|till)\s+(\d{1,2})\.([0-5]\d)\b/gi, '$1 $2:$3'],
+  [/\b(\d{1,2}(?::\d{2})?)\s+(am|pm)\b/gi, '$1$2'],
   [/\b(?:on\s+)?(sat|sun)(?=\s+(?:at\s+)?\d{1,2}(?::\d{2})?\s*(?:am|pm)\b)/gi, 'on $1'],
 ];
 
 export function normalize(text: string): string {
-  return SLANG.reduce((t, [re, to]) => t.replace(re, to), text);
+  return SLANG.reduce((t, [re, to]) => t.replace(re, to as any), text);
+}
+
+const NUM_WORDS: Record<string, number> = { a: 1, an: 1, one: 1, two: 2, three: 3, five: 5, ten: 10, fifteen: 15, twenty: 20, thirty: 30, 'half an': 0.5, half: 0.5 };
+const LEAD_RE = /\b(\d+(?:\.\d+)?|an?|one|two|three|five|ten|fifteen|twenty|thirty|half(?:\s+an?)?)\s*(m|mins?|minutes?|h|hrs?|hours?|d|days?)?\s+(?:before|earlier|ahead|prior|in\s+advance|early)\b/i;
+
+/** "10 before", "half an hour before", "1 day early": minutes of warning, and the text without it. */
+export function extractLead(text: string): { text: string; lead: number | null } {
+  if (/\b(?:no|without|don'?t\s+(?:need\s+a\s+)?)\s*(?:reminders?|alerts?|notifications?)\b/i.test(text)) return { text, lead: null };
+  if (/\b(?:remind\s+me\s+)?(?:at\s+the\s+time|on\s+time|right\s+then)\b/i.test(text) && /\bremind/i.test(text)) {
+    return { text: text.replace(/\s*\b(?:at\s+the\s+time|on\s+time|right\s+then)\b/i, ' ').replace(/\s+/g, ' ').trim(), lead: 0 };
+  }
+  const m = text.match(LEAD_RE);
+  if (!m) return { text, lead: null };
+  const raw = m[1].toLowerCase();
+  const n = NUM_WORDS[raw.replace(/\s+/g, ' ')] ?? parseFloat(raw);
+  const unit = (m[2] || 'm').toLowerCase();
+  const mult = unit.startsWith('d') ? 1440 : unit.startsWith('h') ? 60 : 1;
+  // "half" alone means half an hour.
+  const minutes = Math.round(n * (raw.startsWith('half') && !m[2] ? 60 : mult));
+  return { text: text.replace(m[0], ' ').replace(/\s+/g, ' ').trim(), lead: minutes > 0 && minutes <= 7 * 1440 ? minutes : null };
+}
+
+/** "10 min before", "1 h before", "at the time". */
+export function leadLabel(minutes: number | null): string {
+  if (minutes == null) return 'No reminder';
+  if (minutes === 0) return 'At the time';
+  if (minutes % 1440 === 0) return `${minutes / 1440} day${minutes === 1440 ? '' : 's'} before`;
+  if (minutes % 60 === 0) return `${minutes / 60} h before`;
+  return `${minutes} min before`;
 }
 
 // Where one ask ends and the next starts. Each piece remembers how it was
@@ -109,11 +149,11 @@ const AREA_WORDS: Record<string, string[]> = {
   family: ['mom', 'mum', 'dad', 'sister', 'brother', 'family'],
 };
 
-const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
-const stem = (w: string) => w.replace(/(ings?|ed|es|s)$/, '').slice(0, 7);
-const keyWords = (s: string) => words(s).filter(w => !STOP.has(w) && w.length > 1).map(stem);
-const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-const hasWord = (text: string, w: string) => new RegExp(`(^|[^a-z0-9])${escapeRe(w)}([^a-z0-9]|$)`, 'i').test(text);
+export const words = (s: string) => s.toLowerCase().replace(/[^a-z0-9\s-]/g, ' ').split(/\s+/).filter(Boolean);
+export const stem = (w: string) => w.replace(/(ings?|ed|es|s)$/, '').slice(0, 7);
+export const keyWords = (s: string) => words(s).filter(w => !STOP.has(w) && w.length > 1).map(stem);
+export const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+export const hasWord = (text: string, w: string) => new RegExp(`(^|[^a-z0-9])${escapeRe(w)}([^a-z0-9]|$)`, 'i').test(text);
 
 interface Where { projectId: string | null; branchId: string | null; areaId: string | null; phrase: string | null; why: string | null }
 
@@ -198,6 +238,7 @@ function tidyTitle(title: string, phrase: string | null): string {
   let t = title;
   if (phrase) t = t.replace(new RegExp(`\\s*\\b(?:for|in|on|under|to|at)?\\s*(?:the\\s+)?${escapeRe(phrase)}(?:\\s+(?:project|branch|area))?\\b`, 'i'), ' ');
   t = t.replace(/^(?:and|also|then|plus|ok|okay|so|oh)\s+/i, '')
+    .replace(/(.)\s*\b(?:and\s+|,\s*)?(?:please\s+)?remind\s+me\b(?:\s+(?:about\s+it|of\s+it))?\s*/i, '$1 ')
     .replace(/^(?:i\s+(?:need|have|want)\s+to|i\s+should|i\s+must|need\s+to|have\s+to|gotta|got\s+to)\s+/i, '')
     .replace(/\s+(?:and|also|then|for|on|at|by|to)$/i, '')
     .replace(/\s+/g, ' ').trim();
@@ -218,8 +259,16 @@ const sameKind = (kind: CardKind, entityType: string | undefined) =>
 
 /** One draft card from one piece of a message. */
 export function buildCard(piece: Piece, ctx: CaptureContext, now: Date = new Date()): CaptureCard {
-  const text = normalize(piece.text);
+  const lead = extractLead(normalize(piece.text));
+  const text = lead.text;
   const p = parseQuickAdd(text, now);
+  // Only a time: today, or tomorrow once that time has gone.
+  if (p.time && !p.date) {
+    const d = new Date(now);
+    if (p.time <= `${pad(now.getHours())}:${pad(now.getMinutes())}`) d.setDate(d.getDate() + 1);
+    p.date = todayKey(d);
+    p.dateLabel = d.getDate() === now.getDate() ? 'Today' : 'Tomorrow';
+  }
   const where = matchWhere(text, ctx);
   const title = tidyTitle(p.title, where.phrase);
   const same = findSame(text, title, ctx);
@@ -253,6 +302,10 @@ export function buildCard(piece: Piece, ctx: CaptureContext, now: Date = new Dat
     include: true,
     why,
     unsure: !projectId && !areaId,
+    leadMinutes: lead.lead,
+    description: '',
+    subtasks: [],
+    done: false,
   };
 }
 
@@ -282,12 +335,36 @@ export interface AiItem {
   projectId?: string; branchId?: string; areaId?: string; sameAsId?: string; tags?: string[];
 }
 
+/** Groq sometimes rewrites the words and drops "at 6.45 pm"; keep the day, time, repeat and lead the parser already read. */
+function borrowTiming(card: CaptureCard, it: AiItem, count: number, local: CaptureCard[]) {
+  // A parser card that holds several of the AI's items can't say whose time it is.
+  if (!local.length || local.length < count) return;
+  let src: CaptureCard | undefined = count === 1 && local.length === 1 ? local[0] : undefined;
+  if (!src) {
+    const mine = new Set(keyWords(`${it.text || ''} ${it.title || ''}`));
+    let best = 0;
+    for (const c of local) {
+      const hits = keyWords(c.text).filter(w => mine.has(w)).length;
+      if (hits > best) { best = hits; src = c; }
+    }
+  }
+  if (!src) return;
+  if (!card.date && src.date) { card.date = src.date; card.why = card.why.concat(src.why.filter(w => !card.why.includes(w))); }
+  if (!card.time && src.time) card.time = src.time;
+  if (!card.repeatRule && src.repeatRule) { card.repeatRule = src.repeatRule; card.repeatLabel = src.repeatLabel; }
+  if (card.leadMinutes == null && src.leadMinutes != null) card.leadMinutes = src.leadMinutes;
+  if (!card.priorityGiven && src.priorityGiven) { card.priority = src.priority; card.priorityGiven = true; }
+  card.tags = Array.from(new Set([...card.tags, ...src.tags]));
+}
+
 /** Rebuilds the cards from the AI's split, keeping what the parser read for dates and times. */
-export function mergeAiItems(ai: AiItem[], ctx: CaptureContext, now: Date = new Date()): CaptureCard[] {
+export function mergeAiItems(ai: AiItem[], ctx: CaptureContext, now: Date = new Date(), local: CaptureCard[] = []): CaptureCard[] {
   const cards: CaptureCard[] = [];
   for (const it of ai) {
     const card = buildCard({ text: it.text || it.title, follows: false }, ctx, now);
-    if (it.title) card.title = tidyTitle(it.title, null);
+    borrowTiming(card, it, ai.length, local);
+    // Clean the AI's title the same way, so an echoed "remind me ... at 6.45 pm" loses its timing words.
+    if (it.title) card.title = buildCard({ text: it.title, follows: false }, ctx, now).title || tidyTitle(it.title, null);
     if (it.kind && !(card.kind === 'reminder' && it.kind === 'task')) card.kind = it.kind;
     if (!card.projectId && !card.areaId && (it.projectId || it.areaId)) {
       const project = ctx.projects.find(p => p.id === it.projectId);
@@ -315,93 +392,7 @@ export function mergeAiItems(ai: AiItem[], ctx: CaptureContext, now: Date = new 
   return cards;
 }
 
-// --- Follow-ups: "make gym high priority and a habit" ---
-
-const EDIT_START = /^\s*(?:make|change|move|set|mark|rename|put|switch|turn|actually|no[,\s]|instead|drop|remove|delete|skip|cancel|forget|don'?t|undo|the\s+\w+\s+(?:one|card)|it\s|that\s|those\s|both\s|all\s)/i;
-
-export function looksLikeEdit(message: string): boolean {
-  return EDIT_START.test(message);
-}
-
-export interface CardChange {
-  card: number; remove?: boolean; title?: string; kind?: CardKind; priority?: QuickAddPriority;
-  context?: LifeContext; when?: string; projectId?: string; branchId?: string; areaId?: string;
-}
-
-/** Which cards a follow-up is about: named by a word of their title, else the last one. */
-function targets(message: string, cards: CaptureCard[]): number[] {
-  const lower = message.toLowerCase();
-  if (/\b(?:all|everything|both|them|those)\b/.test(lower)) return cards.map((_, i) => i);
-  const named = cards.map((c, i) => (keyWords(c.title).some(w => w.length >= 3 && lower.split(/[^a-z0-9]+/).some(x => stem(x) === w)) ? i : -1)).filter(i => i >= 0);
-  return named.length ? named : (/\b(?:it|that|this)\b/.test(lower) && cards.length ? [cards.length - 1] : []);
-}
-
-/** A follow-up read without AI. Null when it isn't understood. */
-export function localEdit(message: string, cards: CaptureCard[], ctx: CaptureContext, now: Date = new Date()): CardChange[] | null {
-  const ids = targets(message, cards);
-  if (!ids.length) return null;
-  const text = normalize(message);
-  const change: Omit<CardChange, 'card'> = {};
-  if (/\b(?:drop|remove|delete|skip|cancel|forget|don'?t\s+(?:add|save))\b/i.test(text)) change.remove = true;
-  const pr = text.match(/!(urgent|high|medium|low)\b/i) || text.match(/\b(urgent|important)\b/i);
-  if (pr) change.priority = (pr[1].toLowerCase() === 'important' ? 'high' : pr[1].toLowerCase()) as QuickAddPriority;
-  const kind = text.match(/\b(?:an?\s+)?(habit|reminder|event|task)\b/i);
-  if (kind && /\b(?:make|turn|change|as|into|be|a|an)\b/i.test(text)) change.kind = kind[1].toLowerCase() as CardKind;
-  if (/\bpersonal\b/i.test(text)) change.context = 'personal';
-  else if (/\bwork\b/i.test(text) && !/\bwork\s+on\b/i.test(text)) change.context = 'work';
-  const parsed = parseQuickAdd(text, now);
-  if (parsed.date || parsed.time || parsed.repeatRule) change.when = text;
-  const where = matchWhere(text, ctx);
-  if (where.projectId || where.areaId) {
-    // Only when it's the place being changed, not a word of the card's own title.
-    const titleWords = new Set(ids.flatMap(i => keyWords(cards[i].title)));
-    if (!where.phrase || !keyWords(where.phrase).every(w => titleWords.has(w))) {
-      if (where.projectId) { change.projectId = where.projectId; if (where.branchId) change.branchId = where.branchId; }
-      if (where.areaId) change.areaId = where.areaId;
-    }
-  }
-  if (Object.keys(change).length === 0) return null;
-  return ids.map(card => ({ card, ...change }));
-}
-
-/** Applies changes; returns the new cards and a sentence saying what changed. */
-export function applyChanges(cards: CaptureCard[], changes: CardChange[], ctx: CaptureContext, now: Date = new Date()): { cards: CaptureCard[]; said: string } {
-  const next = cards.map(c => ({ ...c }));
-  const said: string[] = [];
-  for (const ch of changes) {
-    const c = next[ch.card];
-    if (!c) continue;
-    const bits: string[] = [];
-    if (ch.remove) { c.include = false; said.push(`${c.title} is left out`); continue; }
-    if (ch.title) { c.title = ch.title; bits.push(`renamed`); }
-    if (ch.kind) { c.kind = ch.kind; bits.push(`a ${ch.kind}`); }
-    if (ch.priority) { c.priority = ch.priority; c.priorityGiven = true; bits.push(`${ch.priority} priority`); }
-    if (ch.projectId) {
-      const p = ctx.projects.find(x => x.id === ch.projectId);
-      if (p && (p.id !== c.projectId || (ch.branchId || null) !== c.branchId)) { c.projectId = p.id; c.branchId = ch.branchId || null; c.areaId = null; c.lifeContext = 'work'; c.unsure = false; bits.push(`in ${p.name}`); }
-    }
-    if (ch.areaId) {
-      const a = ctx.areas.find(x => x.id === ch.areaId);
-      if (a && a.id !== c.areaId) { c.areaId = a.id; c.projectId = null; c.branchId = null; c.lifeContext = 'personal'; c.unsure = false; bits.push(`in ${a.name}`); }
-    }
-    if (ch.context && !ch.projectId && !ch.areaId) { c.lifeContext = ch.context; bits.push(ch.context); }
-    if (ch.when) {
-      const p = parseQuickAdd(normalize(ch.when), now);
-      if (p.date) c.date = p.date;
-      if (p.time) c.time = p.time;
-      if (p.repeatRule) { c.repeatRule = p.repeatRule; c.repeatLabel = p.repeatLabel; }
-      if (p.date || p.time) bits.push(`on ${[p.date && formatShortDate(p.date), p.time && formatTime(p.time)].filter(Boolean).join(' at ')}`);
-      if (p.repeatLabel) bits.push(p.repeatLabel.toLowerCase());
-    }
-    if (bits.length) said.push(`${c.title} is now ${bits.join(', ')}`);
-  }
-  return { cards: next, said: said.length ? `Done. ${said.join('. ')}.` : '' };
-}
-
 // --- Saving ---
-
-const pad = (n: number) => String(n).padStart(2, '0');
-const todayKey = (d = new Date()) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
 
 /** Days a week a repeat rule asks for, for a habit's weekly target. */
 export function timesPerWeek(rule: string | null): number {
@@ -412,7 +403,7 @@ export function timesPerWeek(rule: string | null): number {
   return 7;
 }
 
-function scope(c: CaptureCard) {
+export function scope(c: Pick<CaptureCard, 'lifeContext' | 'projectId' | 'branchId' | 'areaId'>) {
   return c.lifeContext === 'personal'
     ? { projectId: null, branchId: null, areaId: c.areaId }
     : { projectId: c.projectId, branchId: c.projectId ? c.branchId : null, areaId: null };
@@ -434,16 +425,19 @@ export function newItemPayload(c: CaptureCard): Partial<WorkItem> {
     estimatedMinutes: c.durationMinutes ?? undefined,
     estimated: c.durationMinutes ? `${c.durationMinutes}m` : undefined,
   } as Partial<WorkItem>;
+  if (c.done) (base as any).status = 'done';
+  if (c.description) base.description = c.description;
   if (c.kind === 'reminder') {
-    return { ...base, dueDate: date, startDate: date, remindAt: `${date}T${c.time || '09:00'}` };
+    // The reminder fires at its time, or the lead before it ("10 min before").
+    return { ...base, dueDate: date, startDate: date, dueTime: c.time || '09:00', reminderLeadMinutes: c.leadMinutes ?? 0 };
   }
   if (c.kind === 'event') {
     const start = `${date}T${c.time || '09:00'}`;
     const end = new Date(new Date(start).getTime() + (c.durationMinutes || 60) * 60000);
     const endAt = `${todayKey(end)}T${pad(end.getHours())}:${pad(end.getMinutes())}`;
-    return { ...base, startAt: start, endAt, dueDate: date, startDate: date, reminderLeadMinutes: 10 };
+    return { ...base, startAt: start, endAt, dueDate: date, startDate: date, reminderLeadMinutes: c.leadMinutes ?? 10 };
   }
-  return { ...base, dueDate: date, startDate: date, dueTime: date && c.time ? c.time : null, reminderLeadMinutes: date && c.time ? 0 : null };
+  return { ...base, dueDate: date, startDate: date, dueTime: date && c.time ? c.time : null, reminderLeadMinutes: date ? (c.leadMinutes ?? (c.time ? 0 : null)) : null };
 }
 
 /** Fields to change on the item a card matched: only what the message said. */
@@ -454,8 +448,9 @@ export function matchUpdates(c: CaptureCard, item: WorkItem): Partial<WorkItem> 
     if (!item.startDate || item.startDate > c.date) u.startDate = c.date;
     u.isInbox = false;
     if (c.time) { u.dueTime = c.time; if (item.reminderLeadMinutes == null) u.reminderLeadMinutes = 0; }
-    if (item.entityType === 'reminder') u.remindAt = `${c.date}T${c.time || (item.remindAt || '').slice(11, 16) || '09:00'}`;
+    if (item.entityType === 'reminder' && item.reminderLeadMinutes == null) u.remindAt = `${c.date}T${c.time || (item.remindAt || '').slice(11, 16) || '09:00'}`;
   }
+  if (c.leadMinutes != null) u.reminderLeadMinutes = c.leadMinutes;
   if (c.priorityGiven && c.priority !== item.priority) u.priority = c.priority;
   if (c.repeatRule) u.repeatRule = c.repeatRule;
   const tags = Array.from(new Set([...(item.labels || []), ...c.tags]));

@@ -68,29 +68,48 @@ class TestSplit(unittest.TestCase):
         out = self.answer([{"text": "Tomorrow at 9: sonar pinout", "title": "Sonar pinout"}])
         self.assertEqual(out["items"][0]["text"], "Sonar pinout")
 
+    def test_rewritten_text_keeps_typed_timing(self):
+        req = request(message="remind me 10 before to log off from work at 6.45 pm")
+        out = self.answer([{"text": "Log off from work", "title": "Log off from work", "when": "at 6.45 pm, 10 before, at 9am"}], req)
+        self.assertEqual(out["items"][0]["text"], "Log off from work at 6.45 pm 10 before")
+
     def test_garbage_gives_no_items(self):
         with mock.patch.object(chat_capture, "_answer", return_value=("I can't help with that", "local")):
             self.assertEqual(chat_capture.capture(request())["items"], [])
 
 
 class TestEdit(unittest.TestCase):
-    def test_changes(self):
-        req = request(mode="edit", message="make gym high priority and a habit, and drop the reel",
-                      cards=[{"title": "Finish sonar pinout"}, {"title": "Post the shoes reel"}, {"title": "Gym"}])
-        text = json.dumps({"reply": "Done.", "changes": [
+    def edit(self, changes, cards=None, message="follow-up"):
+        req = request(mode="edit", message=message,
+                      cards=cards if cards is not None else [{"title": "Finish sonar pinout"}, {"title": "Post the shoes reel"}, {"title": "Gym"}])
+        with mock.patch.object(chat_capture, "_answer", return_value=(json.dumps({"reply": "Done.", "changes": changes}), "groq")):
+            return chat_capture.capture(req)
+
+    def test_card_changes(self):
+        out = self.edit([
             {"card": 3, "priority": "high", "kind": "habit"},
             {"card": 2, "remove": True},
             {"card": 9, "priority": "high"},
             {"card": 1, "project": "Nowhere"},
             {"card": 1, "project": "Sage", "branch": "Radar dashboard", "when": "monday 2pm"},
-        ]})
-        with mock.patch.object(chat_capture, "_answer", return_value=(text, "groq")):
-            out = chat_capture.capture(req)
+        ])
         self.assertEqual(out["reply"], "Done.")
         self.assertEqual(out["changes"], [
             {"card": 2, "kind": "habit", "priority": "high"},
-            {"card": 1, "remove": True},
+            {"card": 1, "delete": True},
             {"card": 0, "when": "monday 2pm", "projectId": "p-sage", "branchId": "br-radar"},
+        ])
+
+    def test_items_by_key(self):
+        out = self.edit([
+            {"item": "C-13", "done": True, "note": "ask Ravi", "subtask": "order cables", "add_tags": ["#Parts"]},
+            {"item": "B-3", "remove_tags": ["reels"], "no_reminder": True, "reminder_minutes_before": 30, "clear_date": True, "no_repeat": True},
+            {"item": "X-99", "done": True},
+            {"item": "C-13", "reminder_minutes_before": "soon"},
+        ], cards=[])
+        self.assertEqual(out["changes"], [
+            {"itemId": "i13", "done": True, "addTags": ["parts"], "note": "ask Ravi", "subtask": "order cables"},
+            {"itemId": "b3", "clearDate": True, "noRepeat": True, "noReminder": True, "reminderMinutesBefore": 30, "removeTags": ["reels"]},
         ])
 
 

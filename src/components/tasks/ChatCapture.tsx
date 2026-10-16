@@ -9,10 +9,13 @@ import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { TimePicker } from '../common/TimePicker';
 import {
-  CaptureCard, CaptureContext, CardChange, CardKind, buildCards, mergeAiItems, looksLikeEdit, localEdit,
-  applyChanges, newItemPayload, matchUpdates, timesPerWeek,
+  CaptureCard, CaptureContext, CardKind, buildCards, mergeAiItems, newItemPayload, matchUpdates, timesPerWeek,
+  leadLabel, normalize,
 } from '../../utils/chatCapture';
-import { formatShortDate } from '../../utils/quickAddParser';
+import {
+  Command, Ops, Target, looksLikeEdit, parseCommands, applyToCard, itemUpdates, describe, itemName,
+} from '../../utils/chatCommands';
+import { formatShortDate, parseQuickAdd } from '../../utils/quickAddParser';
 import { projectTypeInfo } from '../../services/projectTypes';
 import { formatTime } from '../../utils/reminders';
 import { ProjectPlan, basePlan, looksLikePlan, looksLikePlanEdit, localPlanEdit, planFromAi, templatePlan, deadlineDays, fitTo, ordered, planDiff } from '../../utils/projectPlan';
@@ -38,7 +41,9 @@ type Saved =
 
 type Turn =
   | { id: string; role: 'me'; text: string }
-  | { id: string; role: 'sage'; text: string; batch?: string; plan?: string; undo?: () => Promise<void>; undone?: boolean };
+  | { id: string; role: 'sage'; text: string; batch?: string; plan?: string; undo?: () => Promise<void>; undone?: boolean;
+      // Deleting something saved asks first.
+      confirm?: { yes: string; run: () => Promise<void>; state?: 'yes' | 'no' } };
 
 interface Batch { id: string; cards: CaptureCard[]; saved: Record<string, Saved> | null; checking: boolean; touched: boolean }
 
@@ -69,6 +74,8 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
   const endRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const lastBatch = useRef<string | null>(null);
+  // What the last follow-up was about, so "move it to friday" knows what "it" is.
+  const lastTarget = useRef<{ batch: string | null; target: Target } | null>(null);
   const batchesRef = useRef(batches);
   batchesRef.current = batches;
 
@@ -119,6 +126,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
       return { kind: 'updated', id: item.id, before };
     }
     const created = await api.workItems.create(newItemPayload(c));
+    for (const st of c.subtasks) await api.subtasks.create(created.id, st);
     return { kind: 'created', id: created.id };
   };
   const uncommit = async (s: Saved) => {
@@ -126,17 +134,6 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     else if (s.kind === 'created') await api.workItems.softDelete(s.id);
     else await api.workItems.updateDetails(s.id, s.before);
   };
-  // A saved card that changed: edit what it made in place where that's the same kind of thing.
-  const recommit = async (s: Saved | undefined, c: CaptureCard): Promise<Saved | undefined> => {
-    if (!c.include) { if (s) await uncommit(s); return undefined; }
-    if (s?.kind === 'created' && c.kind !== 'habit' && !(c.match && c.useMatch)) {
-      await api.workItems.updateDetails(s.id, newItemPayload(c));
-      return s;
-    }
-    if (s) await uncommit(s);
-    return commit(c);
-  };
-
   const saveBatch = async (batchId: string) => {
     const b = batchesRef.current[batchId];
     if (!b || b.saved || busy) return;
@@ -169,65 +166,205 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
 
   // --- Messages ---
 
-  const editBatch = async (batchId: string, message: string) => {
-    const b = batchesRef.current[batchId];
-    let changes: CardChange[] | null = localEdit(message, b.cards, ctx);
-    let aiSaid = '';
-    if (!changes && aiReady !== false) {
-      try {
-        const res = await askAi({
-          mode: 'edit', message, ...aiLists(),
-          cards: b.cards.map(c => ({
-            title: c.title, kind: c.kind, project: projectName(c.projectId), area: areaName(c.areaId),
-            branch: projects.find(p => p.id === c.projectId)?.branches?.find(x => x.id === c.branchId)?.name || '',
-            context: c.lifeContext, priority: c.priority,
-            when: [c.date && formatShortDate(c.date), c.time && formatTime(c.time), c.repeatLabel].filter(Boolean).join(' '),
-          })),
-        });
-        changes = (res.changes || []) as CardChange[];
-        aiSaid = res.reply || '';
-      } catch { /* no AI: say so below */ }
-    }
-    if (!changes || changes.length === 0) {
-      say(`I didn't catch what to change. Name the item, like "make gym high priority", or tap a chip on the card.`);
-      return;
-    }
-    const { cards, said } = applyChanges(b.cards, changes, ctx);
-    if (!b.saved) {
-      setBatch(batchId, x => ({ ...x, cards, touched: true }));
-      say(aiSaid || said || 'Done.');
-      return;
-    }
-    // Already saved: change the records too, with an Undo for just this.
-    setBusy(true);
-    const before = b.cards;
-    const prevSaved = { ...b.saved };
-    const nextSaved = { ...b.saved };
-    try {
-      for (const ch of changes) {
-        const c = cards[ch.card];
-        if (!c) continue;
-        const s = await recommit(nextSaved[c.id], c);
-        if (s) nextSaved[c.id] = s; else delete nextSaved[c.id];
+  // --- Follow-ups: change, add to or delete cards and saved items ---
+
+  /** Runs commands; returns false when there was nothing it could do. */
+  const runCommands = async (batchId: string | null, commands: Command[], aiSaid = ''): Promise<boolean> => {
+    const b = batchId ? batchesRef.current[batchId] : null;
+    const said: string[] = [];
+    const undos: (() => Promise<void>)[] = [];
+    const deletes: { name: string; run: () => Promise<() => Promise<void>> }[] = [];
+    let cards = b ? [...b.cards] : [];
+    let saved = b?.saved ? { ...b.saved } : null;
+    const fresh = async (id: string) => { try { return await api.workItems.get(id); } catch { return null; } };
+
+    // One saved work item: change it, and say how to take it back.
+    const onItem = async (id: string, ops: Ops, cardIndex: number | null) => {
+      const item = await fresh(id);
+      if (!item || item.deletedAt) { said.push(`I couldn't find that item any more`); return; }
+      const name = itemName(item);
+      if (ops.delete) {
+        deletes.push({ name, run: async () => {
+          await api.workItems.softDelete(item.id);
+          if (cardIndex != null && saved) { const c = cards[cardIndex]; if (c) delete saved[c.id]; cards[cardIndex] = { ...cards[cardIndex], include: false }; }
+          return async () => { await api.workItems.restore(item.id); };
+        } });
+        return;
       }
-    } catch (e: any) {
-      say(`Couldn't change it: ${e?.message || e}`);
-      setBusy(false);
-      return;
-    }
-    setBatch(batchId, x => ({ ...x, cards, saved: nextSaved }));
-    const undo = async () => {
-      const restored: Record<string, Saved> = {};
-      for (const c of before) {
-        const s = await recommit(nextSaved[c.id], { ...c, include: !!prevSaved[c.id] }).catch(() => undefined);
-        if (s) restored[c.id] = s;
+      if (ops.kind === 'habit') {
+        const h = await api.habits.create({ name: ops.title || item.title, targetCount: timesPerWeek(ops.repeat?.rule ?? item.repeatRule ?? null), areaId: item.areaId || null });
+        await api.workItems.softDelete(item.id);
+        if (cardIndex != null && saved) saved[cards[cardIndex].id] = { kind: 'habit', id: h.id };
+        undos.push(async () => { await api.habits.delete(h.id); await api.workItems.restore(item.id); });
+        said.push(`${item.title} is now a habit, ${timesPerWeek(ops.repeat?.rule ?? item.repeatRule ?? null)}× a week`);
+        return;
       }
-      setBatch(batchId, x => ({ ...x, cards: before, saved: restored }));
-      onChanged(); loadItems();
+      const bits = describe(ops);
+      if (ops.done && item.status !== 'done') {
+        const prev = item.status;
+        await api.workItems.transitionStatus(item.id, 'done');
+        undos.push(async () => { await api.workItems.transitionStatus(item.id, prev); });
+      }
+      if (ops.reopen && item.status === 'done') {
+        await api.workItems.transitionStatus(item.id, 'todo');
+        undos.push(async () => { await api.workItems.transitionStatus(item.id, 'done'); });
+      }
+      if (ops.subtask) {
+        const st = await api.subtasks.create(item.id, ops.subtask);
+        undos.push(async () => { await api.subtasks.delete(st.id); });
+      }
+      const { updates, before } = itemUpdates(item, ops);
+      if (Object.keys(updates).length) {
+        await api.workItems.updateDetails(item.id, updates);
+        undos.push(async () => { await api.workItems.updateDetails(item.id, before); });
+      }
+      said.push(`${name}: ${bits.join(', ')}`);
     };
-    say(aiSaid || said || 'Done.', { undo });
-    onChanged(); loadItems();
-    setBusy(false);
+
+    for (const { target, ops } of commands) {
+      if (target.kind === 'item') {
+        // An item that one of these cards saved as is shown by that card too.
+        const cardIndex = cards.findIndex(c => saved?.[c.id]?.id === target.id);
+        await onItem(target.id, ops, cardIndex >= 0 ? cardIndex : null);
+        if (cardIndex >= 0 && !ops.delete) cards[cardIndex] = applyToCard(cards[cardIndex], ops);
+        lastTarget.current = { batch: batchId, target };
+        continue;
+      }
+      const card = cards[target.index];
+      if (!card) continue;
+      lastTarget.current = { batch: batchId, target };
+      const s = saved?.[card.id];
+      if (!s) {
+        // A draft: change the card; nothing is written yet.
+        cards[target.index] = applyToCard(card, ops);
+        said.push(ops.delete ? `${card.title} is left out` : `${cards[target.index].title}: ${describe(ops).join(', ')}`);
+        continue;
+      }
+      if (s.kind === 'habit') {
+        if (ops.delete) {
+          deletes.push({ name: `the ${card.title} habit`, run: async () => {
+            await api.habits.delete(s.id);
+            if (saved) delete saved[card.id];
+            cards[target.index] = { ...card, include: false };
+            return async () => { const h = await api.habits.create({ name: card.title, targetCount: timesPerWeek(card.repeatRule), areaId: card.areaId }); if (saved) saved[card.id] = { kind: 'habit', id: h.id }; };
+          } });
+        } else if (ops.kind && ops.kind !== 'habit') {
+          const next = applyToCard(card, ops);
+          await api.habits.delete(s.id);
+          const created = await api.workItems.create(newItemPayload(next));
+          saved![card.id] = { kind: 'created', id: created.id };
+          cards[target.index] = next;
+          undos.push(async () => {
+            await api.workItems.softDelete(created.id);
+            const h = await api.habits.create({ name: card.title, targetCount: timesPerWeek(card.repeatRule), areaId: card.areaId });
+            if (saved) saved[card.id] = { kind: 'habit', id: h.id };
+          });
+          said.push(`${card.title} is now a ${ops.kind}`);
+        } else if (ops.title) {
+          await api.habits.update(s.id, { name: ops.title });
+          undos.push(async () => { await api.habits.update(s.id, { name: card.title }); });
+          cards[target.index] = { ...card, title: ops.title };
+          said.push(`Habit renamed to "${ops.title}"`);
+        } else {
+          said.push(`${card.title} is a habit, which only keeps a name and how often. Turn it back into a task to change more`);
+        }
+        continue;
+      }
+      await onItem(s.id, ops, target.index);
+      if (!ops.delete && ops.kind !== 'habit') cards[target.index] = applyToCard(card, ops);
+      else if (ops.kind === 'habit') cards[target.index] = { ...applyToCard(card, ops), kind: 'habit' };
+    }
+
+    if (!said.length && !deletes.length) return false;
+    if (b) setBatch(b.id, x => ({ ...x, cards, saved, touched: true }));
+    if (said.length) {
+      const undo = undos.length ? async () => { for (const u of undos.reverse()) await u().catch(() => {}); if (b) setBatch(b.id, x => ({ ...x, cards: b.cards, saved: b.saved, touched: true })); onChanged(); loadItems(); } : undefined;
+      say(aiSaid || `Done. ${said.join('. ')}.`, undo ? { undo } : {});
+    }
+    if (deletes.length) {
+      const names = deletes.map(d => d.name).join(', ');
+      say(`Delete ${names}? It goes to Trash, and you can undo it.`, {
+        confirm: {
+          yes: 'Delete',
+          run: async () => {
+            const back: (() => Promise<void>)[] = [];
+            for (const d of deletes) back.push(await d.run());
+            if (b) setBatch(b.id, x => ({ ...x, cards: [...cards], saved: saved ? { ...saved } : null, touched: true }));
+            say(`Deleted ${names}.`, { undo: async () => { for (const u of back) await u().catch(() => {}); if (b) setBatch(b.id, x => ({ ...x, cards: b.cards, saved: b.saved })); onChanged(); loadItems(); } });
+            onChanged(); loadItems();
+          },
+        },
+      });
+    }
+    if (said.length) { onChanged(); loadItems(); }
+    return true;
+  };
+
+  /** The Pi's AI read of a follow-up, as commands. */
+  const aiCommands = async (message: string, b: Batch | null): Promise<{ commands: Command[]; reply: string } | null> => {
+    const cards = b?.cards || [];
+    const res = await askAi({
+      mode: 'edit', message, ...aiLists(),
+      cards: cards.map(c => ({
+        title: c.title, kind: c.kind, project: projectName(c.projectId), area: areaName(c.areaId),
+        branch: projects.find(p => p.id === c.projectId)?.branches?.find(x => x.id === c.branchId)?.name || '',
+        context: c.lifeContext, priority: c.priority,
+        when: [c.date && formatShortDate(c.date), c.time && formatTime(c.time), c.repeatLabel].filter(Boolean).join(' '),
+      })),
+    });
+    const commands: Command[] = [];
+    for (const ch of res.changes || []) {
+      const target: Target | null = typeof ch.card === 'number' && cards[ch.card] ? { kind: 'card', index: ch.card }
+        : ch.itemId && items.some(i => i.id === ch.itemId) ? { kind: 'item', id: ch.itemId } : null;
+      if (!target) continue;
+      const ops: Ops = {};
+      if (ch.remove || ch.delete) ops.delete = true;
+      if (ch.done) ops.done = true;
+      if (ch.reopen) ops.reopen = true;
+      if (ch.title) ops.title = ch.title;
+      if (ch.kind) ops.kind = ch.kind;
+      if (ch.priority) ops.priority = ch.priority;
+      if (ch.context) ops.context = ch.context;
+      if (ch.clearDate) { ops.date = null; ops.time = null; }
+      if (ch.when) {
+        const p = parseQuickAdd(normalize(ch.when));
+        if (p.date) ops.date = p.date;
+        if (p.time) ops.time = p.time;
+        if (p.repeatRule) ops.repeat = { rule: p.repeatRule, label: p.repeatLabel };
+      }
+      if (ch.noRepeat) ops.repeat = { rule: null, label: null };
+      if (ch.noReminder) ops.lead = { minutes: null };
+      else if (typeof ch.reminderMinutesBefore === 'number') ops.lead = { minutes: ch.reminderMinutesBefore };
+      if (ch.addTags?.length) ops.addTags = ch.addTags;
+      if (ch.removeTags?.length) ops.removeTags = ch.removeTags;
+      if (ch.note) ops.note = ch.note;
+      if (ch.subtask) ops.subtask = ch.subtask;
+      if (ch.projectId || ch.areaId) {
+        const project = projects.find(p => p.id === ch.projectId);
+        const branch = project?.branches?.find(x => x.id === ch.branchId);
+        const area = areas.find(a => a.id === ch.areaId);
+        ops.place = { projectId: project?.id || null, branchId: branch?.id || null, areaId: project ? null : area?.id || null, label: project ? `${project.name}${branch ? ` › ${branch.name}` : ''}` : area?.name || '' };
+      }
+      if (Object.keys(ops).length) commands.push({ target, ops });
+    }
+    return commands.length ? { commands, reply: res.reply || '' } : null;
+  };
+
+  /** A follow-up: true when it was handled as one. */
+  const followUp = async (message: string): Promise<boolean> => {
+    const batchId = lastTarget.current?.batch ?? lastBatch.current;
+    const b = batchId ? batchesRef.current[batchId] : null;
+    const savedIds: Record<string, string> = {};
+    for (const [cid, s] of Object.entries(b?.saved || {})) savedIds[cid] = s.id;
+    const last = lastTarget.current && lastTarget.current.batch === (b?.id ?? null) ? lastTarget.current.target : null;
+    const local = parseCommands(message, b?.cards || [], ctx, last, savedIds);
+    if (local) return runCommands(b?.id ?? null, local);
+    if (aiReady === false) return false;
+    try {
+      const ai = await aiCommands(message, b);
+      if (ai) return runCommands(b?.id ?? null, ai.commands, ai.reply);
+    } catch { /* no AI: treat it as something new */ }
+    return false;
   };
 
   // --- Plans: a goal broken into a project, stages and dated tasks ---
@@ -322,9 +459,15 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     setTurns(t => [...t, { id: tid(), role: 'me', text: message }]);
     const plan = lastPlan.current ? plansRef.current[lastPlan.current] : null;
     if (plan && !plan.saved && !plan.loading && looksLikePlanEdit(message)) { await editPlan(plan.id, message); return; }
-    const last = lastBatch.current ? batchesRef.current[lastBatch.current] : null;
-    if (last && looksLikeEdit(message)) { await editBatch(last.id, message); return; }
+    // "make a plan for …" starts like an edit but asks for a plan.
     if (looksLikePlan(message)) { await startPlan(message); return; }
+    if (looksLikeEdit(message)) {
+      setBusy(true);
+      let handled = false;
+      try { handled = await followUp(message); } catch (e: any) { say(`Couldn't change it: ${e?.message || e}`); handled = true; }
+      setBusy(false);
+      if (handled) return;
+    }
     await startBatch(message);
   };
 
@@ -333,6 +476,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     if (cards.length === 0) { say(`Tell me what to add, like "call Sam tomorrow 5pm".`); return; }
     const batchId = `b${Date.now()}`;
     lastBatch.current = batchId;
+    lastTarget.current = null;
     lastPlan.current = null;
     const unsure = cards.some(c => c.unsure) || cards.length === 1 && /\b(?:and|also)\b/i.test(message) && message.length > 60;
     const checking = unsure && aiReady !== false;
@@ -342,7 +486,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
     try {
       const res = await askAi({ mode: 'split', message, ...aiLists() });
       if (res.items?.length) {
-        const merged = mergeAiItems(res.items, ctx);
+        const merged = mergeAiItems(res.items, ctx, new Date(), cards);
         setBatch(batchId, b => (b.touched || b.saved ? { ...b, checking: false } : { ...b, cards: merged.length ? merged : b.cards, checking: false }));
         return;
       }
@@ -398,6 +542,15 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
                   className="text-blue-600 dark:text-blue-400 font-semibold hover:underline inline-flex items-center gap-1"><RotateCcw size={12} /> Undo</button>
               )}
               {t.undone && <span className="text-gray-400">Undone</span>}
+              {t.confirm && !t.confirm.state && (
+                <span className="inline-flex gap-1.5 mt-1.5 basis-full">
+                  <button type="button" disabled={busy} onClick={async () => { setTurns(ts => ts.map(x => (x.id === t.id ? { ...x, confirm: { ...t.confirm!, state: 'yes' } } as Turn : x))); setBusy(true); try { await t.confirm!.run(); } finally { setBusy(false); } }}
+                    className="h-8 px-3 rounded-lg bg-red-600 text-white text-[12.5px] font-semibold active:scale-[0.97]">{t.confirm.yes}</button>
+                  <button type="button" onClick={() => setTurns(ts => ts.map(x => (x.id === t.id ? { ...x, confirm: { ...t.confirm!, state: 'no' } } as Turn : x)))}
+                    className="h-8 px-3 rounded-lg text-[12.5px] font-semibold text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-white/10">Keep it</button>
+                </span>
+              )}
+              {t.confirm?.state === 'no' && <span className="text-gray-400">Kept</span>}
             </div>
           </motion.div>
         ))}
@@ -577,6 +730,13 @@ function CardView({ card: c, projects, areas, locked, onChange }: {
             </TimePicker>
           )}
           </>}
+          {(c.date || c.time) && (c.kind === 'reminder' || c.leadMinutes != null) && c.kind !== 'habit' && (
+            <button type="button" disabled={locked} title="When to remind you"
+              onClick={() => { const order = [0, 10, 30, 60, 1440, null]; const i = order.indexOf(c.leadMinutes as any); onChange({ leadMinutes: order[(i + 1) % order.length] as any }); }}
+              className={c.leadMinutes == null && c.kind !== 'reminder' ? chipGray : `${chip} bg-sky-100 dark:bg-sky-900/40 text-sky-700 dark:text-sky-300`}>
+              <Bell size={10} /> {c.kind === 'reminder' && c.leadMinutes == null ? 'At the time' : leadLabel(c.leadMinutes)}
+            </button>
+          )}
           {c.repeatLabel && (
             <span className={`${chip} bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300`}>
               <Repeat size={10} /> {c.repeatLabel}
@@ -602,6 +762,13 @@ function CardView({ card: c, projects, areas, locked, onChange }: {
                   className={`px-2 py-0.5 rounded-md text-[10.5px] whitespace-nowrap ${c.useMatch === o.v ? 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm' : ''}`}>{o.l}</button>
               ))}
             </span>
+          </div>
+        )}
+        {(c.done || c.description || c.subtasks.length > 0) && (
+          <div className="mt-1.5 text-[11.5px] text-gray-500 dark:text-gray-400 space-y-0.5">
+            {c.done && <p className="font-semibold text-green-600 dark:text-green-400">Saves as done</p>}
+            {c.description && <p className="whitespace-pre-wrap line-clamp-3">📝 {c.description}</p>}
+            {c.subtasks.map((st, i) => <p key={i}>☐ {st}</p>)}
           </div>
         )}
         {c.kind === 'habit' && <p className="mt-1.5 text-[11px] text-gray-500 dark:text-gray-400">Saves as a habit, {timesPerWeek(c.repeatRule)}× a week.</p>}

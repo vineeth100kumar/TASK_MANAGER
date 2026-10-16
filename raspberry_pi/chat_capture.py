@@ -108,11 +108,12 @@ class ChatCaptureRequest(BaseModel):
 
 SPLIT_PROMPT = """You sort one message from Vineeth into items for his task manager, Sage.
 Answer with JSON only, in this shape:
-{"items": [{"text": "...", "title": "...", "kind": "task", "project": null, "branch": null, "area": null, "context": "work", "same_as": null, "tags": []}]}
+{"items": [{"text": "...", "title": "...", "when": "", "kind": "task", "project": null, "branch": null, "area": null, "context": "work", "same_as": null, "tags": []}]}
 
 For every separate thing to do or remember, one item:
 - text: the exact words of the message that belong to this item, copied without changes, including any day, time or repeat words.
 - title: a short clean title, without the day, time, repeat or project words.
+- when: the day, time, repeat and "remind me N before" words for this item exactly as he typed them (like "at 6.45 pm" or "10 before"), or "".
 - kind: task, reminder (he said "remind me"), event (a meeting or appointment at a time) or habit (something he wants to do regularly to build a routine).
 - project and branch: copied exactly from the projects list, or null. A project's type says what kind of work it holds, e.g. filming, editing or posting fits a Content project.
 - area: copied exactly from the areas list, or null. Areas are personal life areas.
@@ -121,18 +122,20 @@ For every separate thing to do or remember, one item:
 - tags: only tags from the tags list that clearly fit, else [].
 Never invent a project, branch, area, key or tag that is not in the lists."""
 
-EDIT_PROMPT = """Vineeth is reviewing items Sage drafted from his message and sent a follow-up.
+EDIT_PROMPT = """Vineeth is talking to Sage, his task manager, about the cards it just drafted or items already in Sage, and sent a follow-up.
 Answer with JSON only, in this shape:
-{"reply": "one short sentence saying what changed", "changes": [{"card": 1, "title": null, "kind": null, "project": null, "branch": null, "area": null, "context": null, "priority": null, "when": null, "remove": false}]}
+{"reply": "one short sentence saying what changed", "changes": [{"card": null, "item": null, "delete": false, "done": false, "reopen": false, "title": null, "kind": null, "project": null, "branch": null, "area": null, "context": null, "priority": null, "when": null, "clear_date": false, "no_repeat": false, "reminder_minutes_before": null, "no_reminder": false, "add_tags": [], "remove_tags": [], "note": null, "subtask": null}]}
 
-Only list the cards the follow-up is about, and only fill the fields it changes; leave the rest null.
-- card: the number of the card.
-- kind: task, reminder, event or habit.
+One change per card or item the follow-up is about; fill only what it changes and leave the rest null, false or [].
+- card: the number of a card, or item: the key of an open item (like C-13). Exactly one of the two.
+- delete: he wants it gone. done / reopen: mark it finished, or not finished.
+- title: a new title. kind: task, reminder, event or habit. priority: low, medium, high or urgent. context: work or personal.
 - project, branch, area: copied exactly from the lists.
-- priority: low, medium, high or urgent.
 - when: new day, time or repeat words exactly as he would type them, e.g. "tomorrow 5pm" or "every mon wed fri 7am".
-- remove: true if he wants the card dropped.
-Never invent a project, branch or area that is not in the lists."""
+- clear_date: take the date off. no_repeat: stop it repeating.
+- reminder_minutes_before: a number of minutes (0 = at the time). no_reminder: turn the reminder off.
+- add_tags / remove_tags: tag names without #. note: text to add as a note. subtask: a step to add.
+Never invent a card number, key, project, branch or area that is not in the lists."""
 
 
 def _lists(req: ChatCaptureRequest) -> str:
@@ -279,6 +282,12 @@ def _clean_split(raw: dict, req: ChatCaptureRequest) -> List[dict]:
         # The app re-reads dates from `text`, so it has to be words he actually typed.
         if text and _norm(text) not in message:
             text = ""
+        # Timing words he typed for this item, so a rewritten text still keeps "at 6.45 pm".
+        base = text or title
+        when = [w for w in re.split(r"\s*,\s*", str(it.get("when") or "").strip())
+                if w and _norm(w) in message and _norm(w) not in _norm(base)]
+        if when:
+            text = " ".join([base] + when)
         out = {"text": text or title, "title": title or text}
         kind = _norm(it.get("kind"))
         if kind in KINDS:
@@ -303,15 +312,25 @@ def _clean_edit(raw: dict, req: ChatCaptureRequest) -> List[dict]:
     for ch in raw.get("changes") or []:
         if not isinstance(ch, dict):
             continue
-        try:
-            card = int(ch.get("card"))
-        except (TypeError, ValueError):
-            continue
-        if not 1 <= card <= len(req.cards):
-            continue
-        out = {"card": card - 1}
-        if ch.get("remove") is True:
-            out["remove"] = True
+        out = {}
+        card = ch.get("card")
+        if card not in (None, "", False):
+            try:
+                card = int(card)
+            except (TypeError, ValueError):
+                continue
+            if not 1 <= card <= len(req.cards):
+                continue
+            out["card"] = card - 1
+        else:
+            item = look.items.get(_norm(ch.get("item")))
+            if not item:
+                continue
+            out["itemId"] = item.id
+        for flag, key in (("delete", "delete"), ("remove", "delete"), ("done", "done"), ("reopen", "reopen"),
+                          ("clear_date", "clearDate"), ("no_repeat", "noRepeat"), ("no_reminder", "noReminder")):
+            if ch.get(flag) is True:
+                out[key] = True
         if ch.get("title"):
             out["title"] = str(ch["title"]).strip()
         kind = _norm(ch.get("kind"))
@@ -325,10 +344,20 @@ def _clean_edit(raw: dict, req: ChatCaptureRequest) -> List[dict]:
             out["context"] = context
         if ch.get("when"):
             out["when"] = str(ch["when"]).strip()
+        lead = ch.get("reminder_minutes_before")
+        if isinstance(lead, (int, float)) and not isinstance(lead, bool) and 0 <= lead <= 7 * 1440:
+            out["reminderMinutesBefore"] = int(lead)
+        for src, dst in (("add_tags", "addTags"), ("remove_tags", "removeTags")):
+            tags = [str(t).lstrip("#").strip().lower() for t in (ch.get(src) or []) if str(t).strip()]
+            if tags:
+                out[dst] = tags
+        for key in ("note", "subtask"):
+            if ch.get(key):
+                out[key] = str(ch[key]).strip()
         if ch.get("project") or ch.get("area"):
             where = look.where(ch)
             if not where:
-                continue  # a name that isn't in Sage: leave the card alone
+                continue  # a name that isn't in Sage: leave it alone
             out.update(where)
         if len(out) > 1:
             changes.append(out)
