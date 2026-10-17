@@ -38,14 +38,14 @@ Install the following via the Arduino IDE Library Manager:
 ### Flashing:
 1. Open `esp32_client/esp32_client.ino` in the Arduino IDE.
 2. Copy `secrets.example.h` to `secrets.h` in the same folder and set `WIFI_SSID`, `WIFI_PASS`, `PI_HOSTNAME` (the Pi's IP) and `DESK_TOKEN` (the six-digit pairing code `deploy/install_pi.sh` prints). `secrets.h` is gitignored, so your password stays off GitHub. A clock with the wrong code shows "Not paired".
-3. Select board: **ESP32C3 Dev Module**.
-4. Set Flash Mode to **DIO** and CPU Frequency to **160MHz**. Leave Partition Scheme on Default: `partitions.csv` sets the layout (see below).
+3. Select board: **MakerGO ESP32 C3 SuperMini** (ESP32 core 3.3.5), with the library versions pinned in `.github/workflows/lumo-firmware.yml`. Updates over Wi-Fi are built with exactly these settings; a build for the generic ESP32C3 Dev Module on core 3.0.7 (FW 2.14.0) left the screen blank white.
+4. Leave the other menus on their defaults, Partition Scheme included: `partitions.csv` sets the layout (see below).
 5. Upload the sketch to your ESP32-C3.
 
 Or from a terminal with `arduino-cli` (same settings):
 
 ```bash
-arduino-cli compile --upload -p COM5 -b esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160 esp32_client
+arduino-cli compile --upload -p COM5 -b esp32:esp32:makergo_c3_supermini esp32_client
 ```
 
 Keep `partitions.csv` next to the `.ino`: the ESP32 core uses it instead of the
