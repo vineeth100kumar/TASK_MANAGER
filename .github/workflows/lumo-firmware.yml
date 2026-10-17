@@ -25,13 +25,17 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # ESP32C3 Dev Module, as in lumo/README.md. The flash layout comes from
-  # lumo/esp32_client/partitions.csv (two 1.9 MB app slots, so one can be
-  # written while the other runs); min_spiffs is the stock scheme with the
-  # same slots, so the size check below matches it.
-  FQBN: esp32:esp32:esp32c3:FlashMode=dio,CPUFreq=160,PartitionScheme=min_spiffs
-  ESP32_CORE: '3.0.7'
+  # Built exactly like a USB flash from the laptop's Arduino IDE (board
+  # "MakerGO ESP32 C3 SuperMini", ESP32 core 3.3.5, the library versions
+  # below). FW 2.14.0 was built for the generic ESP32C3 Dev Module on core
+  # 3.0.7 instead: it ran and joined Sage, but LUMO's screen stayed blank
+  # white. Change these only together with the laptop.
+  # The flash layout comes from lumo/esp32_client/partitions.csv (two 1.9 MB
+  # app slots, so one can be written while the other runs), as on the laptop.
+  FQBN: esp32:esp32:makergo_c3_supermini
+  ESP32_CORE: '3.3.5'
   ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  LIBRARIES: '"Adafruit GFX Library@1.12.1" "Adafruit ILI9341@1.6.2" "Adafruit BusIO@1.17.2" "Adafruit NeoPixel@1.15.1" "ArduinoJson@7.4.3"'
   APP_SLOT_BYTES: 1966080
 
 jobs:
@@ -46,12 +50,13 @@ jobs:
         run: |
           arduino-cli core update-index --additional-urls "$ESP32_INDEX"
           arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$ESP32_INDEX"
-          arduino-cli lib install "Adafruit GFX Library" "Adafruit ILI9341" "Adafruit NeoPixel" "ArduinoJson@7.2.1"
+          eval arduino-cli lib install $LIBRARIES
 
       - name: Build
         run: |
           test ! -e lumo/esp32_client/secrets.h
-          arduino-cli compile --fqbn "$FQBN" --additional-urls "$ESP32_INDEX" --output-dir build --warnings default lumo/esp32_client
+          arduino-cli compile --fqbn "$FQBN" --additional-urls "$ESP32_INDEX" --output-dir build --warnings default \
+            --build-property "upload.maximum_size=$APP_SLOT_BYTES" lumo/esp32_client
           ls -l build
 
       - name: Check it fits and describe it
