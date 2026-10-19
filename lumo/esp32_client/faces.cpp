@@ -591,7 +591,7 @@ static void islandPaint(const LumoState& s, IsKind kind, bool big) {
     uint16_t white = aaRGB(238, 238, 238, faceK), muted = aaRGB(140, 144, 152, faceK);
     uint16_t amber = aaRGB(255, 159, 67, faceK), green = aaRGB(120, 200, 140, faceK);
     int x0 = x1 - W;
-    if (big && W >= IS_BIG_W - 6 && H >= IS_BIG_H - 4) {
+    if (big && W >= IS_BIG_W - 6 && H >= min(IS_BIG_H, fitCard().h - 16) - 4) {
       const int mid = x0 + W / 2, top = cy - H / 2;
       if (kind == IS_MUSIC) {
         const int n = 76, ax = mid - n / 2, ay = top + 14;
@@ -650,7 +650,8 @@ static void islandTick(const LumoState& s) {
   bool grows = style == CLOCK_STACKED || style == CLOCK_DIAL;
   bool big = grows && (kind == IS_MUSIC || kind == IS_TIMER);
   float tw = kind == IS_NONE ? 0 : big ? IS_BIG_W : IS_DOT_W;
-  float th = kind == IS_NONE ? 0 : big ? IS_BIG_H : IS_DOT_H;
+  // A Fit test with big top or bottom margins shortens the card: the island stays inside it.
+  float th = kind == IS_NONE ? 0 : big ? min(IS_BIG_H, fitCard().h - 16) : IS_DOT_H;
 
   if (big && !detailsHidden) { detailsHidden = true; isBlank = true; }
   bool moving = fabsf(tw - isW) > 0.01f || fabsf(th - isH) > 0.01f;
