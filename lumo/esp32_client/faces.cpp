@@ -393,8 +393,8 @@ static void dial(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
 
   if (!minute || detailsHidden) return;       // (the island is covering the column)
   // With the island's dot on the right edge the column gives it room.
-  const int pull = framed() && screenFit.island ? 10 : 0;
-  const int x = FX(226) - pull, right = FX(316) - (pull ? 18 : 0);
+  const int pull = framed() && screenFit.island ? 14 : 0;
+  const int x = FX(226) - pull, right = FX(316) - (pull ? 22 : 0);
   if (!aaBegin(sf, FX(212) - pull, FY(30), FX(320) - FX(212) + pull, FY(196) - FY(30), bg)) return;
   snprintf(buf, sizeof(buf), "%s", fullName(s.weekday, DAYS, 7));
   upper(buf);
@@ -514,17 +514,19 @@ static void faceTickInner(const LumoState& s, const ClockNow& c) {
 // Nightstand nothing, to stay dark. Sage can switch it off (Screen fit).
 
 enum IsKind { IS_NONE, IS_ALARM, IS_MUSIC, IS_TIMER };
-static const int IS_DOT_W = 18, IS_DOT_H = 32, IS_BIG_W = 104, IS_BIG_H = 56;
+static const int IS_DOT_W = 22, IS_DOT_H = 40, IS_BIG_W = 104, IS_BIG_H = 168;   // big: nearly the card's full height
 static float isW = 0, isH = 0;               // the size drawn, easing towards the target
 static int   isDrawW = -1, isDrawH = -1;     // what the panel shows now
 static unsigned long isLast = 0, isLastBars = 0;
 static int   isLastSec = -1;
 static bool  isBlank = false;
+static uint16_t isLastArt = 0;               // the cover the island last showed (display.cpp's artSerial)
 
 static void islandReset() {
   isW = isH = 0;
   isDrawW = isDrawH = -1;
   isLastSec = -1;
+  isLastArt = artSerial;
   isBlank = false;
   detailsHidden = false;
 }
@@ -541,6 +543,31 @@ static int islandTimerLeft(const LumoState& s) {           // milliseconds
   if (s.tm_state == TOOL_PAUSED) return (int)s.tm_left_ms;
   int32_t left = (int32_t)(s.tm_end - millis());
   return left < 0 ? 0 : left;
+}
+
+// The cover, n x n with rounded corners, averaged down from the 100 x 100 frame.
+static void islandArt(AASurface& sf, int ox, int oy, int n, float rad) {
+  const uint16_t* px = (const uint16_t*)artBuf;
+  const uint8_t k = (uint8_t)(faceK * 255);
+  for (int y = 0; y < n; y++) {
+    int sy0 = y * 100 / n, sy1 = max(sy0 + 1, (y + 1) * 100 / n);
+    for (int x = 0; x < n; x++) {
+      float dx = x < rad ? rad - x - 0.5f : (x >= n - rad ? x - (n - rad) + 0.5f : 0);
+      float dy = y < rad ? rad - y - 0.5f : (y >= n - rad ? y - (n - rad) + 0.5f : 0);
+      float cov = 1;
+      if (dx > 0 && dy > 0) cov = constrain(rad + 0.5f - sqrtf(dx * dx + dy * dy), 0.0f, 1.0f);
+      if (cov <= 0) continue;
+      int sx0 = x * 100 / n, sx1 = max(sx0 + 1, (x + 1) * 100 / n);
+      int r = 0, g = 0, b = 0, cnt = 0;
+      for (int yy = sy0; yy < sy1; yy++)
+        for (int xx = sx0; xx < sx1; xx++) {
+          uint16_t c = px[yy * 100 + xx];
+          r += c >> 11; g += (c >> 5) & 63; b += c & 31; cnt++;
+        }
+      uint16_t c = (uint16_t)(((r / cnt) << 11) | ((g / cnt) << 5) | (b / cnt));
+      sf.buf[(oy - sf.y + y) * sf.w + (ox - sf.x + x)] = aaMix(0x0000, c, (uint8_t)(k * cov));
+    }
+  }
 }
 
 static void islandPaint(const LumoState& s, IsKind kind, bool big) {
@@ -565,36 +592,47 @@ static void islandPaint(const LumoState& s, IsKind kind, bool big) {
     uint16_t amber = aaRGB(255, 159, 67, faceK), green = aaRGB(120, 200, 140, faceK);
     int x0 = x1 - W;
     if (big && W >= IS_BIG_W - 6 && H >= IS_BIG_H - 4) {
+      const int mid = x0 + W / 2, top = cy - H / 2;
       if (kind == IS_MUSIC) {
-        uint8_t cr, cg, cb;
-        displayArtTint(cr, cg, cb);
-        aaRoundRect(sf, x0 + 10, cy - 14, 28, 28, 6, aaRGB(cr, cg, cb, faceK));
-        char t[24];
+        const int n = 76, ax = mid - n / 2, ay = top + 14;
+        if (artSerial) islandArt(sf, ax, ay, n, 9);
+        else {
+          uint8_t cr, cg, cb;
+          displayArtTint(cr, cg, cb);
+          aaRoundRect(sf, ax, ay, n, n, 9, aaRGB(cr, cg, cb, faceK));
+        }
+        char t[28];
         strlcpy(t, s.sp_title, sizeof(t));
-        fitText(t, AA_BODY11, W - 46 - 8);
-        aaText(sf, x0 + 46, cy - 3, t, AA_BODY11, white);
+        fitText(t, AA_BODY11, W - 16);
+        aaTextCentered(sf, mid, ay + n + 18, t, AA_BODY11, white);
+        if (s.sp_artist[0]) {
+          char a[28];
+          strlcpy(a, s.sp_artist, sizeof(a));
+          fitText(a, AA_BODY11, W - 16);
+          aaTextCentered(sf, mid, ay + n + 34, a, AA_BODY11, muted);
+        }
         unsigned long now = millis();
         for (int i = 0; i < 5; i++) {
-          float h = s.sp_playing ? 3.0f + 8.0f * fabsf(sinf(now * 0.008f + i * 1.4f)) : 2.0f;
-          aaRoundRect(sf, x0 + 46 + i * 6, cy + 12 - h, 3, h, 1.0f, green);
+          float h = s.sp_playing ? 3.0f + 9.0f * fabsf(sinf(now * 0.008f + i * 1.4f)) : 2.0f;
+          aaRoundRect(sf, mid - 15 + i * 6, top + H - 14 - h, 3, h, 1.0f, green);
         }
       } else if (kind == IS_TIMER) {
         int left = islandTimerLeft(s);
         float frac = s.tm_total_ms ? constrain(left / (float)s.tm_total_ms, 0.0f, 1.0f) : 0.0f;
-        const int dots = 20;
+        const int dots = 28, ringY = top + 62;
         for (int i = 0; i < dots; i++) {
           float a = i * 6.2831853f / dots;
-          aaDisc(sf, x0 + 26 + sinf(a) * 15, cy - cosf(a) * 15, 1.7f, i < (int)(frac * dots + 0.5f) ? amber : aaRGB(70, 56, 40, faceK));
+          aaDisc(sf, mid + sinf(a) * 36, ringY - cosf(a) * 36, 2.2f, i < (int)(frac * dots + 0.5f) ? amber : aaRGB(70, 56, 40, faceK));
         }
         char t[12];
         int secs = (left + 999) / 1000;
         if (secs >= 3600) snprintf(t, sizeof(t), "%d:%02d", secs / 3600, secs / 60 % 60);
         else snprintf(t, sizeof(t), "%02d:%02d", secs / 60, secs % 60);
-        aaText(sf, x0 + 46, cy + 2, t, AA_DISP14, white);
+        aaTextCentered(sf, mid, ringY + 6, t, AA_DISP14, white);
         char lab[25];
         strlcpy(lab, s.tm_label[0] ? s.tm_label : (s.tm_state == TOOL_PAUSED ? "Paused" : "Timer"), sizeof(lab));
-        fitText(lab, AA_BODY11, W - 46 - 6);
-        aaText(sf, x0 + 46, cy + 18, lab, AA_BODY11, muted);
+        fitText(lab, AA_BODY11, W - 16);
+        aaTextCentered(sf, mid, top + H - 22, lab, AA_BODY11, muted);
       }
     } else if (!big || W < 40) {
       // The dot: the colour says what it stands for.
@@ -631,8 +669,8 @@ static void islandTick(const LumoState& s) {
     if (kind == IS_TIMER) {
       int sec = (islandTimerLeft(s) + 999) / 1000;
       if (sec != isLastSec) { isLastSec = sec; content = true; }
-    } else if (kind == IS_MUSIC && now - isLastBars >= 100) {
-      isLastBars = now; content = true;
+    } else if (kind == IS_MUSIC && (now - isLastBars >= 100 || isLastArt != artSerial)) {
+      isLastBars = now; isLastArt = artSerial; content = true;
     }
   }
   int W = (int)(isW + 0.5f), H = (int)(isH + 0.5f);

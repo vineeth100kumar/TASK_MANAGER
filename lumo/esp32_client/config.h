@@ -141,7 +141,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.15.0"
+#define FW_VERSION "2.16.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
