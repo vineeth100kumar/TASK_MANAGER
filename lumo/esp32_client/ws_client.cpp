@@ -294,6 +294,28 @@ static void handleTextMessage(const char* payload, size_t len) {
     }
     applyClockStyle(s, doc);
   }
+  else if (strcmp(cmd, "FIT") == 0) {
+    // The case window, and the Even Frame / island switches (Sage: LUMO > Clock > Screen fit).
+    ScreenFit n = screenFit;
+    n.l = constrain(doc["l"] | (int)n.l, 0, 60);
+    n.r = constrain(doc["r"] | (int)n.r, 0, 60);
+    n.t = constrain(doc["t"] | (int)n.t, 0, 60);
+    n.b = constrain(doc["b"] | (int)n.b, 0, 60);
+    if (doc["frame"].is<bool>())  n.frame  = doc["frame"];
+    if (doc["island"].is<bool>()) n.island = doc["island"];
+    bool test = doc["test"] | false;
+    bool saved = n.l != screenFit.l || n.r != screenFit.r || n.t != screenFit.t || n.b != screenFit.b ||
+                 n.frame != screenFit.frame || n.island != screenFit.island;
+    bool redraw = saved || test != screenFit.test;
+    n.test = test;
+    screenFit = n;
+    if (saved) storeSaveFit(screenFit);
+    if (redraw) {
+      s.flag_clock_changed = true;            // the clock screen starts over at the new window
+      if (test) { s.next_screen = SCREEN_CLOCK; s.flag_screen_switch = true; }   // the pattern shows on the clock screen
+    }
+    Serial.printf("[WS] Screen fit: l%d r%d t%d b%d frame %d island %d test %d\n", n.l, n.r, n.t, n.b, n.frame, n.island, n.test);
+  }
   else if (strcmp(cmd, "WEATHER") == 0) {
     s.temp_c = doc["temp_c"] | s.temp_c;
     if (doc["icon"].is<const char*>()) {
@@ -545,6 +567,11 @@ static void sayHello() {
   if (lastDrop[0]) hello["drop"] = lastDrop;
   if (!everPaired) hello["boot"] = bootReason();
   hello["ota"] = 1;   // takes updates over Wi-Fi (the OTA command)
+  {
+    JsonObject f = hello["fit"].to<JsonObject>();   // the case window as saved (2.15)
+    f["l"] = screenFit.l; f["r"] = screenFit.r; f["t"] = screenFit.t; f["b"] = screenFit.b;
+    f["frame"] = screenFit.frame; f["island"] = screenFit.island;
+  }
   if (otaLastError()[0]) hello["otaError"] = otaLastError();
   if (pendingCount) {
     JsonArray list = hello["offline"].to<JsonArray>();

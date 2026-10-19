@@ -178,6 +178,7 @@ void setup() {
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
   storeLoad(lumoState);
+  storeLoadFit(screenFit);
   hapticInit(lumoState.haptic_strength);
   initNeoPixels();
   displayInit();

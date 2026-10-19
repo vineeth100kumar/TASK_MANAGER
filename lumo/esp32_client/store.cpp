@@ -62,6 +62,28 @@ void storeLoad(LumoState& s) {
   p.end();
 }
 
+// The case window and the frame and island switches (FIT from Sage). The test flag isn't kept.
+void storeLoadFit(ScreenFit& f) {
+  Preferences p;
+  if (!p.begin(NS, true)) return;
+  f.l = constrain(p.getChar("fitl", SCREEN_WIN_L), 0, 60);
+  f.r = constrain(p.getChar("fitr", SCREEN_WIN_R), 0, 60);
+  f.t = constrain(p.getChar("fitt", SCREEN_WIN_T), 0, 60);
+  f.b = constrain(p.getChar("fitb", SCREEN_WIN_B), 0, 60);
+  f.frame  = p.getBool("fitframe", false);
+  f.island = p.getBool("fitisland", true);
+  p.end();
+}
+
+void storeSaveFit(const ScreenFit& f) {
+  Preferences p;
+  if (!p.begin(NS, false)) return;
+  p.putChar("fitl", f.l); p.putChar("fitr", f.r); p.putChar("fitt", f.t); p.putChar("fitb", f.b);
+  p.putBool("fitframe", f.frame);
+  p.putBool("fitisland", f.island);
+  p.end();
+}
+
 void storeSaveClock(const LumoState& s) {
   Preferences p;
   if (!p.begin(NS, false)) return;

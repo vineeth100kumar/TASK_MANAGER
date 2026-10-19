@@ -48,6 +48,8 @@ from desk.ota import ALARM_MARGIN_MINUTES, FirmwareUpdates
 from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
 
+FIT_TEST_SECONDS = 180   # the Fit test pattern goes by itself after this long
+
 log = logging.getLogger("desk")
 
 SOURCE = "desk"
@@ -97,6 +99,7 @@ class Desk:
 
         self.settings = settings or desk_settings.defaults()
         self.lights_off = False
+        self.fit_test = False          # the Fit test pattern is showing on the clock (firmware 2.15+)
         self.night = False
         self.timer = Timer()
         self.stopwatch = Stopwatch()
@@ -539,6 +542,22 @@ class Desk:
         await self.link.send({"cmd": "HAPTICS", "strength": haptics["strength"],
                               "buttons": haptics["buttons"], "notify": haptics["notifications"]})
 
+    async def send_fit(self) -> bool:
+        """The case window and the Even Frame / island switches (firmware 2.15+,
+        kept in flash), with the Fit test on or off. Older firmware has none."""
+        if not self.link.connected or not self.firmware_at_least((2, 15)):
+            return False
+        screen = self.settings["screen"]
+        return await self.link.send({"cmd": "FIT", "l": screen["left"], "r": screen["right"], "t": screen["top"],
+                                     "b": screen["bottom"], "frame": screen["frame"], "island": screen["island"],
+                                     "test": self.fit_test})
+
+    async def _fit_test_timeout(self) -> None:
+        await asyncio.sleep(FIT_TEST_SECONDS)
+        if self.fit_test:
+            self.fit_test = False
+            await self.send_fit()
+
     def clock_extra(self) -> dict:
         """How to show the time, sent with every CLOCK (firmware 1.6 ignores
         these; LUMO 2 draws the clock styles from them)."""
@@ -564,6 +583,7 @@ class Desk:
             return
         await self.controller.send_lights()
         await self.send_haptics()
+        await self.send_fit()
         await self.controller.send_clock()
         await self.send_alarms()
         await self.send_tool_settings(force=True)
@@ -580,6 +600,7 @@ class Desk:
         self.depth_sent = None
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
         await self.send_haptics()
+        await self.send_fit()
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
@@ -701,6 +722,14 @@ class Desk:
             seconds = -(-TONE_CYCLE_MS.get(tone, 2000) // 1000)
             return await self.link.send({"cmd": "TONE", "tone": tone, "volume": volume if volume else self.settings["alarm"]["volume"],
                                          "cycles": 1, "seconds": seconds})
+        if action in ("fit_test", "fit_test_off"):
+            if not self.firmware_at_least((2, 15)):
+                raise ValueError("The Fit test needs firmware 2.15 or later.")
+            self.fit_test = action == "fit_test"
+            sent = await self.send_fit()
+            if self.fit_test:
+                self._spawn(self._fit_test_timeout())    # it never stays up for long
+            return sent
         raise ValueError(f"Unknown device action {action!r}.")
 
     def state(self) -> dict:
@@ -710,6 +739,8 @@ class Desk:
             "screen": self.controller.screen,
             "night": self.night,
             "lightsOff": self.lights_off,
+            "fitTest": self.fit_test,
+            "screenFitSupported": self.firmware_at_least((2, 15)),
             "toolsSupported": self.has_tools,
             "ringing": {"id": ringing.id, "label": ringing.title, "since": int(self.ringing_since * 1000)} if ringing else None,
             "timer": self.timer.describe(),

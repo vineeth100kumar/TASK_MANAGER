@@ -1,10 +1,12 @@
 // The LUMO page's clock settings: the face, how the time reads, the World
-// screen's places, and which screens UP and DOWN step through.
+// screen's places, which screens UP and DOWN step through, and how the clock
+// fits its case window (screen fit, the Even Frame and its island).
 import { useMemo, useState } from 'react';
 import { Check, Clock, Globe2, LayoutGrid, Plus, X } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
 import { Panel, Row, Toggle, selectCls } from './parts';
 import { DepthFacePanel } from './DepthFacePanel';
+import { ScreenFitPanel } from './ScreenFitPanel';
 import { Select } from '../common/Select';
 
 export const FACES: { id: string; name: string; hint: string; classic?: boolean }[] = [
@@ -41,7 +43,7 @@ function zoneNow(zone: string, hour24: boolean) {
   }
 }
 
-export function ClockTab({ settings, save, toolsSupported, depthSupported }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean; depthSupported: boolean }) {
+export function ClockTab({ settings, save, toolsSupported, depthSupported, fitSupported, fitTest, connected }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean; depthSupported: boolean; fitSupported: boolean; fitTest: boolean; connected: boolean }) {
   const zones = useMemo<string[]>(() => {
     try { return (Intl as any).supportedValuesOf('timeZone'); } catch { return COMMON_ZONES; }
   }, []);
@@ -150,6 +152,8 @@ export function ClockTab({ settings, save, toolsSupported, depthSupported }: { s
           </Row>
         </Panel>
       </div>
+
+      <ScreenFitPanel settings={settings} save={save} supported={fitSupported} testing={fitTest} connected={connected} />
 
       <DepthFacePanel settings={settings} save={save} supported={depthSupported} />
     </div>
