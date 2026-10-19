@@ -40,15 +40,32 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned so a new runner image can't change the build under us.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
       - uses: arduino/setup-arduino-cli@v2
+        with:
+          # Pinned: on 2026-10-19 the newest 1.x couldn't load arduino.cc's package index.
+          version: 1.3.1
 
       - name: Install the ESP32 core and libraries
         run: |
-          arduino-cli core update-index --additional-urls "$ESP32_INDEX"
+          # The index download sometimes fails on its own: try it a few times.
+          # On 2026-10-19 arduino.cc's package_index.tar.bz2 stopped unpacking,
+          # so after that fetch the plain JSON files by hand.
+          ok=
+          for i in 1 2 3; do
+            arduino-cli core update-index --additional-urls "$ESP32_INDEX" && { ok=1; break; }
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "::warning::arduino-cli couldn't update its index; fetching it directly"
+            mkdir -p ~/.arduino15
+            curl -fsSL --retry 3 https://downloads.arduino.cc/packages/package_index.json -o ~/.arduino15/package_index.json
+            curl -fsSL --retry 3 "$ESP32_INDEX" -o ~/.arduino15/package_esp32_index.json
+          fi
           arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$ESP32_INDEX"
           # --no-deps: otherwise the ILI9341 pulls in the newest GFX over the pinned one.
           eval arduino-cli lib install --no-deps $LIBRARIES
