@@ -21,6 +21,7 @@ static inline FitCard fitCard() {
 }
 extern uint8_t artBuf[20004];
 extern bool newArtReady;
+extern uint16_t artSerial;    // counts covers received, so a face can tell when it changed
 
 void displayInit();
 void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw);

@@ -16,6 +16,7 @@ ScreenFit screenFit;
 
 alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
+uint16_t artSerial = 0;
 
 static const uint16_t COLOR_BG_BLACK  = 0x0000;
 static const uint16_t COLOR_BG_STEALTH= 0x0842; // Deep stealth black/navy
@@ -80,11 +81,12 @@ void onNewArt(const uint8_t* data, size_t len) {
     size_t row = data[2], rows = data[3];
     if (row + rows > 100 || len - 4 < rows * ROW_BYTES) return;
     memcpy(artBuf + row * ROW_BYTES, data + 4, rows * ROW_BYTES);
-    if (row + rows == 100) { newArtReady = true; measureArtTint(); }   // the last strip completes the cover
+    if (row + rows == 100) { newArtReady = true; artSerial++; measureArtTint(); }   // the last strip completes the cover
   } else if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
     size_t copyLen = min(len - 4, (size_t)20000);
     memcpy(artBuf, data + 4, copyLen);
     newArtReady = true;
+    artSerial++;
     measureArtTint();
   }
 }
