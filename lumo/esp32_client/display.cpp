@@ -11,8 +11,27 @@
 #include <Fonts/FreeSans24pt7b.h>
 #include <math.h>
 
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+FitTFT tft(TFT_CS, TFT_DC);
 ScreenFit screenFit;
+
+// The squeeze for screens drawn for the whole panel: into the card with the
+// Even Frame on, else into the window's columns. Off when nothing is hidden.
+void displayFitApply(bool on) {
+  int x0 = screenFit.l, w = 320 - screenFit.l - screenFit.r;
+  if (screenFit.frame) { FitCard c = fitCard(); x0 = c.x; w = c.w; }
+  tft.fit = on && !screenFit.test && w > 100 && (x0 != 0 || w != 320);
+  tft.fx0 = x0; tft.fw = w;
+}
+
+// Black in the columns the squeeze leaves out (the frame, or the hidden edge).
+static void fitMargins() {
+  if (!tft.fit) return;
+  int16_t x0 = tft.fx0, w = tft.fw;
+  tft.fit = false;
+  if (x0 > 0) tft.fillRect(0, 0, x0, 240, 0x0000);
+  if (x0 + w < 320) tft.fillRect(x0 + w, 0, 320 - x0 - w, 240, 0x0000);
+  tft.fit = true;
+}
 
 alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
@@ -598,6 +617,7 @@ static void clockTick(const LumoState& s);
 void displayClockTick(const LumoState& s) {
   clockTick(s);
   drawLinkBadge();
+  displayFitApply(!faceIsPremium(s.clock_style));
 }
 
 static void clockTick(const LumoState& s) {
@@ -614,10 +634,16 @@ static void clockTick(const LumoState& s) {
   }
 
   depthOn = s.clock_style == CLOCK_DEPTH;
-  if (depthOn && depthTick(clockNeedsStatic)) {
-    clockNeedsStatic = false;
-    return;
+  if (depthOn) {
+    displayFitApply(true);                 // the Pi's picture is drawn for the whole panel
+    bool drawn = depthTick(clockNeedsStatic);
+    displayFitApply(false);
+    if (drawn) {
+      clockNeedsStatic = false;
+      return;
+    }
   }
+  displayFitApply(!faceIsPremium(s.clock_style));
   if (faceIsPremium(s.clock_style)) {
     faceTick(s, c);
     clockNeedsStatic = false;
@@ -1129,6 +1155,9 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
   if (mode != SCREEN_CLOCK) depthOn = false;
   bool modeChanged = (mode != lastModeDrawn) || forceFullRedraw;
   lastModeDrawn = mode;
+  // Every screen fits the window; the smooth faces place themselves.
+  displayFitApply(mode != SCREEN_CLOCK || !faceIsPremium(s.clock_style));
+  if (modeChanged) fitMargins();
 
   switch (mode) {
     case SCREEN_CARD:
