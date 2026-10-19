@@ -123,15 +123,25 @@
 #define V_TOL   0.05f
 
 // ===================== SCREEN AREA =====================
-// Rows of the 320x240 panel that the case hides. Every screen fits its layout
-// into the rows that are left, so nothing ends up behind the bezel. Raise a
-// number if text is still clipped on that edge; set both to 0 if the whole
-// panel shows.
-#define SCREEN_HIDDEN_TOP     0
-#define SCREEN_HIDDEN_BOTTOM  24
+// The part of the 320x240 panel the case window shows, as the number of
+// columns / rows it hides on each side (set in Sage: LUMO > Clock > Screen
+// fit, with a Fit test; these are the defaults). Every screen fits its layout
+// into what is left, so nothing ends up behind the bezel. The right side can
+// hide nothing: past the panel's last column the window shows bare glass.
+#define SCREEN_WIN_L  6
+#define SCREEN_WIN_R  0
+#define SCREEN_WIN_T  0
+#define SCREEN_WIN_B  4
+
+// The Even Frame (2.15, off until switched on in Sage): the clock faces sit on a
+// square-cornered card inside a black frame, and the bare glass strip on the
+// right is the frame's right side. FRAME_SIDE is the left frame's width (the
+// strip's width, so both sides match); FRAME_VERT the top and bottom.
+#define FRAME_SIDE    18
+#define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.14.1"
+#define FW_VERSION "2.15.0"
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.
@@ -170,6 +180,17 @@ enum AlarmTone    { TONE_PULSE, TONE_CLASSIC, TONE_RISING, TONE_CHIRP,
 enum ToolState    { TOOL_IDLE, TOOL_RUNNING, TOOL_PAUSED, TOOL_DONE };
 #define MAX_WORLD_CLOCKS 3
 #define STOPWATCH_LAPS   4
+
+// What the case window shows and how the faces use it (FIT from Sage, kept in
+// flash except for `test`). l/r/t/b: columns and rows hidden on each side.
+struct ScreenFit {
+  int8_t l = SCREEN_WIN_L, r = SCREEN_WIN_R, t = SCREEN_WIN_T, b = SCREEN_WIN_B;
+  bool frame  = false;   // Even Frame: faces on a card inside a black frame
+  bool island = true;    // the island on the card's right edge (alarm, music, timer)
+  bool test   = false;   // showing the Fit test pattern (not saved)
+};
+// The card the clock faces draw on, in panel pixels.
+struct FitCard { int x, y, w, h; };
 
 // ===================== CENTRAL STATE STRUCT =====================
 struct LumoState {

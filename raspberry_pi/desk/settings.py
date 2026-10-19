@@ -3,6 +3,7 @@ settings.py - the desk clock's settings, changed from Sage.
 
 Which screens UP and DOWN step through, what every button does on each screen,
 the alarm's snooze and ring length, the lights, how strong the haptics are,
+what the case window shows and the Even Frame,
 how the clock shows the time, the welcome back message and firmware updates. They live in Sage's metadata table (key `deskSettings`) next to the
 notification preferences, and reach the clock the moment they are saved.
 
@@ -68,6 +69,11 @@ DEFAULTS: Dict[str, Any] = {
     # 2.7+), and whether to knock on each button press and twice for a
     # notification or reminder (firmware 2.8+). The alarm always rings.
     "haptics": {"strength": 70, "buttons": True, "notifications": True},
+    # What the case window shows, as the columns and rows it hides on each
+    # side (firmware 2.15+; the Fit test shows them), and the Even Frame: the
+    # clock faces on a square card inside a black frame, with an island on its
+    # right edge for the alarm, music and timers.
+    "screen": {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True},
     # When the phone comes home after at least `awayMinutes` out, the clock
     # shows `message` with what's on today.
     "welcome": {"enabled": True, "message": "Welcome back to your room", "awayMinutes": 15},
@@ -219,6 +225,15 @@ def merge(current: dict, update: dict) -> dict:
         for name in ("buttons", "notifications"):
             if name in haptics:
                 out["haptics"][name] = _bool(haptics[name], f"haptics.{name}")
+
+    if "screen" in update:
+        screen = _section(update["screen"], "screen")
+        for name in ("left", "right", "top", "bottom"):
+            if name in screen:
+                out["screen"][name] = _int(screen[name], f"screen.{name}", 0, 40)
+        for name in ("frame", "island"):
+            if name in screen:
+                out["screen"][name] = _bool(screen[name], f"screen.{name}")
 
     if "welcome" in update:
         welcome = _section(update["welcome"], "welcome")

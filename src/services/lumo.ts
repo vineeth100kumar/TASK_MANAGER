@@ -49,6 +49,7 @@ export interface LumoState {
   screen: string;
   night: boolean;
   lightsOff: boolean;
+  fitTest?: boolean;            // the Fit test pattern is showing on the clock (firmware 2.15+)
   toolsSupported: boolean;
   ringing: { id: string; label: string; since: number } | null;
   timer: LumoTimer;
@@ -123,6 +124,8 @@ export interface LumoSettings {
   world: { zones: string[] };
   night: { enabled: boolean; start: string; end: string; face: string; lightsMode: string; brightness: number };
   haptics: { strength: number; buttons: boolean; notifications: boolean };
+  // What the case window hides on each side (px, firmware 2.15+), the Even Frame and its island.
+  screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean };
   welcome: { enabled: boolean; message: string; awayMinutes: number };
   updates: { auto: boolean };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
@@ -156,7 +159,7 @@ export const lumoApi = {
   ringing: (action: 'snooze' | 'stop') => post<LumoStatus>('/api/desk/ringing', { action }),
   timer: (action: string, seconds = 0, label = '') => post<LumoStatus>('/api/desk/timer', { action, seconds, label }),
   stopwatch: (action: string) => post<LumoStatus>('/api/desk/stopwatch', { action }),
-  device: (action: 'identify' | 'restart' | 'tone', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
+  device: (action: 'identify' | 'restart' | 'tone' | 'fit_test' | 'fit_test_off', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
   firmware: (action: 'check' | 'install') => post<LumoStatus>('/api/desk/firmware', { action }),
 };

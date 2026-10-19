@@ -7,6 +7,8 @@
 // only when a value changed, so the once-a-minute CLOCK costs no flash wear.
 void storeLoad(LumoState& s);
 void storeSaveClock(const LumoState& s);
+void storeLoadFit(ScreenFit& f);
+void storeSaveFit(const ScreenFit& f);
 void storeSaveAlarms(const LumoState& s);
 void storeSaveHaptics(const LumoState& s);
 

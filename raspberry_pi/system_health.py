@@ -171,7 +171,7 @@ def report(
 def clock_part(state: dict) -> dict:
     """The desk clock: connected or not, its firmware, and how steady its
     link has been (desk/link.py's health, with the last few events)."""
-    out = {k: state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in state}
+    out = {k: state.get(k) for k in ("enabled", "connected", "firmware", "screenFit", "connectedAt", "error") if k in state}
     link = state.get("link")
     if isinstance(link, dict):
         out["link"] = {**link, "history": (link.get("history") or [])[:5]}

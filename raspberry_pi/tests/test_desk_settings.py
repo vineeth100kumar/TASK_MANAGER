@@ -55,6 +55,17 @@ class Merge(unittest.TestCase):
             s = settings.merge(settings.defaults(), {"clock": {"style": style}})
             self.assertEqual(s["clock"]["style"], style)
 
+    def test_screen_fit_defaults_and_limits(self):
+        s = settings.defaults()["screen"]
+        self.assertEqual(s, {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True})
+        s = settings.merge(settings.defaults(), {"screen": {"left": 9, "frame": True}})["screen"]
+        self.assertEqual((s["left"], s["right"], s["frame"], s["island"]), (9, 0, True, True))
+        for bad, why in (({"left": 41}, "0 to 40"), ({"top": -1}, "0 to 40"), ({"bottom": True}, "whole number"),
+                         ({"frame": "yes"}, "true or false")):
+            with self.assertRaises(ValueError) as caught:
+                settings.merge(settings.defaults(), {"screen": bad})
+            self.assertIn(why, str(caught.exception))
+
     def test_the_face_is_refused_now(self):
         with self.assertRaises(ValueError):
             settings.merge(settings.defaults(), {"screens": ["FACE", "CLOCK"]})
@@ -241,6 +252,48 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 35, "buttons": True, "notify": True})
         await desk.apply_settings(settings.merge(desk.settings, {"haptics": {"strength": 0}}))
         self.assertEqual(self.link.last("HAPTICS")["strength"], 0)
+
+
+class ScreenFit(unittest.IsolatedAsyncioTestCase):
+    """The case window and the Even Frame reach firmware 2.15 and later as FIT."""
+
+    def make(self, fw="2.15.0"):
+        self.link = FakeLink()
+        self.link.fw = fw
+
+        async def broadcast(event):
+            pass
+
+        return Desk(self.link, lambda: at(9, 0), FakePhone(), broadcast, items=lambda: [], actions=FakeActions([]))
+
+    async def test_fit_reaches_the_clock(self):
+        desk = self.make()
+        await desk.after_redraw()
+        self.assertEqual(self.link.last("FIT"), {"cmd": "FIT", "l": 6, "r": 0, "t": 0, "b": 4, "frame": False, "island": True, "test": False})
+        await desk.apply_settings(settings.merge(desk.settings, {"screen": {"left": 8, "frame": True}}))
+        fit = self.link.last("FIT")
+        self.assertEqual((fit["l"], fit["frame"], fit["test"]), (8, True, False))
+
+    async def test_older_firmware_is_not_sent_it(self):
+        desk = self.make("2.14.1")
+        await desk.after_redraw()
+        self.assertNotIn("FIT", self.link.cmds())
+        with self.assertRaises(ValueError):
+            await desk.device_do("fit_test")
+
+    async def test_fit_test_goes_on_and_off(self):
+        desk = self.make()
+        self.assertTrue(await desk.device_do("fit_test"))
+        self.assertTrue(self.link.last("FIT")["test"])
+        self.assertTrue(desk.state()["fitTest"])
+        # Saving a setting while the pattern is up keeps it up.
+        await desk.apply_settings(settings.merge(desk.settings, {"screen": {"top": 2}}))
+        self.assertEqual((self.link.last("FIT")["t"], self.link.last("FIT")["test"]), (2, True))
+        self.assertTrue(await desk.device_do("fit_test_off"))
+        self.assertFalse(self.link.last("FIT")["test"])
+        self.assertFalse(desk.state()["fitTest"])
+        for task in list(desk._tasks):
+            task.cancel()
 
 
 class RunHelpers(unittest.IsolatedAsyncioTestCase):

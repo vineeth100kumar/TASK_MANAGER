@@ -6,10 +6,19 @@
 
 extern Adafruit_ILI9341 tft;
 
-// The rows the case window shows (see SCREEN_HIDDEN_* in config.h).
-static constexpr int VIS_T = SCREEN_HIDDEN_TOP;
-static constexpr int VIS_B = 240 - SCREEN_HIDDEN_BOTTOM;
-static constexpr int VIS_H = VIS_B - VIS_T;
+// What the case window shows (ScreenFit in config.h; set from Sage, kept in flash).
+extern ScreenFit screenFit;
+#define VIS_T (screenFit.t)
+#define VIS_B (240 - screenFit.b)
+#define VIS_H (VIS_B - VIS_T)
+// The card the clock faces draw on: the window's rows, full width. With the
+// Even Frame on it is smaller, inside a black frame on three sides; the right
+// side is the bare glass past the panel's last column.
+static inline FitCard fitCard() {
+  if (!screenFit.frame) return { 0, VIS_T, 320, VIS_H };
+  int x = screenFit.l + FRAME_SIDE, y = screenFit.t + FRAME_VERT;
+  return { x, y, 320 - screenFit.r - x, VIS_B - FRAME_VERT - y };
+}
 extern uint8_t artBuf[20004];
 extern bool newArtReady;
 

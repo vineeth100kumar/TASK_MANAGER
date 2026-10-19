@@ -12,6 +12,7 @@
 #include <math.h>
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+ScreenFit screenFit;
 
 alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
@@ -29,9 +30,9 @@ static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
 
 // Layouts are written for the full 240 rows; SY() maps such a row into the
 // rows the case window shows (VIS_T..VIS_B, see display.h).
-static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
-static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
-static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
+static inline int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
+static inline int SH(int y, int h) { return SY(y + h) - SY(y); }
+#define CAPTION_Y (VIS_B - 26)   // memory caption strip
 
 void displayInit() {
   tft.begin();
@@ -155,9 +156,11 @@ void onDepthStrip(const uint8_t* data, size_t len) {
   if (!depthOn || lastModeDrawn != SCREEN_CLOCK || len < 5) return;
   uint16_t y = data[2] | ((uint16_t)data[3] << 8);
   uint8_t  n = data[4];
-  if (n == 0 || n > 2 || len < 5 + (size_t)n * 640 || y + n > VIS_H) return;
+  // The Pi draws the picture 216 rows tall; in a taller window it sits in the middle.
+  const int DEPTH_ROWS = 216, off = max(0, (VIS_H - DEPTH_ROWS) / 2);
+  if (n == 0 || n > 2 || len < 5 + (size_t)n * 640 || y + n > DEPTH_ROWS) return;
   memcpy(depthRows, data + 5, (size_t)n * 640);   // aligned copy, as onNewMemoryStrip does
-  tft.drawRGBBitmap(0, VIS_T + y, depthRows, 320, n);
+  tft.drawRGBBitmap(0, VIS_T + off + y, depthRows, 320, n);
   depthShowing = true;
   depthLastStrip = millis();
 }
@@ -207,8 +210,9 @@ void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, 
 static const int CLK_CANVAS_W = 280;
 static const int CLK_CANVAS_H = 80;
 static const int CLK_CANVAS_X = (320 - CLK_CANVAS_W) / 2;
-static const int CLK_CANVAS_Y = SY(38);
-static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = SY(134), CLK_BAR_H = 3;
+#define CLK_CANVAS_Y SY(38)
+static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_H = 3;
+#define CLK_BAR_Y SY(134)
 
 static GFXcanvas16* timeCanvas = nullptr;
 static bool          canvasTried = false;
@@ -339,7 +343,9 @@ static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) 
 // =====================================================================
 //  ANALOG CLOCK: a dial above, the date and alarm (or second zone) below.
 // =====================================================================
-static const int DIAL_X = 160, DIAL_Y = SY(102), DIAL_R = 88 * VIS_H / 240;
+static const int DIAL_X = 160;
+#define DIAL_Y SY(102)
+#define DIAL_R (88 * VIS_H / 240)
 static const int HAND_H = DIAL_R * 50 / 88, HAND_M = DIAL_R * 74 / 88, HAND_S = DIAL_R * 80 / 88;
 static float dialLast[3] = { -1, -1, -1 };   // hour, minute, second hand angles drawn
 
@@ -593,6 +599,7 @@ void displayClockTick(const LumoState& s) {
 }
 
 static void clockTick(const LumoState& s) {
+  if (screenFit.test) return;            // the Fit test is drawn once
   static unsigned long lastDraw = 0;
   unsigned long now = millis();
   bool entering = (now - clockEnterMs) < 700;
@@ -637,7 +644,54 @@ static void clockTick(const LumoState& s) {
   if (c.synced && s.show_seconds) drawClockSeconds(c, fade, entering);
 }
 
+// The Fit test (Sage: LUMO > Clock > Screen fit): a one-pixel outline on the
+// window's edges, with rulers inside. Nudge each side in Sage until the outline
+// just touches the bezel all the way round and none of it is hidden.
+static void drawFitTest() {
+  const ScreenFit& f = screenFit;
+  int L = f.l, R = 319 - f.r, T = f.t, B = 239 - f.b;
+  const uint16_t dim = tft.color565(70, 74, 84), amber = tft.color565(255, 159, 67);
+  tft.fillScreen(COLOR_BG_BLACK);
+  for (int x = L; x <= R; x += 10) {                       // rulers, a tick every 10, longer every 50
+    int n = ((x - L) % 50 == 0) ? 9 : 4;
+    tft.drawFastVLine(x, T, n, dim);
+    tft.drawFastVLine(x, B - n + 1, n, dim);
+  }
+  for (int y = T; y <= B; y += 10) {
+    int n = ((y - T) % 50 == 0) ? 9 : 4;
+    tft.drawFastHLine(L, y, n, dim);
+    tft.drawFastHLine(R - n + 1, y, n, dim);
+  }
+  tft.drawRect(L, T, R - L + 1, B - T + 1, COLOR_WHITE);
+  if (f.frame) {                                           // where the Even Frame's card will sit
+    FitCard c = fitCard();
+    tft.drawRect(c.x, c.y, c.w, c.h, amber);
+  }
+  tft.setFont(&FreeSans12pt7b);
+  tft.setTextColor(COLOR_WHITE);
+  tft.setCursor(L + 36, T + 70);
+  tft.print("FIT TEST");
+  tft.setFont(NULL);
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_MUTED);
+  tft.setCursor(L + 36, T + 84);
+  tft.print("The white line should just touch");
+  tft.setCursor(L + 36, T + 96);
+  tft.print("the bezel on all four sides.");
+  tft.setTextColor(amber);
+  tft.setCursor(L + 36, T + 118);
+  tft.printf("left %d  right %d  top %d  bottom %d", f.l, f.r, f.t, f.b);
+  if (f.frame) {
+    tft.setCursor(L + 36, T + 134);
+    tft.print("Orange: the Even Frame's card");
+  }
+}
+
 static void drawClockScreen(const LumoState& s, bool full) {
+  if (screenFit.test) {
+    if (full) drawFitTest();
+    return;
+  }
   if (full) {
     tft.fillScreen(COLOR_BG_BLACK);
     clockEnterMs = millis();

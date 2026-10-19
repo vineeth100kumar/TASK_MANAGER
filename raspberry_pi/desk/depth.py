@@ -46,7 +46,8 @@ try:
 except ImportError:  # the desk still works, just without pictures
     Image = None
 
-# The clock is 320x240 but its case hides the bottom 24 rows (SCREEN_HIDDEN_BOTTOM).
+# The clock is 320x240 but its case hides some rows; the picture is drawn 216 rows
+# tall and the clock centres it in the window (display.cpp, onDepthStrip).
 WIDTH, HEIGHT = 320, 216
 # Uploads are kept no bigger than this, which is plenty for a 320-pixel screen
 # and keeps the cutout quick.

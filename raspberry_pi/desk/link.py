@@ -123,6 +123,7 @@ class ClockLink:
         # the clock reached it, which the clock can fetch the update from.
         self.can_ota = False
         self.ota_error = ""
+        self.screen_fit: Optional[dict] = None   # the case window the clock has saved (HELLO "fit", 2.15+)
         self.local_ip = ""
         # The link's story: connects and drops, newest last, and when it went down.
         self.history: deque = deque(maxlen=HISTORY)
@@ -169,6 +170,7 @@ class ClockLink:
         return {
             "connected": self.connected,
             "firmware": self.fw or None,
+            "screenFit": self.screen_fit,
             "address": self.address or None,
             "connectedAt": int(self.connected_at * 1000) if self.connected else None,
             "lastSeen": int(self.last_seen * 1000) if self.last_seen else None,
@@ -280,6 +282,8 @@ class ClockLink:
                            if isinstance(first.get(k), (int, str)) and not isinstance(first.get(k), bool)}
         self.can_ota = bool(first.get("ota"))
         self.ota_error = str(first.get("otaError") or "")[:80]
+        fit = first.get("fit")
+        self.screen_fit = {k: fit[k] for k in ("l", "r", "t", "b", "frame", "island") if k in fit} if isinstance(fit, dict) else None
         remote = getattr(socket, "remote_address", None)
         self.address = str(remote[0]) if isinstance(remote, tuple) and remote else ""
         local = getattr(socket, "local_address", None)
