@@ -286,6 +286,13 @@ class FirmwareUpdates:
         if self.due():
             await self.start()
 
+    async def update_now(self) -> str:
+        """Look on GitHub, then send the newest build if it's newer. Returns "" or why not."""
+        await self.check()
+        if self.check_error and not (self.latest and self.file):
+            return self.check_error
+        return await self.start(force=True)
+
     async def start(self, force: bool = False) -> str:
         """Send the newest build to the clock. Returns "" or why it can't."""
         if force:

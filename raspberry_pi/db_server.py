@@ -1559,7 +1559,7 @@ async def desk_device(req: DeskAction):
 
 
 class DeskFirmware(BaseModel):
-    action: str  # check or install
+    action: str  # check, install or update (check, then install)
 
 
 @app.post("/api/desk/firmware")
@@ -1570,7 +1570,7 @@ async def desk_firmware(req: DeskFirmware):
         problem = await desk_run.firmware(req.action)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if problem and req.action == "install":
+    if problem and req.action in ("install", "update"):
         raise HTTPException(status_code=409, detail=problem)
     return {"success": True, **desk_run.status(desk.ENABLED)}
 
