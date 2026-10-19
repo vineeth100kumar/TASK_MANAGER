@@ -40,7 +40,9 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to Ubuntu 26 on 2026-10-19 and arduino-cli failed
+    # to load its index there.
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +50,12 @@ jobs:
 
       - name: Install the ESP32 core and libraries
         run: |
-          arduino-cli core update-index --additional-urls "$ESP32_INDEX"
+          # The index download sometimes fails on its own: try it a few times.
+          for i in 1 2 3; do
+            arduino-cli core update-index --additional-urls "$ESP32_INDEX" && break
+            [ "$i" = 3 ] && exit 1
+            sleep 10
+          done
           arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$ESP32_INDEX"
           # --no-deps: otherwise the ILI9341 pulls in the newest GFX over the pinned one.
           eval arduino-cli lib install --no-deps $LIBRARIES
