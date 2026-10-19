@@ -256,10 +256,9 @@ function OverTheAir({ updates: u, firmware, auto, setAuto, act }: {
         <Toggle on={auto} onChange={setAuto} label="Update automatically" />
       </Row>
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => act(() => lumoApi.firmware('check'), 'Checked GitHub')} className={btnQuiet}><RefreshCw size={15} /> Check now</button>
-        {u.newer && u.state !== 'updating' && (
-          <button onClick={() => act(() => lumoApi.firmware('install'), 'Sending the update to LUMO')} className={btnQuiet}><Download size={15} /> Update now</button>
-        )}
+        <button onClick={() => act(() => lumoApi.firmware('update'), 'Sending the update to LUMO')} disabled={u.state === 'updating'}
+          className={btnQuiet}><Download size={15} /> Check and update now</button>
+        <button onClick={() => act(() => lumoApi.firmware('check'), 'Checked GitHub')} className={btnQuiet}><RefreshCw size={15} /> Check only</button>
       </div>
     </div>
   );

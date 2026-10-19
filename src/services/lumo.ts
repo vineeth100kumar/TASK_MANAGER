@@ -161,7 +161,7 @@ export const lumoApi = {
   stopwatch: (action: string) => post<LumoStatus>('/api/desk/stopwatch', { action }),
   device: (action: 'identify' | 'restart' | 'tone' | 'fit_test' | 'fit_test_off', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
-  firmware: (action: 'check' | 'install') => post<LumoStatus>('/api/desk/firmware', { action }),
+  firmware: (action: 'check' | 'install' | 'update') => post<LumoStatus>('/api/desk/firmware', { action }),
 };
 
 // The depth face (desk/depth.py on the Pi): a photo with the time tucked

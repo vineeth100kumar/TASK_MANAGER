@@ -167,6 +167,24 @@ class Updates(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.ota.history[-1]["result"], "failed")
         self.assertIn("didn't come back", self.ota.history[-1]["detail"])
 
+    async def test_update_now_checks_first_then_sends(self):
+        self.auto = False
+        await self.ota.tick()
+        self.assertEqual(self.link.sent, [])
+        self.releases = [release("2.13.2", sha="b" * 40)]   # appeared since the last check
+        self.assertEqual(await self.ota.update_now(), "")
+        self.assertEqual(self.link.sent[-1]["version"], "2.13.2")
+
+    async def test_update_now_says_when_there_is_nothing_newer_or_github_is_down(self):
+        self.link.fw = "2.13.1"
+        self.assertIn("already runs 2.13.1", await self.ota.update_now())
+        self.assertEqual(self.link.sent, [])
+
+        async def broken(repo):
+            raise OSError("no route")
+        self.ota.fetch_releases, self.ota.latest, self.ota.file = broken, None, None
+        self.assertIn("couldn't reach GitHub", await self.ota.update_now())
+
     async def test_github_down_is_reported_not_raised(self):
         async def broken(repo):
             raise OSError("no route")

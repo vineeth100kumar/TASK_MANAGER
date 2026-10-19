@@ -133,13 +133,18 @@ async def device(action: str, tone: str = "", volume: int = 0) -> bool:
 
 async def firmware(action: str) -> str:
     """check: look on GitHub for a newer build now. install: send the newest
-    build to the clock now (even after failures). Returns "" or why not."""
+    build to the clock now (even after failures). update: both, in one go.
+    Returns "" or why not."""
     if action == "check":
         await desk.ota.check()
         await desk.announce()
         return desk.ota.check_error
     if action == "install":
         return await desk.ota.start(force=True)
+    if action == "update":
+        problem = await desk.ota.update_now()
+        await desk.announce()
+        return problem
     raise ValueError(f"Unknown firmware action {action!r}.")
 
 
