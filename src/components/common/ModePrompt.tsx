@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { Briefcase, Coffee, Home, MapPin } from 'lucide-react';
-import { LifeMode, describeLifeMode, lifeModeError, setLifeMode, useLifeMode } from '../../services/lifeMode';
+import { LifeMode, describeLifeMode, getLifeMode, lifeModeError, setLifeMode, useLifeMode } from '../../services/lifeMode';
 import { useToast } from '../../context/ToastContext';
 
 export const ASK_EVERY_MS = 3 * 60 * 60 * 1000;
@@ -14,7 +14,7 @@ const ASKED_KEY = 'sage-mode-asked-at';
 const askedAt = (): number => {
   try { return Number(localStorage.getItem(ASKED_KEY)) || 0; } catch { return 0; }
 };
-const markAsked = () => {
+export const markAsked = () => {
   try { localStorage.setItem(ASKED_KEY, String(Date.now())); } catch { /* storage unavailable */ }
 };
 
@@ -25,6 +25,8 @@ export function ModePrompt() {
 
   // Due when it hasn't asked in the last few hours, on this device.
   const check = useCallback(() => {
+    // Welcome home asks first (and covers it), so don't stack the two.
+    if (getLifeMode().welcome) return;
     if (document.visibilityState === 'visible' && Date.now() - askedAt() >= ASK_EVERY_MS) setOpen(true);
   }, []);
 
