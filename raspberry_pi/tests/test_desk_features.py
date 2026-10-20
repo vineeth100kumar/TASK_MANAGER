@@ -490,7 +490,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.phone_presence(True)
         card = self.link.last("NOTIF")
         self.assertEqual(card["title"], "Welcome back to your room")
-        self.assertEqual(card["body"], "1 thing on today, next alarm 07:00")
+        self.assertEqual(card["body"], "Up next: 07:30 Gym, next alarm 07:00")
 
     async def test_no_welcome_after_a_short_trip_when_off_or_after_a_restart(self):
         self.phone.last_seen = time.time() - 6 * 60

@@ -1,3 +1,4 @@
+import { durationToMinutes } from '../../utils/taskLists';
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun } from 'lucide-react';
@@ -71,12 +72,6 @@ function formatDuration(minutes: number | null | undefined): string {
   return h ? (m ? `${h}h${m}m` : `${h}h`) : `${m}m`;
 }
 
-function durationToMinutes(text: string): number | undefined {
-  const h = text.match(/(\d+)\s*h/i);
-  const m = text.match(/(\d+)\s*m/i);
-  const total = (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
-  return total > 0 ? total : undefined;
-}
 
 const mergeTags = (manual: string[], parsed: QuickAddResult | null) => Array.from(new Set([...manual, ...(parsed?.tags || [])]));
 

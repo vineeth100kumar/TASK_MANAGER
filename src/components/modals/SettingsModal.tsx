@@ -20,6 +20,14 @@ const SETTINGS_TABS = [
   { id: 'data', label: 'Data & Migration' },
   { id: 'system', label: 'Server & Reset' },
 ] as const;
+
+// Four groups, so the first look is four choices instead of eight.
+const SETTINGS_GROUPS = [
+  { label: 'Daily', tabs: ['attention', 'modes'] },
+  { label: 'Capture', tabs: ['capture'] },
+  { label: 'Devices', tabs: ['clock', 'bluetooth'] },
+  { label: 'Advanced', tabs: ['radar', 'data', 'system'] },
+] as const;
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
@@ -179,20 +187,32 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
           <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
         </div>
 
-        {/* Tab Navigation: scrolls sideways on narrow screens, fading at the edges. */}
-        <div role="tablist" aria-label="Settings sections"
-          className="flex gap-0.5 overflow-x-auto no-scrollbar bg-gray-100 dark:bg-white/5 p-1 rounded-2xl [mask-image:linear-gradient(to_right,#000_calc(100%-24px),transparent)] sm:[mask-image:none]">
-          {SETTINGS_TABS.map(t => (
-            <button key={t.id} role="tab" aria-selected={activeTab === t.id}
-              ref={el => { if (el && activeTab === t.id) el.scrollIntoView({ block: 'nearest', inline: 'nearest' }); }}
-              onClick={() => setActiveTab(t.id)}
-              className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-                activeTab === t.id ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'
-              }`}>
-              {t.label}
-            </button>
-          ))}
-        </div>
+        {/* Four groups, then the sections inside the chosen group. */}
+        {(() => {
+          const group = SETTINGS_GROUPS.find(g => (g.tabs as readonly string[]).includes(activeTab)) || SETTINGS_GROUPS[0];
+          const seg = (active: boolean) => `flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${active ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`;
+          return (
+            <div className="space-y-2">
+              <div role="tablist" aria-label="Settings groups" className="flex gap-0.5 bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
+                {SETTINGS_GROUPS.map(g => (
+                  <button key={g.label} role="tab" aria-selected={g === group} onClick={() => setActiveTab(g.tabs[0])} className={seg(g === group)}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              {group.tabs.length > 1 && (
+                <div role="tablist" aria-label="Settings sections" className="flex gap-1.5">
+                  {group.tabs.map(id => (
+                    <button key={id} role="tab" aria-selected={activeTab === id} onClick={() => setActiveTab(id)}
+                      className={`px-3 py-1.5 text-[12px] font-semibold rounded-full transition-colors ${activeTab === id ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5'}`}>
+                      {SETTINGS_TABS.find(t => t.id === id)?.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Tab 1: Attention & Notifications */}
         {activeTab === 'attention' && (

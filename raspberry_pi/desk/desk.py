@@ -316,9 +316,13 @@ class Desk:
         await self.controller.show_card("Sage", welcome["message"], self.welcome_line())
 
     def welcome_line(self) -> str:
-        """What's on: today's items and the next alarm."""
+        """What's on: the first thing on today (Up next), how many more, and the next alarm."""
         n = self.today_count
-        parts = [f"{n} thing{'s' if n != 1 else ''} on today" if n else "Nothing else on today"]
+        if n and self.today:
+            more = n - 1
+            parts = [f"Up next: {self.today[0]}"] + ([f"{more} more today"] if more else [])
+        else:
+            parts = [f"{n} thing{'s' if n != 1 else ''} on today" if n else "Nothing else on today"]
         alarm = self.next_alarm()
         if alarm:
             parts.append(f"next alarm {alarm[0]:02d}:{alarm[1]:02d}")

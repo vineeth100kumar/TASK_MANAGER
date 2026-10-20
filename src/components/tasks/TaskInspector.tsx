@@ -15,6 +15,7 @@ import { DatePicker } from '../common/DatePicker';
 import { stageOf, statusesFor } from '../../services/projectTypes';
 import { TimePicker, DateTimePicker } from '../common/TimePicker';
 import { SnoozeMenu } from '../common/SnoozeMenu';
+import { durationToMinutes, formatMinutes } from '../../utils/taskLists';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -50,6 +51,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
   const [activeTab, setActiveTab] = useState('details');
+  const [moreFields, setMoreFields] = useState(false);
   const [loading, setLoading] = useState(true);
 
   const [editTitle, setEditTitle] = useState('');
@@ -176,10 +178,10 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
   // slide-in carries straight on into the details.
   if (loading || !task) return (
      <>
-       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40" />
+       <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40 xl:hidden" />
        <motion.aside role="dialog" aria-modal="true" aria-busy="true"
          initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
-         className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl">
+         className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] xl:shadow-none bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl">
          <div className="h-16 flex items-center px-6 border-b border-gray-100 dark:border-white/5 shrink-0"><div className="skeleton h-5 w-28 !rounded-full" /></div>
          <div className="p-6 md:p-8 space-y-4">
            <div className="skeleton h-9 w-3/4 !rounded-xl" />
@@ -195,11 +197,11 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
   return (
     <>
-      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40" />
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: 0.2 }} onClick={onClose} className="fixed inset-0 scrim z-40 xl:hidden" />
       
       <motion.aside role="dialog" aria-modal="true"
         initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
-        className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl"
+        className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] xl:shadow-none bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl"
       >
         <div className="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
           <div className="flex items-center gap-3">
@@ -306,18 +308,22 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                       <PropertyRow icon={FileText} label="Estimate">
                         <input type="text" className="prop-input w-24"
-                          value={task.estimated || ''} onChange={async (e) => { await onUpdateDetails(task, { estimated: e.target.value }); loadData(); }} placeholder="e.g. 2h" />
+                          value={task.estimated || (task.estimatedMinutes ? formatMinutes(task.estimatedMinutes) : '')} onChange={async (e) => { await onUpdateDetails(task, { estimated: e.target.value, estimatedMinutes: durationToMinutes(e.target.value) ?? null }); loadData(); }} placeholder="e.g. 2h" />
                       </PropertyRow>
 
-                      <PropertyRow icon={FileText} label="Location">
+                      {/* Simple sheet: rarely used fields wait behind "More details" unless they hold something. */}
+                      {(moreFields || !!task.location) && <PropertyRow icon={FileText} label="Location">
                         <input type="text" className="prop-input w-full"
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Optional" />
                       </PropertyRow>
 
-                      <PropertyRow icon={Activity} label="Recurrence">
+                      }
+                      {(moreFields || !!task.repeatRule) && <PropertyRow icon={Activity} label="Recurrence">
                         <RepeatSelect align="end" className="prop-control"
                           value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
+
+                      }
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <Select align="end" className="prop-control"
@@ -364,10 +370,12 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Zoom link or room..." />
                       </PropertyRow>
 
-                      <PropertyRow icon={Activity} label="Recurrence">
+                      {(moreFields || !!task.repeatRule) && <PropertyRow icon={Activity} label="Recurrence">
                         <RepeatSelect align="end" className="prop-control"
                           value={task.repeatRule} onChange={async (v) => { await onUpdateDetails(task, { repeatRule: v || null }); loadData(); }} />
                       </PropertyRow>
+
+                      }
 
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <Select align="end" className="prop-control"
@@ -445,6 +453,11 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                     </>
                   )}
                 </div>
+                {(task.entityType === 'task' || task.entityType === 'event') && !moreFields && !(task.location && task.repeatRule) && (
+                  <button type="button" onClick={() => setMoreFields(true)} className="-mt-5 px-2 text-[12.5px] font-semibold text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+                    More details
+                  </button>
+                )}
 
                 <div>
                   <h4 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400 mb-3 flex items-center gap-1.5"><Tag size={12} /> Tags</h4>

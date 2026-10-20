@@ -1003,7 +1003,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 review_body = _list_titles(done_items[:5]) if done_items else "Nothing completed this week."
                 if stale:
                     review_body += f" {_plural(len(stale), 'stale item')} to triage."
-                message = {"title": review_title, "body": review_body, "tag": "weekly-review", "url": "/", "ttl": 12 * 3600}
+                message = {"title": review_title, "body": review_body, "tag": "weekly-review", "url": "/?ritual=weekly", "ttl": 12 * 3600}
                 email = None
                 if wants_email:
                     link = _app_link()

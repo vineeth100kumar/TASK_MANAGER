@@ -8,7 +8,10 @@ import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { useCachedState } from '../../hooks/useCachedState';
 import { getTodayString } from '../../utils/dateUtils';
-import { isOverdue } from '../../utils/taskLists';
+import { isOverdue, pickUpNext, totalMinutes, formatMinutes } from '../../utils/taskLists';
+import { UpNextCard } from '../common/UpNextCard';
+import { QuickAddLine } from '../common/QuickAddLine';
+import { ProjectGroups } from '../common/ProjectGroups';
 import { HabitTodayCard } from '../habits/HabitViews';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
@@ -118,6 +121,9 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
   const items = data.items || [];
   const snoozed = data.snoozed || [];
   const overdueCount = items.filter(i => isOverdue(i, todayIso)).length;
+  const upNext = pickUpNext(items);
+  const rest = upNext ? items.filter(i => i.id !== upNext.id) : items;
+  const { minutes, unknown } = totalMinutes(items);
 
   const doneToday = data.doneToday || 0;
   const remaining = items.length;
@@ -152,7 +158,14 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
-            {data.week?.length > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
+            {/* Weekend: the weekly review is one tap away. */}
+            {(time.getDay() === 0 || time.getDay() === 6) && (
+              <button onClick={() => window.dispatchEvent(new CustomEvent('sage:ritual', { detail: 'weekly' }))}
+                className="mt-2 text-[13px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                Do the weekly review
+              </button>
+            )}
+            {data.week?.length > 0 && total > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
           </div>
 
           {total > 0 && (
@@ -193,23 +206,38 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
         )}
       </div>
 
+      <QuickAddLine lifeContext={lifeContext} onAdded={load} />
+
       <ReminderPrompt />
 
       {/* Chill mode: work is out of sight, never lost. */}
       <HiddenWorkLine scope="today" />
 
+      {/* Up next: the one thing to do now. Not shown when nothing is waiting. */}
+      {upNext && (
+        <UpNextCard
+          item={upNext} completing={isCompleting(upNext.id)} saving={isSaving(upNext.id)}
+          onComplete={() => handleComplete(upNext)} onOpen={() => onSelectTask(upNext.id)}
+        />
+      )}
+
       {/* The one list */}
+      {(rest.length > 0 || snoozed.length > 0 || !upNext) && (
       <section className="relative has-[[aria-expanded=true]]:z-30 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3" aria-label="Today's tasks">
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
             <CalendarCheck size={18} className="text-blue-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Today</h3>
-            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{items.length}</span>
+            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">{upNext ? 'Then' : 'Today'}</h3>
+            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{rest.length}</span>
           </div>
-          <span className="hidden sm:inline text-[12px] text-gray-400">Overdue first, then priority, then time</span>
+          {minutes > 0 && (
+            <span className="text-[12px] text-gray-400" title={unknown ? `${unknown} without an estimate` : undefined}>
+              About {formatMinutes(minutes)}{unknown ? ' + more' : ''}
+            </span>
+          )}
         </div>
 
-        {items.length === 0 ? (
+        {rest.length === 0 && !upNext ? (
           <div className="flex flex-col items-center text-center py-8 gap-2">
             {doneToday > 0 ? (
               <Celebrate><div className="w-11 h-11 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center"><Check size={20} strokeWidth={3} /></div></Celebrate>
@@ -226,16 +254,18 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
         ) : (
           <div className="stagger -mb-2">
             <AnimatePresence initial={false}>
-              {items.map(item => (
-                <Fold key={item.id}>
-                  <TaskRow
-                    item={item} today={todayIso} combined={!lifeContext}
-                    completing={isCompleting(item.id)} saving={isSaving(item.id)}
-                    onComplete={() => handleComplete(item)} onOpen={() => onSelectTask(item.id)}
-                    onStar={() => handleStar(item)} onSnoozed={load}
-                  />
-                </Fold>
-              ))}
+              <ProjectGroups items={rest}>
+                {(item, grouped) => (
+                  <Fold key={item.id}>
+                    <TaskRow
+                      item={item} today={todayIso} combined={!lifeContext} hideHome={grouped}
+                      completing={isCompleting(item.id)} saving={isSaving(item.id)}
+                      onComplete={() => handleComplete(item)} onOpen={() => onSelectTask(item.id)}
+                      onStar={() => handleStar(item)} onSnoozed={load}
+                    />
+                  </Fold>
+                )}
+              </ProjectGroups>
             </AnimatePresence>
           </div>
         )}
@@ -262,6 +292,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
           </div>
         )}
       </section>
+      )}
 
       {/* Habits: a fresh entry each day, so a missed day shows as missed instead of carrying over. */}
       {lifeContext !== 'work' && data.habits?.length > 0 && (

@@ -29,12 +29,13 @@ import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
   NotesView, NotesLock, CanvasView, RadarView, LumoView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
-  SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown,
+  SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
 } from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
 import { ModePrompt } from './components/common/ModePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
 function MainApp() {
@@ -67,7 +68,8 @@ function MainApp() {
   // mode shows what the filter picks (see services/lifeMode.ts).
   const { mode: lifeMode } = useLifeMode();
   useEffect(() => { loadLifeMode(); }, []);
-  const viewFilter: LifeFilter = lifeMode === 'chill' ? 'personal' : lifeFilter;
+  // Personal-only is Chill now, so Work shows work, or everything with "Show personal too".
+  const viewFilter: LifeFilter = lifeMode === 'chill' ? 'personal' : lifeFilter === 'personal' ? 'all' : lifeFilter;
   const lifeContext = viewFilter === 'all' ? undefined : viewFilter;
   // Radar is work only; switching to Personal while on it goes back to Today.
   useEffect(() => {
@@ -87,6 +89,7 @@ function MainApp() {
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isMorningOpen, setIsMorningOpen] = useState(false);
   const [isEveningOpen, setIsEveningOpen] = useState(false);
+  const [isWeeklyOpen, setIsWeeklyOpen] = useState(false);
   // A note to open when Notes shows next (Radar's "Open note").
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
   useEffect(() => { if (activeView !== 'notes') setOpenNoteId(null); }, [activeView]);
@@ -156,6 +159,7 @@ function MainApp() {
     if (actionParam === 'new-task') setIsCreateModalOpen(true);
     if (ritualParam === 'morning') setIsMorningOpen(true);
     if (ritualParam === 'evening') setIsEveningOpen(true);
+    if (ritualParam === 'weekly') setIsWeeklyOpen(true);
     if (viewParam === 'focus') setActiveView('focus');
     else if (viewParam === 'dashboard') setActiveView('dashboard');
     else if (viewParam === 'inbox') setActiveView('inbox');
@@ -163,6 +167,14 @@ function MainApp() {
       if (event.data?.type === 'sage-open-item' && typeof event.data.id === 'string') setSelectedItemId(event.data.id);
     };
     navigator.serviceWorker?.addEventListener('message', onWorkerMessage);
+    // Screens can open a ritual without a URL change (Today's weekly review link).
+    const onRitual = (e: Event) => {
+      const r = (e as CustomEvent).detail;
+      if (r === 'weekly') setIsWeeklyOpen(true);
+      if (r === 'evening') setIsEveningOpen(true);
+      if (r === 'morning') setIsMorningOpen(true);
+    };
+    window.addEventListener('sage:ritual', onRitual);
 
     // Another device deleted or more recently changed something edited here.
     const unsubOverruled = api.sync.onOverruled((e) => {
@@ -193,6 +205,7 @@ function MainApp() {
       unsubOverruled();
       unsubEntity();
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
+      window.removeEventListener('sage:ritual', onRitual);
     };
   }, []);
 
@@ -431,7 +444,7 @@ function MainApp() {
         onOpenProject={openProject}
       />
 
-      <main data-context={viewFilter} data-mode={lifeMode} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={viewFilter} data-mode={lifeMode} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-[background-color,padding] duration-500 ${selectedItemId ? 'xl:pr-[600px]' : ''} ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
@@ -481,6 +494,7 @@ function MainApp() {
               />
             ) : (
               <div>
+                {isProjectPage && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
                 {isProjectPage && (
                   <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
                 )}
@@ -608,6 +622,9 @@ function MainApp() {
         )}
         {isEveningOpen && (
           <EveningShutdown onClose={() => setIsEveningOpen(false)} />
+        )}
+        {isWeeklyOpen && (
+          <WeeklyReview onClose={() => setIsWeeklyOpen(false)} onNavigateView={setActiveView} />
         )}
       </Suspense>
 

@@ -2,7 +2,7 @@ import { Star } from 'lucide-react';
 import { WorkItem } from '../../services/types';
 import { formatDateRange } from '../../utils/dateUtils';
 import { withTime, formatClock } from '../../utils/reminders';
-import { isOverdue, isSnoozedNow, planDay } from '../../utils/taskLists';
+import { formatMinutes, isOverdue, isSnoozedNow, planDay } from '../../utils/taskLists';
 import { CompleteButton } from './CompleteButton';
 import { ContextTag } from './ContextTag';
 import { SnoozeMenu } from './SnoozeMenu';
@@ -42,15 +42,17 @@ interface TaskRowProps {
   onStar: () => void;
   onSnoozed: () => void;
   extra?: React.ReactNode;    // e.g. a Clarify button in the Inbox
+  hideHome?: boolean;         // under a project header, the project name is already shown
 }
 
 // One task, the same everywhere: tick, priority stripe, title, then where it
 // belongs and when it's due on one quiet line.
-export function TaskRow({ item, today, combined, completing, saving, onComplete, onOpen, onStar, onSnoozed, extra }: TaskRowProps) {
+export function TaskRow({ item, today, combined, completing, saving, onComplete, onOpen, onStar, onSnoozed, extra, hideHome }: TaskRowProps) {
   const p = PRIORITY_STYLE[item.priority] || PRIORITY_STYLE.medium;
   const overdue = isOverdue(item, today);
   const when = whenLabel(item, today);
-  const home = item.project?.name || item.area?.name || null;
+  const home = hideHome ? null : (item.project?.name || item.area?.name || null);
+  const mins = item.estimatedMinutes ? formatMinutes(item.estimatedMinutes) : null;
   const snoozed = isSnoozedNow(item);
 
   return (
@@ -63,6 +65,7 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
           {p.label && <span className={`font-semibold ${p.text}`}>{p.label}</span>}
           {when && <span className={overdue ? 'text-red-500 font-semibold' : ''}>{p.label ? '· ' : ''}{when}</span>}
           {home && <span>{p.label || when ? '· ' : ''}{home}</span>}
+          {mins && <span>· {mins}</span>}
           {KIND[item.entityType] && <span>· {KIND[item.entityType]}</span>}
           {item.status === 'in_progress' && <span className="text-blue-500 font-semibold">· In progress</span>}
           {item.waitingFor?.who ? <span className="text-purple-500 font-semibold">· Waiting on {item.waitingFor.who}</span>
