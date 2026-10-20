@@ -13,6 +13,12 @@ mode you pick stays until you pick the other one.
 Without a phone link (no Bluetooth, or the phone hasn't been seen since the
 Pi started) Auto stays on Work, so nothing is hidden because of a guess.
 
+Arriving: when the phone comes back after being away for AWAY_MINUTES, the
+Pi records an arrival ("lifeModeArrival") and sets Chill once. The first time
+Sage is opened after that, the web app says "Welcome home" and marks the
+arrival welcomed, so it shows once per arrival. Switching to Work afterwards
+sticks until the next arrival or departure.
+
 Settings live in the metadata table under "lifeMode". Reminders held back in
 Chill live under "lifeModeHeld" and go out as one push when Work mode returns.
 """
@@ -27,6 +33,7 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 MODES = ("work", "chill")
 HELD_KEEP = 50
+AWAY_MINUTES = int(os.getenv("SAGE_ARRIVAL_AWAY_MINUTES", "15"))
 
 DEFAULTS: Dict[str, Any] = {
     "auto": True,          # follow home/away
@@ -37,6 +44,9 @@ DEFAULTS: Dict[str, Any] = {
 
 # Set by db_server: returns (known, home). known is False when there is no
 # phone link or the phone hasn't been seen since the Pi started.
+# Set by db_server: when the phone was last seen (epoch s), 0 if never.
+last_seen: Callable[[], float] = lambda: 0.0
+
 presence: Callable[[], Tuple[bool, bool]] = lambda: (False, False)
 
 
@@ -204,6 +214,61 @@ def clear_held() -> None:
     _write("lifeModeHeld", [])
 
 
+# --- Arrival: Welcome home ---
+
+def arrival() -> Optional[dict]:
+    value = _read("lifeModeArrival", None)
+    return value if isinstance(value, dict) and value.get("id") else None
+
+
+def pending_welcome() -> Optional[dict]:
+    a = arrival()
+    return a if a and not a.get("welcomed") else None
+
+
+def mark_welcomed(arrival_id: Optional[int] = None) -> None:
+    a = arrival()
+    if a and (arrival_id is None or a["id"] == arrival_id):
+        a["welcomed"] = True
+        _write("lifeModeArrival", a)
+
+
+def record_arrival(now: Optional[float] = None) -> dict:
+    """You just got home: remember it for one Welcome home, and set Chill
+    (clearing any hand-picked mode; a later pick of Work still sticks)."""
+    now = time.time() if now is None else now
+    entry = {"id": int(now * 1000), "at": int(now), "welcomed": False}
+    _write("lifeModeArrival", entry)
+    settings = get_settings()
+    settings["override"] = None
+    if not settings["auto"]:
+        settings["mode"] = "chill"
+    _save_settings(settings)
+    return entry
+
+
+class ArrivalWatch:
+    """Notices the phone coming back after at least `away_minutes` out."""
+
+    def __init__(self, away_minutes: float = AWAY_MINUTES):
+        self.away_minutes = away_minutes
+        self.left_at: Optional[float] = None
+        self.was_home: Optional[bool] = None
+
+    def update(self, known: bool, home: bool, now: float, last_seen: float = 0.0) -> bool:
+        """True exactly when this reading is an arrival."""
+        at_home = bool(known and home)
+        arrived = False
+        if self.was_home is not None:
+            if self.was_home and not at_home:
+                self.left_at = last_seen or now
+            elif at_home and not self.was_home and self.left_at is not None:
+                arrived = now - self.left_at >= self.away_minutes * 60
+                self.left_at = None
+        self.was_home = at_home
+        return arrived
+
+
 # --- Live updates ---
 
 Broadcast = Callable[[dict], Awaitable[None]]
@@ -213,9 +278,14 @@ async def run(broadcast: Broadcast, every: float = 3.0) -> None:
     """Tells the web app whenever the mode changes (arriving, leaving, or a
     pick on another device)."""
     last: Optional[dict] = None
+    watch = ArrivalWatch()
     while True:
         try:
+            known, home = presence()
+            if watch.update(known, home, time.time(), last_seen()):
+                await asyncio.to_thread(record_arrival)
             state = await asyncio.to_thread(current)
+            state = {**state, "welcome": await asyncio.to_thread(pending_welcome)}
             if state != last:
                 last = state
                 await broadcast({"type": "LIFE_MODE", **state})

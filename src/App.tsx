@@ -34,6 +34,7 @@ import {
 } from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
 import { ModePrompt } from './components/common/ModePrompt';
+import { WelcomeHome } from './components/common/WelcomeHome';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
@@ -613,6 +614,7 @@ function MainApp() {
 
       <PhoneCorner />
       <ModePrompt />
+      <WelcomeHome />
 
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
       <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-16 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
