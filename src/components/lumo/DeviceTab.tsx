@@ -2,10 +2,10 @@
 // Pi is, which firmware it runs, a remote for its buttons, and finding,
 // restarting and locking it.
 import { useState } from 'react';
-import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, KeyRound, Lock, MapPin, Power, Radio, RefreshCw, Wifi } from 'lucide-react';
-import { LumoLink, LumoSettings, LumoSettingsUpdate, LumoStatus, LumoUpdates, lumoApi } from '../../services/lumo';
+import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, Gauge, KeyRound, Lock, MapPin, Pin, Power, Radio, RefreshCw, RotateCcw, Wifi } from 'lucide-react';
+import { LumoLink, LumoPerf, LumoSettings, LumoSettingsUpdate, LumoStatus, LumoUpdates, lumoApi } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
-import { Panel, Row, Toggle, btnQuiet } from './parts';
+import { Panel, Row, Toggle, btnQuiet, selectCls } from './parts';
 
 function ago(ms: number | null): string {
   if (!ms) return '';
@@ -86,6 +86,37 @@ function LinkPanel({ link }: { link: LumoLink }) {
   );
 }
 
+// Firmware 2.18's frame meter: how smoothly the screen ran in the half
+// minute before LUMO's last status.
+function ScreenPanel({ perf }: { perf: LumoPerf }) {
+  const num = (v: number | undefined, unit: string, digits = 0) => (typeof v === 'number' ? `${v.toFixed(digits)}${unit}` : '—');
+  const stall = perf.stallMs ?? 0;
+  const facts: [string, string][] = [
+    ['Frames a second', num(perf.fps, '', 1)],
+    ['Best second', num(perf.peakFps, ' fps')],
+    ['Average frame', num(perf.frameMs, ' ms', 1)],
+    ['Slowest frame', num(perf.worstMs, ' ms', 1)],
+  ];
+  return (
+    <Panel icon={<Gauge size={16} className={stall > 2000 ? 'text-amber-500' : 'text-emerald-500'} />} title="Screen"
+      note={perf.seconds ? `Last ${perf.seconds} s` : undefined}>
+      <dl className="grid grid-cols-2 gap-3">
+        {facts.map(([k, v]) => (
+          <div key={k} className="surface-item rounded-2xl px-3 py-2.5 min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">{k}</dt>
+            <dd className="text-[14px] font-semibold text-gray-900 dark:text-white truncate tabular-nums">{v}</dd>
+          </div>
+        ))}
+      </dl>
+      <p className="text-[12px] text-gray-500 dark:text-gray-400">
+        {stall > 2000
+          ? `The screen stood still for ${(stall / 1000).toFixed(1)} s at one point.`
+          : `Longest pause between frames: ${num(perf.stallMs, ' ms')}.`} A frame is any moment LUMO redraws part of the screen.
+      </p>
+    </Panel>
+  );
+}
+
 function bars(rssi?: number): number {
   if (rssi === undefined) return 0;
   return rssi >= -55 ? 4 : rssi >= -65 ? 3 : rssi >= -75 ? 2 : 1;
@@ -154,10 +185,13 @@ export function DeviceTab({ status, updates, settings, save, onChange }: {
 
       {status?.link && <LinkPanel link={status.link} />}
 
+      {connected && w.perf && <ScreenPanel perf={w.perf} />}
+
       <Panel icon={<Cpu size={16} className="text-blue-600" />} title="Firmware">
         {updates && (updates.canUpdate || updates.state !== 'idle') ? (
           <OverTheAir updates={updates} firmware={status?.firmware ?? null} auto={settings?.updates?.auto ?? true}
-            setAuto={on => save({ updates: { auto: on } })} act={act} />
+            setAuto={on => save({ updates: { auto: on } })} when={settings?.updates?.window ?? '03:00-05:00'}
+            setWhen={w => save({ updates: { window: w } })} act={act} />
         ) : status?.updateAvailable ? (
           <div className="space-y-3">
             <div className="rounded-2xl bg-blue-500/10 text-blue-800 dark:text-blue-200 px-4 py-3 text-[13.5px]">
@@ -223,18 +257,61 @@ export function DeviceTab({ status, updates, settings, save, onChange }: {
 }
 
 // Firmware 2.13+: GitHub builds each merged firmware change and the Pi sends
-// it to LUMO over Wi-Fi, by itself when automatic updates are on.
-function OverTheAir({ updates: u, firmware, auto, setAuto, act }: {
+// it to LUMO over Wi-Fi, by itself when automatic updates are on (inside the
+// update window, unless held on a version). From 2.18 a new version starts on
+// trial and goes back to the old one by itself if its checks fail. Any of the
+// last builds can be installed from the list, older ones too.
+const WINDOWS: { id: string; label: string }[] = [
+  { id: '', label: 'Any time' },
+  { id: '03:00-05:00', label: 'Night, 3 to 5 am' },
+  { id: '01:00-06:00', label: 'Night, 1 to 6 am' },
+  { id: '12:00-14:00', label: 'Midday, 12 to 2 pm' },
+];
+
+function OverTheAir({ updates: u, firmware, auto, setAuto, when, setWhen, act }: {
   updates: LumoUpdates; firmware: string | null; auto: boolean; setAuto: (on: boolean) => void;
+  when: string; setWhen: (w: string) => void;
   act: (fn: () => Promise<unknown>, done?: string) => Promise<void>;
 }) {
   const box = 'rounded-2xl px-4 py-3 text-[13.5px]';
+  const [confirm, setConfirm] = useState('');
+  const [showAll, setShowAll] = useState(false);
+  const busy = u.state === 'updating' || u.state === 'checking';
+  const builds = u.builds || [];
+  const shown = showAll ? builds : builds.slice(0, 4);
+  const rolledBack = u.state === 'failed' && (u.error || '').startsWith('rolled back');
+  const windows = WINDOWS.some(w => w.id === when) ? WINDOWS : [...WINDOWS, { id: when, label: when.replace('-', ' to ') }];
+
+  const install = (version: string, sha: string, older: boolean) => {
+    const key = `${version}-${sha}`;
+    if (confirm !== key) { setConfirm(key); setTimeout(() => setConfirm(c => (c === key ? '' : c)), 4000); return; }
+    setConfirm('');
+    act(() => lumoApi.firmware('install', { version, sha }), older ? `Going back to v${version}` : `Sending v${version} to LUMO`);
+  };
+
   return (
     <div className="space-y-3">
       {u.state === 'updating' ? (
         <div className={`${box} bg-blue-500/10 text-blue-800 dark:text-blue-200`}>
           <div className="font-semibold flex items-center gap-2"><RefreshCw size={15} className="animate-spin" /> Updating to v{u.target}</div>
-          <div className="mt-0.5">LUMO shows the progress and restarts by itself.</div>
+          {typeof u.progress === 'number' ? (
+            <div className="mt-2 flex items-center gap-2">
+              <div className="flex-1 h-1.5 rounded-full bg-blue-500/20 overflow-hidden">
+                <div className="h-full bg-blue-600 rounded-full transition-[width] duration-500" style={{ width: `${u.progress}%` }} />
+              </div>
+              <span className="text-[12px] font-semibold tabular-nums w-10 text-right">{u.progress}%</span>
+            </div>
+          ) : <div className="mt-0.5">LUMO shows the progress and restarts by itself.</div>}
+        </div>
+      ) : u.state === 'checking' ? (
+        <div className={`${box} bg-blue-500/10 text-blue-800 dark:text-blue-200`}>
+          <div className="font-semibold flex items-center gap-2"><RefreshCw size={15} className="animate-spin" /> Checking v{u.target}</div>
+          <div className="mt-0.5">LUMO keeps it once the screen answers and it has run for 2 minutes. If a check fails it goes back to the last version by itself.</div>
+        </div>
+      ) : rolledBack ? (
+        <div className={`${box} bg-amber-500/10 text-amber-800 dark:text-amber-300`}>
+          <div className="font-semibold">LUMO went back to v{firmware}</div>
+          <div className="mt-0.5">v{u.target} {(u.error || '').replace(/^rolled back from [^:]+: /, '')}, so it isn't sent again by itself.</div>
         </div>
       ) : u.state === 'failed' ? (
         <div className={`${box} bg-red-500/10 text-red-700 dark:text-red-300`}>
@@ -244,22 +321,87 @@ function OverTheAir({ updates: u, firmware, auto, setAuto, act }: {
       ) : u.newer && u.latest ? (
         <div className={`${box} bg-blue-500/10 text-blue-800 dark:text-blue-200`}>
           <div className="font-semibold flex items-center gap-2"><Download size={15} /> v{u.latest} is ready</div>
+          {u.latestTitle && <div className="mt-0.5">{u.latestTitle}</div>}
           {u.waiting && <div className="mt-0.5">Waiting: {u.waiting}.</div>}
         </div>
       ) : null}
+      {u.hold && (
+        <div className={`${box} surface-item flex items-center justify-between gap-3`}>
+          <div className="min-w-0">
+            <div className="font-semibold text-gray-900 dark:text-white flex items-center gap-1.5"><Pin size={14} /> Held on v{u.hold}</div>
+            <div className="text-[12px] text-gray-500 dark:text-gray-400">Automatic updates skip newer builds until you let them go.</div>
+          </div>
+          <button onClick={() => act(() => lumoApi.firmware('release'), 'Updates will go ahead again')} className={btnQuiet}>Let go</button>
+        </div>
+      )}
       <p className="text-[13.5px] text-gray-600 dark:text-gray-300">
         LUMO is on <b>v{firmware || '?'}</b>
         {u.latest ? <>; the newest build is <b>v{u.latest}</b>{u.latestSha ? ` (${u.latestSha})` : ''}.</> : '.'}
         {u.checkError && <span className="block text-[12px] text-amber-600 dark:text-amber-400 mt-1">{u.checkError}</span>}
       </p>
-      <Row title="Update automatically" hint="When a firmware change is merged on GitHub, LUMO installs it as soon as it isn't busy">
+      <Row title="Update automatically" hint="When a firmware change is merged on GitHub, LUMO installs it when it isn't busy">
         <Toggle on={auto} onChange={setAuto} label="Update automatically" />
       </Row>
+      <Row title="When" hint="Automatic updates wait for this window. Update now doesn't.">
+        <select value={when} onChange={e => setWhen(e.target.value)} className={selectCls} aria-label="Update window">
+          {windows.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
+        </select>
+      </Row>
       <div className="flex flex-wrap gap-2">
-        <button onClick={() => act(() => lumoApi.firmware('update'), 'Sending the update to LUMO')} disabled={u.state === 'updating'}
+        <button onClick={() => act(() => lumoApi.firmware('update'), 'Sending the update to LUMO')} disabled={busy}
           className={btnQuiet}><Download size={15} /> Check and update now</button>
         <button onClick={() => act(() => lumoApi.firmware('check'), 'Checked GitHub')} className={btnQuiet}><RefreshCw size={15} /> Check only</button>
+        {!u.hold && firmware && (
+          <button onClick={() => act(() => lumoApi.firmware('hold'), `Held on v${firmware}`)} className={btnQuiet}><Pin size={15} /> Hold this version</button>
+        )}
       </div>
+      {builds.length > 0 && (
+        <div className="space-y-1.5">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Versions</div>
+          <ul className="space-y-1.5">
+            {shown.map(b => {
+              const older = !!firmware && cmpVersion(b.version, firmware) < 0;
+              const key = `${b.version}-${b.sha}`;
+              return (
+                <li key={key} className="surface-item rounded-2xl px-3 py-2.5 flex items-center gap-3 min-w-0">
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[14px] font-semibold text-gray-900 dark:text-white flex items-center gap-2 flex-wrap">
+                      v{b.version}
+                      <span className="text-[11px] font-mono font-normal text-gray-400">{b.sha}</span>
+                      {b.running && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-emerald-500/15 text-emerald-700 dark:text-emerald-300">Running</span>}
+                      {u.hold === b.version && <span className="text-[11px] px-1.5 py-0.5 rounded-md bg-amber-500/15 text-amber-800 dark:text-amber-300">Held</span>}
+                    </div>
+                    <div className="text-[12px] text-gray-500 dark:text-gray-400 truncate">
+                      {b.title || 'No description'}{b.pr ? ` (#${b.pr})` : ''}{b.at ? ` · ${ago(Date.parse(b.at))}` : ''}
+                    </div>
+                  </div>
+                  {!b.running && (
+                    <button onClick={() => install(b.version, b.sha, older)} disabled={busy || !b.installable}
+                      title={b.installable ? undefined : 'Too old to update over Wi-Fi again'}
+                      className={`${btnQuiet} !py-1.5 !text-[12.5px] shrink-0`}>
+                      {confirm === key ? 'Tap again' : older ? <><RotateCcw size={14} /> Go back</> : 'Install'}
+                    </button>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          {builds.length > shown.length || showAll ? (
+            <button onClick={() => setShowAll(v => !v)} className="text-[12.5px] font-semibold text-blue-600 dark:text-blue-400">
+              {showAll ? 'Show fewer' : `Show all ${builds.length}`}
+            </button>
+          ) : null}
+        </div>
+      )}
     </div>
   );
+}
+
+function cmpVersion(a: string, b: string): number {
+  const pa = a.split('.').map(Number), pb = b.split('.').map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
 }

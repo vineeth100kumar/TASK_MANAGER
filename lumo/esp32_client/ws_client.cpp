@@ -5,8 +5,11 @@
 #include "clockkeeper.h"
 #include "store.h"
 #include "ota.h"
+#include "perf.h"
 
 #include <WiFi.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
 #include <esp_system.h>
@@ -567,6 +570,7 @@ static void sayHello() {
   if (lastDrop[0]) hello["drop"] = lastDrop;
   if (!everPaired) hello["boot"] = bootReason();
   hello["ota"] = 1;   // takes updates over Wi-Fi (the OTA command)
+  if (otaOnTrial()) hello["trial"] = true;   // a new version, kept once it has run 2 min (ota.cpp)
   {
     JsonObject f = hello["fit"].to<JsonObject>();   // the case window as saved (2.15)
     f["l"] = screenFit.l; f["r"] = screenFit.r; f["t"] = screenFit.t; f["b"] = screenFit.b;
@@ -607,22 +611,66 @@ static String piAddress() {
   return String(netHost);
 }
 
+// Reaching the Pi (an mDNS lookup, the TCP connect and the handshake) can
+// take several seconds when it's away, so since 2.18 it runs in a task of its
+// own and the screen keeps moving meanwhile. While a try runs the task owns
+// `client`; wsPoll leaves it alone until the try is done (connectState 2).
+static TaskHandle_t     connectTask  = nullptr;
+static volatile uint8_t connectState = 0;     // 0 idle, 1 trying, 2 done (loop() takes the result)
+static volatile bool    connectOk    = false;
+static char             connectHost[64] = "";
+
+static void connectTry() {
+  String host = piAddress();
+  strlcpy(connectHost, host.c_str(), sizeof(connectHost));
+  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", connectHost, PI_WS_PORT, PI_WS_PATH);
+  connectOk = client.connect(connectHost, PI_WS_PORT, PI_WS_PATH, LINK_CONNECT_MS);
+}
+
+static void connectWorker(void*) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    connectTry();
+    connectState = 2;
+  }
+}
+
+// A try finished: say hello, or note why not and wait longer before the next.
+static void connectFinish() {
+  connectState = 0;
+  if (connectOk && paused) {   // an update started meanwhile
+    client.close(1001);
+    return;
+  }
+  if (connectOk) {
+    sayHello();
+    return;
+  }
+  if (piIpKnown) piIpFails++;
+  if (tries < 60000) tries++;
+  snprintf(tryFail, sizeof(tryFail), "%s at %s", client.failure(), connectHost);
+  Serial.printf("[WS] Try %u failed: %s\n", tries, tryFail);
+  // Wait longer each time, with a little randomness so a clock and a
+  // restarting Pi don't keep missing each other.
+  retryMs = min(retryMs * 2, (unsigned long)LINK_RETRY_MAX_MS);
+  nextTryAt = millis() + retryMs * 3 / 4 + random(retryMs / 2 + 1);
+}
+
 void wsConnect() {
   if (WiFi.status() != WL_CONNECTED) {
     Serial.println("[WS] WiFi not connected, skipping wsConnect");
     return;
   }
-  wsMark("connect");
-  String host = piAddress();
-  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", host.c_str(), PI_WS_PORT, PI_WS_PATH);
-  if (client.connect(host.c_str(), PI_WS_PORT, PI_WS_PATH, LINK_CONNECT_MS)) {
-    sayHello();
-  } else {
-    if (piIpKnown) piIpFails++;
-    if (tries < 60000) tries++;
-    snprintf(tryFail, sizeof(tryFail), "%s at %s", client.failure(), host.c_str());
-    Serial.printf("[WS] Try %u failed: %s\n", tries, tryFail);
+  if (connectState) return;   // a try is already running (or waiting to be taken)
+  if (!connectTask) xTaskCreate(connectWorker, "lumo-connect", 6144, nullptr, 1, &connectTask);
+  if (!connectTask) {         // no memory for the task: try here, as before 2.18
+    wsMark("connect");
+    connectTry();
+    connectFinish();
+    return;
   }
+  connectState = 1;
+  xTaskNotifyGive(connectTask);
 }
 
 // Every 30 s, how the clock is doing, for the LUMO page in Sage.
@@ -631,11 +679,13 @@ static void sendStatus() {
   if (!isConnected || !statePtr || !statePtr->paired) return;
   if (lastStatus && millis() - lastStatus < 30000) return;
   lastStatus = millis();
-  char json[256];
+  char perf[160];
+  perfReport(perf, sizeof(perf));   // how smoothly the screen ran since the last STATUS (2.18)
+  char json[384];
   snprintf(json, sizeof(json),
-           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\",\"rtt\":%d,\"wifiDrops\":%u}",
+           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\",\"rtt\":%d,\"wifiDrops\":%u,\"perf\":%s}",
            WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), millis() / 1000UL,
-           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str(), rttMs, (unsigned)wifiDrops);
+           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str(), rttMs, (unsigned)wifiDrops, perf);
   client.sendText(json);
 }
 
@@ -705,6 +755,11 @@ static void piWatch(unsigned long now) {
 void wsPoll() {
   wsMark("link");
   wifiWatch();
+  if (connectState == 2) connectFinish();
+  if (connectState == 1) {    // the connect task has the socket
+    piWatch(millis());
+    return;
+  }
   client.poll();
   sendStatus();
 
@@ -728,12 +783,6 @@ void wsPoll() {
   if (!paused && WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
     Serial.printf("[WS] Reconnecting (next wait: %lu ms)...\n", retryMs);
     wsConnect();
-    if (!isConnected) {
-      // Wait longer each time, with a little randomness so a clock and a
-      // restarting Pi don't keep missing each other.
-      retryMs = min(retryMs * 2, (unsigned long)LINK_RETRY_MAX_MS);
-      nextTryAt = millis() + retryMs * 3 / 4 + random(retryMs / 2 + 1);
-    }
   }
 }
 

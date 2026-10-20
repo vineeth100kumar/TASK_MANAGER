@@ -141,7 +141,22 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.17.0"
+#define FW_VERSION "2.18.0"
+
+// Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
+// and it has run this long without restarting...
+#define OTA_TRIAL_KEEP_MS   120000
+// ...and goes back to the last version if it can't reach Sage within this.
+#define OTA_TRIAL_REACH_MS  300000
+
+// ===================== FRAMES =====================
+// Screens draw on a steady beat (anim.h, framePace): this often while
+// something moves (a minute turning over, a fade, the hands spinning in)...
+#define FRAME_FAST_MS   16
+// ...and this often otherwise (the colon breathing, the seconds bar).
+#define FRAME_CALM_MS   33
+// loop() never sleeps longer than this between passes (buttons, haptics, Sage).
+#define LOOP_IDLE_MS    6
 
 // ===================== ENUMS =====================
 // BTN_HOLD_OK is OK held for HOLD_OK_MS; a shorter press is BTN_OK on release.

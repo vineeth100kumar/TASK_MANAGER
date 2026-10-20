@@ -178,11 +178,14 @@ def clock_part(state: dict) -> dict:
     wifi = state.get("wifi")
     if isinstance(wifi, dict) and wifi.get("rssi") is not None:
         out["rssi"] = wifi["rssi"]
+    if isinstance(wifi, dict) and isinstance(wifi.get("perf"), dict):
+        # Firmware 2.18's frame meter: fps, slowest frame and longest stall since its last STATUS.
+        out["screen"] = {**wifi["perf"], "on": (state.get("state") or {}).get("screen")}
     updates = (state.get("state") or {}).get("updates")
     if isinstance(updates, dict):
         # Firmware updates over Wi-Fi (desk/ota.py): the newest GitHub build and how the last install went.
-        out["updates"] = {k: updates.get(k) for k in ("latest", "latestSha", "ready", "newer", "canUpdate", "state",
-                                                      "target", "error", "waiting", "checkError")}
+        out["updates"] = {k: updates.get(k) for k in ("latest", "latestSha", "latestTitle", "ready", "newer", "canUpdate", "state",
+                                                      "target", "error", "waiting", "checkError", "hold", "progress")}
     return out
 
 
@@ -234,6 +237,9 @@ def problems(data: dict) -> List[str]:
             out.append(f"The desk clock's update to {updates.get('target')} failed: {updates.get('error')}.")
         if updates.get("checkError"):
             out.append(f"Checking for LUMO firmware: {updates['checkError']}.")
+        stall = (clock.get("screen") or {}).get("stallMs")
+        if isinstance(stall, (int, float)) and stall > 2000:
+            out.append(f"The desk clock's screen stood still for {stall / 1000:.1f} s at once in its last half minute.")
         if isinstance(clock.get("rssi"), (int, float)) and clock["rssi"] < -78:
             out.append(f"The desk clock's Wi-Fi signal is weak ({clock['rssi']} dBm), which can drop the link.")
     face = data.get("depthFace", {})

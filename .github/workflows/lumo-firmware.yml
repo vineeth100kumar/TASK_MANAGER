@@ -37,6 +37,11 @@ env:
   ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
   LIBRARIES: '"Adafruit GFX Library@1.12.1" "Adafruit ILI9341@1.6.2" "Adafruit BusIO@1.17.2" "Adafruit NeoPixel@1.15.1" "ArduinoJson@7.4.3"'
   APP_SLOT_BYTES: 1966080
+  # Compiled for speed rather than size (2.18): the drawing loops run faster
+  # and the image grows ~10%, well inside the slot. To build the same way on
+  # the laptop, put "compiler.optimization_flags=-O2" in a platform.local.txt
+  # next to the ESP32 core's platform.txt.
+  OPTIMIZE: -O2
 
 jobs:
   build:
@@ -75,11 +80,18 @@ jobs:
         run: |
           test ! -e lumo/esp32_client/secrets.h
           arduino-cli compile --fqbn "$FQBN" --additional-urls "$ESP32_INDEX" --output-dir build --warnings default \
-            --build-property "upload.maximum_size=$APP_SLOT_BYTES" lumo/esp32_client
+            --build-property "upload.maximum_size=$APP_SLOT_BYTES" \
+            --build-property "compiler.optimization_flags=$OPTIMIZE" \
+            --build-property "compiler.optimization_flags.release=$OPTIMIZE" lumo/esp32_client
           ls -l build
 
       - name: Check it fits and describe it
         id: describe
+        env:
+          # What Sage shows for this build: the merged PR's title (a merge
+          # commit's message is "Merge pull request #N from ...", a blank line,
+          # then the title), or the commit's first line.
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || github.event.pull_request.title }}
         run: |
           version=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' lumo/esp32_client/config.h)
           [ -n "$version" ] || { echo "::error::FW_VERSION not found in config.h"; exit 1; }
@@ -90,9 +102,20 @@ jobs:
           if [ "${{ github.event_name }}" = "pull_request" ]; then branch="${{ github.base_ref }}"; else branch="${GITHUB_REF_NAME}"; fi
           asset="lumo-$version.bin"
           cp "$bin" "$asset"
+          first=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n1)
+          pr=$(printf '%s' "$first" | sed -n 's/^Merge pull request #\([0-9]*\).*/\1/p')
+          if [ -n "$pr" ]; then
+            title=$(printf '%s\n' "$COMMIT_MESSAGE" | sed -n '3p')
+          else
+            title=$first
+            pr=$(printf '%s' "${{ github.event.pull_request.number }}")
+          fi
+          title=$(printf '%s' "$title" | cut -c1-120)
           jq -n --arg version "$version" --arg branch "$branch" --arg sha "$GITHUB_SHA" \
                 --arg md5 "$(md5sum "$asset" | cut -d' ' -f1)" --argjson size "$size" --arg asset "$asset" \
-                '{version: $version, branch: $branch, sha: $sha, md5: $md5, size: $size, asset: $asset}' > manifest.json
+                --arg title "$title" --arg pr "$pr" \
+                '{version: $version, branch: $branch, sha: $sha, md5: $md5, size: $size, asset: $asset, title: $title}
+                 + (if $pr == "" then {} else {pr: ($pr | tonumber)} end)' > manifest.json
           cat manifest.json
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "asset=$asset" >> "$GITHUB_OUTPUT"
