@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, Thought, ThoughtStatus, LifeContext } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
@@ -32,6 +32,7 @@ export interface LocalState {
   boards: Board[];
   dossiers: Dossier[];
   ideas: Idea[];
+  thoughts: Thought[];
 }
 
 let state: LocalState = {
@@ -46,7 +47,8 @@ let state: LocalState = {
   activities: [],
   boards: [],
   dossiers: [],
-  ideas: []
+  ideas: [],
+  thoughts: []
 };
 
 let isInitialized = false;
@@ -62,7 +64,7 @@ async function initializeStore(): Promise<void> {
 
     // 2. Load all entities instantly from IndexedDB
     const [
-      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards, dossiers, ideas
+      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards, dossiers, ideas, thoughts
     ] = await Promise.all([
       getAllFromStore<WorkItem>('workItems'),
       getAllFromStore<Project>('projects'),
@@ -75,7 +77,8 @@ async function initializeStore(): Promise<void> {
       getAllFromStore<Activity>('activities'),
       getAllFromStore<Board>('boards'),
       getAllFromStore<Dossier>('dossiers'),
-      getAllFromStore<Idea>('ideas')
+      getAllFromStore<Idea>('ideas'),
+      getAllFromStore<Thought>('thoughts')
     ]);
 
     // Sample data for local testing only (`npm run dev`). A real install starts
@@ -107,7 +110,8 @@ async function initializeStore(): Promise<void> {
         activities,
         boards,
         dossiers,
-        ideas
+        ideas,
+        thoughts
       };
     }
 
@@ -174,6 +178,15 @@ async function removeRecord(table: Table, id: string): Promise<void> {
   syncEngine.cancelDebounced(table, id);
   await deleteFromStore(table, id);
   syncEngine.enqueueOperation(table, id, 'delete', { id });
+}
+
+// Moves a note to the top of the Notes list, e.g. when a thought on its map changes.
+async function touchNote(id: string): Promise<void> {
+  const n = state.notes.find(n => n && n.id === id);
+  if (!n) return;
+  n.updatedAt = new Date().toISOString();
+  await putToStore('notes', n);
+  syncEngine.enqueueNoteDebounced(n.id, n);
 }
 
 // The next copy of a repeating item: every date moved to the next occurrence,
@@ -255,7 +268,7 @@ export const api = {
           if (json.success && json.data) {
             const data = json.data;
             const unsynced = await syncEngine.getUnsyncedKeys();
-            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas'] as const;
+            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas', 'thoughts'] as const;
             for (const table of tables) {
               const rows = data[table];
               if (!Array.isArray(rows) || rows.length === 0) continue;
@@ -778,6 +791,7 @@ export const api = {
         areaId: payload.areaId || null,
         projectId: payload.projectId || null,
         ...(payload.lifeContext ? { lifeContext: payload.lifeContext } : {}),
+        ...(payload.kind ? { kind: payload.kind } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -825,7 +839,61 @@ export const api = {
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
+      // A map takes its thoughts with it.
+      for (const t of state.thoughts.filter(t => t && t.mapId === id)) await removeRecord('thoughts', t.id);
       await removeRecord('notes', id);
+    }
+  },
+
+  // Thoughts on a thought map (a note with kind 'map'), oldest first.
+  thoughts: {
+    list: async (mapId?: string): Promise<Thought[]> => {
+      await initializeStore();
+      return state.thoughts
+        .filter(t => t && t.mapId && (!mapId || t.mapId === mapId))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    },
+    create: async (mapId: string, payload: { text: string; status?: ThoughtStatus; topic?: string; parentId?: string | null; note?: string }): Promise<Thought> => {
+      await initializeStore();
+      const now = new Date().toISOString();
+      const thought: Thought = {
+        id: uuid(),
+        mapId,
+        text: payload.text.trim().slice(0, 500),
+        status: payload.status || 'open',
+        topic: (payload.topic || '').trim().slice(0, 40),
+        parentId: payload.parentId || null,
+        ...(payload.note ? { note: payload.note } : {}),
+        source: 'you',
+        createdAt: now,
+        updatedAt: now
+      };
+      state.thoughts.push(thought);
+      await persist('thoughts', thought);
+      await touchNote(mapId);
+      return thought;
+    },
+    update: async (id: string, updates: Partial<Pick<Thought, 'text' | 'status' | 'topic' | 'parentId' | 'note'>>): Promise<Thought> => {
+      await initializeStore();
+      const t = state.thoughts.find(t => t && t.id === id);
+      if (!t) throw new Error('Thought not found');
+      Object.assign(t, updates, { updatedAt: new Date().toISOString() });
+      await persist('thoughts', t);
+      await touchNote(t.mapId);
+      return t;
+    },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      const t = state.thoughts.find(t => t && t.id === id);
+      if (!t) return;
+      // Thoughts under it move up to its parent rather than vanishing.
+      for (const child of state.thoughts.filter(c => c && c.parentId === id)) {
+        child.parentId = t.parentId || null;
+        child.updatedAt = new Date().toISOString();
+        await persist('thoughts', child);
+      }
+      await removeRecord('thoughts', id);
+      await touchNote(t.mapId);
     }
   },
 
@@ -1259,7 +1327,8 @@ export const api = {
         activities: Array.isArray(parsed.data.activities) ? parsed.data.activities : [],
         boards: Array.isArray(parsed.data.boards) ? parsed.data.boards : [],
         dossiers: Array.isArray(parsed.data.dossiers) ? parsed.data.dossiers : [],
-        ideas: Array.isArray(parsed.data.ideas) ? parsed.data.ideas : []
+        ideas: Array.isArray(parsed.data.ideas) ? parsed.data.ideas : [],
+        thoughts: Array.isArray(parsed.data.thoughts) ? parsed.data.thoughts : []
       };
 
       await Promise.all([
@@ -1274,7 +1343,8 @@ export const api = {
         putBatchToStore('activities', state.activities),
         putBatchToStore('boards', state.boards),
         putBatchToStore('dossiers', state.dossiers),
-        putBatchToStore('ideas', state.ideas)
+        putBatchToStore('ideas', state.ideas),
+        putBatchToStore('thoughts', state.thoughts)
       ]);
 
       // Upload everything restored, not just tasks, so other devices get it too.
@@ -1317,7 +1387,7 @@ export const api = {
 
     await clearAllStores();
     state = {
-      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: [], dossiers: [], ideas: []
+      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: [], dossiers: [], ideas: [], thoughts: []
     };
     try {
       localStorage.removeItem('sage_solo_v5');

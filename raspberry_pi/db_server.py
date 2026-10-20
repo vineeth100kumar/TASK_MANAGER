@@ -60,6 +60,8 @@ SYNC_TABLES = {
     "comments", "subtasks", "activities", "boards",
     # Radar's research (radar_research.py): one dossier per run, three ideas each.
     "dossiers", "ideas",
+    # Thought maps: each map is a note (kind "map"), one record per thought.
+    "thoughts",
 }
 SYNC_OPERATIONS = {"save", "patch", "delete"}
 LEDGER_DAYS = 90

@@ -38,12 +38,16 @@ const DEFAULT_SHEETS = {
     'id', 'name', 'frequency', 'targetCount', 'history', 'areaId', 'streak', 'revision', 'createdAt', 'updatedAt'
   ],
   notes: [
-    'id', 'title', 'content', 'areaId', 'projectId', 'revision', 'createdAt', 'updatedAt'
+    'id', 'title', 'content', 'kind', 'areaId', 'projectId', 'revision', 'createdAt', 'updatedAt'
   ],
   // Canvas whiteboards. The drawing is split across scene0, scene1, ... (added as
   // needed) so each part fits in a cell; sceneParts says how many are current.
   boards: [
     'id', 'title', 'lifeContext', 'sceneParts', 'scene0', 'revision', 'createdAt', 'updatedAt'
+  ],
+  // Thought maps: the map is a note with kind 'map'; each thought is a row here.
+  thoughts: [
+    'id', 'mapId', 'text', 'status', 'topic', 'parentId', 'note', 'source', 'revision', 'createdAt', 'updatedAt'
   ],
   comments: [
     'id', 'workItemId', 'body', 'createdAt', 'deletedAt'

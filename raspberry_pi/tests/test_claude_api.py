@@ -171,6 +171,55 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertIsInstance(data["problems"], list)
         self.assertGreaterEqual(data["server"]["uptimeMinutes"], 0)
 
+    def test_thought_maps(self):
+        def rpc(name, args):
+            reply = client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                                       "params": {"name": name, "arguments": args}}).json()["result"]
+            return reply["isError"], (reply["content"][0]["text"] if reply["isError"] else json.loads(reply["content"][0]["text"]))
+
+        # No map yet: adding asks for create_map rather than guessing.
+        err, msg = rpc("sage_thought_add", {"map": "Startup", "thoughts": [{"text": "Savings"}]})
+        self.assertTrue(err)
+        self.assertIn("create_map", msg)
+
+        err, added = rpc("sage_thought_add", {"map": "Should I start a startup?", "create_map": True, "thoughts": [
+            {"text": "8 months of savings", "status": "pro", "topic": "Money"},
+            {"text": "Grant takes 4 to 6 months", "status": "con", "topic": "Money"},
+            {"text": "Need a technical co-founder", "topic": "People"},
+        ]})
+        self.assertFalse(err, added)
+        self.assertEqual([t["status"] for t in added["added"]], ["good", "bad", "open"])
+        self.assertEqual(added["counts"], {"open": 1, "unsure": 0, "good": 1, "bad": 1})
+        map_id = added["map"]["id"]
+        note = client.get(f"/api/claude/notes/{map_id}", headers=CLAUDE).json()["record"]
+        self.assertEqual((note["kind"], note["title"]), ("map", "Should I start a startup?"))
+
+        # Part of the title finds it; "under" by text sets the parent and takes its topic.
+        err, more = rpc("sage_thought_add", {"map": "startup", "thoughts": [
+            {"text": "Arjun might join part-time", "status": "confused", "under": "need a technical co-founder"}]})
+        self.assertFalse(err, more)
+        child = more["added"][0]
+        self.assertEqual((child["status"], child["topic"], child["source"]), ("unsure", "People", "claude"))
+        self.assertEqual(child["parentId"], added["added"][2]["id"])
+
+        err, maps = rpc("sage_maps", {})
+        self.assertEqual(maps["maps"][0]["topics"], ["Money", "People"])
+        self.assertEqual(maps["maps"][0]["thoughts"], 4)
+        err, one = rpc("sage_map", {"map": map_id})
+        self.assertEqual([t["text"] for t in one["thoughts"]][0], "8 months of savings")
+
+        # Re-sorting goes through sage_update and the same status words.
+        moved = client.patch(f"/api/claude/thoughts/{child['id']}", json={"status": "holds up"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(moved["status"], "good")
+        self.assertEqual(client.patch(f"/api/claude/thoughts/{child['id']}", json={"status": "sideways"}, headers=CLAUDE).status_code, 400)
+        err, msg = rpc("sage_thought_add", {"map": map_id, "thoughts": [{"text": "x", "under": "nothing like it"}]})
+        self.assertTrue(err)
+
+        # The app gets them through sync like any other table.
+        synced = client.get("/api/sync/all", headers=CLAUDE).json()["data"]["thoughts"]
+        self.assertEqual(len(synced), 4)
+        self.assertEqual(client.get("/api/claude/maps", headers=CLAUDE).json()["maps"][0]["id"], map_id)
+
     def test_mcp(self):
         def rpc(method, params=None, msg_id=1, token=TOKEN):
             return client.post(f"/mcp/{token}", json={"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}})
