@@ -167,8 +167,28 @@ export interface Note {
   areaId?: string | null;
   projectId?: string | null;
   lifeContext?: LifeContext;   // unset on older notes, which show under both
+  // 'map' makes the note a thought map: its thoughts live in the thoughts table.
+  kind?: 'map' | null;
   createdAt: string;
   updatedAt: string;
+}
+
+// How far a thought on a map has been worked out: open (just captured), unsure
+// (confused or still researching), good (holds up) or bad (doesn't hold).
+export type ThoughtStatus = 'open' | 'unsure' | 'good' | 'bad';
+
+export interface Thought {
+  id: string;
+  mapId: string;              // the note (kind 'map') it belongs to
+  text: string;
+  status: ThoughtStatus;
+  topic?: string;             // its branch on the map; empty is the main line
+  parentId?: string | null;   // the thought it sits under
+  note?: string;
+  source?: string;            // 'you', or 'claude' when added from a Claude chat
+  createdAt: string;
+  updatedAt?: string;
+  revision?: number;
 }
 
 export interface Comment {

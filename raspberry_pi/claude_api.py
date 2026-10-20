@@ -293,6 +293,12 @@ async def create_record(table: str, fields: dict) -> dict:
             record["completedAt"] = now
         if not record.get("key"):
             record["key"] = _next_key(record)
+    if table == "thoughts":
+        if not str(record.get("text") or "").strip() or not record.get("mapId"):
+            raise ApiError(400, "A thought needs text and the mapId of its map")
+        record["status"] = thought_status(record.get("status"))
+        record.setdefault("topic", "")
+        record.setdefault("source", CLIENT_ID)
     if table == "notes":
         record.setdefault("title", "Untitled")
         record.setdefault("content", "")
@@ -314,6 +320,8 @@ async def update_record(table: str, record_id: str, fields: dict) -> dict:
         fields["completedAt"] = _now()
     if table == "notes":
         _note_body(fields)
+    if table == "thoughts" and "status" in fields:
+        fields["status"] = thought_status(fields["status"])
     fields["updatedAt"] = _now()
     await _write(table, record_id, "patch", fields)
     return get_record(table, record_id)
@@ -331,6 +339,126 @@ async def quick_add(text: str) -> dict:
     if not str(text or "").strip():
         raise ApiError(400, "text is required")
     return await _quick_add(text)
+
+
+# --- Thought maps: a note with kind "map", its thoughts in the thoughts table ---
+
+THOUGHT_STATUSES = ("open", "unsure", "good", "bad")
+# Words Claude (or a person) might use for each icon.
+_STATUS_WORDS = {
+    "open": "open", "?": "open", "unsorted": "open", "question": "open", "todo": "open",
+    "unsure": "unsure", "confused": "unsure", "confusing": "unsure", "maybe": "unsure", "ongoing": "unsure", "researching": "unsure",
+    "good": "good", "pro": "good", "holds": "good", "holds up": "good", "valid": "good", "yes": "good", "tick": "good",
+    "bad": "bad", "con": "bad", "doesn't hold": "bad", "invalid": "bad", "no": "bad", "dropped": "bad", "ruled out": "bad",
+}
+
+
+def thought_status(word: Any) -> str:
+    key = str(word or "open").strip().lower()
+    if key not in _STATUS_WORDS:
+        raise ApiError(400, f"Unknown status {word!r}. Use open, unsure, good or bad (pro and con work too)")
+    return _STATUS_WORDS[key]
+
+
+def _maps() -> List[dict]:
+    return [n for n in _rows("notes") if n.get("kind") == "map"]
+
+
+def _thoughts_of(map_id: str) -> List[dict]:
+    rows = [t for t in _rows("thoughts") if t.get("mapId") == map_id]
+    rows.sort(key=lambda t: (str(t.get("createdAt") or ""), str(t.get("id"))))
+    return rows
+
+
+def _counts(thoughts: List[dict]) -> dict:
+    counts = {s: 0 for s in THOUGHT_STATUSES}
+    for t in thoughts:
+        counts[t.get("status") if t.get("status") in counts else "open"] += 1
+    return counts
+
+
+def _find_map(ref: str) -> Optional[dict]:
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    maps = _maps()
+    for m in maps:
+        if m.get("id") == ref:
+            return m
+    lower = ref.lower()
+    exact = [m for m in maps if str(m.get("title") or "").strip().lower() == lower]
+    if exact:
+        return exact[0]
+    partial = [m for m in maps if lower in str(m.get("title") or "").lower()]
+    if len(partial) > 1:
+        raise ApiError(400, "More than one map matches: " + ", ".join(repr(m.get("title")) for m in partial) + ". Use the map's id")
+    return partial[0] if partial else None
+
+
+def list_maps() -> dict:
+    out = []
+    for m in sorted(_maps(), key=lambda m: str(m.get("updatedAt") or ""), reverse=True):
+        thoughts = _thoughts_of(m["id"])
+        topics = []
+        for t in thoughts:
+            if t.get("topic") and t["topic"] not in topics:
+                topics.append(t["topic"])
+        out.append({"id": m["id"], "title": m.get("title"), "thoughts": len(thoughts), "counts": _counts(thoughts),
+                    "topics": topics, "updatedAt": m.get("updatedAt")})
+    return {"maps": out}
+
+
+def get_map(ref: str) -> dict:
+    m = _find_map(ref)
+    if not m:
+        raise ApiError(404, f"No thought map called {ref!r}. sage_maps lists them")
+    thoughts = _thoughts_of(m["id"])
+    keep = ("id", "text", "status", "topic", "parentId", "note", "source", "createdAt")
+    return {
+        "map": {"id": m["id"], "title": m.get("title"), "lifeContext": m.get("lifeContext")},
+        "counts": _counts(thoughts),
+        "thoughts": [{k: t.get(k) for k in keep if t.get(k) not in (None, "")} for t in thoughts],
+    }
+
+
+async def add_thoughts(ref: str, thoughts: Any, create_map: bool = False) -> dict:
+    if not isinstance(thoughts, list) or not thoughts:
+        raise ApiError(400, "Send thoughts as a list of {text, status, topic, under, note}")
+    m = _find_map(ref)
+    if not m:
+        if not create_map or not str(ref or "").strip():
+            raise ApiError(404, f"No thought map called {ref!r}. sage_maps lists them, or pass create_map true")
+        m = await create_record("notes", {"title": str(ref).strip(), "kind": "map", "content": ""})
+    existing = _thoughts_of(m["id"])
+    added = []
+    base = datetime.datetime.now(datetime.timezone.utc)
+    for i, raw in enumerate(thoughts):
+        if isinstance(raw, str):
+            raw = {"text": raw}
+        if not isinstance(raw, dict) or not str(raw.get("text") or "").strip():
+            raise ApiError(400, f"Thought {i + 1} needs some text")
+        parent = None
+        under = str(raw.get("under") or raw.get("parentId") or "").strip()
+        if under:
+            pool = existing + added
+            parent = next((t for t in pool if t["id"] == under), None) or \
+                next((t for t in pool if str(t.get("text") or "").strip().lower() == under.lower()), None)
+            if not parent:
+                raise ApiError(400, f"No thought {under!r} in {m.get('title')!r} to put thought {i + 1} under")
+        topic = str(raw.get("topic") or "").strip()
+        if not topic and parent:
+            topic = parent.get("topic") or ""
+        # A millisecond apart, so a batch keeps the order it was sent in.
+        at = (base + datetime.timedelta(milliseconds=i)).isoformat().replace("+00:00", "Z")
+        fields = {
+            "mapId": m["id"], "text": str(raw["text"]).strip()[:500], "status": thought_status(raw.get("status")),
+            "topic": topic[:40], "parentId": parent["id"] if parent else None, "source": CLIENT_ID, "createdAt": at,
+        }
+        if str(raw.get("note") or "").strip():
+            fields["note"] = str(raw["note"]).strip()[:2000]
+        added.append(await create_record("thoughts", fields))
+    await update_record("notes", m["id"], {"title": m.get("title")})  # bumps the map up the Notes list
+    return {"map": {"id": m["id"], "title": m.get("title")}, "added": added, "counts": _counts(existing + added)}
 
 
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
@@ -376,6 +504,24 @@ async def http_quick_add(request: Request):
     return await _answer(lambda: quick_add(body.get("text", "") if isinstance(body, dict) else ""))
 
 
+@router.get("/maps")
+async def http_maps():
+    return await _answer(list_maps)
+
+
+@router.get("/maps/{ref}")
+async def http_map(ref: str):
+    return await _answer(lambda: get_map(ref))
+
+
+@router.post("/maps/{ref}/thoughts")
+async def http_add_thoughts(ref: str, request: Request):
+    body = await _body(request) or {}
+    if not isinstance(body, dict):
+        body = {}
+    return await _answer(lambda: add_thoughts(ref, body.get("thoughts"), bool(body.get("createMap"))))
+
+
 @router.get("/{table}")
 async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50):
     return await _answer(lambda: list_records(table, q, status, due_by, limit))
@@ -419,6 +565,11 @@ notes (title, content), comments and subtasks (workItemId), activities, boards (
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
 acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
+Thought maps are notes with kind "map" (Notes > Maps in the app): Vineeth's thinking on a decision, one
+record per thought in the thoughts table (mapId, text, status open|unsure|good|bad, topic, parentId, note,
+source). When he talks a decision through, put each point into his map with sage_thought_add: good for a
+point that holds up (a pro), bad for one that doesn't (a con), unsure for confusion, open for unsorted
+questions. Re-sort a thought by changing its status with sage_update. Use sage_maps and sage_map to read them.
 Start with sage_overview; sage_health says whether the Pi itself is working. Changes appear in the open web app straight away. Prefer updating
 over deleting, and say what you changed."""
 
@@ -453,6 +604,25 @@ def _tools() -> List[dict]:
          "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, plus a "
          "plain list of problems.",
          "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_maps", "description": "Vineeth's thought maps (mind maps in Notes): title, how many thoughts are "
+         "open, unsure, good (holds up) or bad (doesn't hold), and their topics.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_map", "description": "One thought map with every thought in time order: id, text, status, topic, "
+         "parentId (the thought it sits under), note and who added it.",
+         "inputSchema": {"type": "object", "required": ["map"], "properties": {
+             "map": {"type": "string", "description": "The map's id or title (part of the title works)"}}}},
+        {"name": "sage_thought_add", "description": "Add thoughts to a thought map while talking a decision through: "
+         "pros as good, cons as bad, confusions as unsure, unsorted questions as open. They appear in the app at once, "
+         "marked as from Claude.",
+         "inputSchema": {"type": "object", "required": ["map", "thoughts"], "properties": {
+             "map": {"type": "string", "description": "The map's id or title"},
+             "create_map": {"type": "boolean", "description": "Make a new map with this title if none matches"},
+             "thoughts": {"type": "array", "items": {"type": "object", "required": ["text"], "properties": {
+                 "text": {"type": "string", "description": "One short point"},
+                 "status": {"type": "string", "enum": list(THOUGHT_STATUSES), "description": "Default open"},
+                 "topic": {"type": "string", "description": "A short topic name such as Money or People; reuse the map's topics"},
+                 "under": {"type": "string", "description": "Id or exact text of the thought this one belongs under"},
+                 "note": {"type": "string"}}}}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
     ]
@@ -475,6 +645,12 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await quick_add(args.get("text", ""))
     if name == "sage_health":
         return health()
+    if name == "sage_maps":
+        return list_maps()
+    if name == "sage_map":
+        return get_map(args.get("map", ""))
+    if name == "sage_thought_add":
+        return await add_thoughts(args.get("map", ""), args.get("thoughts"), bool(args.get("create_map")))
     if name == "sage_history":
         return history(args.get("limit", 50))
     raise ApiError(404, f"Unknown tool {name}")
