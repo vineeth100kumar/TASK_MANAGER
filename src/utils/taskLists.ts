@@ -26,6 +26,7 @@ export const isSnoozedNow = (i: WorkItem, now = Date.now()) =>
 export const planDay = (i: WorkItem) => dayOf(i.dueDate) || dayOf(i.startAt) || dayOf(i.startDate);
 
 export const isOverdue = (i: WorkItem, today: string) => {
+  if (i.status === 'done') return false; // a reached milestone or finished task is history
   const d = planDay(i);
   return !!d && d < today;
 };

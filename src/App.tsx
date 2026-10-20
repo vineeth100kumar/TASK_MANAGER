@@ -519,6 +519,7 @@ function MainApp() {
                             activeWorkspace={activeWorkspace}
                             onSelectTask={setSelectedItemId}
                             onRefreshData={() => fetchWorkItems(false)}
+                            onTransition={handleTransitionStatus}
                           />
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}

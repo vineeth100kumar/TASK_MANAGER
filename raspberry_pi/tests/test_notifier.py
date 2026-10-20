@@ -41,6 +41,15 @@ def put_items(*items) -> None:
     conn.close()
 
 
+def put_habits(*habits) -> None:
+    conn = sqlite3.connect(notifier.DB_PATH)
+    for habit in habits:
+        habit = {"name": "Habit", "targetCount": 7, "history": [], **habit}
+        conn.execute("INSERT OR REPLACE INTO entities VALUES ('habits', ?, 1, ?, 0, 1)", (habit["id"], json.dumps(habit)))
+    conn.commit()
+    conn.close()
+
+
 class SchedulerTests(unittest.TestCase):
     def setUp(self):
         notifier.init_tables()
@@ -141,6 +150,32 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(message["title"], "Today: 2 things planned")
         self.assertEqual(message["body"], "Ship report and Gym. Plus 1 overdue.")
         self.assertNotIn("morning:2026-10-01", notifier.run_once(utc(2026, 10, 1, 2, 40)))
+
+    def test_habit_reminder_once_a_day_when_not_ticked(self):
+        put_items()
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        put_habits(
+            {"id": "h1", "name": "Pushups", "remindTime": "19:30", "history": ["2026-09-30", "2026-09-29"]},
+            {"id": "h2", "name": "Read", "remindTime": "19:30", "history": ["2026-10-01"]},  # ticked today
+            {"id": "h3", "name": "Run", "remindTime": "19:30", "targetCount": 2, "history": ["2026-09-28", "2026-09-29"]},  # week met
+            {"id": "h4", "name": "Stretch", "remindTime": "19:30", "remindPush": False},  # no channel left
+            {"id": "h5", "name": "Walk"},  # no reminder
+        )
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 13, 59)), [])  # 19:29 in Kolkata
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 0)), ["habit:h1:2026-10-01:19:30"])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 5)), [])  # not twice
+        self.assertEqual(self.pushed[0]["title"], "Pushups")
+        self.assertIn("2-day streak", self.pushed[0]["body"])
+
+    def test_habit_reminder_by_email(self):
+        put_items()
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        notifier.save_smtp_password("app-password")
+        put_habits({"id": "h", "name": "Meditate", "remindTime": "07:00", "remindPush": False, "remindEmail": True})
+        with mock.patch.object(notifier, "send_email") as send:
+            self.assertEqual(notifier.run_once(utc(2026, 10, 1, 1, 30)), ["habit:h:2026-10-01:07:00"])
+        self.assertEqual(self.pushed, [])
+        self.assertEqual(send.call_args[0][1], "Habit: Meditate")
 
     def test_snoozed_items_are_not_reminded(self):
         put_items({"id": "s", "title": "Later please", "remindAt": "2026-10-01T09:00", "snoozedUntil": "2026-10-01T05:00:00Z"})

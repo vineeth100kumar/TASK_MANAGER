@@ -63,7 +63,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
         <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
             const dateStr = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
-            const swipeable = task.entityType === 'task' && task.status !== 'done';
+            const tickable = task.entityType === 'task' || task.entityType === 'milestone';
+            const swipeable = tickable && task.status !== 'done';
             return (
               <SwipeRow key={task.id}
                 onSwipeRight={swipeable ? () => onTransition(task, 'done') : undefined}
@@ -83,7 +84,9 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />
                   ) : task.entityType === 'milestone' ? (
-                    <Flag size={20} className={task.status === 'done' || task.status === 'achieved' ? 'text-emerald-500' : 'text-orange-500'} />
+                    task.status === 'done'
+                      ? <Flag size={20} className="text-emerald-500" aria-label="Milestone reached" />
+                      : <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
                   ) : (
                     <Bell size={20} className="text-emerald-500" />
                   )}
@@ -139,7 +142,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
 
                 {task.entityType === 'milestone' && dateStr && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
-                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {dateStr}</span>
+                    <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}><Flag size={14}/> {dateStr}</span>
                   </div>
                 )}
 
