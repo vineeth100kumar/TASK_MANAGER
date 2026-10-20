@@ -81,8 +81,14 @@ def _labels(value) -> list:
 
 def normalize_item(raw: dict, project_type: Optional[str] = None) -> dict:
     """The item in the one shape; unknown fields are kept as they are."""
-    status, stage = status_of(raw, project_type)
     kind = kind_of(raw)
+    if kind == "milestone":
+        # Logged once the work is done, so always done (older open ones too).
+        stages = TYPE_STAGES.get(project_type or "", {})
+        stored = raw.get("stage")
+        status, stage = "done", (stored if stages.get(stored) == "done" else None)
+    else:
+        status, stage = status_of(raw, project_type)
     priority = _word(raw.get("priority"))
     out = dict(raw)
     out.update({
@@ -101,6 +107,8 @@ def normalize_item(raw: dict, project_type: Optional[str] = None) -> dict:
         "isInbox": _truthy(raw.get("isInbox")),
         "isFocus": _truthy(raw.get("isFocus")),
     })
+    if kind == "milestone" and not raw.get("completedAt"):
+        out["completedAt"] = str(raw.get("dueDate") or raw.get("startDate") or raw.get("createdAt") or "")[:10] or None
     return out
 
 

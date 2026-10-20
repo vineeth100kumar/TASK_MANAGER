@@ -34,8 +34,8 @@ describe('the Sage project as stored on the Pi (16 Oct 2026)', () => {
   it('Board columns add up to what Branches counts', () => {
     const cols = columns(page.items, SAGE_ID);
     expect(Object.values(cols).reduce((a, b) => a + b, 0)).toBe(85);
-    expect(cols.shipped).toBe(83);
-    expect(cols.building).toBe(2);
+    expect(cols.shipped).toBe(85); // S-50 and S-51 were stored in progress; milestones are always done
+    expect(cols.building).toBe(0);
     const branchTotal = page.items.filter(i => !i.branchId).length
       + page.items.filter(i => !!i.branchId).length;
     expect(branchTotal).toBe(85);
@@ -132,6 +132,21 @@ describe('older and odd records', () => {
     expect(dayOf(norm({ id: '2', entityType: 'reminder', dueDate: '2026-10-21' }))).toBe('2026-10-21');
     expect(dayOf(norm({ id: '3', entityType: 'milestone', dueDate: '2026-10-22T00:00:00Z' }))).toBe('2026-10-22');
     expect(dayOf(norm({ id: '4' }))).toBeNull();
+  });
+});
+
+describe('milestones', () => {
+  it('are always done, in the done column, even when stored open', () => {
+    const b7 = norm({ id: 'b7', key: 'B-7', entityType: 'milestone', status: 'todo', stage: 'idea', projectId: 'p-content', dueDate: '2026-10-20' });
+    expect(b7.status).toBe('done');
+    expect(b7.completedAt).toBe('2026-10-20');
+    expect(stageOf(b7, statusesFor('p-content', projects)).id).toBe('published');
+    expect(columns([b7], 'p-content')).toMatchObject({ idea: 0, published: 1 });
+  });
+
+  it('keep a done status they already sit on', () => {
+    const shipped = norm({ id: 's', entityType: 'milestone', status: 'done', stage: 'shipped', projectId: SAGE_ID, completedAt: '2026-10-01T10:00:00Z' });
+    expect([shipped.stage, shipped.completedAt]).toEqual(['shipped', '2026-10-01T10:00:00Z']);
   });
 });
 

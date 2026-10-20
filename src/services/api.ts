@@ -349,6 +349,8 @@ export const api = {
       const estimatedMinutes = payload.estimatedMinutes !== undefined ? payload.estimatedMinutes : (isShortAction ? 10 : null);
       const energy = payload.energy || (isShortAction ? 'low' : 'medium');
 
+      // A milestone is logged once the work is done, so it is always done.
+      const isMilestone = (payload.entityType || payload.type) === 'milestone';
       const newItem: WorkItem = {
         id,
         key,
@@ -357,7 +359,7 @@ export const api = {
         entityType: payload.entityType || 'task',
         lifeContext: payload.lifeContext || 'work',
         type: payload.type || 'task',
-        status: payload.status || 'todo',
+        status: isMilestone ? 'done' : (payload.status || 'todo'),
         priority: payload.priority || 'medium',
         projectId: payload.projectId || null,
         branchId: payload.projectId ? payload.branchId || null : null,
@@ -391,10 +393,9 @@ export const api = {
         customFields: payload.customFields || {},
         // A planned task names the one before it, and starts in its project type's first status.
         ...(payload.dependsOn?.length ? { dependsOn: payload.dependsOn } : {}),
-        ...((payload as any).stage ? { stage: (payload as any).stage } : {}),
+        ...((payload as any).stage && !isMilestone ? { stage: (payload as any).stage } : {}),
         version: 1,
-        // A milestone logged as already reached is done from the start.
-        completedAt: payload.status === 'done' ? (payload.completedAt || now) : null,
+        completedAt: isMilestone || payload.status === 'done' ? (payload.completedAt || now) : null,
         deletedAt: null,
         createdAt: now,
         updatedAt: now,

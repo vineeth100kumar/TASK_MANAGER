@@ -63,8 +63,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
         <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
             const dateStr = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
-            const tickable = task.entityType === 'task' || task.entityType === 'milestone';
-            const swipeable = tickable && task.status !== 'done';
+            const swipeable = task.entityType === 'task' && task.status !== 'done';
             return (
               <SwipeRow key={task.id}
                 onSwipeRight={swipeable ? () => onTransition(task, 'done') : undefined}
@@ -84,9 +83,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />
                   ) : task.entityType === 'milestone' ? (
-                    task.status === 'done'
-                      ? <Flag size={20} className="text-emerald-500" aria-label="Milestone reached" />
-                      : <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
+                    <Flag size={20} className="text-emerald-500" aria-label="Milestone reached" />
                   ) : (
                     <Bell size={20} className="text-emerald-500" />
                   )}
@@ -94,7 +91,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
                       <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-gray-400 w-14 shrink-0">{task.key}</span>
-                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.entityType !== 'milestone' && (task.status === 'done' || task.completed) ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
                         <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}
@@ -142,7 +139,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
 
                 {task.entityType === 'milestone' && dateStr && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
-                    <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}><Flag size={14}/> {dateStr}</span>
+                    <span className="text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 text-gray-500"><Flag size={14}/> {dateStr}</span>
                   </div>
                 )}
 

@@ -255,21 +255,23 @@ function RowContent({ row, lineName, branches, onSelectTask, onMove, onTransitio
   }
   const { item } = row;
   const done = item.status === 'done';
-  const when = done ? `Done ${formatShortDate(row.date)}`
+  const milestone = item.entityType === 'milestone';
+  const when = milestone ? `Reached ${formatShortDate(row.date)}`
+    : done ? `Done ${formatShortDate(row.date)}`
     : (item.startDate || item.dueDate || item.startAt) ? `${row.date < getTodayString() ? 'Was due' : 'Due'} ${formatShortDate(row.date)}`
     : `Added ${formatShortDate(row.date)}`;
   return (
     <div className="group flex items-center gap-3 w-full min-w-0">
-      {onTransition && (item.entityType === 'task' || item.entityType === 'milestone') && (
+      {onTransition && item.entityType === 'task' && (
         <button type="button" onClick={() => onTransition(item, done ? 'todo' : 'done')}
           aria-pressed={done} aria-label={done ? `Reopen ${item.title}` : `Mark ${item.title} done`}
-          title={done ? 'Reopen' : item.entityType === 'milestone' ? 'Mark reached' : 'Mark done'}
+          title={done ? 'Reopen' : 'Mark done'}
           className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 text-transparent hover:border-emerald-500 hover:text-emerald-500'}`}>
           <Check size={11} strokeWidth={3} />
         </button>
       )}
       <button onClick={() => onSelectTask(item.id)} className="min-w-0 flex-1 text-left">
-        <div className={`text-[14px] font-medium truncate ${done ? 'text-gray-400 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-900 dark:text-white'}`}>{item.title}</div>
+        <div className={`text-[14px] font-medium truncate ${done && !milestone ? 'text-gray-400 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-900 dark:text-white'}`}>{item.title}</div>
         <div className="text-[11.5px] text-gray-400 truncate">
           {when}{item.status === 'blocked' && <span className="text-red-500 font-semibold"> · Blocked</span>}
           {item.status === 'in_progress' && <span className="text-blue-500 font-semibold"> · In progress</span>}

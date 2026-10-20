@@ -408,14 +408,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                   {task.entityType === 'milestone' && (
                     <>
-                      <PropertyRow icon={Circle} label="Milestone State">
-                        <Select align="end" className="prop-control" 
-                          value={task.status} onChange={handleStatusChange}>
-                          <option value="todo">Upcoming (In Flight)</option>
-                          <option value="done">Achieved ✓</option>
-                        </Select>
-                      </PropertyRow>
-                      <PropertyRow icon={CalendarIcon} label="Target Checkpoint">
+                      <PropertyRow icon={CalendarIcon} label="Date reached">
                         <DatePicker align="end" icon={false} className="prop-control"
                           value={toInputDateValue(task.dueDate || task.startDate)} onChange={async v => { 
                             const val = v || null;

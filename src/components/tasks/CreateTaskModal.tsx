@@ -748,19 +748,15 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
 
 function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [], keep }: any) {
   const [payload, setPayload] = useState({
-    description: '', type: 'milestone', dueDate: '', priority: 'medium',
+    description: '', type: 'milestone', dueDate: getTodayString(), priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || ''
   });
   const [tags, setTags] = useState<string[]>([]);
   const set = useParsedFields(smart.parsed, p => ({
-    dueDate: parsedDate(p),
+    dueDate: parsedDate(p) || getTodayString(),
     priority: p?.priority || 'medium',
   }), setPayload);
-  // Milestones are usually logged once the work is done, so a date today or
-  // earlier means "reached" unless you say otherwise; a future date is planned.
-  const [reachedPick, setReachedPick] = useState<boolean | null>(null);
-  const reached = reachedPick ?? (!!payload.dueDate && payload.dueDate <= getTodayString());
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -770,7 +766,8 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
       labels: mergeTags(tags, smart.parsed),
       dueDate,
       startDate: dueDate,
-      status: reached ? 'done' : 'todo',
+      // Logged once the work is done, so a milestone is always done.
+      status: 'done',
     });
   };
 
@@ -781,7 +778,7 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="field-label">Target Checkpoint Date</label>
+          <label className="field-label">Date reached</label>
           <DatePicker className="field" value={payload.dueDate} onChange={v => set('dueDate', v)} disabled={isSubmitting} />
         </div>
 
@@ -801,13 +798,6 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
         </div>
 
         <SharedTags tags={tags} setTags={setTags} />
-
-        <label className="col-span-2 flex items-center gap-2 text-[13px] font-medium text-gray-700 dark:text-gray-300 cursor-pointer select-none">
-          <input type="checkbox" className="w-4 h-4 accent-emerald-500" checked={reached} disabled={isSubmitting}
-            onChange={e => setReachedPick(e.target.checked)} />
-          Already reached
-          <span className="text-[12px] text-gray-400">{reached ? 'Logged as done' : 'Planned: tick it when you get there'}</span>
-        </label>
       </div>
 
       <FooterActions isSubmitting={isSubmitting} onCancel={onCancel} label="Add Milestone" disabled={!smart.title.trim() || !payload.dueDate} keep={keep} />
