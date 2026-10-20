@@ -42,6 +42,13 @@ class ItemShapeTests(unittest.TestCase):
         self.assertFalse(item_shape.is_open(item_shape.normalize_item({"status": "done"})))
         self.assertFalse(item_shape.is_open(item_shape.normalize_item({"status": "todo", "deletedAt": "x"})))
 
+    def test_milestone_is_always_done(self):
+        old = item_shape.normalize_item({"entityType": "milestone", "status": "todo", "stage": "idea", "dueDate": "2026-10-20"}, "content")
+        self.assertEqual((old["status"], old["stage"], old["completedAt"]), ("done", None, "2026-10-20"))
+        self.assertFalse(item_shape.is_open(old))
+        kept = item_shape.normalize_item({"entityType": "milestone", "status": "done", "stage": "published", "completedAt": "x"}, "content")
+        self.assertEqual((kept["stage"], kept["completedAt"]), ("published", "x"))
+
     def test_next_key(self):
         self.assertEqual(item_shape.next_key([{"key": "S-1"}, {"key": "S-50"}, {}, {"key": "SAGE-9"}], "S"), "S-51")
         self.assertEqual(item_shape.next_key([], "TASK"), "TASK-1")

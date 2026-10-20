@@ -71,14 +71,16 @@ class ClaudeApiTests(unittest.TestCase):
             self.assertEqual(client.get("/api/sync/all", headers=CLAUDE).status_code, 401)
             self.assertEqual(client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code, 404)
 
-    def test_logged_milestone_is_reached_not_overdue(self):
+    def test_milestone_is_always_done(self):
         logged = client.post("/api/claude/workItems", json={"title": "Shipped it", "entityType": "milestone", "dueDate": "2026-01-02"}, headers=CLAUDE).json()["record"]
         self.assertEqual(logged["status"], "done")
         self.assertTrue(logged["completedAt"])
-        planned = client.post("/api/claude/workItems", json={"title": "Launch", "entityType": "milestone", "dueDate": "2099-01-01"}, headers=CLAUDE).json()["record"]
-        self.assertEqual((planned["status"], planned.get("completedAt")), ("todo", None))
-        waiting = client.post("/api/claude/workItems", json={"title": "Seen on the clock", "entityType": "milestone", "dueDate": "2026-01-02", "status": "todo"}, headers=CLAUDE).json()["record"]
-        self.assertEqual(waiting["status"], "todo")  # said so on purpose
+        asked_open = client.post("/api/claude/workItems", json={"title": "Seen on the clock", "entityType": "milestone", "dueDate": "2099-01-01", "status": "todo", "stage": "idea"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((asked_open["status"], asked_open.get("stage")), ("done", None))
+        reopened = client.patch(f"/api/claude/workItems/{logged['id']}", json={"status": "todo"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(reopened["status"], "done")
+        task = client.post("/api/claude/workItems", json={"title": "Plain task", "dueDate": "2026-01-02", "status": "todo"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(task["status"], "todo")
 
     def test_create_update_delete_sync_to_devices(self):
         seen = client.get("/api/sync/changes", params={"sinceRevision": 10**9}, headers=OWNER).json()["serverRevision"]

@@ -133,7 +133,7 @@ def list_records(table: str, q: str = "", status: str = "", due_by: str = "", li
         # Compared in the one shape, so "in_review" counts as in_progress, as in the app.
         wanted = {s.strip() for s in status.split(",") if s.strip()}
         types = item_shape.project_types(_rows("projects")) if table == "workItems" else {}
-        records = [r for r in records if (item_shape.status_of(r, types.get(r.get("projectId")))[0] if table == "workItems" else r.get("status")) in wanted]
+        records = [r for r in records if (item_shape.normalize_item(r, types.get(r.get("projectId")))["status"] if table == "workItems" else r.get("status")) in wanted]
     if due_by:
         records = [r for r in records if r.get("dueDate") and str(r["dueDate"]) <= due_by]
     records.sort(key=lambda r: str(r.get("updatedAt") or r.get("createdAt") or ""), reverse=True)
@@ -284,11 +284,11 @@ async def create_record(table: str, fields: dict) -> dict:
         record["lifeContext"] = item_shape.context_of(record)
         record.setdefault("labels", [])
         record.setdefault("branchId", None)
-        # A milestone is usually logged after the work is done: dated today or
-        # earlier with no status given, it is reached, not overdue.
-        day = str(record.get("dueDate") or record.get("startDate") or "")[:10]
-        if record["entityType"] == "milestone" and "status" not in fields and day and day <= datetime.date.today().isoformat():
+        # A milestone is logged after the work is done, so it is always done.
+        if record["entityType"] == "milestone":
             record["status"] = "done"
+            if record.get("stage") and record["stage"] not in ("done", "shipped", "published"):
+                record["stage"] = None
         if record.get("status") == "done" and not record.get("completedAt"):
             record["completedAt"] = now
         if not record.get("key"):
@@ -308,6 +308,8 @@ async def update_record(table: str, record_id: str, fields: dict) -> dict:
     if _find(table, record_id) is None:
         raise ApiError(404, f"No {table} record {record_id}")
     fields = {k: v for k, v in fields.items() if k not in ("id", "revision", "createdAt")}
+    if table == "workItems" and "status" in fields and item_shape.kind_of({**_find(table, record_id), **fields}) == "milestone":
+        fields["status"] = "done"  # a milestone can't be reopened; it was logged as done
     if table == "workItems" and fields.get("status") == "done" and "completedAt" not in fields:
         fields["completedAt"] = _now()
     if table == "notes":

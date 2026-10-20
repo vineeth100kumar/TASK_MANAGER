@@ -49,21 +49,24 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
             <div className={`flex flex-col gap-3 surface p-3 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
               {columnTasks.map(task => {
                 const dateText = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
+                // A milestone is logged once the work is done: it sits in the
+                // done column with a flag, and can't be ticked open or dragged.
+                const milestone = task.entityType === 'milestone';
                 return (
-                  <div key={task.id} draggable onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
-                    className="surface-item is-interactive p-4 rounded-2xl cursor-grab active:cursor-grabbing group outline-none focus:ring-2 focus:ring-blue-500/50">
+                  <div key={task.id} draggable={!milestone} onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
+                    className={`surface-item is-interactive p-4 rounded-2xl ${milestone ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} group outline-none focus:ring-2 focus:ring-blue-500/50`}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
-                        <button 
+                        {milestone ? <Flag size={14} className="text-emerald-500" aria-label="Milestone reached" /> : <button 
                           onClick={(e) => { e.stopPropagation(); onTransition(task, task.status === 'done' ? 'todo' : 'done'); }}
                           className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${task.status === 'done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 hover:border-blue-500'}`}
                           title={task.status === 'done' ? 'Mark as To Do' : 'Mark as Done'}>
                           {task.status === 'done' && <Check size={10} strokeWidth={3} />}
-                        </button>
+                        </button>}
                         <span className="text-[12px] font-semibold text-gray-400 uppercase">{task.key}</span>
                         {task.entityType !== 'task' && <span className="text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 bg-black/[0.04] dark:bg-white/[0.06] px-1.5 py-0.5 rounded-md">{KIND_LABEL[task.entityType] || task.entityType}</span>}
                       </div>
-                      <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />
+                      {!milestone && <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />}
                     </div>
                     <h4 className="text-[14.5px] font-semibold tracking-[-0.01em] mb-3 leading-snug group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors line-clamp-2">{task.title}</h4>
                     

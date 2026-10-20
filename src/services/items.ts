@@ -53,6 +53,12 @@ export function statusOf(raw: { status?: unknown; stage?: unknown; completedAt?:
   return { status: raw.completedAt ? 'done' : 'todo', stage: storedStage };
 }
 
+/** Always done; the stored stage is kept only when it is one of the done statuses. */
+function milestoneStatus(raw: { stage?: unknown }, statuses: StatusStage[]): { status: TaskStatus; stage: string | null } {
+  const stored = raw.stage ? statuses.find(x => x.id === String(raw.stage) && x.base === 'done') : undefined;
+  return { status: 'done', stage: stored ? stored.id : null };
+}
+
 function labelsOf(v: unknown): string[] {
   if (Array.isArray(v)) return v.filter(x => x != null && String(x).trim()).map(x => String(x).trim());
   if (typeof v === 'string' && v.trim()) return v.split(',').map(x => x.trim()).filter(Boolean);
@@ -62,8 +68,10 @@ function labelsOf(v: unknown): string[] {
 /** Any stored work item, in the one shape every screen expects. */
 export function normalizeItem(raw: any, projects: Project[] = []): WorkItem {
   const statuses = statusesFor(raw.projectId, projects);
-  const { status, stage } = statusOf(raw, statuses);
   const kind = kindOf(raw);
+  // A milestone is logged once the work is done, so it is always done: older
+  // ones stored as open read as reached, on the project's own done status.
+  const { status, stage } = kind === 'milestone' ? milestoneStatus(raw, statuses) : statusOf(raw, statuses);
   const priority = word(raw.priority);
   return {
     ...raw,
@@ -75,6 +83,7 @@ export function normalizeItem(raw: any, projects: Project[] = []): WorkItem {
     type: raw.type ? String(raw.type) : kind,
     status,
     stage,
+    ...(kind === 'milestone' && !raw.completedAt ? { completedAt: toInputDateValue(raw.dueDate) || toInputDateValue(raw.startDate) || raw.createdAt || null } : {}),
     priority: (PRIORITIES as string[]).includes(priority) ? priority as TaskPriority : priority === 'critical' ? 'urgent' : 'medium',
     lifeContext: contextOf(raw),
     projectId: raw.projectId || null,
