@@ -6,6 +6,26 @@
 // time since it started, so a slow frame never makes one stutter or overrun:
 // it just lands a little further along.
 
+// The steady beat screens draw on (2.18). Each screen keeps its own `next`;
+// framePace says whether it's time to draw and moves `next` on by `period`,
+// so frames land on the beat instead of drifting with loop()'s work. A screen
+// that falls a whole beat behind starts the beat again from now rather than
+// rushing to catch up. frameWakeAt is the soonest beat any screen wants:
+// loop() sleeps until then (at most LOOP_IDLE_MS).
+extern uint32_t frameWakeAt;
+
+static inline void frameWant(uint32_t at) {
+  if ((int32_t)(at - frameWakeAt) < 0) frameWakeAt = at;
+}
+
+static inline bool framePace(uint32_t& next, uint32_t now, uint32_t period, bool force = false) {
+  if (!force && (int32_t)(now - next) < 0) { frameWant(next); return false; }
+  next += period;
+  if ((int32_t)(now - next) >= 0 || force) next = now + period;
+  frameWant(next);
+  return true;
+}
+
 static inline float animClamp(float t) { return t < 0 ? 0 : (t > 1 ? 1 : t); }
 
 // 0..1 through an animation that started at `start` and lasts `ms`.

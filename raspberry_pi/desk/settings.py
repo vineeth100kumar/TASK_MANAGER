@@ -16,6 +16,7 @@ alarm's, and never presses sent from Sage).
 
 import copy
 import json
+import re
 from typing import Any, Dict
 
 import notifier
@@ -78,8 +79,10 @@ DEFAULTS: Dict[str, Any] = {
     # shows `message` with what's on today.
     "welcome": {"enabled": True, "message": "Welcome back to your room", "awayMinutes": 15},
     # Install firmware GitHub built from a merged change as soon as the clock
-    # isn't busy (desk/ota.py; firmware 2.13+).
-    "updates": {"auto": True},
+    # isn't busy (desk/ota.py; firmware 2.13+), only inside `window`
+    # ("HH:MM-HH:MM", may cross midnight; "" any time) and not while `hold`
+    # names a version (set by installing an older build, or by a USB flash).
+    "updates": {"auto": True, "hold": "", "window": "03:00-05:00"},
     "buttons": {
         "locked": False,
         "map": {
@@ -251,6 +254,24 @@ def merge(current: dict, update: dict) -> dict:
         updates = _section(update["updates"], "updates")
         if "auto" in updates:
             out["updates"]["auto"] = _bool(updates["auto"], "updates.auto")
+        if "hold" in updates:
+            hold = updates["hold"] or ""
+            if not isinstance(hold, str) or (hold and not re.fullmatch(r"\d+\.\d+\.\d+", hold)):
+                raise ValueError("updates.hold must be a firmware version like 2.18.0, or empty.")
+            out["updates"]["hold"] = hold
+        if "window" in updates:
+            window = updates["window"] or ""
+            if not isinstance(window, str):
+                raise ValueError("updates.window must be HH:MM-HH:MM, or empty for any time.")
+            if window:
+                parts = window.split("-")
+                if len(parts) != 2:
+                    raise ValueError("updates.window must be HH:MM-HH:MM, or empty for any time.")
+                start, end = _hhmm(parts[0], "updates.window start"), _hhmm(parts[1], "updates.window end")
+                if start == end:
+                    raise ValueError("updates.window can't start and end at the same time.")
+                window = f"{start}-{end}"
+            out["updates"]["window"] = window
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")
@@ -282,6 +303,18 @@ def in_night(current: dict, hour: int, minute: int) -> bool:
     if start == end:
         return False
     return start <= now < end if start < end else now >= start or now < end
+
+
+def in_window(window: str, hour: int, minute: int) -> bool:
+    """Whether hour:minute falls in an "HH:MM-HH:MM" window (which may cross
+    midnight). An empty window is always open."""
+    if not window:
+        return True
+    start, end = window.split("-")
+    now = hour * 60 + minute
+    a = int(start[:2]) * 60 + int(start[3:])
+    b = int(end[:2]) * 60 + int(end[3:])
+    return a <= now < b if a < b else now >= a or now < b
 
 
 def action_for(current: dict, button: str, screen: str, ringing: bool) -> str:

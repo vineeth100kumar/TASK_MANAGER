@@ -13,6 +13,10 @@ class FitTFT : public Adafruit_ILI9341 {
  public:
   FitTFT(int8_t cs, int8_t dc) : Adafruit_ILI9341(cs, dc) {}
   bool fit = false;
+  // Counts every batch of pixels sent, so the frame meter (2.18) can tell a
+  // loop that drew from one that didn't.
+  uint32_t writes = 0;
+  void startWrite() override { writes++; Adafruit_ILI9341::startWrite(); }
   int16_t fx0 = 0, fw = 320;
   int16_t mx(int16_t x) const { return fx0 + (int16_t)((int32_t)x * fw / 320); }
 
@@ -45,20 +49,39 @@ class FitTFT : public Adafruit_ILI9341 {
     int16_t a = mx(x), b = mx(x + w);
     x = a; w = b > a ? b - a : 1;
   }
-  // Each row resampled to its squeezed width (nearest column).
+  // Each row resampled to its squeezed width (nearest column), all of them
+  // into one window in one go (2.18; it was one send per row).
   void bitmap(int16_t x, int16_t y, uint16_t* px, int16_t w, int16_t h) {
     if (!fit) { Adafruit_ILI9341::drawRGBBitmap(x, y, px, w, h); return; }
     static uint16_t line[320];
+    static int16_t  src[320];
     int16_t a = mx(x), ow = mx(x + w) - a;
-    if (ow <= 0 || w <= 0) return;
+    if (ow <= 0 || w <= 0 || h <= 0) return;
     if (ow > 320) ow = 320;
-    for (int16_t r = 0; r < h; r++) {
-      for (int16_t i = 0; i < ow; i++) {
-        int32_t si = ((int32_t)(a + i - fx0) * 320 + fw / 2) / fw - x;
-        line[i] = px[r * w + (si < 0 ? 0 : si >= w ? w - 1 : si)];
+    // Rows that fall off the panel are cut, as drawRGBBitmap would.
+    int16_t r0 = y < 0 ? -y : 0, r1 = y + h > height() ? height() - y : h;
+    if (a < 0 || a + ow > width() || r0 >= r1) {
+      for (int16_t r = r0; r < r1; r++) {
+        for (int16_t i = 0; i < ow; i++) {
+          int32_t si = ((int32_t)(a + i - fx0) * 320 + fw / 2) / fw - x;
+          line[i] = px[r * w + (si < 0 ? 0 : si >= w ? w - 1 : si)];
+        }
+        Adafruit_ILI9341::drawRGBBitmap(a, y + r, line, ow, 1);
       }
-      Adafruit_ILI9341::drawRGBBitmap(a, y + r, line, ow, 1);
+      return;
     }
+    for (int16_t i = 0; i < ow; i++) {
+      int32_t si = ((int32_t)(a + i - fx0) * 320 + fw / 2) / fw - x;
+      src[i] = (int16_t)(si < 0 ? 0 : si >= w ? w - 1 : si);
+    }
+    startWrite();
+    setAddrWindow(a, y + r0, ow, r1 - r0);
+    for (int16_t r = r0; r < r1; r++) {
+      const uint16_t* row = px + r * w;
+      for (int16_t i = 0; i < ow; i++) line[i] = row[src[i]];
+      writePixels(line, ow);
+    }
+    endWrite();
   }
 };
 extern FitTFT tft;
@@ -92,6 +115,11 @@ void displaySpotifyTick(const LumoState& s);              // the level bars, ~25
 void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b); // the cover's colour, for the light ring
 // Updating over Wi-Fi (ota.cpp): pct 0-100, or -1 with why it failed.
 void displayUpdateScreen(const char* version, int pct, const char* error);
+// A new version failed its trial (ota.cpp): going back to the last one.
+void displayRollbackScreen(const char* why);
+// Whether the panel answers a status read (it reads back "display on").
+// False also when its read line (MISO) isn't wired; ota.cpp allows for that.
+bool displayPanelAnswers();
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor);
 void onNewArt(const uint8_t* data, size_t len);
 void onNewMemoryStrip(const uint8_t* data, size_t len);

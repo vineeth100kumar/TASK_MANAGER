@@ -1570,7 +1570,9 @@ async def desk_device(req: DeskAction):
 
 
 class DeskFirmware(BaseModel):
-    action: str  # check, install or update (check, then install)
+    action: str  # check, install, update (check, then install), hold or release
+    version: Optional[str] = None  # install: this listed build (older ones too)
+    sha: Optional[str] = None      # ...this rebuild of it
 
 
 @app.post("/api/desk/firmware")
@@ -1578,10 +1580,10 @@ async def desk_firmware(req: DeskFirmware):
     """Firmware updates over Wi-Fi (desk/ota.py): check GitHub now, or install the newest build now."""
     desk_run = _desk_running()
     try:
-        problem = await desk_run.firmware(req.action)
+        problem = await desk_run.firmware(req.action, req.version or "", req.sha or "")
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
-    if problem and req.action in ("install", "update"):
+    if problem and req.action in ("install", "update", "hold"):
         raise HTTPException(status_code=409, detail=problem)
     return {"success": True, **desk_run.status(desk.ENABLED)}
 

@@ -66,6 +66,21 @@ class Merge(unittest.TestCase):
                 settings.merge(settings.defaults(), {"screen": bad})
             self.assertIn(why, str(caught.exception))
 
+    def test_update_hold_and_window(self):
+        u = settings.defaults()["updates"]
+        self.assertEqual(u, {"auto": True, "hold": "", "window": "03:00-05:00"})
+        u = settings.merge(settings.defaults(), {"updates": {"hold": "2.17.0", "window": "23:30-1:00"}})["updates"]
+        self.assertEqual((u["hold"], u["window"]), ("2.17.0", "23:30-01:00"))
+        self.assertEqual(settings.merge(settings.defaults(), {"updates": {"window": ""}})["updates"]["window"], "")
+        for bad in ({"hold": "latest"}, {"window": "3-5"}, {"window": "03:00-03:00"}, {"window": 5}):
+            with self.assertRaises(ValueError):
+                settings.merge(settings.defaults(), {"updates": bad})
+        self.assertTrue(settings.in_window("03:00-05:00", 4, 59))
+        self.assertFalse(settings.in_window("03:00-05:00", 5, 0))
+        self.assertTrue(settings.in_window("23:30-01:00", 0, 15))
+        self.assertFalse(settings.in_window("23:30-01:00", 12, 0))
+        self.assertTrue(settings.in_window("", 12, 0))
+
     def test_the_face_is_refused_now(self):
         with self.assertRaises(ValueError):
             settings.merge(settings.defaults(), {"screens": ["FACE", "CLOCK"]})

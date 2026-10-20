@@ -8,6 +8,7 @@
 bool faceIsPremium(ClockStyle style);
 void faceReset();                                          // redraw everything next tick
 void faceTick(const LumoState& s, const ClockNow& c);      // called every loop on the clock screen
+bool faceAnimating();                                      // fading in or turning a minute over (draws on the fast beat)
 
 // The music screen (Now Playing), drawn the same way.
 void nowPlayingReset();                                    // start over (fade in) next tick

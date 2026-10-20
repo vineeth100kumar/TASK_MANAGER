@@ -438,16 +438,28 @@ static uint16_t faceBg(ClockStyle st) {
   }
 }
 
+bool faceAnimating() { return !entryDone || !transDone; }
+
 static void faceTickInner(const LumoState& s, const ClockNow& c) {
-  static unsigned long lastDraw = 0;
+  static uint32_t nextDraw = 0;
+  static int lastEnterStep = -1;
   unsigned long now = millis();
   float enter = entryDone ? 1.0f : animProgress(enterMs, now, ENTER_MS);
   const ClockStyle style = drawnStyle(s.clock_style);
   unsigned long turn = turnMs(style);
   bool turning = !transDone;
   bool animating = enter < 1 || turning;
-  if (!needAll && now - lastDraw < (animating ? 33UL : 50UL)) return;
-  lastDraw = now;
+  if (!framePace(nextDraw, now, animating ? FRAME_FAST_MS : 50UL, needAll)) return;
+  // The fade-in redraws every band, so it moves in 24 visible steps and a
+  // frame on the same step as the last is skipped (2.18).
+  // (Not the Dial: its hands spin in, and every frame of that shows.)
+  if (enter < 1 && !needAll && !turning && style != CLOCK_DIAL) {
+    int step = (int)(easeInOutCubic(enter) * 24 + 0.5f);
+    if (step == lastEnterStep) return;
+    lastEnterStep = step;
+  } else if (enter >= 1) {
+    lastEnterStep = -1;
+  }
 
   // Same day-phase dimming as the classic clock: calm at night, never dark.
   float k = 0.5f + 0.5f * clockPhase(c.minuteOfDay).level;
@@ -475,7 +487,8 @@ static void faceTickInner(const LumoState& s, const ClockNow& c) {
   detailsDirty = false;
   FaceAnim an;
   an.enter = enter;
-  an.k = k * easeInOutCubic(enter);
+  an.k = k * (enter >= 1 ? 1.0f : style == CLOCK_DIAL ? easeInOutCubic(enter)
+                                   : (int)(easeInOutCubic(enter) * 24 + 0.5f) / 24.0f);
   faceK = an.k;
   an.all = minute;
   an.timeBand = turning;
@@ -1034,8 +1047,9 @@ static void npBars(const LumoState& s, float k, float t, float dt) {
 
 void nowPlayingTick(const LumoState& s) {
   static unsigned long lastDraw = 0;
+  static uint32_t nextDraw = 0;
   unsigned long now = millis();
-  if (!npNeedAll && now - lastDraw < 33) return;
+  if (!framePace(nextDraw, now, FRAME_CALM_MS, npNeedAll)) return;
   float dt = (now - lastDraw) / 1000.0f;
   if (dt > 0.2f || dt <= 0) dt = 0.033f;
   lastDraw = now;
@@ -1301,10 +1315,8 @@ static void worldScreen(const LumoState& s, const ClockNow& c) {
 }
 
 void toolScreenTick(ScreenMode screen, const LumoState& s) {
-  static unsigned long last = 0;
-  unsigned long now = millis();
-  if (!toolAll && now - last < 40) return;   // ~25 fps is plenty
-  last = now;
+  static uint32_t nextDraw = 0;
+  if (!framePace(nextDraw, millis(), 40, toolAll)) return;   // ~25 fps is plenty
   if (screen == SCREEN_TIMER) timerScreen(s);
   else if (screen == SCREEN_STOPWATCH) stopwatchScreen(s);
   else if (screen == SCREEN_WORLD) {

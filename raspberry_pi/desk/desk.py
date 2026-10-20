@@ -138,8 +138,10 @@ class Desk:
         self._depth_lock = asyncio.Lock()
         link.on_depth_need = self.depth_need
         link.on_offline = self.offline_reports
-        self.ota = ota or FirmwareUpdates(link, busy=self.update_blocker, auto=lambda: self.settings["updates"]["auto"])
+        self.ota = ota or FirmwareUpdates(link, busy=self.update_blocker, auto=lambda: self.settings["updates"]["auto"],
+                                          hold=lambda: self.settings["updates"].get("hold", ""), quiet=self.update_window_wait)
         self.ota.on_change = self.announce
+        self.ota.on_flashed = self.firmware_flashed
 
     # --- Sage's items ---
 
@@ -765,6 +767,26 @@ class Desk:
         if alarm and (alarm.rings_at - now).total_seconds() < ALARM_MARGIN_MINUTES * 60:
             return "an alarm is due soon"
         return ""
+
+    def update_window_wait(self) -> str:
+        """Why automatic updates wait for their window ("" inside it)."""
+        window = self.settings["updates"].get("window", "")
+        now = self.now()
+        if desk_settings.in_window(window, now.hour, now.minute):
+            return ""
+        return f"automatic updates wait for {window.replace('-', '–')}"
+
+    async def hold_firmware(self, held: str) -> None:
+        """Hold automatic updates on `held` ("" lets them go again)."""
+        if self.settings["updates"].get("hold", "") == held:
+            return
+        self.settings = await asyncio.to_thread(desk_settings.save, {"updates": {"hold": held}})
+        await self.announce()
+
+    async def firmware_flashed(self, fw: str) -> None:
+        """LUMO came back on a version Sage didn't send (a USB flash): hold
+        updates there, so the flash isn't replaced a few seconds later."""
+        await self.hold_firmware(fw)
 
     async def announce(self) -> None:
         await self.broadcast({"type": "DESK_STATE", "state": self.state()})

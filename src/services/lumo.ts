@@ -67,13 +67,37 @@ export interface LumoUpdates {
   latestAt: string | null;
   ready: boolean;            // downloaded and checked
   newer: boolean;            // newer than what LUMO runs
-  state: 'idle' | 'updating' | 'done' | 'failed';
+  state: 'idle' | 'updating' | 'checking' | 'done' | 'failed';   // checking: the new version is on trial (firmware 2.18)
   target: string | null;
   error: string | null;
   waiting: string | null;    // why an available update hasn't gone yet
   checkedAt: number | null;
   checkError: string | null;
-  history: { at: number; version: string; result: 'done' | 'failed'; detail: string }[];
+  history: { at: number; version: string; result: 'done' | 'failed' | 'flashed'; detail: string }[];
+  builds?: LumoBuild[];      // the branch's last builds, newest first (each can be installed)
+  latestTitle?: string | null;
+  hold?: string | null;      // automatic updates are held on this version
+  progress?: number | null;  // % of the update LUMO has downloaded
+}
+
+export interface LumoBuild {
+  version: string;
+  sha: string;
+  at: string | null;
+  title: string | null;      // the merged PR's title
+  pr: number | null;
+  running: boolean;
+  installable: boolean;      // 2.13+: can update over Wi-Fi again afterwards
+}
+
+// Firmware 2.18's frame meter, from the clock's last STATUS.
+export interface LumoPerf {
+  fps?: number;
+  peakFps?: number;
+  frameMs?: number;
+  worstMs?: number;
+  stallMs?: number;
+  seconds?: number;
 }
 
 export interface LumoLinkEvent {
@@ -108,7 +132,7 @@ export interface LumoStatus {
   address: string | null;
   connectedAt: number | null;
   lastSeen: number | null;
-  wifi: { ip?: string; rssi?: number; uptime?: number; heap?: number; ssid?: string; rtt?: number; wifiDrops?: number } | null;
+  wifi: { ip?: string; rssi?: number; uptime?: number; heap?: number; ssid?: string; rtt?: number; wifiDrops?: number; perf?: LumoPerf } | null;
   link?: LumoLink;
   token: string | null;
   port: number;
@@ -127,7 +151,7 @@ export interface LumoSettings {
   // What the case window hides on each side (px, firmware 2.15+), the Even Frame and its island.
   screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean };
   welcome: { enabled: boolean; message: string; awayMinutes: number };
-  updates: { auto: boolean };
+  updates: { auto: boolean; hold: string; window: string };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
 
@@ -161,7 +185,8 @@ export const lumoApi = {
   stopwatch: (action: string) => post<LumoStatus>('/api/desk/stopwatch', { action }),
   device: (action: 'identify' | 'restart' | 'tone' | 'fit_test' | 'fit_test_off', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
-  firmware: (action: 'check' | 'install' | 'update') => post<LumoStatus>('/api/desk/firmware', { action }),
+  firmware: (action: 'check' | 'install' | 'update' | 'hold' | 'release', build?: { version: string; sha?: string }) =>
+    post<LumoStatus>('/api/desk/firmware', { action, ...(build || {}) }),
 };
 
 // The depth face (desk/depth.py on the Pi): a photo with the time tucked

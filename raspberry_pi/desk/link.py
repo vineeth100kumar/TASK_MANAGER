@@ -123,6 +123,10 @@ class ClockLink:
         # the clock reached it, which the clock can fetch the update from.
         self.can_ota = False
         self.ota_error = ""
+        # Firmware 2.18 starts a new version on trial (HELLO "trial") and says
+        # TRIAL once it has kept itself (desk/ota.py).
+        self.trial = False
+        self.on_trial: Optional[Callable[[bool, str], Awaitable[None]]] = None
         self.screen_fit: Optional[dict] = None   # the case window the clock has saved (HELLO "fit", 2.15+)
         self.local_ip = ""
         # The link's story: connects and drops, newest last, and when it went down.
@@ -281,7 +285,8 @@ class ClockLink:
         self.clock_said = {k: first[k] for k in ("drop", "reconnects", "boot", "tries", "tryFail", "kicks")
                            if isinstance(first.get(k), (int, str)) and not isinstance(first.get(k), bool)}
         self.can_ota = bool(first.get("ota"))
-        self.ota_error = str(first.get("otaError") or "")[:80]
+        self.ota_error = str(first.get("otaError") or "")[:120]
+        self.trial = bool(first.get("trial"))
         fit = first.get("fit")
         self.screen_fit = {k: fit[k] for k in ("l", "r", "t", "b", "frame", "island") if k in fit} if isinstance(fit, dict) else None
         remote = getattr(socket, "remote_address", None)
@@ -339,6 +344,15 @@ class ClockLink:
                 elif evt == "STATUS":
                     self.info = {k: msg[k] for k in ("ip", "rssi", "uptime", "heap", "ssid", "rtt", "wifiDrops")
                                  if isinstance(msg.get(k), (int, float, str)) and not isinstance(msg.get(k), bool)}
+                    # How smoothly the screen ran since the last STATUS (firmware 2.18's frame meter).
+                    perf = msg.get("perf")
+                    if isinstance(perf, dict):
+                        self.info["perf"] = {k: perf[k] for k in ("fps", "peakFps", "frameMs", "worstMs", "stallMs", "seconds")
+                                             if isinstance(perf.get(k), (int, float)) and not isinstance(perf.get(k), bool)}
+                elif evt == "TRIAL":
+                    self.trial = False
+                    if self.on_trial:
+                        await self._call(self.on_trial, bool(msg.get("ok")), str(msg.get("fw") or self.fw))
                 elif evt == "OFFLINE" and self.on_offline:
                     # Something it did alone while it still thought it was cut off.
                     await self._call(self.on_offline, [msg])

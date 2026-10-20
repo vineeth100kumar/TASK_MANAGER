@@ -10,6 +10,10 @@
 #include "store.h"
 #include "ota.h"
 #include "faces.h"
+#include "perf.h"
+#include "anim.h"
+
+uint32_t frameWakeAt = 0;   // the soonest beat a screen wants to draw on (anim.h)
 
 static LumoState lumoState;
 static ScreenMode currentScreen = SCREEN_CONNECTING;
@@ -182,6 +186,7 @@ void setup() {
   hapticInit(lumoState.haptic_strength);
   initNeoPixels();
   displayInit();
+  otaTrialBegin();   // a new version's first start: its trial begins (and may end here)
 
   tft.setFont(NULL);
   tft.setTextSize(2);
@@ -225,7 +230,10 @@ void setup() {
 }
 
 void loop() {
+  perfLoopStart();
+  frameWakeAt = millis() + LOOP_IDLE_MS;
   wsPoll();
+  otaTrialTick(talkingToSage());
   wsMark("update");
   if (otaPoll()) displayDrawScreen(currentScreen, lumoState, true);   // the update failed: back to the screen
   wsMark("screen");
@@ -390,6 +398,20 @@ void loop() {
       displayDrawScreen(SCREEN_MEMORY, lumoState, false);
     }
   }
+  perfLoopEnd();
 
-  delay(6);
+  // Sleep until the next beat a screen asked for (anim.h), never longer than
+  // LOOP_IDLE_MS, so frames land on time instead of up to 6 ms late (2.18).
+  // A screen running behind its beat goes again straight away, but loop()
+  // still sleeps a moment every 100 ms so the system's idle work gets done.
+  static unsigned long lastSleep = 0;
+  int32_t wait = (int32_t)(frameWakeAt - millis());
+  if (wait > LOOP_IDLE_MS) wait = LOOP_IDLE_MS;
+  if (wait <= 0 && millis() - lastSleep >= 100) wait = 1;
+  if (wait > 0) {
+    delay(wait);
+    lastSleep = millis();
+  } else {
+    yield();
+  }
 }

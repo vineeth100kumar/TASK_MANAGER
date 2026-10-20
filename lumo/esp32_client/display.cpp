@@ -458,7 +458,8 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
   // Colon breathes once per second; quantised so we only blit when it visibly changes.
   float pulse = 0.5f + 0.5f * cosf(c.secFrac * 6.2831853f);     // 1 -> 0 -> 1
   uint8_t step = (uint8_t)(pulse * 12.0f);
-  if (!force && !turnFrame && step == clockLastColonStep && fade >= 1.0f) return;
+  // (During the fade-in `force` says when its step moved; 2.18.)
+  if (!force && !turnFrame && step == clockLastColonStep) return;
   clockLastColonStep = step;
 
   uint16_t accent, ink, muted; const char* greeting;
@@ -622,11 +623,12 @@ void displayClockTick(const LumoState& s) {
 
 static void clockTick(const LumoState& s) {
   if (screenFit.test) return;            // the Fit test is drawn once
-  static unsigned long lastDraw = 0;
+  static uint32_t nextDraw = 0;
   unsigned long now = millis();
   bool entering = (now - clockEnterMs) < 700;
-  if (!clockNeedsStatic && now - lastDraw < 33) return;
-  lastDraw = now;
+  bool moving = entering || clkTurning || (now - clockEnterMs) < 900 ||
+                (faceIsPremium(s.clock_style) && faceAnimating());
+  if (!framePace(nextDraw, now, moving ? FRAME_FAST_MS : FRAME_CALM_MS, clockNeedsStatic)) return;
 
   ClockNow c = clockNow();
   if (!c.synced) {                      // no Pi yet: show whatever we were last told
@@ -652,24 +654,35 @@ static void clockTick(const LumoState& s) {
 
   float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
   fade = fade * fade * (3.0f - 2.0f * fade);
+  // The fade moves in FADE_STEPS steps, and a frame whose step hasn't changed
+  // isn't redrawn (2.18): the eye can't tell them apart, and each one costs a
+  // whole redraw.
+  static const int FADE_STEPS = 24;
+  static int lastFadeStep = -1;
+  int fadeStep = (int)(fade * FADE_STEPS + 0.5f);
+  fade = (float)fadeStep / FADE_STEPS;
+  bool fadeMoved = entering && fadeStep != lastFadeStep;
+  lastFadeStep = entering ? fadeStep : -1;
 
   if (s.clock_style == CLOCK_ANALOG) {
-    if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+    bool statics = clockNeedsStatic || fadeMoved || c.m != clockLastMinute;
+    if (statics) {
       drawAnalogStatics(s, c, fade);
       clockLastMinute = c.m;
     }
-    drawAnalogHands(s, c, fade, clockNeedsStatic || entering);
+    drawAnalogHands(s, c, fade, statics);
     clockNeedsStatic = false;
     return;
   }
 
-  if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+  bool statics = clockNeedsStatic || fadeMoved || c.m != clockLastMinute;
+  if (statics) {
     drawClockStatics(s, c, fade);
     clockLastMinute = c.m;
     clockNeedsStatic = false;
   }
-  drawClockTime(s, c, fade, entering);
-  if (c.synced && s.show_seconds) drawClockSeconds(c, fade, entering);
+  drawClockTime(s, c, fade, fadeMoved || statics);
+  if (c.synced && s.show_seconds) drawClockSeconds(c, fade, fadeMoved || statics);
 }
 
 // The Fit test (Sage: LUMO > Clock > Screen fit): a one-pixel outline on the
@@ -1010,6 +1023,33 @@ void displayUpdateScreen(const char* version, int pct, const char* error) {
   snprintf(p, sizeof(p), "%d%%", max(pct, 0));
   centerText(p, barY + 26, COLOR_ACCENT, &FreeSans9pt7b);
   tft.setFont(NULL);
+}
+
+void displayRollbackScreen(const char* why) {
+  displayFitApply(true);
+  tft.fillScreen(COLOR_BG_STEALTH);
+  fitMargins();
+  centerText("LUMO", SY(92), COLOR_WHITE, &FreeSans24pt7b);
+  centerText("v" FW_VERSION, SY(122), COLOR_MUTED, &FreeSans9pt7b);
+  centerText("Going back to the last version", SY(160), COLOR_RED_PULSE, &FreeSans12pt7b);
+  centerText(why && why[0] ? why : "this version didn't pass its checks", SY(200), COLOR_MUTED, &FreeSans9pt7b);
+  tft.setFont(NULL);
+  displayFitApply(false);
+}
+
+bool displayPanelAnswers() {
+  // Reads are only reliable well below the 40 MHz writes run at.
+  tft.setSPISpeed(4000000);
+  bool ok = false;
+  for (int i = 0; i < 3 && !ok; i++) {
+    uint8_t mode = tft.readcommand8(ILI9341_RDMODE);
+    // 0x9C after begin(): booster on, awake, normal mode, display on. A loose
+    // or missing read line gives 0x00 or 0xFF.
+    ok = mode != 0x00 && mode != 0xFF && (mode & 0x14) == 0x14;
+    if (!ok) delay(20);
+  }
+  tft.setSPISpeed(40000000);
+  return ok;
 }
 
 // Connecting: the eyes and caption are drawn once; only three dots breathe.

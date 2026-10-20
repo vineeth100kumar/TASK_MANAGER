@@ -44,6 +44,8 @@ class FakeLink:
         self.socket = object()
         self.sent = []
         self.on_connect = None
+        self.on_trial = None
+        self.trial = False
 
     @property
     def connected(self):
@@ -78,6 +80,8 @@ class Updates(unittest.IsolatedAsyncioTestCase):
         self.downloads = []
         self.busy = ""
         self.auto = True
+        self.hold = ""
+        self.quiet = ""
         self.now = 1_000_000.0
 
         async def releases(repo):
@@ -88,7 +92,8 @@ class Updates(unittest.IsolatedAsyncioTestCase):
             return FIRMWARE
 
         self.ota = ota.FirmwareUpdates(
-            self.link, busy=lambda: self.busy, auto=lambda: self.auto, releases=releases, download=download,
+            self.link, busy=lambda: self.busy, auto=lambda: self.auto, hold=lambda: self.hold, quiet=lambda: self.quiet,
+            releases=releases, download=download,
             branch=BRANCH, repo="x/y", cache=Path(tempfile.mkdtemp()), port=free_port(), clock=lambda: self.now)
 
     async def asyncTearDown(self):
@@ -184,6 +189,82 @@ class Updates(unittest.IsolatedAsyncioTestCase):
             raise OSError("no route")
         self.ota.fetch_releases, self.ota.latest, self.ota.file = broken, None, None
         self.assertIn("couldn't reach GitHub", await self.ota.update_now())
+
+    async def test_a_version_on_trial_is_done_only_once_it_keeps_itself(self):
+        await self.ota.tick()
+        self.link.fw, self.link.trial = "2.13.1", True
+        await self.ota.on_connect()
+        self.assertEqual(self.ota.state, "checking")
+        await self.ota.on_trial(True, "2.13.1")
+        self.assertEqual(self.ota.state, "done")
+        self.assertEqual(self.ota.history[-1]["result"], "done")
+
+    async def test_a_rollback_is_failed_and_not_sent_again_by_itself(self):
+        await self.ota.tick()
+        self.link.fw, self.link.trial = "2.13.1", True
+        await self.ota.on_connect()
+        self.link.fw, self.link.trial = "2.13.0", False
+        self.link.ota_error = "rolled back from 2.13.1: the screen didn't answer"
+        await self.ota.on_connect()
+        self.assertEqual(self.ota.state, "failed")
+        self.assertIn("screen didn't answer", self.ota.error)
+        self.now += ota.RETRY_AFTER * 4
+        await self.ota.tick()
+        self.assertEqual(len(self.link.sent), 1)
+        self.assertIn("failed 3 times", self.ota.waiting)
+        # LUMO repeats the note in every HELLO; it's noted once.
+        await self.ota.on_connect()
+        self.assertEqual(sum(1 for h in self.ota.history if h["result"] == "failed"), 1)
+
+    async def test_a_trial_that_never_finishes_times_out(self):
+        await self.ota.tick()
+        self.link.fw, self.link.trial = "2.13.1", True
+        await self.ota.on_connect()
+        self.now += ota.TRIAL_TIMEOUT + 1
+        await self.ota.tick()
+        self.assertEqual(self.ota.state, "failed")
+
+    async def test_lists_builds_and_installs_an_older_one(self):
+        self.link.fw = "2.13.2"
+        self.releases = [release("2.13.2", sha="b" * 40, published="2026-10-16T08:00:00Z"), release("2.13.1"),
+                         release("2.12.0", sha="c" * 40)]
+        await self.ota.check()
+        builds = self.ota.status()["builds"]
+        self.assertEqual([b["version"] for b in builds], ["2.13.2", "2.13.1", "2.12.0"])
+        self.assertTrue(builds[0]["running"])
+        self.assertFalse(builds[2]["installable"])
+        self.assertIn("can't take updates", await self.ota.install("2.12.0"))
+        self.assertIn("already runs", await self.ota.install("2.13.2"))
+        self.assertEqual(await self.ota.install("2.13.1"), "")
+        self.assertEqual(self.link.sent[-1]["version"], "2.13.1")
+        head, body = await self.fetch(self.link.sent[-1]["url"])
+        self.assertEqual(body, FIRMWARE)
+        self.assertEqual(self.ota.status()["progress"], 100)
+
+    async def test_held_or_outside_the_window_waits(self):
+        self.hold = "2.13.0"
+        await self.ota.tick()
+        self.assertEqual(self.ota.waiting, "updates are held on 2.13.0")
+        self.hold, self.quiet = "", "automatic updates wait for 03:00–05:00"
+        await self.ota.tick()
+        self.assertEqual(self.ota.waiting, "automatic updates wait for 03:00–05:00")
+        self.assertEqual(self.link.sent, [])
+        self.assertEqual(await self.ota.update_now(), "")   # Update now doesn't wait
+
+    async def test_a_usb_flash_is_noticed_and_held(self):
+        flashed = []
+
+        async def on_flashed(fw):
+            flashed.append(fw)
+        self.ota.on_flashed = on_flashed
+        await self.ota.on_connect()                 # first sight: 2.13.0
+        self.link.fw = "2.13.5"
+        await self.ota.on_connect()
+        self.assertEqual(flashed, ["2.13.5"])
+        self.assertEqual(self.ota.history[-1]["result"], "flashed")
+        # Remembered across a restart of Sage.
+        again = ota.FirmwareUpdates(self.link, cache=self.ota.cache, branch=BRANCH, repo="x/y", port=free_port())
+        self.assertEqual(again.last_fw, "2.13.5")
 
     async def test_github_down_is_reported_not_raised(self):
         async def broken(repo):

@@ -131,10 +131,29 @@ async def device(action: str, tone: str = "", volume: int = 0) -> bool:
     return await desk.device_do(action, tone, volume)
 
 
-async def firmware(action: str) -> str:
+async def firmware(action: str, version: str = "", sha: str = "") -> str:
     """check: look on GitHub for a newer build now. install: send the newest
-    build to the clock now (even after failures). update: both, in one go.
+    build to the clock now (even after failures), or with `version` that
+    build, older ones too. update: check, then install the newest. hold /
+    release: stop automatic updates on what LUMO runs now, or let them go.
     Returns "" or why not."""
+    if action == "install" and version:
+        problem = await desk.ota.install(version, sha)
+        if not problem:
+            # Going back holds updates there (or they'd bring the newest straight
+            # back); installing the newest lets them go again.
+            newest = desk.ota.latest
+            await desk.hold_firmware("" if newest and newest["version"] == version else version)
+        await desk.announce()
+        return problem
+    if action == "hold":
+        if not link or not link.fw:
+            return "LUMO hasn't said which version it runs yet."
+        await desk.hold_firmware(link.fw)
+        return ""
+    if action == "release":
+        await desk.hold_firmware("")
+        return ""
     if action == "check":
         await desk.ota.check()
         await desk.announce()
@@ -143,6 +162,8 @@ async def firmware(action: str) -> str:
         return await desk.ota.start(force=True)
     if action == "update":
         problem = await desk.ota.update_now()
+        if not problem:
+            await desk.hold_firmware("")
         await desk.announce()
         return problem
     raise ValueError(f"Unknown firmware action {action!r}.")
