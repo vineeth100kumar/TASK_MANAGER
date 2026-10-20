@@ -20,6 +20,7 @@ const loaders = {
   shortcuts: () => import('../modals/ShortcutSheet'),
   morning: () => import('../modals/MorningPickThree'),
   evening: () => import('../modals/EveningShutdown'),
+  weekly: () => import('../modals/WeeklyReview'),
 };
 
 // Like React.lazy, but once the code has arrived (say from a prefetch) the
@@ -54,6 +55,7 @@ export const TrashModal = named(loaders.trash, 'TrashModal');
 export const ShortcutSheet = named(loaders.shortcuts, 'ShortcutSheet');
 export const MorningPickThree = named(loaders.morning, 'MorningPickThree');
 export const EveningShutdown = named(loaders.evening, 'EveningShutdown');
+export const WeeklyReview = named(loaders.weekly, 'WeeklyReview');
 
 // Sidebar ids to the pages they open. The drawing engine behind Canvas is
 // several MB, so it is only fetched when you head for Canvas, never in the

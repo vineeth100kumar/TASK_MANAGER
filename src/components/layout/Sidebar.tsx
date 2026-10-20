@@ -58,6 +58,8 @@ export function Sidebar({
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [isSettingsMenuOpen, setIsSettingsMenuOpen] = useState(false);
+  const [moreOpen, setMoreOpenState] = useState(() => { try { return localStorage.getItem('sage:nav-more') === '1'; } catch { return false; } });
+  const setMoreOpen = (f: (o: boolean) => boolean) => setMoreOpenState(o => { const n = f(o); try { localStorage.setItem('sage:nav-more', n ? '1' : '0'); } catch {} return n; });
   const settingsMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -350,23 +352,18 @@ export function Sidebar({
               </div>
               <p className="px-1 text-[11.5px] text-gray-500 dark:text-gray-400 truncate" title={describeLifeMode(lifeMode)}>{describeLifeMode(lifeMode)} · <kbd className="kbd">M</kbd></p>
             </div>
+            {/* One switch: Work or Chill above. In Work, personal tasks can ride along. */}
             {lifeMode.mode === 'chill' ? null : (
-            <div className="bg-gray-200/60 dark:bg-white/5 p-1 rounded-xl flex items-center">
-              {(['all', 'work', 'personal'] as const).map(ctx => {
-                const active = lifeContext === ctx;
-                return (
-                  <button key={ctx} onClick={() => setLifeContext(ctx)} aria-pressed={active}
-                    className={`relative flex-1 py-1.5 text-[13px] font-semibold rounded-lg transition-colors ${active ? (ctx === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white') : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
-                    {active && <motion.span layoutId="context-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-lg bg-white dark:bg-[#2c2c2e] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
-                    <span className="relative">{ctx === 'all' ? 'All' : ctx === 'work' ? 'Work' : 'Personal'}</span>
-                  </button>
-                );
-              })}
-            </div>
+              <label className="flex items-center justify-between px-1 -mt-3 text-[12.5px] text-gray-500 dark:text-gray-400 cursor-pointer select-none">
+                <span>Show personal too</span>
+                <input type="checkbox" role="switch" className="sr-only peer" checked={lifeContext === 'all'}
+                  onChange={e => setLifeContext(e.target.checked ? 'all' : 'work')} />
+                <span aria-hidden className="relative w-8 h-[18px] rounded-full bg-gray-300 dark:bg-white/15 peer-checked:bg-blue-600 transition-colors after:absolute after:top-[2px] after:left-[2px] after:w-[14px] after:h-[14px] after:rounded-full after:bg-white after:shadow after:transition-transform peer-checked:after:translate-x-[14px]" />
+              </label>
             )}
 
             <div className="space-y-0.5">
-              {[ 
+              {(() => { const all = [
                 { id: 'dashboard', name: 'Today', icon: LayoutDashboard },
                 { id: 'inbox', name: 'Inbox', icon: Inbox, count: inboxCount, highlight: inboxCount > 0 },
                 { id: 'focus', name: 'Focus', icon: Target, count: focusCount, color: 'text-amber-500' },
@@ -378,7 +375,15 @@ export function Sidebar({
                 ...(lifeContext === 'personal' ? [] : [{ id: 'radar', name: 'Radar', icon: Radar, color: 'text-purple-500' }]),
                 // The desk clock: alarms, timers and its settings.
                 { id: 'lumo', name: 'LUMO', icon: AlarmClock, color: 'text-amber-500' }
-              ].map((item: any) => {
+              ];
+              // Four doors: Today, Inbox, Notes, LUMO. The rest waits under More,
+              // which opens by itself when one of its screens is showing.
+              const DOORS = ['dashboard', 'inbox', 'notes', 'lumo'];
+              const moreActive = all.some(i => !DOORS.includes(i.id) && (i.id === 'all' ? activeView === 'tasks' && activeWorkspace === 'all' : activeView === i.id));
+              const showMore = moreOpen || moreActive;
+              const moreCount = all.filter(i => !DOORS.includes(i.id)).reduce((n, i: any) => n + (i.count || 0), 0);
+              const list = [...all.filter(i => DOORS.includes(i.id)), ...(showMore ? all.filter(i => !DOORS.includes(i.id)) : [])];
+              return <>{list.map((item: any) => {
                 const isActive = 
                   item.id === 'notes' ? activeView === 'notes' : 
                   item.id === 'canvas' ? activeView === 'canvas' : 
@@ -435,6 +440,12 @@ export function Sidebar({
                   </button>
                 );
               })}
+              <button type="button" onClick={() => setMoreOpen(o => !o)} aria-expanded={showMore} disabled={moreActive}
+                className="w-full flex items-center justify-between px-3 py-1.5 rounded-xl text-[13px] font-medium text-gray-400 hover:text-gray-700 dark:hover:text-gray-200 disabled:hover:text-gray-400">
+                <span className="flex items-center gap-3"><ChevronDown size={15} className={`transition-transform ${showMore ? 'rotate-180' : ''}`} /> {showMore ? 'Less' : 'More'}</span>
+                {!showMore && moreCount > 0 && <span className="text-[11px] tabular-nums">{moreCount}</span>}
+              </button>
+              </>; })()}
             </div>
 
             <div className="space-y-6">

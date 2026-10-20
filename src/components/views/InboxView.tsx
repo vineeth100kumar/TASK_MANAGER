@@ -3,6 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Inbox, CheckCircle2, Plus, Sparkles, ChevronRight, Check, X, Play, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useCompletion } from '../../hooks/useCompletion';
 import { TaskRow } from '../common/TaskRow';
+import { ProjectGroups } from '../common/ProjectGroups';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
 import { timeAgo } from '../../utils/progress';
@@ -238,11 +239,12 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
       ) : (
         <div className="relative has-[[aria-expanded=true]]:z-30 stagger -mb-2">
           <AnimatePresence initial={false}>
-          {items.map((item) => (
+          <ProjectGroups items={items}>
+          {(item, grouped) => (
             <Fold key={item.id}>
             <SwipeRow onSwipeRight={() => handleComplete(item)} onSwipeLeft={() => handleSnoozeTomorrow(item)}>
               <TaskRow
-                item={item} today={todayIso} combined={!lifeContext}
+                item={item} today={todayIso} combined={!lifeContext} hideHome={grouped}
                 completing={isCompleting(item.id)} saving={isSaving(item.id)}
                 onComplete={() => handleComplete(item)}
                 onOpen={() => unsortedIds.has(item.id) ? startClarify(item) : onSelectTask(item.id)}
@@ -256,7 +258,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
               />
             </SwipeRow>
             </Fold>
-          ))}
+          )}
+          </ProjectGroups>
           </AnimatePresence>
         </div>
       )}

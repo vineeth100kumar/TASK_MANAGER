@@ -15,6 +15,7 @@
 
 import { parseQuickAdd, QuickAddPriority, formatShortDate } from './quickAddParser';
 import { formatTime } from './reminders';
+import { stripLeadIn } from './titles';
 import { Project, Area, WorkItem, LifeContext } from '../services/types';
 
 const pad = (n: number) => String(n).padStart(2, '0');
@@ -239,9 +240,9 @@ function tidyTitle(title: string, phrase: string | null): string {
   if (phrase) t = t.replace(new RegExp(`\\s*\\b(?:for|in|on|under|to|at)?\\s*(?:the\\s+)?${escapeRe(phrase)}(?:\\s+(?:project|branch|area))?\\b`, 'i'), ' ');
   t = t.replace(/^(?:and|also|then|plus|ok|okay|so|oh)\s+/i, '')
     .replace(/(.)\s*\b(?:and\s+|,\s*)?(?:please\s+)?remind\s+me\b(?:\s+(?:about\s+it|of\s+it))?\s*/i, '$1 ')
-    .replace(/^(?:i\s+(?:need|have|want)\s+to|i\s+should|i\s+must|need\s+to|have\s+to|gotta|got\s+to)\s+/i, '')
     .replace(/\s+(?:and|also|then|for|on|at|by|to)$/i, '')
     .replace(/\s+/g, ' ').trim();
+  t = stripLeadIn(t);
   return t ? t[0].toUpperCase() + t.slice(1) : title;
 }
 

@@ -89,3 +89,58 @@ export function checkVisibility(all: WorkItem[], listedIds: Set<string>, ctx?: L
     missing
   };
 }
+
+// ---- Sage, simplified: Up next, minutes and project groups ----
+
+const isParked = (i: WorkItem) =>
+  i.status === 'blocked' || !!i.waitingFor?.who || isSnoozedNow(i);
+
+/** The one thing to do now: the first item in list order that isn't blocked, waiting or snoozed. */
+export const pickUpNext = (items: WorkItem[]): WorkItem | null =>
+  items.find(i => isOpen(i) && !isParked(i)) || null;
+
+export const formatMinutes = (m: number) => {
+  const h = Math.floor(m / 60), r = m % 60;
+  return h && r ? `${h}h ${r}m` : h ? `${h}h` : `${r}m`;
+};
+
+/** Total estimated minutes, and how many items have no estimate (so the total is honest). */
+export function totalMinutes(items: WorkItem[]) {
+  let minutes = 0, unknown = 0;
+  for (const i of items) {
+    if (i.estimatedMinutes && i.estimatedMinutes > 0) minutes += i.estimatedMinutes; else unknown++;
+  }
+  return { minutes, unknown };
+}
+
+export interface ProjectGroup { key: string; name: string; color?: string; items: WorkItem[] }
+
+/**
+ * Items grouped by project (else area, else "No project"), groups in order of
+ * their first item so list order is kept. Two projects with the same task
+ * names stay apart. Returns one group per home; callers show headers only
+ * when there are several.
+ */
+export function groupByProject(items: WorkItem[]): ProjectGroup[] {
+  const groups = new Map<string, ProjectGroup>();
+  for (const i of items) {
+    const key = i.projectId ? `p:${i.projectId}` : i.areaId ? `a:${i.areaId}` : 'none';
+    let g = groups.get(key);
+    if (!g) {
+      g = { key, name: i.project?.name || i.area?.name || 'No project', color: (i.project as any)?.color, items: [] };
+      groups.set(key, g);
+    }
+    g.items.push(i);
+  }
+  return [...groups.values()];
+}
+
+/** "1h 30m" / "45m" / "2h" / "30" → minutes; undefined when there is no duration. */
+export function durationToMinutes(text: string | null | undefined): number | undefined {
+  const t = (text || '').trim();
+  if (/^\d+$/.test(t)) return parseInt(t, 10) || undefined;
+  const h = t.match(/(\d+)\s*h/i);
+  const m = t.match(/(\d+)\s*m/i);
+  const total = (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
+  return total > 0 ? total : undefined;
+}
