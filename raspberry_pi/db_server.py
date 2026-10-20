@@ -1252,10 +1252,12 @@ def _phone_presence():
 
 
 life_mode.presence = _phone_presence
+life_mode.last_seen = lambda: float(phone_link.link.last_seen or 0)
 
 
 def _life_mode_state() -> dict:
-    return {"success": True, **life_mode.current(), "held": len(life_mode.held()), "phoneLink": phone_link.link.available}
+    return {"success": True, **life_mode.current(), "held": len(life_mode.held()), "phoneLink": phone_link.link.available,
+            "welcome": life_mode.pending_welcome()}
 
 
 @app.get("/api/life-mode")
@@ -1269,6 +1271,15 @@ async def life_mode_update(update: Dict[str, Any]):
         life_mode.update_settings(update)
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    state = _life_mode_state()
+    await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return state
+
+
+@app.post("/api/life-mode/welcomed")
+async def life_mode_welcomed(body: Dict[str, Any]):
+    """The web app showed Welcome home; don't show it again for this arrival."""
+    life_mode.mark_welcomed(body.get("id"))
     state = _life_mode_state()
     await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
     return state

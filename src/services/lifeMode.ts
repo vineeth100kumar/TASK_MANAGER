@@ -25,6 +25,7 @@ export interface LifeModeState {
   urgentThrough: boolean;
   held: number;     // work reminders waiting for Work mode
   phoneLink: boolean;
+  welcome: { id: number; at: number } | null; // an arrival not yet welcomed (shown once)
 }
 
 const LOCAL_KEY = 'sage-life-mode';
@@ -34,7 +35,7 @@ const readLocal = (): LifeMode => {
 };
 
 const localState = (): LifeModeState => ({
-  mode: readLocal(), source: 'local', auto: false, known: false, home: false, urgentThrough: false, held: 0, phoneLink: false,
+  mode: readLocal(), source: 'local', auto: false, known: false, home: false, urgentThrough: false, held: 0, phoneLink: false, welcome: null,
 });
 
 let state: LifeModeState = localState();
@@ -62,6 +63,7 @@ const fromPi = (data: any): Partial<LifeModeState> => ({
   urgentThrough: !!data.urgentThrough,
   ...(typeof data.held === 'number' ? { held: data.held } : {}),
   ...(typeof data.phoneLink === 'boolean' ? { phoneLink: data.phoneLink } : {}),
+  ...('welcome' in data ? { welcome: data.welcome && data.welcome.id ? { id: data.welcome.id, at: data.welcome.at } : null } : {}),
 });
 
 // The Pi's LIFE_MODE event (see liveStream.ts).
@@ -116,6 +118,23 @@ export async function setLifeMode(mode: LifeMode): Promise<void> {
   } catch (e) {
     set({ mode: before });
     throw e;
+  }
+}
+
+// Welcome home was shown: tell the Pi so it isn't shown again for this arrival.
+export async function markWelcomed(): Promise<void> {
+  const id = state.welcome?.id;
+  set({ welcome: null });
+  const base = piBackendUrl();
+  if (!base || id === undefined) return;
+  try {
+    await fetch(`${base}/api/life-mode/welcomed`, {
+      method: 'POST',
+      headers: piHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify({ id }),
+    });
+  } catch {
+    // The Pi is unreachable; it will offer the welcome again next time.
   }
 }
 

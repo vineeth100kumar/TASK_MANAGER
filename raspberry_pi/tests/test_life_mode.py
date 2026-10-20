@@ -38,7 +38,7 @@ class Presence:
 def reset_db():
     conn = sqlite3.connect(life_mode.DB_PATH)
     conn.execute("CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT)")
-    conn.execute("DELETE FROM metadata WHERE key IN ('lifeMode', 'lifeModeHeld')")
+    conn.execute("DELETE FROM metadata WHERE key IN ('lifeMode', 'lifeModeHeld', 'lifeModeArrival')")
     conn.commit()
     conn.close()
 
@@ -215,6 +215,36 @@ class ChillRemindersTests(unittest.TestCase):
         notifier.run_once(datetime.datetime(2026, 10, 16, 8, 0, tzinfo=UTC))
         self.assertEqual(self.pushed[0]["title"], "Today: 1 thing planned")
         self.assertEqual(self.pushed[0]["body"], "Call mum. 1 work task waits for Work mode.")
+
+
+class ArrivalTests(unittest.TestCase):
+    def setUp(self):
+        reset_db()
+
+    def test_back_after_a_while_is_an_arrival(self):
+        w = life_mode.ArrivalWatch(away_minutes=15)
+        self.assertFalse(w.update(True, True, 0))
+        self.assertFalse(w.update(True, False, 100, last_seen=100))
+        self.assertTrue(w.update(True, True, 100 + 20 * 60))
+        self.assertFalse(w.update(True, True, 100 + 21 * 60))
+
+    def test_a_short_trip_is_not(self):
+        w = life_mode.ArrivalWatch(away_minutes=15)
+        w.update(True, True, 0)
+        w.update(True, False, 100, last_seen=100)
+        self.assertFalse(w.update(True, True, 100 + 5 * 60))
+
+    def test_arrival_welcomes_once_and_sets_chill(self):
+        life_mode.update_settings({"mode": "work"})
+        entry = life_mode.record_arrival(1000)
+        self.assertEqual(life_mode.pending_welcome()["id"], entry["id"])
+        life_mode.mark_welcomed(entry["id"])
+        self.assertIsNone(life_mode.pending_welcome())
+
+    def test_arrival_chill_with_auto_off(self):
+        life_mode.update_settings({"auto": False, "mode": "work"})
+        life_mode.record_arrival(1000)
+        self.assertEqual(life_mode.get_settings()["mode"], "chill")
 
 
 if __name__ == "__main__":
