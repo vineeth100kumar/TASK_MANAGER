@@ -18,7 +18,7 @@ const KIND: Record<string, string> = { reminder: 'Reminder', event: 'Event', mil
 
 function whenLabel(item: WorkItem, today: string): string | null {
   if (item.startAt && planDay(item) === today) return formatClock(item.startAt);
-  if (item.dueDate) return withTime(formatDateRange(null, item.dueDate), item.dueTime);
+  if (item.dueDate) return withTime(formatDateRange(null, item.dueDate, item.status === 'done'), item.dueTime);
   if (item.startAt) return formatDateRange(item.startAt, null);
   if (item.startDate) return formatDateRange(item.startDate, null);
   return null;

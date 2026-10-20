@@ -8,6 +8,8 @@ The Pi decides when to notify, so alerts arrive while the app is closed:
   - morning plan: what's due today and what's overdue, at the time chosen in
     Settings
   - evening check-in: what's still open from today, only when something is
+  - habits: a habit's remindTime, once a day, on days it isn't ticked yet and
+    its weekly target isn't met; to push and/or email as the habit says
 
 Times without an offset ("2026-10-01T09:00", what the app stores) are read in
 the timezone the app last reported, so a reminder fires at the wall-clock
@@ -477,6 +479,54 @@ def completed_since(since_date: str) -> List[dict]:
     return items
 
 
+def habits() -> List[dict]:
+    conn = _connect()
+    rows = conn.execute("SELECT payload FROM entities WHERE table_name = 'habits' AND deleted = 0").fetchall()
+    conn.close()
+    out = []
+    for (payload,) in rows:
+        try:
+            habit = json.loads(payload)
+        except ValueError:
+            continue
+        if isinstance(habit, dict) and not habit.get("deletedAt"):
+            out.append(habit)
+    return out
+
+
+def habit_due(habit: dict, now: datetime.datetime) -> bool:
+    """True when this habit still wants doing today: not ticked today and,
+    for an N-days-a-week habit, this week's N not reached yet."""
+    history = {d for d in (habit.get("history") or []) if isinstance(d, str) and len(d) == 10}
+    today = now.date()
+    if today.isoformat() in history:
+        return False
+    try:
+        target = max(1, min(7, int(habit.get("targetCount") or 7)))
+    except (TypeError, ValueError):
+        target = 7
+    monday = today - datetime.timedelta(days=today.weekday())
+    this_week = sum(1 for i in range(7) if (monday + datetime.timedelta(days=i)).isoformat() in history)
+    return this_week < target
+
+
+def habit_message(habit: dict, now: datetime.datetime) -> dict:
+    name = habit.get("name") or "Habit"
+    history = {d for d in (habit.get("history") or []) if isinstance(d, str)}
+    streak, day = 0, now.date() - datetime.timedelta(days=1)
+    while day.isoformat() in history:
+        streak += 1
+        day -= datetime.timedelta(days=1)
+    body = f"Keep your {streak}-day streak going. Tick it in Sage." if streak > 1 else "Not ticked yet today. Tick it in Sage when it's done."
+    return {
+        "title": name,
+        "body": body,
+        "tag": f"habit-{habit.get('id')}",
+        "url": "/?view=today",
+        "ttl": 3600,
+    }
+
+
 def _is_snoozed(item: dict, now: datetime.datetime, tz: ZoneInfo) -> bool:
     until = parse_when(item.get("snoozedUntil"), tz)
     return bool(until and until > now)
@@ -860,6 +910,33 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
             if not chill:
                 key = _send_held(conn, prefs, items)
                 if key:
+                    sent.append(key)
+
+            # Habits are personal, so Chill mode doesn't hold them back.
+            for habit in habits():
+                hhmm = str(habit.get("remindTime") or "")
+                if not _valid_time(hhmm):
+                    continue
+                push, mail = habit.get("remindPush", True) is not False, bool(habit.get("remindEmail"))
+                when = _today_at(now, hhmm)
+                if not (push or mail) or not (when <= now < when + REMINDER_GRACE) or not habit_due(habit, now):
+                    continue
+                key = f"habit:{habit.get('id')}:{today_iso}:{hhmm}"
+                if _already_sent(conn, key):
+                    continue
+                message = habit_message(habit, now)
+                delivered = push and any(r.get("ok") for r in send_push(message, prefs=prefs))
+                if mail and email_ready(prefs):
+                    link = _app_link()
+                    try:
+                        send_email(prefs, f"Habit: {message['title']}",
+                                   email_text(message["title"], message["body"], [], link),
+                                   email_html(message["title"], message["body"], [], link))
+                        delivered = True
+                    except Exception as e:
+                        print(f"Sage habit email failed: {e}")
+                if delivered:
+                    _mark_sent(conn, key)
                     sent.append(key)
 
         # In Chill the digests only talk about personal things.

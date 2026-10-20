@@ -146,6 +146,11 @@ export interface Habit {
   history: string[]; // dates ticked, e.g. ["2026-10-01", "2026-10-02"]
   areaId?: string | null;
   streak?: number;
+  // A daily nudge at this time ("19:30") on days the habit isn't ticked yet,
+  // sent by the Pi (raspberry_pi/notifier.py). Unset means no reminder.
+  remindTime?: string | null;
+  remindPush?: boolean;   // to the website / home-screen app (default on)
+  remindEmail?: boolean;  // to the notification email (default off)
   createdAt: string;
   updatedAt?: string;
 }

@@ -393,7 +393,8 @@ export const api = {
         ...(payload.dependsOn?.length ? { dependsOn: payload.dependsOn } : {}),
         ...((payload as any).stage ? { stage: (payload as any).stage } : {}),
         version: 1,
-        completedAt: null,
+        // A milestone logged as already reached is done from the start.
+        completedAt: payload.status === 'done' ? (payload.completedAt || now) : null,
         deletedAt: null,
         createdAt: now,
         updatedAt: now,
@@ -741,11 +742,14 @@ export const api = {
       await persist('habits', h);
       return h;
     },
-    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount'>): Promise<Habit> => {
+    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount' | 'remindTime' | 'remindPush' | 'remindEmail'>): Promise<Habit> => {
       await initializeStore();
       const h = state.habits.find(h => h && h.id === id);
       if (!h) throw new Error('Habit not found');
       if (updates.name !== undefined) h.name = updates.name.trim() || h.name;
+      if (updates.remindTime !== undefined) h.remindTime = /^\d{2}:\d{2}$/.test(updates.remindTime || '') ? updates.remindTime : null;
+      if (updates.remindPush !== undefined) h.remindPush = !!updates.remindPush;
+      if (updates.remindEmail !== undefined) h.remindEmail = !!updates.remindEmail;
       if (updates.targetCount !== undefined) h.targetCount = Math.min(7, Math.max(1, Math.round(updates.targetCount)));
       h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();

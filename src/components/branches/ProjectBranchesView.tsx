@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { GitBranch, GitMerge, Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, X } from 'lucide-react';
+import { GitBranch, GitMerge, Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, ProjectBranch, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -23,6 +23,7 @@ interface Props {
   activeWorkspace: string;
   onSelectTask: (id: string) => void;
   onRefreshData?: () => void;
+  onTransition?: (item: WorkItem, toStatus: string) => void;
 }
 
 /**
@@ -30,7 +31,7 @@ interface Props {
  * lanes, oldest at the top, with each item placed on the day it happened (or
  * is planned) and a line marking today.
  */
-export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSelectTask, onRefreshData }: Props) {
+export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSelectTask, onRefreshData, onTransition }: Props) {
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -158,7 +159,7 @@ export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSel
                 <RowGraph row={row} r={r} flow={flow} todayRow={todayRow} lineColor={lineColor} />
               </svg>
               <div className="flex-1 min-w-0 flex items-center pr-3 md:pr-5 border-b border-black/[0.04] dark:border-white/[0.04]">
-                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} />
+                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} onTransition={onTransition} />
               </div>
             </li>
           ))}
@@ -222,12 +223,13 @@ function RowGraph({ row, r, flow, todayRow, lineColor }: {
   return <>{parts}</>;
 }
 
-function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
+function RowContent({ row, lineName, branches, onSelectTask, onMove, onTransition }: {
   row: FlowRow;
   lineName: (id?: string | null) => string;
   branches: ProjectBranch[];
   onSelectTask: (id: string) => void;
   onMove: (item: WorkItem, branchId: string) => void;
+  onTransition?: (item: WorkItem, toStatus: string) => void;
 }) {
   if (row.kind === 'today') {
     return (
@@ -258,6 +260,14 @@ function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
     : `Added ${formatShortDate(row.date)}`;
   return (
     <div className="group flex items-center gap-3 w-full min-w-0">
+      {onTransition && (item.entityType === 'task' || item.entityType === 'milestone') && (
+        <button type="button" onClick={() => onTransition(item, done ? 'todo' : 'done')}
+          aria-pressed={done} aria-label={done ? `Reopen ${item.title}` : `Mark ${item.title} done`}
+          title={done ? 'Reopen' : item.entityType === 'milestone' ? 'Mark reached' : 'Mark done'}
+          className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 text-transparent hover:border-emerald-500 hover:text-emerald-500'}`}>
+          <Check size={11} strokeWidth={3} />
+        </button>
+      )}
       <button onClick={() => onSelectTask(item.id)} className="min-w-0 flex-1 text-left">
         <div className={`text-[14px] font-medium truncate ${done ? 'text-gray-400 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-900 dark:text-white'}`}>{item.title}</div>
         <div className="text-[11.5px] text-gray-400 truncate">
