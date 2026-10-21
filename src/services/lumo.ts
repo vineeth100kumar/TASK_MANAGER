@@ -190,11 +190,13 @@ export const lumoApi = {
     post<LumoStatus>('/api/desk/firmware', { action, ...(build || {}) }),
   galleryPhotos: () => call<{ photos: { name: string; size: number }[] }>('/api/desk/gallery/photos').then(d => d.photos),
   galleryUpload: async (file: File) => {
-    const form = new FormData();
-    form.append('file', file);
-    const res = await fetch(`${piBackendUrl()}/api/desk/gallery/photos`, { method: 'POST', body: form });
-    if (!res.ok) throw new Error(await res.text());
-    return res.json() as Promise<{ name: string; size: number }>;
+    const buf = await file.arrayBuffer();
+    const bytes = new Uint8Array(buf);
+    let binary = '';
+    for (let i = 0; i < bytes.length; i += 8192) {
+      binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+    }
+    return post<{ name: string; size: number }>('/api/desk/gallery/photos', { name: file.name, data: btoa(binary) });
   },
   galleryDeletePhoto: (name: string) => call(`/api/desk/gallery/photos/${encodeURIComponent(name)}`, { method: 'DELETE' }),
   galleryPreview: () => post<{ slide: number; total: number }>('/api/desk/gallery/preview', {}),

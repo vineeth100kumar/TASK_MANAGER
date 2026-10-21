@@ -6,7 +6,7 @@ import datetime
 import asyncio
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -1684,15 +1684,19 @@ async def desk_gallery_photos():
 
 
 @app.post("/api/desk/gallery/photos")
-async def desk_gallery_photo_upload(file: UploadFile):
+async def desk_gallery_photo_upload(body: Dict[str, Any]):
+    import base64 as b64
     from desk.gallery import PHOTOS_DIR
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
-    name = file.filename or "photo.jpg"
+    name = body.get("name") or "photo.jpg"
     name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
-    dest = PHOTOS_DIR / name
-    content = await file.read()
+    data_str = body.get("data") or ""
+    if "," in data_str:
+        data_str = data_str.split(",", 1)[1]
+    content = b64.b64decode(data_str)
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
+    dest = PHOTOS_DIR / name
     await asyncio.to_thread(dest.write_bytes, content)
     return {"name": dest.name, "size": len(content)}
 
