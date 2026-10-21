@@ -1,7 +1,7 @@
 // The LUMO page's light ring, night mode, haptics and welcome back message.
-import { useEffect, useState } from 'react';
-import { Home, Lightbulb, Moon, Vibrate } from 'lucide-react';
-import { LumoSettings, LumoSettingsUpdate } from '../../services/lumo';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Home, ImageIcon, Lightbulb, Moon, Plus, Trash2, Vibrate } from 'lucide-react';
+import { LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
 import { FACES } from './ClockTab';
 import { Panel, Row, Segmented, Slider, Toggle, selectCls } from './parts';
 import { Select } from '../common/Select';
@@ -89,7 +89,115 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
       </Panel>
 
       <WelcomePanel settings={settings} save={save} />
+      <GalleryPanel settings={settings} save={save} />
     </div>
+  );
+}
+
+const INTERVAL_CHOICES = [10, 15, 20, 30, 45, 60, 90, 120, 180, 300];
+const intervalLabel = (s: number) => (s < 60 ? `${s} seconds` : `${s / 60} minute${s === 60 ? '' : 's'}`);
+
+const GALLERY_SOURCES = [
+  { id: 'quotes', name: 'Quotes', hint: 'Inspirational quotes' },
+  { id: 'memories', name: 'Completed tasks', hint: 'Things you finished recently' },
+  { id: 'photos', name: 'Photos', hint: 'Pictures from your library' },
+  { id: 'notes', name: 'Notes', hint: 'Short snippets from your notes' },
+];
+
+function GalleryPanel({ settings, save }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void }) {
+  const g = settings.gallery;
+  const [photos, setPhotos] = useState<{ name: string; size: number }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const loadPhotos = useCallback(() => { lumoApi.galleryPhotos().then(setPhotos).catch(() => {}); }, []);
+  useEffect(() => { loadPhotos(); }, [loadPhotos]);
+
+  const toggleSource = (id: string) => {
+    const current = g.sources || [];
+    const next = current.includes(id) ? current.filter(s => s !== id) : [...current, id];
+    if (next.length > 0) save({ gallery: { sources: next } });
+  };
+  const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files?.length) return;
+    setUploading(true);
+    try {
+      for (const file of Array.from(files)) {
+        await lumoApi.galleryUpload(file);
+      }
+      loadPhotos();
+    } catch { /* ignore */ }
+    setUploading(false);
+    if (fileRef.current) fileRef.current.value = '';
+  };
+  const handleDelete = async (name: string) => {
+    await lumoApi.galleryDeletePhoto(name);
+    loadPhotos();
+  };
+  const intervals = INTERVAL_CHOICES.includes(g.intervalSeconds)
+    ? INTERVAL_CHOICES
+    : [...INTERVAL_CHOICES, g.intervalSeconds].sort((a, b) => a - b);
+  return (
+    <Panel icon={<ImageIcon size={16} className="text-violet-500" />} title="Away gallery"
+      right={<Toggle on={g.enabled} onChange={on => save({ gallery: { enabled: on } })} label="Away gallery" />}>
+      <p className="text-[13px] text-gray-500 dark:text-gray-400">
+        When you leave home, LUMO shows a rotating gallery of quotes, memories and photos instead of the clock.
+      </p>
+      <div className={`space-y-3 ${g.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+        <Row title="Rotate every">
+          <Select className={selectCls} value={String(g.intervalSeconds)}
+            onChange={v => save({ gallery: { intervalSeconds: Number(v) } })}>
+            {intervals.map(s => <option key={s} value={String(s)}>{intervalLabel(s)}</option>)}
+          </Select>
+        </Row>
+        <div className="space-y-2">
+          <div className="text-[13px] font-medium text-gray-500">Content sources</div>
+          {GALLERY_SOURCES.map(src => (
+            <label key={src.id} className="flex items-center gap-3 cursor-pointer group">
+              <input type="checkbox" checked={(g.sources || []).includes(src.id)}
+                onChange={() => toggleSource(src.id)}
+                className="rounded border-gray-300 dark:border-gray-600 text-blue-600 focus:ring-blue-500 w-4 h-4" />
+              <div>
+                <span className="text-[13px] font-medium text-gray-900 dark:text-white">{src.name}</span>
+                <span className="text-[12px] text-gray-400 ml-2">{src.hint}</span>
+              </div>
+            </label>
+          ))}
+        </div>
+        {(g.sources || []).includes('photos') && (
+          <div className="space-y-2 border-t border-gray-100 dark:border-white/5 pt-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[13px] font-medium text-gray-500">Photos ({photos.length})</span>
+              <label className="inline-flex items-center gap-1 text-[12px] text-blue-600 hover:text-blue-700 cursor-pointer">
+                <Plus size={14} />
+                {uploading ? 'Uploading...' : 'Add'}
+                <input ref={fileRef} type="file" accept="image/*" multiple className="hidden" onChange={handleUpload} />
+              </label>
+            </div>
+            {photos.length > 0 && (
+              <div className="space-y-1 max-h-40 overflow-y-auto">
+                {photos.map(p => (
+                  <div key={p.name} className="flex items-center justify-between text-[12px] px-2 py-1 rounded-lg hover:bg-gray-50 dark:hover:bg-white/5">
+                    <span className="text-gray-700 dark:text-gray-300 truncate">{p.name}</span>
+                    <button onClick={() => handleDelete(p.name)} className="text-gray-400 hover:text-red-500 shrink-0 ml-2" title="Remove">
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+            {photos.length === 0 && (
+              <p className="text-[12px] text-gray-400 italic">No photos yet. Add some to see them on LUMO when you're away.</p>
+            )}
+          </div>
+        )}
+        <button onClick={() => lumoApi.galleryPreview().catch(() => {})}
+          className="text-[12px] text-blue-600 hover:text-blue-700 font-medium">
+          Preview on LUMO
+        </button>
+      </div>
+    </Panel>
   );
 }
 

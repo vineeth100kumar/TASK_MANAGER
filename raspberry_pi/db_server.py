@@ -6,7 +6,7 @@ import datetime
 import asyncio
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
@@ -1668,6 +1668,57 @@ async def desk_depth_delete():
     await asyncio.to_thread(depth.clear)
     await _depth_to_clock()  # the ring may have been following the photo
     return await asyncio.to_thread(_depth_describe)
+
+
+# --- Gallery photos (see desk/gallery.py) ---
+
+@app.get("/api/desk/gallery/photos")
+async def desk_gallery_photos():
+    from desk.gallery import PHOTOS_DIR
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    photos = []
+    for f in sorted(PHOTOS_DIR.iterdir()):
+        if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
+            photos.append({"name": f.name, "size": f.stat().st_size})
+    return {"photos": photos}
+
+
+@app.post("/api/desk/gallery/photos")
+async def desk_gallery_photo_upload(file: UploadFile):
+    from desk.gallery import PHOTOS_DIR
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    name = file.filename or "photo.jpg"
+    name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
+    dest = PHOTOS_DIR / name
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
+    await asyncio.to_thread(dest.write_bytes, content)
+    return {"name": dest.name, "size": len(content)}
+
+
+@app.delete("/api/desk/gallery/photos/{name}")
+async def desk_gallery_photo_delete(name: str):
+    from desk.gallery import PHOTOS_DIR
+    target = PHOTOS_DIR / name
+    if not target.exists() or not target.is_file() or target.parent != PHOTOS_DIR:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    await asyncio.to_thread(target.unlink)
+    return {"deleted": name}
+
+
+@app.post("/api/desk/gallery/preview")
+async def desk_gallery_preview():
+    """Show the next gallery slide on the clock now (for testing)."""
+    from desk import run as desk_run
+    if not desk.ENABLED or desk_run.desk is None:
+        raise HTTPException(status_code=400, detail="The desk clock is off.")
+    g = desk_run.desk.gallery
+    if not g.active:
+        g.configure(desk_run.desk.settings.get("gallery", {}))
+        g.start()
+    await g.show_current()
+    return {"slide": g.index, "total": len(g.slides)}
 
 
 # --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---

@@ -151,6 +151,7 @@ export interface LumoSettings {
   // What the case window hides on each side (px, firmware 2.15+), the Even Frame and its island.
   screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean };
   welcome: { enabled: boolean; message: string; awayMinutes: number };
+  gallery: { enabled: boolean; intervalSeconds: number; sources: string[] };
   updates: { auto: boolean; hold: string; window: string };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
@@ -187,6 +188,16 @@ export const lumoApi = {
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
   firmware: (action: 'check' | 'install' | 'update' | 'hold' | 'release', build?: { version: string; sha?: string }) =>
     post<LumoStatus>('/api/desk/firmware', { action, ...(build || {}) }),
+  galleryPhotos: () => call<{ photos: { name: string; size: number }[] }>('/api/desk/gallery/photos').then(d => d.photos),
+  galleryUpload: async (file: File) => {
+    const form = new FormData();
+    form.append('file', file);
+    const res = await fetch(`${piBackendUrl()}/api/desk/gallery/photos`, { method: 'POST', body: form });
+    if (!res.ok) throw new Error(await res.text());
+    return res.json() as Promise<{ name: string; size: number }>;
+  },
+  galleryDeletePhoto: (name: string) => call(`/api/desk/gallery/photos/${encodeURIComponent(name)}`, { method: 'DELETE' }),
+  galleryPreview: () => post<{ slide: number; total: number }>('/api/desk/gallery/preview', {}),
 };
 
 // The depth face (desk/depth.py on the Pi): a photo with the time tucked
