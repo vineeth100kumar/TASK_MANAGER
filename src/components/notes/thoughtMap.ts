@@ -86,7 +86,7 @@ export type ThoughtRow =
   | { kind: 'day'; date: string }
   | { kind: 'fork'; lane: number; topic: string; color: string; at: string }
   | { kind: 'settle'; lane: number; topic: string; color: string; at: string }
-  | { kind: 'thought'; lane: number; color: string; thought: Thought };
+  | { kind: 'thought'; lane: number; color: string; thought: Thought; depth: number };
 
 export interface ThoughtFlow {
   rows: ThoughtRow[];
@@ -95,18 +95,66 @@ export interface ThoughtFlow {
   spans: { lane: number; from: number; to: number; color: string; open: boolean }[];
 }
 
+export interface TreeNode {
+  thought: Thought;
+  depth: number;          // 0 for a thought nothing else is above
+  children: TreeNode[];
+}
+
+/**
+ * The thoughts as a tree: each sits under its parent, siblings oldest first.
+ * A thought whose parent isn't in the list (deleted, or filtered out) is a root.
+ */
+export function thoughtTree(thoughts: Thought[]): TreeNode[] {
+  const sorted = sortThoughts(thoughts);
+  const ids = new Set(sorted.map(t => t.id));
+  const kids = new Map<string, Thought[]>();
+  const roots: Thought[] = [];
+  for (const t of sorted) {
+    if (t.parentId && t.parentId !== t.id && ids.has(t.parentId)) {
+      if (!kids.has(t.parentId)) kids.set(t.parentId, []);
+      kids.get(t.parentId)!.push(t);
+    } else roots.push(t);
+  }
+  const seen = new Set<string>();
+  const grow = (t: Thought, depth: number): TreeNode => {
+    seen.add(t.id);
+    return { thought: t, depth, children: (kids.get(t.id) || []).filter(c => !seen.has(c.id)).map(c => grow(c, depth + 1)) };
+  };
+  const out = roots.map(r => grow(r, 0));
+  // A loop of parents (a under b under a) has no root; show what's left at the top.
+  for (const t of sorted) if (!seen.has(t.id)) out.push(grow(t, 0));
+  return out;
+}
+
+/** The tree read top to bottom: each thought followed by everything under it. */
+function flatten(nodes: TreeNode[], root: Thought | null = null, out: Array<{ thought: Thought; depth: number; root: Thought }> = []) {
+  for (const n of nodes) {
+    out.push({ thought: n.thought, depth: n.depth, root: root || n.thought });
+    flatten(n.children, root || n.thought, out);
+  }
+  return out;
+}
+
 /**
  * Lays a map out oldest first, like a project's branches: thoughts with no
  * topic on the main line, each topic on its own lane from its first thought.
+ * Points under a thought follow it straight away, indented, on its lane, so
+ * the order of the main thoughts is time and the order below them is the flow.
  * A topic whose thoughts are all settled folds back after its last one, and
  * its lane is free for the next topic.
  */
 export function buildThoughtFlow(thoughts: Thought[], colors?: { name: string; color: string }[]): ThoughtFlow {
-  const sorted = sortThoughts(thoughts);
+  const ordered = flatten(thoughtTree(thoughts));
+  const sorted = ordered.map(o => o.thought);
+  const rootOf = new Map(ordered.map(o => [o.thought.id, o.root]));
+  const depthOf = new Map(ordered.map(o => [o.thought.id, o.depth]));
   // A filtered view passes the whole map's topics, so colours don't shift.
   const topics = colors || topicsOf(sorted);
   const colorOf = (name: string) => topics.find(t => t.name.toLowerCase() === name.toLowerCase())?.color || MAIN_COLOR;
-  const keyOf = (t: Thought) => (t.topic || '').trim().toLowerCase();
+  // A point sits on the lane of the thought it grew from.
+  const keyOf = (t: Thought) => ((rootOf.get(t.id) || t).topic || '').trim().toLowerCase();
+  const topicName = (t: Thought) => ((rootOf.get(t.id) || t).topic || '').trim();
 
   const lastIndex = new Map<string, number>();
   sorted.forEach((t, i) => keyOf(t) && lastIndex.set(keyOf(t), i));
@@ -124,7 +172,7 @@ export function buildThoughtFlow(thoughts: Thought[], colors?: { name: string; c
   let day = '';
 
   sorted.forEach((t, i) => {
-    const d = toDateKey(new Date(t.createdAt));
+    const d = toDateKey(new Date((rootOf.get(t.id) || t).createdAt));
     if (d !== day) { rows.push({ kind: 'day', date: d }); day = d; }
     const k = keyOf(t);
     let lane = 0;
@@ -134,18 +182,18 @@ export function buildThoughtFlow(thoughts: Thought[], colors?: { name: string; c
         while (laneFree[lane] === false) lane++;
         laneFree[lane] = false;
         laneOf.set(k, lane);
-        const name = t.topic!.trim();
+        const name = topicName(t);
         rows.push({ kind: 'fork', lane, topic: topics.find(x => x.name.toLowerCase() === k)?.name || name, color: colorOf(name), at: t.createdAt });
         spanOf.set(k, spans.length);
         spans.push({ lane, from: rows.length - 1, to: rows.length - 1, color: colorOf(name), open: true });
       }
       lane = laneOf.get(k)!;
     }
-    rows.push({ kind: 'thought', lane, color: k ? colorOf(t.topic!) : MAIN_COLOR, thought: t });
+    rows.push({ kind: 'thought', lane, color: k ? colorOf(topicName(t)) : MAIN_COLOR, thought: t, depth: depthOf.get(t.id) || 0 });
     if (k) spans[spanOf.get(k)!].to = rows.length - 1;
     if (k && lastIndex.get(k) === i && settled.get(k)) {
       const s = spans[spanOf.get(k)!];
-      rows.push({ kind: 'settle', lane, topic: topics.find(x => x.name.toLowerCase() === k)?.name || t.topic!, color: s.color, at: t.createdAt });
+      rows.push({ kind: 'settle', lane, topic: topics.find(x => x.name.toLowerCase() === k)?.name || topicName(t), color: s.color, at: t.createdAt });
       s.to = rows.length - 1;
       s.open = false;
       laneFree[lane] = true;
@@ -156,4 +204,16 @@ export function buildThoughtFlow(thoughts: Thought[], colors?: { name: string; c
   spans.forEach(s => { if (s.open) s.to = Math.max(s.to, rows.length - 1); });
   const laneCount = Math.max(1, ...spans.map(s => s.lane + 1));
   return { rows, laneCount, spans };
+}
+
+/** For each thought, the topic of the thought it grew from (its own, for a top thought). */
+export function rootTopics(thoughts: Thought[]): Map<string, string> {
+  const out = new Map<string, string>();
+  const walk = (nodes: TreeNode[], topic: string | null) => nodes.forEach(n => {
+    const tp = topic ?? (n.thought.topic || '').trim();
+    out.set(n.thought.id, tp);
+    walk(n.children, tp);
+  });
+  walk(thoughtTree(thoughts), null);
+  return out;
 }
