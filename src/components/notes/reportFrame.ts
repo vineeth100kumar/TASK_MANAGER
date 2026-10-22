@@ -9,6 +9,9 @@
  * page that brings its own design keeps it.
  */
 
+// The Auto colours script, run inside the frame (see contrastFix.js).
+import CONTRAST_FIX_JS from './contrastFix.js?raw';
+
 export type FrameTheme = 'light' | 'dark';
 
 const CDNS = 'https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com';
@@ -156,22 +159,7 @@ body pre{background:var(--sage-code-bg)!important;color:var(--sage-code-text)!im
 body :not(pre)>code{background:var(--sage-surface)!important}
 body blockquote{background:var(--sage-accent-soft)!important;border-color:var(--sage-accent)!important}`;
 
-// Runs inside the sandboxed frame: finds text whose colour is too close to the
-// colour behind it and gives it a readable one, again as the page changes.
-const CONTRAST_FIX_JS = `(()=>{
-const parse=c=>{const m=c&&c.match(/rgba?\\(([^)]+)\\)/);if(!m)return null;const p=m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number);return{r:p[0],g:p[1],b:p[2],a:p.length>3?p[3]:1}};
-const lum=c=>{const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c.r)+.7152*f(c.g)+.0722*f(c.b)};
-const ratio=(a,b)=>{const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
-const root=getComputedStyle(document.documentElement);
-const page=parse(getComputedStyle(document.body).backgroundColor)||{r:0,g:0,b:0,a:0};
-const sageBg=document.documentElement.dataset.theme==='dark'?{r:28,g:28,b:30,a:1}:{r:255,g:255,b:255,a:1};
-const bgOf=el=>{for(let e=el;e&&e.nodeType===1;e=e.parentElement){const c=parse(getComputedStyle(e).backgroundColor);if(c&&c.a>.5)return c;if(getComputedStyle(e).backgroundImage!=='none')return null}return page.a>.5?page:sageBg};
-const hasText=el=>{for(const n of el.childNodes)if(n.nodeType===3&&n.textContent.trim())return true;return false};
-const fix=()=>{for(const el of document.body.querySelectorAll('*')){if(el.closest('svg,canvas,pre')||!hasText(el))continue;const st=getComputedStyle(el);const fg=parse(st.color);const bg=bgOf(el);if(!fg||!bg)continue;const min=parseFloat(st.fontSize)>=18||(parseInt(st.fontWeight)>=700&&parseFloat(st.fontSize)>=14)?3:4.5;if(ratio(fg,bg)>=min)continue;const dark=lum(bg)<.2;el.style.setProperty('color',el.closest('a')?(dark?'#93c5fd':'#1d4ed8'):(dark?'#f3f4f6':'#111827'),'important');el.dataset.sageRecoloured=''}};
-let t;const later=()=>{clearTimeout(t);t=setTimeout(fix,120)};
-document.readyState==='loading'?addEventListener('DOMContentLoaded',fix):fix();addEventListener('load',later);
-new MutationObserver(later).observe(document.body,{childList:true,subtree:true});
-})();`;
+
 
 /**
  * The whole document the frame shows: the report parsed (never run here), with
@@ -200,6 +188,7 @@ export function buildReportDocument(html: string, theme: FrameTheme, mode: Color
     add(charset);
   }
   doc.documentElement.setAttribute('data-theme', theme);
+  doc.documentElement.setAttribute('data-sage-frame', '');
   doc.documentElement.classList.toggle('dark', theme === 'dark');
   // Highlight code blocks that came as plain text; ones already marked up are left as sent.
   for (const pre of Array.from(doc.querySelectorAll('pre'))) {
