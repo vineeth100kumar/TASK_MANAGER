@@ -138,6 +138,15 @@ One change per card or item the follow-up is about; fill only what it changes an
 Never invent a card number, key, project, branch or area that is not in the lists."""
 
 
+REFINE_PROMPT = """You tidy up one task's name and give it a short description, for Vineeth's task manager, Sage.
+Answer with JSON only, in this shape:
+{"title": "...", "description": "..."}
+
+- title: a clear, specific task name of 2 to 8 words, in the same style and wording as the project's other tasks. Keep his own names, numbers, codes and intent; fix only what makes it clearer, and never invent scope he did not mention. If his title is already good, return it almost unchanged.
+- description: one short, concrete sentence (at most 20 words) saying what the task involves or the first step to take. No fluff, no restating the title word for word. Use "" when there is genuinely nothing useful to add.
+Do not add dates, times, tags or priority. Do not answer the task or ask questions."""
+
+
 def _lists(req: ChatCaptureRequest) -> str:
     lines = [f"Today is {req.today}." if req.today else ""]
     if req.projects:
@@ -538,9 +547,42 @@ def plan(req: ChatCaptureRequest) -> dict:
     return {"engine": "groq", "plan": cleaned}
 
 
+def _refine_text(req: ChatCaptureRequest) -> str:
+    lines: List[str] = []
+    if req.today:
+        lines.append(f"Today is {req.today}.")
+    if req.target:
+        meta = f" ({req.typeHint})" if req.typeHint else ""
+        lines.append(f"Project: {req.target}{meta}")
+    if req.targetItems:
+        lines.append("Other tasks already in this project (match their naming style):")
+        for t in req.targetItems[:20]:
+            t = re.sub(r"\s+", " ", str(t or "")).strip()
+            if t:
+                lines.append(f"- {t}")
+    lines.append(f"Task to tidy up: {req.message}")
+    return "\n".join(lines)
+
+
+def _one_line(s, limit: int) -> str:
+    s = re.sub(r"\s+", " ", str(s or "")).strip().strip('"')
+    return s[:limit].rstrip() if len(s) > limit else s
+
+
+def refine(req: ChatCaptureRequest) -> dict:
+    """A cleaner name and a short description for one task. Groq, else the local model."""
+    text, used = _answer(REFINE_PROMPT, _refine_text(req))
+    raw = _json_object(text, "title")
+    title = _one_line(raw.get("title"), 120) or req.message.strip()
+    description = _one_line(raw.get("description"), 200)
+    return {"engine": used, "title": title, "description": description}
+
+
 def capture(req: ChatCaptureRequest) -> dict:
     if req.mode in ("plan", "plan_edit"):
         return plan(req)
+    if req.mode == "refine":
+        return refine(req)
     if req.mode == "edit":
         text, used = _answer(EDIT_PROMPT, _user_text(req))
         raw = _json_object(text, "changes")

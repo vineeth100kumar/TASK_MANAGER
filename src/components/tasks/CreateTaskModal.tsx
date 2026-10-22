@@ -1,10 +1,12 @@
 import { durationToMinutes } from '../../utils/taskLists';
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun } from 'lucide-react';
+import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun, Wand2, Loader2 } from 'lucide-react';
 import { SpinnerCheck } from '../common/SpinnerCheck';
 import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
+import { aiEngine } from '../../services/aiEngine';
+import { useToast } from '../../context/ToastContext';
 import { Project, Area, LifeContext } from '../../services/types';
 import { parseQuickAdd, QuickAddResult, flipGuessedTime, formatShortDate } from '../../utils/quickAddParser';
 import { formatTime } from '../../utils/reminders';
@@ -457,6 +459,44 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
     }
   }, [projects, areas]);
 
+  const { showToast } = useToast();
+  const [refining, setRefining] = useState(false);
+  // Ask the AI for a cleaner name and a short description, in the style of the
+  // project's other tasks. Keeps the date, time and priority the title already set.
+  const refine = async () => {
+    const raw = (smart.parsed?.title || smart.title).trim();
+    if (!raw || refining) return;
+    setRefining(true);
+    try {
+      const project = lifeContext === 'personal' ? null : projects.find((p: any) => p.id === payload.projectId);
+      const pastTitles = project
+        ? api.workItems.snapshot()
+            .filter((i: any) => i.projectId === project.id && !i.deletedAt && (i.entityType || 'task') === 'task'
+              && i.title && i.title.trim().toLowerCase() !== raw.toLowerCase())
+            .slice(0, 20).map((i: any) => i.title)
+        : [];
+      const r = await aiEngine.refineItem({ title: raw, project: project?.name, projectType: (project as any)?.type, pastTitles });
+      // The title loses its date/time words after refining, so lock in what the parser read first.
+      const p = smart.parsed;
+      if (p) {
+        if (parsedDate(p)) set('dueDate', parsedDate(p));
+        if (p.time) set('dueTime', p.time);
+        if (p.priority) set('priority', p.priority);
+        if (p.location) set('location', p.location);
+        if (parsedRepeat(p)) set('repeatRule', parsedRepeat(p));
+        if (p.durationMinutes) set('estimated', formatDuration(p.durationMinutes));
+        if (p.tags?.length) setTags(prev => Array.from(new Set([...prev, ...p.tags])));
+      }
+      if (r.title) smart.setTitle(r.title);
+      if (r.description) { set('description', r.description); if (!moreOpen) toggleMore(); }
+      showToast(r.description ? 'Refined the name and added a description' : 'Refined the name');
+    } catch (e: any) {
+      showToast(e?.message || 'Could not refine this one', 'error');
+    } finally {
+      setRefining(false);
+    }
+  };
+
   const reminderLead: number | '' = chosenLead ?? (payload.dueTime ? 0 : '');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -488,6 +528,16 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
   return (
     <form onSubmit={handleSubmit}>
       <SmartTitle smart={smart} disabled={isSubmitting} placeholder="What needs to be done?" />
+
+      {/* Let the AI give it a clearer name and a short description, in the style of this project's tasks. */}
+      {(smart.parsed?.title || smart.title).trim() && (
+        <button type="button" onClick={refine} disabled={refining || isSubmitting}
+          title="Clean up the name and add a short description, based on this project's other tasks"
+          className="inline-flex items-center gap-1.5 mb-4 px-3 h-8 rounded-full text-[12.5px] font-semibold ring-1 ring-inset ring-purple-300/60 dark:ring-purple-500/30 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 disabled:opacity-60 transition-colors active:scale-[0.97]">
+          {refining ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+          {refining ? 'Refining…' : 'Refine with AI'}
+        </button>
+      )}
 
       {/* The common choices, one tap each. */}
       <div className="flex flex-nowrap sm:flex-wrap items-center gap-2 mb-4 -mx-6 px-6 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar" role="group" aria-label="When">

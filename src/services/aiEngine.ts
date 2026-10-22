@@ -109,14 +109,29 @@ export const aiEngine = {
         return res.json();
     },
 
-    getDailyBriefing: async (tasksJson: string) => {
-        const res = await fetch(getAiUrl('/api/daily-briefing'), {
+    // Tidy one task's name and add a short description, informed by the project's
+    // other tasks. Groq on the Pi, else the Pi's local model.
+    refineItem: async (payload: {
+        title: string;
+        project?: string;
+        projectType?: string;
+        pastTitles?: string[];
+        today?: string;
+    }, signal?: AbortSignal): Promise<{ engine: string; title: string; description: string }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
             method: 'POST',
+            signal,
             headers: piHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ tasks_json: tasksJson })
+            body: JSON.stringify({
+                mode: 'refine',
+                message: payload.title,
+                today: payload.today || '',
+                target: payload.project || '',
+                typeHint: payload.projectType || '',
+                targetItems: payload.pastTitles || [],
+            }),
         });
-        const json = await res.json();
-        if (!json.success) throw new Error("AI failed to generate briefing");
-        return json.data;
-    }
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
 }
