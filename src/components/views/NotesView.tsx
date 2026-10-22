@@ -14,6 +14,8 @@ type Kind = 'all' | 'notes' | 'maps';
 const KIND_KEY = 'sage.notesKind';
 const isMap = (n: Note) => n.kind === 'map';
 const isRaw = (n?: Note) => n?.kind === 'html' || n?.kind === 'code';
+// A whole HTML page pasted or saved as a plain note (before reports existed, or by an AI using plain create).
+const pageIn = (n?: Note) => (!n || n.kind ? null : /^\s*(<!doctype html|<html[\s>])/i.test(n.content || '') ? n.content : null);
 
 interface NotesViewProps {
   lifeContext?: 'work' | 'personal';
@@ -133,6 +135,14 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
       showToast('Note deleted');
     }
   };
+
+  // Old notes that hold a whole HTML page open as a report: the page text becomes the report's source.
+  useEffect(() => {
+    const page = pageIn(selectedNote);
+    if (!selectedNote || !page) return;
+    const text = (new DOMParser().parseFromString(page, 'text/html').body.textContent || '').replace(/\s+/g, ' ').trim();
+    api.notes.update(selectedNote.id, { kind: 'html' }).then(() => api.notes.saveBody(selectedNote.id, page, text)).then(loadNotes);
+  }, [selectedNote?.id, selectedNote?.kind]);
 
   const thoughtsOf = (id: string) => thoughts.filter(t => t.mapId === id);
   const q = searchQuery.toLowerCase();

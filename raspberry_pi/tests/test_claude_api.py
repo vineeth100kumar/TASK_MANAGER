@@ -240,6 +240,10 @@ class ClaudeApiTests(unittest.TestCase):
         code = client.get(f"/api/claude/notes/{json.loads(reply['content'][0]['text'])['note']['id']}", headers=CLAUDE).json()["record"]
         self.assertEqual((code["kind"], code["language"], code["bodyHtml"]), ("code", "python", "if a < b:\n    print(a)"))
 
+        # A page sent as a plain note through sage_create is shown as a report too.
+        plain = client.post("/api/claude/notes", json={"title": "Pasted", "content": "<!DOCTYPE html><html><body><p>Hi</p></body></html>"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((plain["kind"], plain["content"]), ("html", "Hi"))
+
         for bad in ({"title": "x"}, {"html": "<p>"}, {"title": "x", "html": "<p>", "code": "1"}, {"title": "x", "html": "  "}):
             self.assertEqual(client.post("/api/claude/notes/push", json=bad, headers=CLAUDE).status_code, 400, bad)
 

@@ -226,6 +226,10 @@ def _html_text(html: str) -> str:
     return re.sub(r"\s+", " ", text).strip()[:40000]
 
 
+def looks_like_html_page(text: Any) -> bool:
+    return bool(re.match(r"\s*(<!doctype html|<html[\s>])", str(text or ""), re.I))
+
+
 def _note_body(fields: dict, kind: Optional[str] = None) -> None:
     """The web app shows a note's body parts when it has any, so plain text
     sent as `content` is written there too, the way the editor would save it.
@@ -322,6 +326,9 @@ async def create_record(table: str, fields: dict) -> dict:
     if table == "notes":
         record.setdefault("title", "Untitled")
         record.setdefault("content", "")
+        # A whole HTML page sent with sage_create becomes a report, not text.
+        if not record.get("kind") and looks_like_html_page(record["content"]):
+            record["kind"] = "html"
         _note_body(record)
     await _write(table, record_id, "save", record)
     return get_record(table, record_id)
