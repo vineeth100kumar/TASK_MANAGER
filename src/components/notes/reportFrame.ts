@@ -9,6 +9,9 @@
  * page that brings its own design keeps it.
  */
 
+// The Auto colours script, run inside the frame (see contrastFix.js).
+import CONTRAST_FIX_JS from './contrastFix.js?raw';
+
 export type FrameTheme = 'light' | 'dark';
 
 const CDNS = 'https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://unpkg.com';
@@ -135,11 +138,35 @@ export function highlightCode(code: string, language?: string | null): string {
 }
 
 /**
+ * How a report's own colours meet Sage's theme:
+ * - auto: keep the page's design, but any text that would be hard to read on
+ *   what is behind it (dark text on Sage's dark page, say) is recoloured;
+ * - sage: the page's colours are dropped and Sage's are used throughout;
+ * - original: exactly as the page set them.
+ */
+export type ColorMode = 'auto' | 'sage' | 'original';
+
+// Forced Sage colours. Charts (svg, canvas) and images keep theirs.
+const SAGE_COLORS_CSS = `
+html,body{background:var(--sage-bg)!important;color:var(--sage-text)!important}
+body *:not(svg):not(svg *):not(canvas):not(img):not(video):not(pre *){color:inherit!important;background-color:transparent!important;border-color:var(--sage-border)!important;text-shadow:none!important}
+body :is(header,section,article,aside,nav,footer,div,table,details)[style*="background"],body :is(.card,.box,.panel,.callout){background-color:var(--sage-surface)!important}
+body :is(h1,h2,h3,h4,h5,h6,strong,b,th){color:var(--sage-text)!important}
+body :is(small,figcaption,caption,th){color:var(--sage-muted)!important}
+body :is(a,a *){color:var(--sage-accent)!important}
+body th{background-color:var(--sage-surface)!important}
+body pre{background:var(--sage-code-bg)!important;color:var(--sage-code-text)!important}
+body :not(pre)>code{background:var(--sage-surface)!important}
+body blockquote{background:var(--sage-accent-soft)!important;border-color:var(--sage-accent)!important}`;
+
+
+
+/**
  * The whole document the frame shows: the report parsed (never run here), with
  * Sage's policy, theme and base styles put first in its head, links opening in
  * a new tab, and its unstyled code blocks highlighted.
  */
-export function buildReportDocument(html: string, theme: FrameTheme): string {
+export function buildReportDocument(html: string, theme: FrameTheme, mode: ColorMode = 'auto'): string {
   const doc = new DOMParser().parseFromString(html || '', 'text/html');
   const head = doc.head;
   const add = (el: Element) => head.insertBefore(el, head.firstChild);
@@ -161,6 +188,7 @@ export function buildReportDocument(html: string, theme: FrameTheme): string {
     add(charset);
   }
   doc.documentElement.setAttribute('data-theme', theme);
+  doc.documentElement.setAttribute('data-sage-frame', '');
   doc.documentElement.classList.toggle('dark', theme === 'dark');
   // Highlight code blocks that came as plain text; ones already marked up are left as sent.
   for (const pre of Array.from(doc.querySelectorAll('pre'))) {
@@ -168,6 +196,17 @@ export function buildReportDocument(html: string, theme: FrameTheme): string {
     if (target.children.length) continue;
     const lang = (target.className.match(/(?:language|lang)-([\w+#-]+)/) || pre.className.match(/(?:language|lang)-([\w+#-]+)/) || [])[1];
     target.innerHTML = highlightCode(target.textContent || '', lang);
+  }
+  if (mode === 'sage') {
+    // Last in the head and !important, so it beats the page's own styles.
+    const force = doc.createElement('style');
+    force.textContent = SAGE_COLORS_CSS;
+    head.appendChild(force);
+  }
+  if (mode === 'auto') {
+    const fixer = doc.createElement('script');
+    fixer.textContent = CONTRAST_FIX_JS;
+    (doc.body || doc.documentElement).appendChild(fixer);
   }
   return '<!doctype html>' + doc.documentElement.outerHTML;
 }
