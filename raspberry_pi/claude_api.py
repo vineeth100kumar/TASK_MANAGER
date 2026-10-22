@@ -20,8 +20,9 @@ import datetime
 import hmac
 import json
 import os
+import re
 import sqlite3
-from html import escape
+from html import escape, unescape
 from typing import Any, Awaitable, Callable, List, Optional
 
 from fastapi import APIRouter, Request
@@ -214,13 +215,31 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _note_body(fields: dict) -> None:
+RAW_NOTE_KINDS = ("html", "code")
+MAX_PUSH_CHARS = 2_000_000
+
+
+def _html_text(html: str) -> str:
+    """Plain words of an HTML page, for the Notes list preview and search."""
+    html = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", " ", html)
+    text = unescape(re.sub(r"(?s)<[^>]+>", " ", html))
+    return re.sub(r"\s+", " ", text).strip()[:40000]
+
+
+def _note_body(fields: dict, kind: Optional[str] = None) -> None:
     """The web app shows a note's body parts when it has any, so plain text
-    sent as `content` is written there too, the way the editor would save it."""
+    sent as `content` is written there too, the way the editor would save it.
+    HTML reports and code notes keep their source as sent: the app shows them
+    in a sandboxed frame or a code view, never in the editor."""
     if "content" not in fields or any(k.startswith("body") for k in fields):
         return
     text = str(fields["content"] or "")
-    html = "".join(f"<div>{escape(line) if line else '<br>'}</div>" for line in text.split("\n")) if text else ""
+    kind = fields.get("kind", kind)
+    if kind in RAW_NOTE_KINDS:
+        html = text
+        fields["content"] = _html_text(text) if kind == "html" else text[:40000]
+    else:
+        html = "".join(f"<div>{escape(line) if line else '<br>'}</div>" for line in text.split("\n")) if text else ""
     parts = max(1, -(-len(html) // NOTE_PART_SIZE))
     for i in range(parts):
         fields[f"body{i}"] = "~" + html[i * NOTE_PART_SIZE:(i + 1) * NOTE_PART_SIZE]
@@ -320,7 +339,7 @@ async def update_record(table: str, record_id: str, fields: dict) -> dict:
     if table == "workItems" and fields.get("status") == "done" and "completedAt" not in fields:
         fields["completedAt"] = _now()
     if table == "notes":
-        _note_body(fields)
+        _note_body(fields, _find(table, record_id).get("kind"))
     if table == "thoughts" and "status" in fields:
         fields["status"] = thought_status(fields["status"])
     fields["updatedAt"] = _now()
@@ -462,6 +481,50 @@ async def add_thoughts(ref: str, thoughts: Any, create_map: bool = False) -> dic
     return {"map": {"id": m["id"], "title": m.get("title")}, "added": added, "counts": _counts(existing + added)}
 
 
+# --- Reports and code pushed into Notes ---
+
+def _find_note(ref: str) -> Optional[dict]:
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    notes = [n for n in _rows("notes") if n.get("kind") != "map"]
+    return next((n for n in notes if n.get("id") == ref), None) or \
+        next((n for n in notes if str(n.get("title") or "").strip().lower() == ref.lower()), None)
+
+
+async def push_note(args: Any) -> dict:
+    """Saves an HTML report or a piece of code as a note. Sending the same title
+    (or the note's id as `replace`) again updates that note instead of adding one."""
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {title, html} or {title, code, language}")
+    title = str(args.get("title") or "").strip()[:200]
+    html, code = args.get("html"), args.get("code")
+    if not title or (html is None) == (code is None):
+        raise ApiError(400, "Send a title and exactly one of html or code")
+    body = str(html if html is not None else code)
+    if not body.strip():
+        raise ApiError(400, "The html or code is empty")
+    if len(body) > MAX_PUSH_CHARS:
+        raise ApiError(413, f"That is {len(body)} characters; a note holds at most {MAX_PUSH_CHARS}")
+    fields = {
+        "title": title, "kind": "html" if html is not None else "code", "content": body,
+        # Who sent it, e.g. claude, gemini or chatgpt, shown on the note.
+        "source": re.sub(r"[^a-z0-9 ._-]", "", str(args.get("source") or CLIENT_ID).lower())[:30] or CLIENT_ID,
+    }
+    if code is not None:
+        fields["language"] = re.sub(r"[^a-z0-9+#._-]", "", str(args.get("language") or "").lower())[:20]
+    if args.get("projectId"):
+        fields["projectId"] = str(args["projectId"])
+    if args.get("lifeContext") in ("work", "personal"):
+        fields["lifeContext"] = args["lifeContext"]
+    old = _find_note(args.get("replace") or title)
+    if old and old.get("kind") in RAW_NOTE_KINDS:
+        record = await update_record("notes", old["id"], fields)
+        return {"updated": True, "note": _short(record)}
+    record = await create_record("notes", fields)
+    return {"updated": False, "note": _short(record)}
+
+
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
 
 router = APIRouter(prefix="/api/claude")
@@ -523,6 +586,12 @@ async def http_add_thoughts(ref: str, request: Request):
     return await _answer(lambda: add_thoughts(ref, body.get("thoughts"), bool(body.get("createMap"))))
 
 
+@router.post("/notes/push")
+async def http_push_note(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: push_note(body))
+
+
 @router.get("/{table}")
 async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50):
     return await _answer(lambda: list_records(table, q, status, due_by, limit))
@@ -562,7 +631,7 @@ INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
 dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
 projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
-notes (title, content), comments and subtasks (workItemId), activities, boards (drawings),
+notes (title, content; kind html for a report, code for code), comments and subtasks (workItemId), activities, boards (drawings),
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
 acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
@@ -571,6 +640,7 @@ record per thought in the thoughts table (mapId, text, status open|unsure|good|b
 source). When he talks a decision through, put each point into his map with sage_thought_add: good for a
 point that holds up (a pro), bad for one that doesn't (a con), unsure for confusion, open for unsorted
 questions. Re-sort a thought by changing its status with sage_update. Use sage_maps and sage_map to read them.
+To hand Vineeth a report, plan or snippet to keep, push it into Notes with sage_note_push.
 Start with sage_overview; sage_health says whether the Pi itself is working. Changes appear in the open web app straight away. Prefer updating
 over deleting, and say what you changed."""
 
@@ -624,6 +694,21 @@ def _tools() -> List[dict]:
                  "topic": {"type": "string", "description": "A short topic name such as Money or People; reuse the map's topics"},
                  "under": {"type": "string", "description": "Id or exact text of the thought this one belongs under"},
                  "note": {"type": "string"}}}}}}},
+        {"name": "sage_note_push", "description": "Put an HTML report or a piece of code into Sage Notes. HTML shows "
+         "in a sandboxed frame that already carries Sage's look (font, colours, light and dark, tables, code blocks), so "
+         "send plain semantic HTML without your own theme; it may use the CSS variables --sage-bg, --sage-surface, "
+         "--sage-text, --sage-muted, --sage-border, --sage-accent, --sage-good, --sage-warn, --sage-bad. Scripts run "
+         "but cannot reach the app or the network except for scripts and styles from cdnjs, jsdelivr or unpkg. "
+         "Sending the same title again replaces that note.",
+         "inputSchema": {"type": "object", "required": ["title"], "properties": {
+             "title": {"type": "string"},
+             "html": {"type": "string", "description": "A full page or just body HTML. Send this or code"},
+             "code": {"type": "string", "description": "Source code, shown highlighted with a copy button"},
+             "language": {"type": "string", "description": "For code: python, ts, js, html, css, json, bash, cpp, sql..."},
+             "source": {"type": "string", "description": "Which AI sent it, e.g. claude, gemini, chatgpt (default claude)"},
+             "replace": {"type": "string", "description": "Id or title of an existing report or code note to overwrite"},
+             "projectId": {"type": "string"},
+             "lifeContext": {"type": "string", "enum": ["work", "personal"]}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
     ]
@@ -652,6 +737,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         return get_map(args.get("map", ""))
     if name == "sage_thought_add":
         return await add_thoughts(args.get("map", ""), args.get("thoughts"), bool(args.get("create_map")))
+    if name == "sage_note_push":
+        return await push_note(args)
     if name == "sage_history":
         return history(args.get("limit", 50))
     raise ApiError(404, f"Unknown tool {name}")
