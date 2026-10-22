@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import sage from './__fixtures__/sage-project-2026-10-16.json';
-import { normalizeItem, selectItems, onlyDated, describeShown, nextKey, kindOf, statusOf, contextOf, dayOf } from './items';
+import { normalizeItem, selectItems, onlyDated, describeShown, nextKey, kindOf, statusOf, contextOf, dayOf, isAlarm } from './items';
 import { statusesFor, stageOf, DEFAULT_STATUSES } from './projectTypes';
 import type { Project, WorkItem } from './types';
 
@@ -154,5 +154,14 @@ describe('keys', () => {
   it('numbers past the highest key, so gaps and keyless items never repeat one', () => {
     expect(nextKey([{ key: 'S-1' }, { key: 'S-50' }, { key: '' }, null, { key: 'SAGE-99' }], 'S')).toBe('S-51');
     expect(nextKey([], 'TASK')).toBe('TASK-1');
+  });
+});
+
+describe('LUMO alarms', () => {
+  it('a reminder labelled "alarm" is an alarm, whatever its source', () => {
+    expect(isAlarm(norm({ id: 'a', entityType: 'reminder', labels: ['alarm'] }))).toBe(true);
+    expect(isAlarm(norm({ id: 'b', entityType: 'reminder', labels: ['Alarm'], source: 'lumo' }))).toBe(true);
+    expect(isAlarm(norm({ id: 'c', entityType: 'reminder', labels: ['home'] }))).toBe(false);
+    expect(isAlarm(norm({ id: 'd', entityType: 'task' }))).toBe(false);
   });
 });

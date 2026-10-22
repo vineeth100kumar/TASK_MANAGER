@@ -34,6 +34,12 @@ export function kindOf(raw: { entityType?: unknown; type?: unknown }): EntityTyp
   return 'task';
 }
 
+/** A LUMO alarm: a reminder labelled "alarm" that the desk clock rings (the Pi
+ * uses the same test). Alarms live on the LUMO page, never in task lists or counts. */
+export function isAlarm(i: { labels?: unknown }): boolean {
+  return labelsOf(i.labels).some(l => l.toLowerCase() === 'alarm');
+}
+
 /** Older or imported records can say "Personal" or "life"; anything else is work. */
 export function contextOf(i: { lifeContext?: unknown }): LifeContext {
   const c = word(i.lifeContext);

@@ -112,6 +112,13 @@ def normalize_item(raw: dict, project_type: Optional[str] = None) -> dict:
     return out
 
 
+def is_alarm(item: dict) -> bool:
+    """A LUMO alarm: a reminder labelled "alarm" that the desk clock rings
+    (desk/alarms.py and the web app use the same test). Alarms live on the
+    LUMO page and are never counted or listed as tasks."""
+    return any(str(label).strip().lower() == "alarm" for label in item.get("labels") or [])
+
+
 def is_open(item: dict) -> bool:
     """Open means not deleted and not done; status decides, as in the web app."""
     return not item.get("deletedAt") and item.get("status") != "done"
