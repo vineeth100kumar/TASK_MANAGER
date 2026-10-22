@@ -907,9 +907,6 @@ MODEL_NAME = "qwen2.5:1.5b"
 class TaskParseRequest(BaseModel):
     natural_language: str
 
-class DailyBriefingRequest(BaseModel):
-    tasks_json: str
-
 # --- Helper to guarantee hallucination-proof parsing ---
 def safe_parse_json(raw_text: str):
     text = raw_text.strip()
@@ -961,30 +958,6 @@ def parse_task(req: TaskParseRequest):
     except Exception as e:
         print(f"Error parsing task: {e}")
         raise HTTPException(status_code=500, detail="AI failed to parse task reliably")
-
-@app.post("/api/daily-briefing")
-def daily_briefing(req: DailyBriefingRequest):
-    prompt = f"""
-    You are a strategic assistant. Review the following tasks for today.
-    Tasks: 
-    {req.tasks_json}
-    Calculate the total estimated minutes, identify the bottleneck task, and write a 2-sentence motivational strategy.
-    Respond ONLY with a raw JSON dictionary matching this exact structure:
-    {{
-        "strategyText": "Your 2 sentence strategy...",
-        "totalFocusMinutes": 60,
-        "bottleneckTaskTitle": "Title of the hardest task",
-        "recommendedOrder": ["task_id_a", "task_id_b"]
-    }}
-    """
-    try:
-        response = ollama.generate(
-            model=MODEL_NAME, prompt=prompt, format='json', options={"temperature": 0.25}
-        )
-        parsed_data = safe_parse_json(response['response'])
-        return {"success": True, "data": parsed_data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="AI failed to generate briefing")
 
 # --- Canvas thinking partner (see canvas_thinker.py) ---
 import canvas_thinker

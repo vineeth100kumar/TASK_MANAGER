@@ -136,7 +136,6 @@ Tests: `cd raspberry_pi && python -m unittest discover -s tests`.
 Two endpoints use a local model through [Ollama](https://ollama.com):
 
 - `POST /api/parse-task` turns text like "call mum at 6" into tasks (LUMO's voice assistant uses it).
-- `POST /api/daily-briefing` writes the Dashboard's morning briefing.
 
 Everything else works without them. The installer does not set up Ollama; to
 enable these endpoints, install it and pull the model once:

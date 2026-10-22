@@ -1,8 +1,7 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Sun, Sparkles, Check, BrainCircuit, CalendarCheck, ChevronDown, Moon, Inbox as InboxIcon } from 'lucide-react';
+import { Sun, Sparkles, Check, CalendarCheck, ChevronDown, Moon, Inbox as InboxIcon } from 'lucide-react';
 import { api } from '../../services/api';
-import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
@@ -45,30 +44,13 @@ interface TodayData {
 export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
   const [data, setData] = useCachedState<TodayData | null>(`today-list:${lifeContext || 'all'}`, null);
   const [time, setTime] = useState(new Date());
-  const [aiBriefing, setAiBriefing] = useState<any>(null);
-  const [isAiLoading, setIsAiLoading] = useState(false);
   const [showSnoozed, setShowSnoozed] = useState(false);
-  // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
-  const briefingRequested = useRef(false);
   const { showToast } = useToast();
 
   const load = useCallback(async () => {
     try {
       const [today, habits] = await Promise.all([api.today.list(lifeContext), api.habits.list()]);
       setData({ ...today, habits, doneToday: countDoneToday(lifeContext), week: weekActivity(lifeContext) });
-
-      if (!briefingRequested.current && today.items.length > 0) {
-        briefingRequested.current = true;
-        setIsAiLoading(true);
-        try {
-          const tasksString = JSON.stringify(today.items.slice(0, 8).map(t => ({ id: t.id, title: t.title, priority: t.priority })));
-          setAiBriefing(await aiEngine.getDailyBriefing(tasksString));
-        } catch (e) {
-          console.warn('AI Briefing failed:', e);
-        } finally {
-          setIsAiLoading(false);
-        }
-      }
     } catch (e) {
       console.warn('Failed to load Today:', e);
       setData({ items: [], snoozed: [], habits: [], doneToday: 0, week: [] });
@@ -140,8 +122,6 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
     return `${remaining} ${remaining === 1 ? 'thing' : 'things'} for today${overdueCount ? `, ${overdueCount} overdue` : ''}. Start at the top.`;
   })();
 
-  const accent = lifeContext === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-blue-600 dark:text-blue-400';
-  const showBriefing = isAiLoading || !!aiBriefing;
 
   return (
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans stagger">
@@ -186,24 +166,6 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
           )}
         </div>
 
-        {/* AI briefing: only takes space when there's something to read. */}
-        {showBriefing && (
-          <div className="mt-4 md:mt-5 rounded-2xl p-4 w-full max-w-2xl bg-white/70 dark:bg-white/[0.04] backdrop-blur-md ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-[0_1px_2px_rgb(16_24_40/0.04)]">
-             <div className={`flex items-center gap-2 mb-1.5 font-semibold text-[12px] ${accent}`}>
-                <BrainCircuit size={14} /> <span>Sage AI Strategy</span>
-             </div>
-             {isAiLoading ? (
-                 <div className="space-y-2 pt-1" aria-label="Analyzing your tasks">
-                    <div className="skeleton h-3 w-11/12 !rounded-full" />
-                    <div className="skeleton h-3 w-2/3 !rounded-full" />
-                 </div>
-             ) : (
-                 <p className="text-[14px] text-gray-800 dark:text-gray-200 leading-relaxed animate-[rise_400ms_var(--ease-out-expo)]">
-                    {aiBriefing.strategyText}
-                 </p>
-             )}
-          </div>
-        )}
       </div>
 
       <QuickAddLine lifeContext={lifeContext} onAdded={load} />
