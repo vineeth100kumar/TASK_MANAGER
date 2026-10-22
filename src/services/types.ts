@@ -168,7 +168,11 @@ export interface Note {
   projectId?: string | null;
   lifeContext?: LifeContext;   // unset on older notes, which show under both
   // 'map' makes the note a thought map: its thoughts live in the thoughts table.
-  kind?: 'map' | null;
+  // 'html' is a report and 'code' a code snippet, usually pushed by an AI: the
+  // body parts hold the source as sent, shown in a sandboxed frame or code view.
+  kind?: 'map' | 'html' | 'code' | null;
+  language?: string;          // for code notes
+  source?: string;            // who sent it: claude, gemini, ... (unset: you)
   createdAt: string;
   updatedAt: string;
 }

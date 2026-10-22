@@ -220,6 +220,33 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertEqual(len(synced), 4)
         self.assertEqual(client.get("/api/claude/maps", headers=CLAUDE).json()["maps"][0]["id"], map_id)
 
+    def test_note_push(self):
+        page = "<html><head><style>p{}</style></head><body><h1>Q3 &amp; plan</h1><p>Revenue up</p></body></html>"
+        made = client.post("/api/claude/notes/push", json={"title": "Q3 report", "html": page, "source": "Gemini!"}, headers=CLAUDE).json()
+        self.assertTrue(made["success"], made)
+        self.assertFalse(made["updated"])
+        note = client.get(f"/api/claude/notes/{made['note']['id']}", headers=CLAUDE).json()["record"]
+        # The source is kept as sent, the preview text is the page's words.
+        self.assertEqual((note["kind"], note["bodyHtml"], note["source"]), ("html", page, "gemini"))
+        self.assertEqual(note["content"], "Q3 & plan Revenue up")
+
+        # The same title replaces that note; code keeps its language and text.
+        again = client.post("/api/claude/notes/push", json={"title": "Q3 report", "html": "<p>v2</p>"}, headers=CLAUDE).json()
+        self.assertTrue(again["updated"])
+        self.assertEqual(again["note"]["id"], made["note"]["id"])
+        reply = client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": {
+            "name": "sage_note_push", "arguments": {"title": "Fizz", "code": "if a < b:\n    print(a)", "language": "Python"}}}).json()["result"]
+        self.assertFalse(reply["isError"], reply)
+        code = client.get(f"/api/claude/notes/{json.loads(reply['content'][0]['text'])['note']['id']}", headers=CLAUDE).json()["record"]
+        self.assertEqual((code["kind"], code["language"], code["bodyHtml"]), ("code", "python", "if a < b:\n    print(a)"))
+
+        # A page sent as a plain note through sage_create is shown as a report too.
+        plain = client.post("/api/claude/notes", json={"title": "Pasted", "content": "<!DOCTYPE html><html><body><p>Hi</p></body></html>"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((plain["kind"], plain["content"]), ("html", "Hi"))
+
+        for bad in ({"title": "x"}, {"html": "<p>"}, {"title": "x", "html": "<p>", "code": "1"}, {"title": "x", "html": "  "}):
+            self.assertEqual(client.post("/api/claude/notes/push", json=bad, headers=CLAUDE).status_code, 400, bad)
+
     def test_mcp(self):
         def rpc(method, params=None, msg_id=1, token=TOKEN):
             return client.post(f"/mcp/{token}", json={"jsonrpc": "2.0", "id": msg_id, "method": method, "params": params or {}})

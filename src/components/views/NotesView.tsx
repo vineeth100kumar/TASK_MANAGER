@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Trash2, Search, FileText, ChevronLeft, Network } from 'lucide-react';
+import { Plus, Trash2, Search, FileText, ChevronLeft, Network, Sparkles, FileCode } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note, Thought } from '../../services/types';
 import { formatDisplayDate } from '../../utils/dateUtils';
@@ -8,10 +8,14 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { RichNoteEditor } from '../notes/RichNoteEditor';
 import { ThoughtMapView, StatusBar } from '../notes/ThoughtMapView';
 import { countStatuses } from '../notes/thoughtMap';
+import { ReportNoteView } from '../notes/ReportNoteView';
 
 type Kind = 'all' | 'notes' | 'maps';
 const KIND_KEY = 'sage.notesKind';
 const isMap = (n: Note) => n.kind === 'map';
+const isRaw = (n?: Note) => n?.kind === 'html' || n?.kind === 'code';
+// A whole HTML page pasted or saved as a plain note (before reports existed, or by an AI using plain create).
+const pageIn = (n?: Note) => (!n || n.kind ? null : /^\s*(<!doctype html|<html[\s>])/i.test(n.content || '') ? n.content : null);
 
 interface NotesViewProps {
   lifeContext?: 'work' | 'personal';
@@ -73,13 +77,14 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
     }
   }, [selectedNoteId]);
 
-  const handleCreateNote = async (asMap = false) => {
+  const handleCreateNote = async (as: boolean | 'html' | 'code' = false) => {
     setNewMenu(false);
+    const asMap = as === true;
     const newNote = await api.notes.create({
-      title: asMap ? 'What am I deciding?' : 'New Note',
+      title: asMap ? 'What am I deciding?' : as === 'html' ? 'New report' : as === 'code' ? 'New snippet' : 'New Note',
       content: '',
       lifeContext,
-      ...(asMap ? { kind: 'map' as const } : {})
+      ...(asMap ? { kind: 'map' as const } : as ? { kind: as } : {})
     });
     setNotes(prev => [newNote, ...prev]);
     setSelectedNoteId(newNote.id);
@@ -131,6 +136,14 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
     }
   };
 
+  // Old notes that hold a whole HTML page open as a report: the page text becomes the report's source.
+  useEffect(() => {
+    const page = pageIn(selectedNote);
+    if (!selectedNote || !page) return;
+    const text = (new DOMParser().parseFromString(page, 'text/html').body.textContent || '').replace(/\s+/g, ' ').trim();
+    api.notes.update(selectedNote.id, { kind: 'html' }).then(() => api.notes.saveBody(selectedNote.id, page, text)).then(loadNotes);
+  }, [selectedNote?.id, selectedNote?.kind]);
+
   const thoughtsOf = (id: string) => thoughts.filter(t => t.mapId === id);
   const q = searchQuery.toLowerCase();
   const filteredNotes = notes.filter(n =>
@@ -168,6 +181,14 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
                     <Network size={16} className="text-violet-500 mt-0.5 shrink-0" />
                     <span><span className="block text-sm font-semibold dark:text-white">Thought map</span><span className="block text-xs text-gray-500">Sort every thought on a decision</span></span>
                   </button>
+                  <button role="menuitem" onClick={() => handleCreateNote('html')} className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-left">
+                    <Sparkles size={16} className="text-blue-500 mt-0.5 shrink-0" />
+                    <span><span className="block text-sm font-semibold dark:text-white">HTML report</span><span className="block text-xs text-gray-500">Paste a page from any AI</span></span>
+                  </button>
+                  <button role="menuitem" onClick={() => handleCreateNote('code')} className="w-full flex items-start gap-2.5 px-3 py-2 rounded-lg hover:bg-black/5 dark:hover:bg-white/10 text-left">
+                    <FileCode size={16} className="text-emerald-500 mt-0.5 shrink-0" />
+                    <span><span className="block text-sm font-semibold dark:text-white">Code</span><span className="block text-xs text-gray-500">Keep a snippet, highlighted</span></span>
+                  </button>
                 </div>
               )}
             </div>
@@ -199,6 +220,8 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
                 <div className="flex items-center justify-between">
                   <h4 className={`text-[14px] font-bold truncate pr-6 flex items-center gap-1.5 ${isSelected ? (isMap(note) ? 'text-violet-600 dark:text-violet-400' : 'text-blue-600 dark:text-blue-400') : 'text-gray-900 dark:text-white'}`}>
                     {isMap(note) && <Network size={14} className="shrink-0 text-violet-500" aria-label="Thought map" />}
+                    {note.kind === 'html' && <Sparkles size={14} className="shrink-0 text-blue-500" aria-label="HTML report" />}
+                    {note.kind === 'code' && <FileCode size={14} className="shrink-0 text-emerald-500" aria-label="Code" />}
                     <span className="truncate">{note.title || 'Untitled Note'}</span>
                   </h4>
                   <button onClick={(e) => handleDeleteNote(note.id, e)} className="opacity-0 group-hover:opacity-100 text-gray-400 hover:text-red-500 transition-opacity p-1" title="Delete note">
@@ -247,6 +270,8 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
 
             {selectedNote && isMap(selectedNote)
               ? <ThoughtMapView map={selectedNote} />
+              : selectedNote && isRaw(selectedNote)
+              ? <ReportNoteView note={selectedNote} body={activeContent} onChange={handleContentChange} />
               : <RichNoteEditor noteId={selectedNoteId} html={activeContent} onChange={handleContentChange} />}
           </>
         ) : (
