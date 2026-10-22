@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Code2, Copy, Download, Eye, FileCode, Maximize2, Minimize2, Sparkles } from 'lucide-react';
+import { Check, Code2, Copy, Download, Eye, FileCode, Maximize2, Minimize2, Palette, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Note } from '../../services/types';
-import { REPORT_SANDBOX, buildReportDocument, highlightCode, themeVars, HIGHLIGHT_CSS, FrameTheme } from './reportFrame';
+import { REPORT_SANDBOX, buildReportDocument, highlightCode, themeVars, HIGHLIGHT_CSS, FrameTheme, ColorMode } from './reportFrame';
 
 /** Follows the app's light/dark switch (the `dark` class on <html>). */
 function useAppTheme(): FrameTheme {
@@ -18,6 +18,13 @@ function useAppTheme(): FrameTheme {
 
 const SOURCE_NAMES: Record<string, string> = { claude: 'Claude', gemini: 'Gemini', chatgpt: 'ChatGPT', openai: 'ChatGPT', you: 'You' };
 const sourceName = (s?: string | null) => (s ? SOURCE_NAMES[s] || s.charAt(0).toUpperCase() + s.slice(1) : 'You');
+
+const MODE_LABEL: Record<ColorMode, string> = { auto: 'Auto colours', sage: 'Sage colours', original: 'Original' };
+const MODE_HINT: Record<ColorMode, string> = {
+  auto: 'Keeps the page\'s design and fixes text that is hard to read. Tap for Sage colours',
+  sage: 'Uses Sage\'s colours for everything. Tap for the original',
+  original: 'Exactly as the page was made. Tap for Auto colours',
+};
 
 interface ReportNoteViewProps {
   note: Note;
@@ -36,7 +43,17 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
   const [tab, setTab] = useState<'view' | 'source'>('view');
   const [full, setFull] = useState(false);
   const [copied, setCopied] = useState(false);
-  const srcDoc = useMemo(() => (isCode || tab !== 'view' ? '' : buildReportDocument(body, theme)), [body, theme, isCode, tab]);
+  // Each report remembers how its colours are shown; Auto fixes unreadable text.
+  const modeKey = `sage.reportColors.${note.id}`;
+  const readMode = (): ColorMode => { try { return (localStorage.getItem(modeKey) as ColorMode) || 'auto'; } catch { return 'auto'; } };
+  const [mode, setModeState] = useState<ColorMode>(readMode);
+  useEffect(() => setModeState(readMode()), [note.id]);
+  const nextMode = () => {
+    const m: ColorMode = mode === 'auto' ? 'sage' : mode === 'sage' ? 'original' : 'auto';
+    setModeState(m);
+    try { localStorage.setItem(modeKey, m); } catch { /* private window */ }
+  };
+  const srcDoc = useMemo(() => (isCode || tab !== 'view' ? '' : buildReportDocument(body, theme, mode)), [body, theme, isCode, tab, mode]);
   const highlighted = useMemo(() => (isCode ? highlightCode(body, note.language) : ''), [body, isCode, note.language]);
 
   useEffect(() => { setTab('view'); setFull(false); }, [note.id]);
@@ -93,6 +110,12 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
               </button>
             ))}
           </div>
+          {!isCode && tab === 'view' && (
+            <button onClick={nextMode} title={MODE_HINT[mode]} aria-label={`Colours: ${MODE_LABEL[mode]}`}
+              className={`flex items-center gap-1.5 h-8 px-2.5 rounded-[10px] text-xs font-semibold transition active:scale-95 ${mode === 'original' ? 'text-gray-500 hover:bg-black/5 dark:hover:bg-white/10' : 'text-blue-600 dark:text-blue-400 bg-blue-500/10 hover:bg-blue-500/15'}`}>
+              <Palette size={15} /><span className="hidden sm:inline">{MODE_LABEL[mode]}</span>
+            </button>
+          )}
           <button onClick={copy} className={btn} title={copied ? 'Copied' : 'Copy'} aria-label="Copy">{copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}</button>
           <button onClick={download} className={btn} title="Download" aria-label="Download"><Download size={16} /></button>
           <button onClick={() => setFull(f => !f)} className={btn} title={full ? 'Exit full screen (Esc)' : 'Full screen'} aria-label={full ? 'Exit full screen' : 'Full screen'}>
@@ -135,7 +158,7 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
             </div>
           ) : (
             // No allow-same-origin: the page can't reach the app, its storage or its data.
-            <iframe key={`${note.id}-${theme}`} title={note.title || 'Report'} sandbox={REPORT_SANDBOX} srcDoc={srcDoc}
+            <iframe key={`${note.id}-${theme}-${mode}`} title={note.title || 'Report'} sandbox={REPORT_SANDBOX} srcDoc={srcDoc}
               referrerPolicy="no-referrer" className="flex-1 min-h-0 w-full border-0 bg-white dark:bg-[#1c1c1e]" style={{ colorScheme: theme }} />
           )}
         </div>

@@ -135,11 +135,50 @@ export function highlightCode(code: string, language?: string | null): string {
 }
 
 /**
+ * How a report's own colours meet Sage's theme:
+ * - auto: keep the page's design, but any text that would be hard to read on
+ *   what is behind it (dark text on Sage's dark page, say) is recoloured;
+ * - sage: the page's colours are dropped and Sage's are used throughout;
+ * - original: exactly as the page set them.
+ */
+export type ColorMode = 'auto' | 'sage' | 'original';
+
+// Forced Sage colours. Charts (svg, canvas) and images keep theirs.
+const SAGE_COLORS_CSS = `
+html,body{background:var(--sage-bg)!important;color:var(--sage-text)!important}
+body *:not(svg):not(svg *):not(canvas):not(img):not(video):not(pre *){color:inherit!important;background-color:transparent!important;border-color:var(--sage-border)!important;text-shadow:none!important}
+body :is(header,section,article,aside,nav,footer,div,table,details)[style*="background"],body :is(.card,.box,.panel,.callout){background-color:var(--sage-surface)!important}
+body :is(h1,h2,h3,h4,h5,h6,strong,b,th){color:var(--sage-text)!important}
+body :is(small,figcaption,caption,th){color:var(--sage-muted)!important}
+body :is(a,a *){color:var(--sage-accent)!important}
+body th{background-color:var(--sage-surface)!important}
+body pre{background:var(--sage-code-bg)!important;color:var(--sage-code-text)!important}
+body :not(pre)>code{background:var(--sage-surface)!important}
+body blockquote{background:var(--sage-accent-soft)!important;border-color:var(--sage-accent)!important}`;
+
+// Runs inside the sandboxed frame: finds text whose colour is too close to the
+// colour behind it and gives it a readable one, again as the page changes.
+const CONTRAST_FIX_JS = `(()=>{
+const parse=c=>{const m=c&&c.match(/rgba?\\(([^)]+)\\)/);if(!m)return null;const p=m[1].split(/[ ,\\/]+/).filter(Boolean).map(Number);return{r:p[0],g:p[1],b:p[2],a:p.length>3?p[3]:1}};
+const lum=c=>{const f=v=>{v/=255;return v<=.03928?v/12.92:Math.pow((v+.055)/1.055,2.4)};return .2126*f(c.r)+.7152*f(c.g)+.0722*f(c.b)};
+const ratio=(a,b)=>{const x=lum(a),y=lum(b);return(Math.max(x,y)+.05)/(Math.min(x,y)+.05)};
+const root=getComputedStyle(document.documentElement);
+const page=parse(getComputedStyle(document.body).backgroundColor)||{r:0,g:0,b:0,a:0};
+const sageBg=document.documentElement.dataset.theme==='dark'?{r:28,g:28,b:30,a:1}:{r:255,g:255,b:255,a:1};
+const bgOf=el=>{for(let e=el;e&&e.nodeType===1;e=e.parentElement){const c=parse(getComputedStyle(e).backgroundColor);if(c&&c.a>.5)return c;if(getComputedStyle(e).backgroundImage!=='none')return null}return page.a>.5?page:sageBg};
+const hasText=el=>{for(const n of el.childNodes)if(n.nodeType===3&&n.textContent.trim())return true;return false};
+const fix=()=>{for(const el of document.body.querySelectorAll('*')){if(el.closest('svg,canvas,pre')||!hasText(el))continue;const st=getComputedStyle(el);const fg=parse(st.color);const bg=bgOf(el);if(!fg||!bg)continue;const min=parseFloat(st.fontSize)>=18||(parseInt(st.fontWeight)>=700&&parseFloat(st.fontSize)>=14)?3:4.5;if(ratio(fg,bg)>=min)continue;const dark=lum(bg)<.2;el.style.setProperty('color',el.closest('a')?(dark?'#93c5fd':'#1d4ed8'):(dark?'#f3f4f6':'#111827'),'important');el.dataset.sageRecoloured=''}};
+let t;const later=()=>{clearTimeout(t);t=setTimeout(fix,120)};
+document.readyState==='loading'?addEventListener('DOMContentLoaded',fix):fix();addEventListener('load',later);
+new MutationObserver(later).observe(document.body,{childList:true,subtree:true});
+})();`;
+
+/**
  * The whole document the frame shows: the report parsed (never run here), with
  * Sage's policy, theme and base styles put first in its head, links opening in
  * a new tab, and its unstyled code blocks highlighted.
  */
-export function buildReportDocument(html: string, theme: FrameTheme): string {
+export function buildReportDocument(html: string, theme: FrameTheme, mode: ColorMode = 'auto'): string {
   const doc = new DOMParser().parseFromString(html || '', 'text/html');
   const head = doc.head;
   const add = (el: Element) => head.insertBefore(el, head.firstChild);
@@ -168,6 +207,17 @@ export function buildReportDocument(html: string, theme: FrameTheme): string {
     if (target.children.length) continue;
     const lang = (target.className.match(/(?:language|lang)-([\w+#-]+)/) || pre.className.match(/(?:language|lang)-([\w+#-]+)/) || [])[1];
     target.innerHTML = highlightCode(target.textContent || '', lang);
+  }
+  if (mode === 'sage') {
+    // Last in the head and !important, so it beats the page's own styles.
+    const force = doc.createElement('style');
+    force.textContent = SAGE_COLORS_CSS;
+    head.appendChild(force);
+  }
+  if (mode === 'auto') {
+    const fixer = doc.createElement('script');
+    fixer.textContent = CONTRAST_FIX_JS;
+    (doc.body || doc.documentElement).appendChild(fixer);
   }
   return '<!doctype html>' + doc.documentElement.outerHTML;
 }
