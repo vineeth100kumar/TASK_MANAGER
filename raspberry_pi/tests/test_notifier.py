@@ -207,6 +207,17 @@ class SchedulerTests(unittest.TestCase):
         tz = notifier._tz(notifier.get_prefs())
         self.assertEqual(notifier._describe(due[1], tz, utc(2026, 10, 1, 2, 30).astimezone(tz)), "6:00 PM · Evening call")
 
+    def test_alarms_are_not_counted_or_reminded(self):
+        put_items(
+            {"id": "al", "title": "Alarm", "entityType": "reminder", "labels": ["alarm"], "source": "lumo",
+             "dueDate": "2026-10-01", "remindAt": "2026-10-01T09:00", "startAt": "2026-10-01T09:00"},
+        )
+        # The alarm is due today and has a remindAt, but the clock rings it:
+        # no morning plan, no reminder push.
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 3, 30)), [])
+        self.assertEqual(self.pushed, [])
+
     def test_morning_plan_skips_an_empty_day(self):
         put_items({"id": "5", "title": "Later", "dueDate": "2026-10-05"})
         self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])

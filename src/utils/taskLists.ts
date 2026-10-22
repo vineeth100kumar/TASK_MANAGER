@@ -8,14 +8,10 @@ export const PRIORITY_RANK: Record<string, number> = { urgent: 0, high: 1, mediu
 
 const dayOf = (s: string | null | undefined) => (s ? s.slice(0, 10) : '');
 
-import { contextOf } from '../services/items';
-export { contextOf };
+import { contextOf, isAlarm } from '../services/items';
+export { contextOf, isAlarm };
 
 export const inContext = (i: WorkItem, ctx?: LifeContext) => !ctx || contextOf(i) === ctx;
-
-// LUMO alarms are stored as reminders but live on the LUMO page.
-export const isAlarm = (i: WorkItem) =>
-  (i.labels || []).includes('alarm') && ((i as any).source === 'lumo' || !!i.customFields?.alarm || i.customFields?.source === 'lumo');
 
 export const isOpen = (i: WorkItem) => !!i && !i.deletedAt && i.status !== 'done';
 
@@ -76,16 +72,16 @@ export interface VisibilityCheck {
 
 // Every open item must be in the Inbox list, on the LUMO page (alarms), or
 // behind the Work/Personal switch. Anything else is reported as missing.
-export function checkVisibility(all: WorkItem[], listedIds: Set<string>, ctx?: LifeContext): VisibilityCheck {
+// Alarms are counted on their own: they are never among the items listed.
+export function checkVisibility(all: WorkItem[], listedIds: Set<string>, ctx?: LifeContext, alarmCount = 0): VisibilityCheck {
   const open = all.filter(isOpen);
-  const here = open.filter(i => inContext(i, ctx));
-  const alarms = here.filter(isAlarm);
-  const missing = here.filter(i => !isAlarm(i) && !listedIds.has(i.id));
+  const here = open.filter(i => inContext(i, ctx) && !isAlarm(i));
+  const missing = here.filter(i => !listedIds.has(i.id));
   return {
-    open: here.length,
-    listed: here.length - alarms.length - missing.length,
-    alarms: alarms.length,
-    otherContext: open.length - here.length,
+    open: here.length + alarmCount,
+    listed: here.length - missing.length,
+    alarms: alarmCount,
+    otherContext: open.filter(i => !isAlarm(i)).length - here.length,
     missing
   };
 }

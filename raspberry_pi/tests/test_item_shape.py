@@ -42,6 +42,12 @@ class ItemShapeTests(unittest.TestCase):
         self.assertFalse(item_shape.is_open(item_shape.normalize_item({"status": "done"})))
         self.assertFalse(item_shape.is_open(item_shape.normalize_item({"status": "todo", "deletedAt": "x"})))
 
+    def test_alarm_is_a_labelled_reminder(self):
+        self.assertTrue(item_shape.is_alarm({"entityType": "reminder", "labels": ["alarm"]}))
+        self.assertTrue(item_shape.is_alarm({"labels": ["Alarm"]}))
+        self.assertFalse(item_shape.is_alarm({"labels": ["home"]}))
+        self.assertFalse(item_shape.is_alarm({"entityType": "task"}))
+
     def test_milestone_is_always_done(self):
         old = item_shape.normalize_item({"entityType": "milestone", "status": "todo", "stage": "idea", "dueDate": "2026-10-20"}, "content")
         self.assertEqual((old["status"], old["stage"], old["completedAt"]), ("done", None, "2026-10-20"))

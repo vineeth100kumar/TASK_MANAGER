@@ -170,7 +170,8 @@ def overview() -> dict:
         counts[table] = len(_rows(table))
     types = item_shape.project_types(_rows("projects")) if "projects" in TABLES else {}
     items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in _rows("workItems")] if "workItems" in TABLES else []
-    open_items = [i for i in items if item_shape.is_open(i)]
+    # LUMO alarms are reminders underneath but not tasks.
+    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i)]
 
     def brief(i: dict) -> dict:
         return {k: i.get(k) for k in ("id", "title", "status", "priority", "dueDate", "dueTime", "projectId") if i.get(k) is not None}

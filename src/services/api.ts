@@ -137,9 +137,11 @@ async function initializeStore(): Promise<void> {
 initializeStore().catch(console.error);
 
 // Every live item, read into the one shape (see items.ts). Lists start here.
+// LUMO alarms are reminders underneath but not tasks: they live on the LUMO
+// page, so no list, count, board, calendar or export starts with them.
 function liveItems(): WorkItem[] {
   const projects = state.projects.filter(Boolean);
-  return state.workItems.filter(isLive).map(i => normalizeItem(i, projects));
+  return state.workItems.filter(i => isLive(i) && !isAlarm(i)).map(i => normalizeItem(i, projects));
 }
 
 function hydrateWorkItem(raw: WorkItem): WorkItem {
@@ -1034,10 +1036,11 @@ export const api = {
       await initializeStore();
       const today = localDateString();
       const live = liveItems().map(hydrateWorkItem);
-      const items = live.filter(i => isOpen(i) && inContext(i, lifeContext) && !isAlarm(i)).sort(compareInbox(today));
-      const done = live.filter(i => i.status === 'done' && inContext(i, lifeContext) && !isAlarm(i))
+      const items = live.filter(i => isOpen(i) && inContext(i, lifeContext)).sort(compareInbox(today));
+      const done = live.filter(i => i.status === 'done' && inContext(i, lifeContext))
         .sort((a, b) => (b.completedAt || b.updatedAt || '').localeCompare(a.completedAt || a.updatedAt || ''));
-      const check = checkVisibility(live, new Set(items.map(i => i.id)), lifeContext);
+      const alarms = state.workItems.filter(i => isLive(i) && isAlarm(i) && isOpen(i) && inContext(i, lifeContext)).length;
+      const check = checkVisibility(live, new Set(items.map(i => i.id)), lifeContext, alarms);
       return { items, done, check };
     },
 
@@ -1144,7 +1147,7 @@ export const api = {
       await initializeStore();
       const today = localDateString();
       const candidates = liveItems()
-        .filter(i => isOpen(i) && inContext(i, lifeContext) && !isAlarm(i))
+        .filter(i => isOpen(i) && inContext(i, lifeContext))
         .map(hydrateWorkItem)
         .filter(i => isOnToday(i, today))
         .sort(compareToday(today));
@@ -1158,7 +1161,7 @@ export const api = {
     hiddenWork: async (): Promise<{ today: number; open: number }> => {
       await initializeStore();
       const today = localDateString();
-      const work = liveItems().filter(i => isOpen(i) && contextOf(i) === 'work' && !isAlarm(i)).map(hydrateWorkItem);
+      const work = liveItems().filter(i => isOpen(i) && contextOf(i) === 'work').map(hydrateWorkItem);
       return { today: work.filter(i => isOnToday(i, today)).length, open: work.length };
     }
   },

@@ -473,7 +473,7 @@ def completed_since(since_date: str) -> List[dict]:
             continue
         item = item_shape.normalize_item(item)
         ca = item.get("completedAt") or ""
-        if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt"):
+        if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt") and not item_shape.is_alarm(item):
             items.append(item)
     items.sort(key=lambda i: i.get("completedAt", ""))
     return items
@@ -866,7 +866,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
     wants_email = email_ready(prefs)
     if not has_devices and not wants_email and clock_reminder is None:
         return []
-    items = open_items()
+    # The clock rings alarms itself (desk/alarms.py); they aren't tasks to
+    # remind about, plan for the day or review.
+    items = [i for i in open_items() if not item_shape.is_alarm(i)]
     sent: List[str] = []
     conn = _connect()
     try:
