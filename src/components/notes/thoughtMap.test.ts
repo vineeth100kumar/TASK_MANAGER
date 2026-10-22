@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { Thought } from '../../services/types';
-import { buildThoughtFlow, countStatuses, nextStatus, parseThought, splitLines, topicsOf } from './thoughtMap';
+import { thoughtTree, buildThoughtFlow, countStatuses, nextStatus, parseThought, splitLines, topicsOf } from './thoughtMap';
 
 let n = 0;
 const t = (text: string, status: Thought['status'], topic = '', at = `2026-10-13T09:${String(n).padStart(2, '0')}:00`): Thought =>
@@ -58,5 +58,33 @@ describe('buildThoughtFlow', () => {
 
   it('cycles icons in order', () => {
     expect(['open', 'unsure', 'good', 'bad'].map(s => nextStatus(s as Thought['status']))).toEqual(['unsure', 'good', 'bad', 'open']);
+  });
+});
+
+describe('sub-points', () => {
+  it('follow their parent in the timeline, indented, on its lane', () => {
+    n = 0;
+    const root = t('Started a company', 'good', 'Venture');
+    const other = t('Need a co-founder', 'open', 'People');
+    const child = { ...t('Started with 2,000', 'good'), parentId: root.id };
+    const grand = { ...t('Earned 10,000', 'good'), parentId: child.id };
+    const flow = buildThoughtFlow([root, other, child, grand]);
+    const rows = flow.rows.filter(r => r.kind === 'thought') as Array<{ thought: Thought; depth: number; lane: number }>;
+    expect(rows.map(r => [r.thought.text, r.depth])).toEqual([
+      ['Started a company', 0], ['Started with 2,000', 1], ['Earned 10,000', 2], ['Need a co-founder', 0]]);
+    expect(rows[1].lane).toBe(rows[0].lane);
+  });
+
+  it('build a tree, and a missing parent makes a root', () => {
+    n = 0;
+    const a = t('a', 'open');
+    const b = { ...t('b', 'open'), parentId: a.id };
+    const c = { ...t('c', 'open'), parentId: 'gone' };
+    const loop1 = { ...t('x', 'open'), parentId: 't5' };
+    const loop2 = { ...t('y', 'open'), parentId: 't4' };
+    const tree = thoughtTree([a, b, c, loop1, loop2]);
+    expect(tree.map(n => n.thought.text)).toEqual(['a', 'c', 'x']);
+    expect(tree[0].children.map(n => n.thought.text)).toEqual(['b']);
+    expect(tree[2].children.map(n => n.thought.text)).toEqual(['y']);
   });
 });

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { GitBranch, GitMerge, ArrowUp, X, Trash2, CornerDownRight, Plus } from 'lucide-react';
+import { GitBranch, GitMerge, ArrowUp, X, Trash2, CornerDownRight, Plus, ListTree, Network } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note, Thought, ThoughtStatus } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -9,8 +9,12 @@ import { formatShortDate } from '../../utils/quickAddParser';
 import { Select } from '../common/Select';
 import {
   STATUSES, STATUS_NAMES, MAIN_COLOR, ThoughtFlow, ThoughtRow, buildThoughtFlow, countStatuses,
-  isSettled, nextStatus, parseThought, splitLines, statusOf, topicsOf,
+  isSettled, nextStatus, parseThought, rootTopics, splitLines, statusOf, topicsOf,
 } from './thoughtMap';
+import { ThoughtTree } from './ThoughtTree';
+
+type MapView = 'timeline' | 'tree';
+const VIEW_KEY = 'sage.mapView';
 
 const ROW_H = 58;
 const SLIM_H = 32;
@@ -95,6 +99,10 @@ export function ThoughtMapView({ map }: Props) {
   const listEnd = useRef<HTMLDivElement>(null);
   const wide = useWide();
   const geo = wide ? WIDE : NARROW;
+  const [view, setViewState] = useState<MapView>(() => {
+    try { return localStorage.getItem(VIEW_KEY) === 'tree' ? 'tree' : 'timeline'; } catch { return 'timeline'; }
+  });
+  const setView = (v: MapView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ } };
 
   const load = async () => setThoughts(await api.thoughts.list(map.id));
   useEffect(() => { setStatusFilter(null); setTopicFilter(null); setOpenId(null); load(); }, [map.id]);
@@ -102,10 +110,12 @@ export function ThoughtMapView({ map }: Props) {
 
   const topics = useMemo(() => topicsOf(thoughts), [thoughts]);
   const counts = useMemo(() => countStatuses(thoughts), [thoughts]);
+  // A point under a thought belongs to that thought's topic, even with none of its own.
+  const rootTopic = useMemo(() => rootTopics(thoughts), [thoughts]);
   const shown = useMemo(() => thoughts.filter(t =>
     (!statusFilter || statusOf(t) === statusFilter) &&
-    (!topicFilter || (t.topic || '').trim().toLowerCase() === topicFilter.toLowerCase())
-  ), [thoughts, statusFilter, topicFilter]);
+    (!topicFilter || (rootTopic.get(t.id) || '').toLowerCase() === topicFilter.toLowerCase())
+  ), [thoughts, statusFilter, topicFilter, rootTopic]);
   const flow = useMemo(() => buildThoughtFlow(shown, topics), [shown, topics]);
   const childCount = useMemo(() => {
     const m = new Map<string, number>();
@@ -147,8 +157,17 @@ export function ThoughtMapView({ map }: Props) {
           </div>
         </div>
         <StatusBar thoughts={thoughts} className="md:hidden" />
+        <div className="flex items-center gap-2">
+        <div className="flex p-0.5 rounded-xl bg-black/[0.05] dark:bg-white/[0.06] shrink-0" role="tablist" aria-label="View">
+          {([['timeline', 'Timeline', ListTree], ['tree', 'Tree', Network]] as const).map(([v, label, Ic]) => (
+            <button key={v} role="tab" aria-selected={view === v} onClick={() => setView(v)}
+              className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-[10px] text-[12px] font-semibold ${view === v ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'}`}>
+              <Ic size={13} />{label}
+            </button>
+          ))}
+        </div>
         {topics.length > 0 && (
-          <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
+          <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
             <TopicChip name="All topics" color={MAIN_COLOR} active={!topicFilter} onClick={() => setTopicFilter(null)} />
             {topics.map(t => (
               <TopicChip key={t.name} name={t.name} color={t.color} active={topicFilter?.toLowerCase() === t.name.toLowerCase()}
@@ -156,6 +175,7 @@ export function ThoughtMapView({ map }: Props) {
             ))}
           </div>
         )}
+        </div>
       </div>
 
       <div className="flex-1 overflow-y-auto custom-scrollbar px-2 md:px-6 py-2">
@@ -163,6 +183,9 @@ export function ThoughtMapView({ map }: Props) {
           <EmptyMap />
         ) : shown.length === 0 ? (
           <p className="p-8 text-center text-sm text-gray-400">No thoughts match. Tap the filter again to see them all.</p>
+        ) : view === 'tree' ? (
+          <ThoughtTree title={map.title} thoughts={shown} topics={topics} rootTopic={rootTopic} wide={wide}
+            Icon={ThoughtIcon} onOpen={id => setOpenId(id)} onCycle={cycle} />
         ) : (
           <ol aria-label={`${map.title} thoughts`}>
             {flow.rows.map((row, r) => (
@@ -275,10 +298,17 @@ function RowContent({ row, flow, geo, childCount, thoughts, onOpen, onCycle }: {
   const t = row.thought;
   const s = statusOf(t);
   const kids = childCount.get(t.id) || 0;
-  const parent = t.parentId ? thoughts.find(p => p.id === t.parentId) : null;
+  // The parent sits just above when it's shown, so only name it when it isn't.
+  const parent = t.parentId && row.depth === 0 ? thoughts.find(p => p.id === t.parentId) : null;
+  const indent = Math.min(row.depth, 4) * (geo === WIDE ? 22 : 14);
   return (
     <div className="flex-1 min-w-0 flex items-center gap-2.5 pr-2 rounded-xl hover:bg-black/[0.03] dark:hover:bg-white/[0.04] cursor-pointer"
-      onClick={() => onOpen(t.id)}>
+      style={{ paddingLeft: indent }} onClick={() => onOpen(t.id)}>
+      {row.depth > 0 && (
+        <svg width={14} height={ROW_H} className="shrink-0 -ml-3.5 -mr-1" aria-hidden>
+          <path d={`M 4 0 V ${ROW_H / 2 - 4} Q 4 ${ROW_H / 2} 8 ${ROW_H / 2} H 14`} fill="none" stroke={row.color} strokeOpacity={0.5} strokeWidth={1.5} />
+        </svg>
+      )}
       <button onClick={e => { e.stopPropagation(); onCycle(t); }} className="p-1 -m-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10"
         title={`${STATUS_NAMES[s]}. Tap for ${STATUS_NAMES[nextStatus(s)]}`} aria-label={`${STATUS_NAMES[s]}, change`}>
         <ThoughtIcon status={s} />
@@ -288,7 +318,7 @@ function RowContent({ row, flow, geo, childCount, thoughts, onOpen, onCycle }: {
           {t.text}
         </div>
         <div className="flex items-center gap-1.5 text-[11.5px] text-gray-400 min-w-0">
-          {t.topic && <span className="font-semibold shrink-0" style={{ color: row.color }}>{t.topic}</span>}
+          {t.topic && row.depth === 0 && <span className="font-semibold shrink-0" style={{ color: row.color }}>{t.topic}</span>}
           <span className="shrink-0 tabular-nums">{timeOf(t.createdAt)}</span>
           {parent && <span className="truncate inline-flex items-center gap-0.5"><CornerDownRight size={11} className="shrink-0" />{parent.text}</span>}
           {kids > 0 && <span className="shrink-0">· {kids} under it</span>}
