@@ -786,9 +786,9 @@ static void renderTool(ScreenMode screen, const LumoState& s, float t, float day
 
 // ---- Now playing: the cover's two colours as a gradient (2.19) --------
 //
-// The ring is laid out left to right (RING_LEFT_LED is the leftmost LED, the
-// one opposite it the rightmost), with the cover's main colour on one side
-// and its second colour on the other. While the song plays, the blend glides
+// The six LEDs sit in a row along the top of the case, LED 0 on the left.
+// The cover's main colour lights the left end and its second colour the
+// right end. While the song plays, the blend glides
 // across to the other side and back, and a soft band of light travels with
 // it: there in MUSIC_SWEEP_S, back in as long again, easing at each end. It
 // keeps no tempo (the clock can't hear the music), so it never fights the
@@ -797,7 +797,7 @@ static void renderTool(ScreenMode screen, const LumoState& s, float t, float day
 
 static const float MUSIC_SWEEP_S  = 6.0f;    // one side to the other
 static const float MUSIC_SOFT     = 0.80f;   // how wide the blend between the colours is
-static const float MUSIC_TRAVEL   = 0.70f;   // how far the blend's middle moves either side (ring is -1..1)
+static const float MUSIC_TRAVEL   = 0.70f;   // how far the blend's middle moves either side (the row is -1..1)
 static const float MUSIC_BAND_W   = 0.60f;   // the light band's width
 static const float MUSIC_BAND     = 0.30f;   // how much brighter the band is than the rest
 
@@ -824,7 +824,7 @@ static void renderMusic(const LumoState& s, float day, Rgb* out) {
   float band = 1.25f * (2 * u - 1);                        // the light runs just past each edge
   float level = GLOW * (s.sp_playing ? day : day * 0.5f);
   for (int i = 0; i < NUMPIXELS; i++) {
-    float x = -cosf(TWO_PI_F * (i - RING_LEFT_LED) / NUMPIXELS);   // -1 left .. 1 right
+    float x = 2.0f * i / (NUMPIXELS - 1) - 1;                   // -1 left .. 1 right
     float m = clamp01((x - mid) / (2 * MUSIC_SOFT) + 0.5f);
     m = m * m * (3 - 2 * m);
     Rgb c = mixc(musicA, musicB, m);
