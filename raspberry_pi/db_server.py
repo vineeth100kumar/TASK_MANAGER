@@ -19,6 +19,7 @@ import backup
 import claude_api
 import placement
 import desk
+import industry
 import item_actions
 import life_mode
 import phone_link
@@ -1781,6 +1782,10 @@ app.include_router(markets.router)
 # Radar Lab (sparks.py): each morning's business-idea sparks, matched to My edge.
 sparks.connect(DB_PATH, events.broadcast)
 app.include_router(sparks.router)
+
+# Radar industry search (industry.py): type an industry, get a full brief.
+industry.connect(DB_PATH, events.broadcast)
+app.include_router(industry.router)
 
 
 if (DIST_DIR / "index.html").is_file():
