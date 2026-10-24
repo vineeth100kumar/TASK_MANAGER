@@ -130,7 +130,7 @@ def edge_lines() -> List[str]:
         if value:
             lines.append(f"- {label}: {value}{' hours a week' if key == 'hours' and value.isdigit() else ''}")
     if not any(edge.get(k) for k in ("skills", "assets")):
-        names = [p.get("name") for p in _entities("projects") if p.get("name")]
+        names = [p.get("name") for p in _entities("projects") if p.get("name") and p.get("id") != "inbox"]
         if names:
             lines.append(f"- Works on: {', '.join(names[:6])}")
     if not edge.get("place") and settings["india"]:

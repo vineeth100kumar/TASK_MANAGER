@@ -89,7 +89,7 @@ class ClaudeApiTests(unittest.TestCase):
         item = made["record"]
         self.assertEqual((item["status"], item["entityType"], item["isInbox"]), ("todo", "task", False))
         # The web app needs a key on every item (it crashed without one).
-        self.assertTrue(item["key"].startswith("TASK-"))
+        self.assertTrue(item["key"].startswith("INBOX-"))  # no project named: it lands in the Inbox project
 
         changes = client.get("/api/sync/changes", params={"sinceRevision": seen}, headers=OWNER).json()
         self.assertEqual([r["title"] for r in changes["changes"]["workItems"]], ["Plan trip"])
@@ -105,7 +105,7 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertIn(item["id"], everything["deleted"]["workItems"])
 
         ops = [c["operation"] for c in client.get("/api/claude/history", headers=CLAUDE).json()["changes"]]
-        self.assertEqual(sorted(ops), ["delete", "patch", "save"])
+        self.assertEqual(sorted(ops), ["delete", "patch", "save", "save"])  # + the Inbox project made on first use
 
     def test_new_item_gets_project_key(self):
         project = client.post("/api/claude/projects", json={"name": "Keys", "key": "KEYS"}, headers=CLAUDE).json()["record"]

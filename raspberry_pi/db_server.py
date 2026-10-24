@@ -17,6 +17,7 @@ from urllib.parse import parse_qs, quote
 import access_gate
 import backup
 import claude_api
+import placement
 import desk
 import item_actions
 import life_mode
@@ -820,6 +821,21 @@ async def quick_add_endpoint(req: QuickAddRequest):
             if str((json.loads(raw) or {}).get("key") or "").startswith("TASK")
         )
         payload["key"] = f"TASK-{task_keys + 1}"
+        # Every task belongs to a project: the one it names, else the Inbox project.
+        projects = [json.loads(r[0]) for r in cursor.execute("SELECT payload FROM entities WHERE table_name = 'projects' AND deleted = 0")]
+        titles = [json.loads(r[0]) for r in cursor.execute("SELECT payload FROM entities WHERE table_name = 'workItems' AND deleted = 0")]
+        if placement.needs_place(payload):
+            payload["projectId"] = placement.choose_project(payload["title"], projects, titles) or placement.INBOX_PROJECT_ID
+            if payload["projectId"] == placement.INBOX_PROJECT_ID and not any(p.get("id") == placement.INBOX_PROJECT_ID for p in projects):
+                inbox_rev = increment_server_revision(cursor)
+                cursor.execute(
+                    "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
+                    ("projects", placement.INBOX_PROJECT_ID, json.dumps(placement.inbox_project(now_iso)), inbox_rev),
+                )
+                cursor.execute(
+                    "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+                    (f"quickadd-inbox-{entity_id}", req.source, "projects", placement.INBOX_PROJECT_ID, "save"),
+                )
         next_rev = increment_server_revision(cursor)
         cursor.execute(
             "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
