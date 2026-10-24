@@ -1643,6 +1643,62 @@ async def desk_depth_delete():
     return await asyncio.to_thread(_depth_describe)
 
 
+# --- Gallery photos (see desk/gallery.py) ---
+
+@app.get("/api/desk/gallery/photos")
+async def desk_gallery_photos():
+    from desk.gallery import PHOTOS_DIR, MAX_GALLERY_BYTES
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    photos = []
+    total = 0
+    for f in sorted(PHOTOS_DIR.iterdir()):
+        if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
+            sz = f.stat().st_size
+            photos.append({"name": f.name, "size": sz})
+            total += sz
+    return {"photos": photos, "usedBytes": total, "capBytes": MAX_GALLERY_BYTES}
+
+
+@app.post("/api/desk/gallery/photos")
+async def desk_gallery_photo_upload(body: Dict[str, Any]):
+    import base64 as b64
+    from desk.gallery import PHOTOS_DIR, save_photo
+    name = body.get("name") or "photo.jpg"
+    name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
+    data_str = body.get("data") or ""
+    if "," in data_str:
+        data_str = data_str.split(",", 1)[1]
+    content = b64.b64decode(data_str)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
+    dest = await asyncio.to_thread(save_photo, content, name, PHOTOS_DIR)
+    return {"name": dest.name, "size": dest.stat().st_size}
+
+
+@app.delete("/api/desk/gallery/photos/{name}")
+async def desk_gallery_photo_delete(name: str):
+    from desk.gallery import PHOTOS_DIR
+    target = PHOTOS_DIR / name
+    if not target.exists() or not target.is_file() or target.parent != PHOTOS_DIR:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    await asyncio.to_thread(target.unlink)
+    return {"deleted": name}
+
+
+@app.post("/api/desk/gallery/preview")
+async def desk_gallery_preview():
+    """Show the next gallery slide on the clock now (for testing)."""
+    from desk import run as desk_run
+    if not desk.ENABLED or desk_run.desk is None:
+        raise HTTPException(status_code=400, detail="The desk clock is off.")
+    g = desk_run.desk.gallery
+    if not g.active:
+        g.configure(desk_run.desk.settings.get("gallery", {}))
+        g.start()
+    await g.show_current()
+    return {"slide": g.index, "total": len(g.slides)}
+
+
 # --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---
 def _claude_today() -> datetime.date:
     return datetime.datetime.now(notifier._tz(notifier.get_prefs())).date()

@@ -42,7 +42,7 @@ from typing import Any, Awaitable, Callable, List, Optional, Set
 
 import item_actions
 import notifier
-from desk import ambient, art, depth, settings as desk_settings, song, today
+from desk import ambient, art, depth, gallery as desk_gallery, settings as desk_settings, song, today
 from desk.alarms import TONE_CYCLE_MS, Alarms, is_alarm
 from desk.ota import ALARM_MARGIN_MINUTES, FirmwareUpdates
 from desk.tools import Stopwatch, Timer
@@ -142,6 +142,14 @@ class Desk:
                                           hold=lambda: self.settings["updates"].get("hold", ""), quiet=self.update_window_wait)
         self.ota.on_change = self.announce
         self.ota.on_flashed = self.firmware_flashed
+
+        self.gallery = desk_gallery.Gallery(
+            send_binary=link.send_binary,
+            send_json=link.send,
+            items=items,
+            photos_dir=str(desk_gallery.PHOTOS_DIR),
+        )
+        self.gallery.configure(self.settings.get("gallery", {}))
 
     # --- Sage's items ---
 
@@ -300,17 +308,31 @@ class Desk:
 
     async def phone_presence(self, home: bool) -> None:
         """PHONE_STATUS: the phone left (it's been gone a few minutes, see
-        phone_link.AWAY_AFTER) or came back. Back after at least the
-        welcome's awayMinutes, the clock says welcome back."""
+        phone_link.AWAY_AFTER) or came back. Away starts the gallery;
+        back stops it and optionally shows the welcome card."""
         if not home:
             if self.phone_left_at is None:
                 self.phone_left_at = getattr(self.phone, "last_seen", 0) or time.time()
+            # Start gallery if enabled
+            gallery_cfg = self.settings.get("gallery", {})
+            if gallery_cfg.get("enabled") and self.link.connected and not self.gallery.active:
+                self.gallery.configure(gallery_cfg)
+                self.gallery.start()
+                await self.gallery.show_current()
+                log.info("Away: gallery started")
+            await self.announce()
             return
+        # Coming home: stop gallery and return to clock
+        if self.gallery.active:
+            self.gallery.stop()
+            if self.link.connected:
+                await self.controller.show_screen(self.settings["homeScreen"])
+            log.info("Home: gallery stopped, back to clock")
         left_at, self.phone_left_at = self.phone_left_at, None
+        await self.announce()
         welcome = self.settings["welcome"]
         if left_at is None or not welcome["enabled"] or time.time() - left_at < welcome["awayMinutes"] * 60:
             return
-        # A reminder waiting for an answer, or a ringing alarm, comes first.
         if self.controller.card or self.alarms.ringing or not self.link.connected:
             return
         log.info("Phone back after %d min; welcoming you", (time.time() - left_at) // 60)
@@ -580,6 +602,7 @@ class Desk:
     async def apply_settings(self, new: dict) -> None:
         """Use settings just saved in Sage, and show them on the clock now."""
         self.settings = new
+        self.gallery.configure(new.get("gallery", {}))
         self.night = desk_settings.in_night(new, self.now().hour, self.now().minute)
         self.controller.screens = new["screens"]
         self.controller.lights = self.lights()
@@ -752,6 +775,7 @@ class Desk:
             "timer": self.timer.describe(),
             "stopwatch": self.stopwatch.describe(),
             "updates": self.ota.status(),
+            "gallery": {"active": self.gallery.active, "slide": self.gallery.index, "total": len(self.gallery.slides)},
         }
 
     def update_blocker(self) -> str:
@@ -852,6 +876,17 @@ class Desk:
         if self.link.connected and self.controller.screen == "SYSTEM":
             await self.link.send(self.vitals.command())
 
+    async def gallery_tick(self) -> None:
+        """Advance the gallery slide when active."""
+        if self.gallery.active and self.link.connected:
+            await self.gallery.advance()
+
+    async def _gallery_loop(self) -> None:
+        """Run the gallery on its own interval (it changes with settings)."""
+        while True:
+            await asyncio.sleep(max(10, self.gallery.interval))
+            await self._guard(self.gallery_tick())
+
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()
         await asyncio.gather(
@@ -865,4 +900,5 @@ class Desk:
             self._every(WEATHER_EVERY, self.update_weather),
             self._every(2, self.ambient),
             self._every(30, self.ota.tick),
+            self._gallery_loop(),
         )

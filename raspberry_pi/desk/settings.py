@@ -83,6 +83,7 @@ DEFAULTS: Dict[str, Any] = {
     # ("HH:MM-HH:MM", may cross midnight; "" any time) and not while `hold`
     # names a version (set by installing an older build, or by a USB flash).
     "updates": {"auto": True, "hold": "", "window": "03:00-05:00"},
+    "gallery": {"enabled": True, "intervalSeconds": 30, "sources": ["quotes", "memories", "photos"]},
     "buttons": {
         "locked": False,
         "map": {
@@ -272,6 +273,21 @@ def merge(current: dict, update: dict) -> dict:
                     raise ValueError("updates.window can't start and end at the same time.")
                 window = f"{start}-{end}"
             out["updates"]["window"] = window
+
+    if "gallery" in update:
+        gallery = _section(update["gallery"], "gallery")
+        if "enabled" in gallery:
+            out["gallery"]["enabled"] = _bool(gallery["enabled"], "gallery.enabled")
+        if "intervalSeconds" in gallery:
+            out["gallery"]["intervalSeconds"] = _int(gallery["intervalSeconds"], "gallery.intervalSeconds", 10, 300)
+        if "sources" in gallery:
+            sources = gallery["sources"]
+            valid = ("quotes", "memories", "photos", "notes")
+            if not isinstance(sources, list) or not sources:
+                raise ValueError("gallery.sources must be a list with at least one source.")
+            for s in sources:
+                _choice(s, "gallery.sources", valid)
+            out["gallery"]["sources"] = list(sources)
 
     if "buttons" in update:
         buttons = _section(update["buttons"], "buttons")
