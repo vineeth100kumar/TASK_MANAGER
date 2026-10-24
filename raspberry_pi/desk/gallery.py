@@ -29,6 +29,8 @@ log = logging.getLogger("desk.gallery")
 DATA_DIR = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent
 PHOTOS_DIR = Path(os.getenv("SAGE_GALLERY_DIR", str(DATA_DIR / "gallery_photos")))
 
+MAX_GALLERY_BYTES = 1 * 1024 * 1024 * 1024  # 1 GB cap for the photo directory
+
 # --- Image encoding for the clock's MEMORY screen ---
 
 WIDTH, HEIGHT = 320, 240
@@ -62,6 +64,51 @@ def image_to_strips(image) -> list:
                 body += struct.pack("<H", _rgb565(r, g, b))
         strips.append(encode_strip(y, h, bytes(body)))
     return strips
+
+
+def enforce_cap(photos_dir: Path = PHOTOS_DIR, cap: int = MAX_GALLERY_BYTES) -> int:
+    """Delete oldest photos until the directory is under *cap* bytes. Returns bytes freed."""
+    if not photos_dir.is_dir():
+        return 0
+    exts = {".jpg", ".jpeg", ".png", ".bmp"}
+    files = sorted(
+        (f for f in photos_dir.iterdir() if f.suffix.lower() in exts),
+        key=lambda f: f.stat().st_mtime,
+    )
+    total = sum(f.stat().st_size for f in files)
+    freed = 0
+    while total > cap and files:
+        oldest = files.pop(0)
+        sz = oldest.stat().st_size
+        oldest.unlink()
+        total -= sz
+        freed += sz
+        log.info("Gallery cap: removed %s (%d KB)", oldest.name, sz // 1024)
+    return freed
+
+
+def save_photo(raw: bytes, name: str, photos_dir: Path = PHOTOS_DIR) -> Path:
+    """Resize to display size, save as JPEG, and enforce the 1 GB cap."""
+    from PIL import Image
+    import io
+
+    photos_dir.mkdir(parents=True, exist_ok=True)
+
+    img = Image.open(io.BytesIO(raw)).convert("RGB")
+    ratio = max(WIDTH / img.width, HEIGHT / img.height)
+    img = img.resize((int(img.width * ratio), int(img.height * ratio)), Image.Resampling.LANCZOS)
+    left = (img.width - WIDTH) // 2
+    top = (img.height - HEIGHT) // 2
+    img = img.crop((left, top, left + WIDTH, top + HEIGHT))
+
+    stem = Path(name).stem
+    dest = photos_dir / f"{stem}.jpg"
+    buf = io.BytesIO()
+    img.save(buf, "JPEG", quality=85)
+    dest.write_bytes(buf.getvalue())
+
+    enforce_cap(photos_dir)
+    return dest
 
 
 # --- Built-in quotes ---

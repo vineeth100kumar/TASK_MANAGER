@@ -1674,20 +1674,22 @@ async def desk_depth_delete():
 
 @app.get("/api/desk/gallery/photos")
 async def desk_gallery_photos():
-    from desk.gallery import PHOTOS_DIR
+    from desk.gallery import PHOTOS_DIR, MAX_GALLERY_BYTES
     PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
     photos = []
+    total = 0
     for f in sorted(PHOTOS_DIR.iterdir()):
         if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
-            photos.append({"name": f.name, "size": f.stat().st_size})
-    return {"photos": photos}
+            sz = f.stat().st_size
+            photos.append({"name": f.name, "size": sz})
+            total += sz
+    return {"photos": photos, "usedBytes": total, "capBytes": MAX_GALLERY_BYTES}
 
 
 @app.post("/api/desk/gallery/photos")
 async def desk_gallery_photo_upload(body: Dict[str, Any]):
     import base64 as b64
-    from desk.gallery import PHOTOS_DIR
-    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    from desk.gallery import PHOTOS_DIR, save_photo
     name = body.get("name") or "photo.jpg"
     name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
     data_str = body.get("data") or ""
@@ -1696,9 +1698,8 @@ async def desk_gallery_photo_upload(body: Dict[str, Any]):
     content = b64.b64decode(data_str)
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
-    dest = PHOTOS_DIR / name
-    await asyncio.to_thread(dest.write_bytes, content)
-    return {"name": dest.name, "size": len(content)}
+    dest = await asyncio.to_thread(save_photo, content, name, PHOTOS_DIR)
+    return {"name": dest.name, "size": dest.stat().st_size}
 
 
 @app.delete("/api/desk/gallery/photos/{name}")
