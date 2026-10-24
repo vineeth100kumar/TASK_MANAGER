@@ -16,6 +16,7 @@ import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
+import { needsPlace, suggestPlace, INBOX_PROJECT_ID, INBOX_PROJECT_NAME } from './placement';
 import { normalizeItem, nextKey, selectItems, isLive, type ItemFilters, type Selection } from './items';
 import { contextOf, inContext, isAlarm, isOpen, isSnoozedNow, isOnToday, compareToday, compareInbox, checkVisibility, VisibilityCheck } from '../utils/taskLists';
 
@@ -125,6 +126,8 @@ async function initializeStore(): Promise<void> {
       });
     });
 
+    sweepLooseItems().catch(err => console.warn('[placement] sweep failed:', err));
+
     syncEngine.init().catch(err => {
       console.warn('[SyncEngine] Background initialization warning:', err);
     });
@@ -135,6 +138,46 @@ async function initializeStore(): Promise<void> {
 
 // Start async initialization immediately
 initializeStore().catch(console.error);
+
+// The Inbox project is the home of anything that names no project or area.
+async function ensureInboxProject(): Promise<void> {
+  if (state.projects.some(p => p && p.id === INBOX_PROJECT_ID)) return;
+  const now = new Date().toISOString();
+  const project: Project = {
+    id: INBOX_PROJECT_ID, name: INBOX_PROJECT_NAME, key: 'INBOX', color: 'bg-slate-500',
+    sequence: state.projects.length + 1, type: 'other', description: 'Tasks that were added without a project.',
+    createdAt: now, updatedAt: now,
+  };
+  state.projects.push(project);
+  await persist('projects', project);
+}
+
+// Gives a loose task a project or area; returns whether it changed.
+async function placeItem(item: WorkItem): Promise<boolean> {
+  if (!needsPlace(item)) return false;
+  const guess = suggestPlace(item.title || '', state.projects.filter(Boolean), state.areas.filter(Boolean), state.workItems);
+  if (guess) {
+    item.projectId = guess.projectId || null;
+    item.branchId = guess.projectId ? guess.branchId || null : null;
+    item.areaId = guess.areaId || null;
+  } else {
+    await ensureInboxProject();
+    item.projectId = INBOX_PROJECT_ID;
+    item.branchId = null;
+  }
+  return true;
+}
+
+// Existing loose tasks (added before this rule, or by another device) get a home too.
+async function sweepLooseItems(): Promise<void> {
+  const now = new Date().toISOString();
+  for (const item of state.workItems) {
+    if (!item || !(await placeItem(item))) continue;
+    item.updatedAt = now;
+    item.version = (item.version || 1) + 1;
+    await persist('workItems', item);
+  }
+}
 
 // Every live item, read into the one shape (see items.ts). Lists start here.
 // LUMO alarms are reminders underneath but not tasks: they live on the LUMO
@@ -346,6 +389,12 @@ export const api = {
       await initializeStore();
       const now = new Date().toISOString();
       const id = uuid();
+
+      if (needsPlace(payload)) {
+        const loose = { ...payload, title: payload.title || '' } as WorkItem;
+        await placeItem(loose);
+        payload = { ...payload, projectId: loose.projectId, branchId: loose.branchId, areaId: loose.areaId };
+      }
 
       let prefix = 'TASK';
       if (payload.projectId) {
