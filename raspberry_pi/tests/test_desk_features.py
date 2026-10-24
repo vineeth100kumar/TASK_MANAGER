@@ -545,6 +545,41 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.phone_presence(True)
         self.assertNotIn("NOTIF", self.link.cmds())
 
+    async def test_away_gallery_starts_when_out_and_stops_at_home(self):
+        self.desk.settings["gallery"]["sources"] = ["quotes"]
+        await self.desk.phone_presence(False)
+        self.assertTrue(self.desk.gallery.active)
+        self.assertIn("MEMORY_META", self.link.cmds())
+        await self.desk.phone_presence(True)
+        self.assertFalse(self.desk.gallery.active)
+        self.assertEqual(self.link.last("SCREEN")["mode"], self.desk.settings["homeScreen"])
+
+    async def test_photo_frame_mode_shows_the_gallery_while_home(self):
+        new = dict(self.desk.settings)
+        new["gallery"] = {**new["gallery"], "mode": "always", "sources": ["quotes"]}
+        await self.desk.apply_settings(new)
+        self.assertTrue(self.desk.gallery.active)
+        self.assertEqual(self.desk.state()["gallery"]["mode"], "always")
+        await self.desk.phone_presence(True)       # being home doesn't stop it
+        self.assertTrue(self.desk.gallery.active)
+        # Back to Auto: home, so the clock comes back.
+        await self.desk.apply_settings({**new, "gallery": {**new["gallery"], "mode": "away"}})
+        self.assertFalse(self.desk.gallery.active)
+
+    async def test_a_press_in_photo_frame_mode_peeks_at_the_clock(self):
+        new = dict(self.desk.settings)
+        new["gallery"] = {**new["gallery"], "mode": "always", "sources": ["quotes"]}
+        await self.desk.apply_settings(new)
+        self.link.sent.clear()
+        await self.desk.controller.on_button("OK")
+        self.assertEqual(self.link.last("SCREEN")["mode"], self.desk.controller.screen)
+        self.assertTrue(self.desk.state()["gallery"]["peeking"])
+        await self.desk.gallery_tick()             # held while peeking
+        self.assertNotIn("MEMORY_META", self.link.cmds())
+        self.desk.gallery_peek_until = 0
+        await self.desk.gallery_tick()
+        self.assertIn("MEMORY_META", self.link.cmds())
+
     async def test_no_firmware_update_near_an_alarm_or_while_busy(self):
         await self.desk.refresh()
         self.assertEqual(self.desk.update_blocker(), "")            # 6:00, alarm at 7:00

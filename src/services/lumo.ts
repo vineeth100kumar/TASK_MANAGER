@@ -139,6 +139,8 @@ export interface LumoStatus {
   state: LumoState | null;
 }
 
+export type GalleryMode = 'away' | 'always';
+
 export interface LumoSettings {
   screens: string[];
   homeScreen: string;
@@ -151,7 +153,8 @@ export interface LumoSettings {
   // What the case window hides on each side (px, firmware 2.15+), the Even Frame and its island.
   screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean };
   welcome: { enabled: boolean; message: string; awayMinutes: number };
-  gallery: { enabled: boolean; intervalSeconds: number; sources: string[] };
+  // mode: 'away' shows it while your phone is out, 'always' makes LUMO a photo frame.
+  gallery: { enabled: boolean; mode: GalleryMode; intervalSeconds: number; sources: string[] };
   updates: { auto: boolean; hold: string; window: string };
   buttons: { locked: boolean; map: Record<string, Record<string, string>> };
 }
