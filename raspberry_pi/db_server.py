@@ -1223,6 +1223,7 @@ class PhoneNotification(BaseModel):
     app: Optional[str] = "Phone"
     title: str
     message: Optional[str] = ""
+    category: Optional[str] = "other"   # "incoming call" shows the call card on the clock
 
 
 class PhoneCommand(BaseModel):

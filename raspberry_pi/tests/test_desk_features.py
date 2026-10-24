@@ -57,6 +57,11 @@ class FakePhone:
         self.media = {"title": "", "artist": "", "playing": False}
         self.commands = []
         self.last_seen = 0.0
+        self.actions = []
+
+    async def perform_action(self, note_id, positive):
+        self.actions.append((note_id, positive))
+        return True
 
     async def send_command(self, command):
         self.commands.append(command)
@@ -271,7 +276,8 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(took)
         await asyncio.sleep(0.05)
         self.assertNotIn("SCREEN", self.link.cmds())  # firmware 2 shows cards over any screen
-        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "Reminder", "title": "Gym", "body": "Due today at 7:30 AM"})
+        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "Reminder", "title": "Gym", "body": "Due today at 7:30 AM",
+                                                   "color": "#FF9F43", "kind": "sage"})
         self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Tomorrow", "ok": "Done", "right": "Snooze"})
         await self.desk.controller.on_button("OK")
         self.assertEqual(self.actions.calls, [("done", "gym")])
@@ -302,10 +308,46 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.controller.show_screen("CLOCK")
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Call me"})
         self.assertEqual(self.link.last("SCREEN")["mode"], "CLOCK")
-        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "WhatsApp", "title": "Mum", "body": "Call me"})
+        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "WhatsApp", "title": "Mum", "body": "Call me",
+                                                   "color": "#FF9F43", "kind": "note"})
         await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Again"})
         self.assertEqual(self.link.last("NOTIF")["title"], "Gym")
+
+    async def test_phone_cards_clear_answer_and_go(self):
+        await self.desk.show_notification({"id": "5", "app": "WhatsApp", "title": "Mum", "message": "Call me",
+                                           "color": "#25D366", "actions": {"positive": False, "negative": True}})
+        self.assertEqual((self.link.last("NOTIF")["color"], self.link.last("NOTIF")["kind"]), ("#25D366", "note"))
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Clear", "ok": "Close"})
+        await self.desk.controller.on_button("LEFT")
+        self.assertEqual(self.phone.actions, [("5", False)])
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS"})
+        # A call: Decline and Answer, and it goes when the phone drops it.
+        await self.desk.show_notification({"id": "6", "app": "Phone", "title": "Amma", "category": "incoming call",
+                                           "message": "", "actions": {"positive": True, "negative": True}})
+        self.assertEqual((self.link.last("NOTIF")["kind"], self.link.last("NOTIF")["body"]), ("call", "Calling"))
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Decline", "right": "Answer"})
+        # A newer message takes over the call's card; the old one's removal leaves it be.
+        await self.desk.show_notification({"id": "7", "app": "Messages", "title": "Ravi", "message": "Here"})
+        self.desk.on_event({"type": "PHONE_NOTIFICATION_REMOVED", "id": "6"})
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.desk.controller.card.tag, "phone:7")
+        self.desk.on_event({"type": "PHONE_NOTIFICATION_REMOVED", "id": "7"})
+        await asyncio.sleep(0.05)
+        self.assertIsNone(self.desk.controller.card)
+
+    async def test_phone_cards_close_by_themselves(self):
+        from desk import desk as desk_module
+        was = desk_module.NOTE_CARD_SECONDS
+        desk_module.NOTE_CARD_SECONDS = 0.05
+        try:
+            await self.desk.show_notification({"id": "8", "app": "Mail", "title": "Bank", "message": "Statement"})
+            self.assertIsNotNone(self.desk.controller.card)
+            await asyncio.sleep(0.15)
+            self.assertIsNone(self.desk.controller.card)
+            self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS"})
+        finally:
+            desk_module.NOTE_CARD_SECONDS = was
 
     async def test_playing_with_no_title_names_the_app(self):
         await self.desk.show_media({"title": "", "artist": "", "app": "YouTube Music", "playing": True})

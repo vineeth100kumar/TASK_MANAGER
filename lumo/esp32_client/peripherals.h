@@ -16,7 +16,11 @@ void     neoSetContext(ScreenMode screen, const LumoState& s);  // AUTO follows 
 void     neoSetSleep(bool sleeping);                  // sleep schedule: AUTO glow drops to a whisper
 void     neoSetAlarm(bool ringing);
 void     neoSetVoice(VoiceFx fx, float level);
-void     neoPing(uint8_t r, uint8_t g, uint8_t b);    // two soft pulses, e.g. a notification
+void     neoPing(uint8_t r, uint8_t g, uint8_t b);    // two soft pulses
+// A card came up (2.20): the row opens out in the app's colour from the
+// middle, swells twice and then glows softly in the middle until the card
+// goes. A call instead rings across all six, ring-ring, while it shows.
+void     neoNotify(uint8_t r, uint8_t g, uint8_t b, bool call);
 void     neoClear();
 
 Button   readButton();

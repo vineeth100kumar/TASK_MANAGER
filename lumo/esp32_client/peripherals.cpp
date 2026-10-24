@@ -438,6 +438,13 @@ static unsigned long alarmSince;
 static unsigned long pingStart = 0;
 static Rgb      pingColor  = {1, 1, 1};
 static bool     pingActive = false;
+// A card's light (neoNotify): when it started, its colour, and how much of it
+// shows (1 while the card is up, easing to 0 after it goes).
+static unsigned long notifyStart = 0;
+static Rgb      notifyColor  = {1, 1, 1};
+static bool     notifyCall   = false;
+static bool     notifyActive = false;
+static float    notifyHold   = 0;
 
 static Rgb      frameCur[NUMPIXELS];            // smoothed, perceptual
 static uint8_t  lastOut[NUMPIXELS][3];
@@ -488,6 +495,14 @@ void neoPing(uint8_t r, uint8_t g, uint8_t b) {
   pingColor  = rgb(r / 255.0f, g / 255.0f, b / 255.0f);
   pingStart  = millis();
   pingActive = true;
+}
+void neoNotify(uint8_t r, uint8_t g, uint8_t b, bool call) {
+  notifyColor  = rgb(r / 255.0f, g / 255.0f, b / 255.0f);
+  notifyStart  = millis();
+  notifyCall   = call;
+  notifyActive = true;
+  notifyHold   = 1;
+  pingActive   = false;
 }
 void neoClear() {
   for (int i = 0; i < NUMPIXELS; i++) frameCur[i] = rgb(0, 0, 0);
@@ -599,7 +614,8 @@ static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rg
       k.color = rgb8(255, 170, 120);
       break;
     case SCREEN_CARD:
-      k.color = rgb8(80, 200, 255);
+      k.color = rgb8(s.notif_r, s.notif_g, s.notif_b);   // the card's own light rides on top (notifyLight)
+      k.level = day * 0.35f;
       break;
     default:
       break;
@@ -960,6 +976,45 @@ static void sceneVoice(float t, Rgb* out, float& tau) {
   }
 }
 
+// How much of a card's colour each LED takes (0..1), `el` seconds after it
+// came up. A message: the light opens out from the middle pair (0.5 s), swells
+// twice, then settles to a soft glow in the middle that breathes slowly. A
+// call: all six ring, two quick swells every 1.6 s, like a phone.
+static void notifyWeights(float el, float* w) {
+  for (int i = 0; i < NUMPIXELS; i++) {
+    float x = 2.0f * i / (NUMPIXELS - 1) - 1;                 // -1 left .. 1 right
+    if (notifyCall) {
+      float u = fmodf(el, 1.6f);
+      float ring = swellAt(u, 0.5f) + 0.8f * swellAt(u - 0.42f, 0.55f);
+      float edge = clamp01(el / 0.4f);                       // fades in over the first beat
+      w[i] = edge * (0.30f + 0.65f * clamp01(ring));
+      continue;
+    }
+    float r = clamp01(el / 0.5f);
+    r = r * r * (3 - 2 * r);
+    float open = clamp01((r * 1.25f - fabsf(x)) / 0.3f);
+    float intro = 0.55f + 0.45f * clamp01(swellAt(el - 0.35f, 0.8f) + swellAt(el - 1.15f, 0.9f));
+    float rest = (0.16f + 0.62f * expf(-(x / 0.5f) * (x / 0.5f))) * (1 - 0.12f * breathe(el, 4.0f));
+    float m = clamp01((el - 1.9f) / 0.7f);
+    m = m * m * (3 - 2 * m);
+    w[i] = open * (intro + (rest - intro) * m);
+  }
+}
+
+static void notifyLight(Rgb* target, float dt) {
+  if (!notifyActive) return;
+  float el = (millis() - notifyStart) / 1000.0f;
+  // The card takes a moment to come up, and a plain one goes after 4.5 s.
+  bool up = ctxScreen == SCREEN_CARD || el < 1.0f;
+  notifyHold += ((up ? 1.0f : 0.0f) - notifyHold) * (1 - expf(-dt / 0.3f));
+  if (!up && notifyHold < 0.01f) { notifyActive = false; return; }
+  float w[NUMPIXELS];
+  notifyWeights(el, w);
+  float night = sleeping ? 0.5f : 1.0f;
+  for (int i = 0; i < NUMPIXELS; i++)
+    target[i] = mixc(target[i], scalec(notifyColor, night), clamp01(w[i] * notifyHold) * 0.95f);
+}
+
 void neoTick() {
   unsigned long ms = millis();
   if (ms - lastFrameMs < 16) return;
@@ -993,6 +1048,9 @@ void neoTick() {
       default:          sceneAuto(t, target, tau);    break;
     }
   }
+
+  // A card's light rides on top of whatever is playing (not a ringing alarm's).
+  if (!alarmOn) notifyLight(target, dt);
 
   // Notification ping rides on top of whatever is playing.
   if (pingActive) {

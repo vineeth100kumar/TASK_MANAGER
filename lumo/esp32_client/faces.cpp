@@ -1326,3 +1326,213 @@ void toolScreenTick(ScreenMode screen, const LumoState& s) {
   }
   toolAll = false;
 }
+
+// ------------------------------------------------------------- Cards
+// A phone notification: who (with a disc in the app's colour holding their
+// initial), the app, then the message wrapped over a few lines. An incoming
+// call: the disc in the middle with rings going out, the name under it, and
+// Decline / Answer in red and green. Sage's own (a reminder, the welcome) take
+// Sage's orange. Each part is drawn in its own small band, so the shared
+// buffer stays small.
+
+static const uint16_t CARD_BG_PLAIN = 0x18C3;   // (24,24,28) with the frame off
+static int cardRingFrame = -1;
+
+struct CardBox { int x, y, w, h; };
+static CardBox cardBox() {
+  if (framed()) { FitCard c = fitCard(); return { c.x, c.y, c.w, c.h }; }
+  int x = screenFit.l;
+  return { x, VIS_T, 320 - screenFit.r - x, VIS_H };
+}
+static uint16_t cardBgColor() { return framed() ? aaRGB(28, 30, 36) : CARD_BG_PLAIN; }
+
+static bool lightColor(uint8_t r, uint8_t g, uint8_t b) {
+  return 0.299f * r + 0.587f * g + 0.114f * b > 150;
+}
+
+// The first letter or digit of the sender, upper case; "?" when there is none.
+static void initialOf(const char* name, char* out) {
+  out[0] = '?'; out[1] = '\0';
+  for (const char* p = name; *p; p++) {
+    if (isalnum((unsigned char)*p)) { out[0] = toupper(*p); return; }
+  }
+}
+
+// Wraps `text` into at most maxLines lines of maxW pixels; when it doesn't all
+// fit, the last line ends in "...". Returns the number of lines.
+static int wrapLines(const char* text, const AAFont& f, int maxW, char lines[][64], int maxLines) {
+  int n = 0;
+  const char* p = text;
+  char tmp[64];
+  while (*p && n < maxLines) {
+    while (*p == ' ') p++;
+    if (!*p) break;
+    int best = 0;
+    const char* q = p;
+    while (true) {                       // add a word at a time while it fits
+      while (*q == ' ') q++;
+      const char* e = q;
+      while (*e && *e != ' ') e++;
+      int take = min((int)(e - p), 63);
+      memcpy(tmp, p, take); tmp[take] = '\0';
+      if (aaTextWidth(f, tmp) > maxW) break;
+      best = take;
+      if (!*e || take == 63) break;
+      q = e;
+    }
+    if (best == 0) {                     // one long word: cut it by letters
+      best = 1;
+      while (best < 63 && p[best]) {
+        memcpy(tmp, p, best + 1); tmp[best + 1] = '\0';
+        if (aaTextWidth(f, tmp) > maxW) break;
+        best++;
+      }
+    }
+    memcpy(lines[n], p, best); lines[n][best] = '\0';
+    n++;
+    p += best;
+  }
+  while (*p == ' ') p++;
+  if (*p && n > 0) {                     // more than fits: end on "..."
+    char* last = lines[n - 1];
+    while (true) {
+      snprintf(tmp, sizeof(tmp), "%s...", last);
+      if (aaTextWidth(f, tmp) <= maxW || !last[0]) break;
+      last[strlen(last) - 1] = '\0';
+    }
+    size_t len = strlen(last);
+    while (len && last[len - 1] == ' ') last[--len] = '\0';
+    strlcat(last, "...", 64);
+  }
+  return n;
+}
+
+static void cardText(int x0, int x1, int baseline, const char* txt, const AAFont& f, uint16_t color, uint16_t bg, bool centered) {
+  AASurface sf;
+  if (!band(sf, x0, x1, baseline, f, bg)) return;
+  if (centered) aaTextCentered(sf, (x0 + x1) / 2, baseline, txt, f, color);
+  else aaText(sf, x0, baseline, txt, f, color);
+  aaEnd(sf);
+}
+
+// The sender's disc: the app's colour with their initial on it. A call's has
+// rings going out from it (phase 0..1).
+static void cardDisc(const LumoState& s, int cx, int cy, int r, bool rings, float phase) {
+  uint16_t bg = cardBgColor();
+  int half = rings ? r + 22 : r + 2;
+  AASurface sf;
+  if (!aaBegin(sf, cx - half, cy - half, 2 * half, 2 * half, bg)) return;
+  uint16_t col = aaRGB(s.notif_r, s.notif_g, s.notif_b);
+  if (rings) {
+    for (int i = 0; i < 2; i++) {
+      float u = fmodf(phase + i * 0.5f, 1.0f);
+      float rr = r + 3 + u * 17;
+      uint8_t fade = (uint8_t)(255 * (1 - u) * 0.55f);
+      aaRing(sf, cx, cy, rr, 2.0f, aaMix(bg, col, fade));
+    }
+  }
+  aaDisc(sf, cx, cy, r, col);
+  char ini[2];
+  initialOf(s.notif_title, ini);
+  uint16_t ink = lightColor(s.notif_r, s.notif_g, s.notif_b) ? aaRGB(18, 18, 22) : aaRGB(250, 250, 250);
+  const AAFont& f = r >= 24 ? AA_DISP20 : AA_DISP14;
+  aaTextCentered(sf, cx, cy + f.ascent / 2, ini, f, ink);
+  aaEnd(sf);
+}
+
+// LEFT, OK and RIGHT along the bottom: OK filled in the card's colour; a call's
+// Decline and Answer filled red and green; the rest outlined.
+static void cardButtons(const LumoState& s, const CardBox& b) {
+  const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
+  if (!labels[0][0] && !labels[1][0] && !labels[2][0]) return;
+  uint16_t bg = cardBgColor();
+  const int pad = 12, gap = 8, h = 28;
+  int w = (b.w - 2 * pad - 2 * gap) / 3;
+  int y = b.y + b.h - h - 12;
+  AASurface sf;
+  if (!aaBegin(sf, b.x, y - 1, b.w, h + 2, bg)) return;
+  for (int i = 0; i < 3; i++) {
+    if (!labels[i][0]) continue;
+    int x = b.x + pad + i * (w + gap);
+    bool call = s.notif_kind == CARD_CALL && i != 1;
+    bool filled = i == 1 || call;
+    uint8_t r = s.notif_r, g = s.notif_g, bl = s.notif_b;
+    if (call && i == 0) { r = 255; g = 69;  bl = 58; }
+    if (call && i == 2) { r = 52;  g = 199; bl = 89; }
+    if (filled) {
+      aaRoundRect(sf, x, y, w, h, 8, aaRGB(r, g, bl));
+    } else {
+      aaRoundRect(sf, x, y, w, h, 8, aaRGB(92, 96, 108));
+      aaRoundRect(sf, x + 1.5f, y + 1.5f, w - 3, h - 3, 6.5f, bg);
+    }
+    char text[20];
+    if (i == 0) snprintf(text, sizeof(text), "< %s", labels[i]);
+    else if (i == 1) snprintf(text, sizeof(text), "OK  %s", labels[i]);
+    else snprintf(text, sizeof(text), "%s >", labels[i]);
+    uint16_t ink = filled ? (lightColor(r, g, bl) ? aaRGB(18, 18, 22) : aaRGB(250, 250, 250)) : aaRGB(235, 236, 240);
+    aaTextCentered(sf, x + w / 2, y + 18, text, AA_SEMI11, ink);
+  }
+  aaEnd(sf);
+}
+
+static void callCard(const LumoState& s, const CardBox& b) {
+  uint16_t bg = cardBgColor();
+  int cx = b.x + b.w / 2;
+  cardDisc(s, cx, b.y + 58, 26, true, 0);
+  cardText(b.x + 12, b.x + b.w - 12, b.y + 126, s.notif_title, AA_DISP20, aaRGB(245, 243, 238), bg, true);
+  char sub[64];
+  snprintf(sub, sizeof(sub), "%s  -  %s", s.notif_body[0] ? s.notif_body : "Calling", s.notif_app);
+  fitText(sub, AA_BODY11, b.w - 24);
+  cardText(b.x + 12, b.x + b.w - 12, b.y + 144, sub, AA_BODY11, aaRGB(140, 145, 155), bg, true);
+  cardRingFrame = -1;
+}
+
+static void noteCard(const LumoState& s, const CardBox& b) {
+  uint16_t bg = cardBgColor();
+  const int left = b.x + 16, right = b.x + b.w - 14;
+  cardDisc(s, left + 16, b.y + 30, 16, false, 0);
+  char title[32];
+  strlcpy(title, s.notif_title, sizeof(title));
+  fitText(title, AA_DISP20, right - (left + 42));
+  cardText(left + 42, right, b.y + 31, title, AA_DISP20, aaRGB(245, 243, 238), bg, false);
+  char app[24];
+  strlcpy(app, s.notif_app, sizeof(app));
+  cardText(left + 42, right, b.y + 48, app, AA_SEMI11, aaRGB(s.notif_r, s.notif_g, s.notif_b), bg, false);
+  // The message, as many lines as there is room for above the buttons.
+  bool buttons = s.act_left[0] || s.act_ok[0] || s.act_right[0];
+  int bottom = b.y + b.h - (buttons ? 48 : 10);
+  int first = b.y + 78, step = 20;
+  int room = (bottom - first) / step + 1;
+  if (room > 5) room = 5;
+  char lines[5][64];
+  int n = room > 0 ? wrapLines(s.notif_body, AA_DISP14, right - left, lines, room) : 0;
+  for (int i = 0; i < n; i++)
+    cardText(left, right, first + i * step, lines[i], AA_DISP14, aaRGB(214, 218, 226), bg, false);
+}
+
+void cardDraw(const LumoState& s) {
+  CardBox b = cardBox();
+  uint16_t bg = cardBgColor();
+  if (framed()) {
+    tft.fillScreen(0x0000);
+    tft.fillRect(b.x, b.y, b.w, b.h, bg);
+  } else {
+    tft.fillScreen(bg);
+  }
+  if (s.notif_kind == CARD_CALL) callCard(s, b);
+  else noteCard(s, b);
+  cardButtons(s, b);
+}
+
+void cardTick(const LumoState& s) {
+  if (s.notif_kind != CARD_CALL) return;
+  static unsigned long last = 0;
+  if (millis() - last < 50) return;      // the rings, at 20 fps
+  last = millis();
+  CardBox b = cardBox();
+  float phase = fmodf(millis() / 1600.0f, 1.0f);
+  int frame = (int)(phase * 32);
+  if (frame == cardRingFrame) return;
+  cardRingFrame = frame;
+  cardDisc(s, b.x + b.w / 2, b.y + 58, 26, true, phase);
+}

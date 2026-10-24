@@ -27,7 +27,10 @@ def attrs_packet(uid, app, title, message):
 class Decoding(unittest.TestCase):
     def test_notification_source(self):
         note = phone_link.parse_notification_source(bytes([0, 0, 4, 1]) + struct.pack("<I", 77))
-        self.assertEqual(note, {"event": "added", "silent": False, "preExisting": False, "category": "social", "uid": 77})
+        self.assertEqual(note, {"event": "added", "silent": False, "important": False, "preExisting": False,
+                                "positive": False, "negative": False, "category": "social", "uid": 77})
+        call = phone_link.parse_notification_source(bytes([0, 2 | 8 | 16, 1, 1]) + struct.pack("<I", 78))
+        self.assertEqual((call["category"], call["important"], call["positive"], call["negative"]), ("incoming call", True, True, True))
         self.assertTrue(phone_link.parse_notification_source(bytes([2, 4, 0, 0, 1, 0, 0, 0]))["preExisting"])
         self.assertIsNone(phone_link.parse_notification_source(b"\x00\x01"))
 
@@ -38,6 +41,13 @@ class Decoding(unittest.TestCase):
 
     def test_entity_update(self):
         self.assertEqual(phone_link.parse_entity_update(bytes([2, 2, 0]) + b"Yellow"), (2, 2, "Yellow"))
+
+    def test_app_color(self):
+        self.assertEqual(phone_link.app_color("net.whatsapp.WhatsApp"), "#25D366")
+        made_up = phone_link.app_color("com.example.thing")
+        self.assertIn(made_up, phone_link.APP_PALETTE)
+        self.assertEqual(phone_link.app_color("com.example.thing"), made_up)   # always the same
+        self.assertEqual(phone_link.app_color("", "email"), "#0A84FF")
 
     def test_app_label(self):
         self.assertEqual(phone_link.app_label("com.apple.MobileSMS"), "Messages")
@@ -66,6 +76,27 @@ class State(unittest.TestCase):
         self.assertEqual(self.sent[-1]["type"], "PHONE_NOTIFICATION")
         note = self.sent[-1]["notification"]
         self.assertEqual((note["id"], note["app"], note["title"], note["message"]), ("5", "WhatsApp", "Ravi", "On my way"))
+
+    def test_actions_go_to_the_phone(self):
+        written = []
+
+        class ControlPoint:
+            async def call_write_value(self, value, options):
+                written.append(bytes(value))
+
+        async def go():
+            self.link._pending[7] = {"category": "incoming call", "uid": 7, "positive": True, "negative": True}
+            await self.link._on_value(phone_link.ANCS_DATA_SOURCE, attrs_packet(7, "com.apple.mobilephone", "Amma", "Incoming call"))
+            note = self.sent[-1]["notification"]
+            self.assertEqual((note["color"], note["actions"]), ("#34C759", {"positive": True, "negative": True}))
+            self.assertFalse(await self.link.perform_action("7", True))       # no link yet
+            self.link._chars[phone_link.ANCS_CONTROL_POINT] = ControlPoint()
+            self.assertTrue(await self.link.perform_action("7", False))
+            self.assertFalse(await self.link.perform_action("99", True))      # not one of the phone's
+            await self.link.add_notification({"title": "Test", "uid": "local-1"})
+            self.assertFalse(await self.link.perform_action("local-1", False))
+        self.run_async(go())
+        self.assertEqual(written, [bytes([2, 7, 0, 0, 0, 1])])
 
     def test_keeps_newest_twenty_and_removes(self):
         async def go():

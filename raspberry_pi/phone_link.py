@@ -105,7 +105,12 @@ def parse_notification_source(data: bytes) -> Optional[dict]:
     return {
         "event": ("added", "modified", "removed")[event] if event < 3 else "unknown",
         "silent": bool(flags & 1),
+        "important": bool(flags & 2),
         "preExisting": bool(flags & 4),
+        # What the phone lets an accessory do with it: for a call, positive
+        # answers and negative declines; for most others negative clears it.
+        "positive": bool(flags & 8),
+        "negative": bool(flags & 16),
         "category": CATEGORIES[category] if category < len(CATEGORIES) else "other",
         "uid": uid,
     }
@@ -134,6 +139,38 @@ def parse_entity_update(data: bytes) -> Optional[tuple]:
     if len(data) < 3:
         return None
     return data[0], data[1], data[3:].decode("utf-8", errors="replace")
+
+
+# Each app's own colour, for its card and the light on the clock. Apps not
+# listed get one picked from APP_PALETTE by their bundle id, so an app is
+# always the same colour; with no bundle id the category decides.
+APP_COLORS = {
+    "net.whatsapp.WhatsApp": "#25D366", "com.apple.MobileSMS": "#34C759",
+    "com.apple.mobilephone": "#34C759", "com.apple.facetime": "#34C759",
+    "com.apple.mobilemail": "#0A84FF", "com.google.Gmail": "#EA4335",
+    "com.microsoft.Office.Outlook": "#0A84FF", "com.apple.mobilecal": "#FF453A",
+    "com.apple.reminders": "#FF9F0A", "com.tinyspeck.chatlyio": "#A05AC8",
+    "com.microsoft.skype.teams": "#6264A7", "ph.telegra.Telegraph": "#2AABEE",
+    "com.burbn.instagram": "#E1306C", "com.facebook.Messenger": "#0084FF",
+    "com.atebits.Tweetie2": "#1D9BF0", "com.google.ios.youtube": "#FF0000",
+    "com.spotify.client": "#1DB954", "com.linkedin.LinkedIn": "#0A66C2",
+    "com.toyopagroup.picaboo": "#FFFC00", "com.amazon.Amazon": "#FF9900",
+}
+CATEGORY_COLORS = {
+    "incoming call": "#34C759", "missed call": "#FF453A", "voicemail": "#34C759",
+    "social": "#5AC8FA", "schedule": "#FF453A", "email": "#0A84FF", "news": "#FF375F",
+    "health": "#FF2D55", "business": "#A05AC8", "location": "#30D158", "entertainment": "#BF5AF2",
+}
+APP_PALETTE = ["#5AC8FA", "#FF9F0A", "#BF5AF2", "#30D158", "#FF375F", "#64D2FF", "#FFD60A", "#FF6482"]
+DEFAULT_COLOR = "#5AC8FA"
+
+
+def app_color(app_id: str, category: str = "other") -> str:
+    if app_id in APP_COLORS:
+        return APP_COLORS[app_id]
+    if app_id:
+        return APP_PALETTE[sum(app_id.encode()) % len(APP_PALETTE)]
+    return CATEGORY_COLORS.get(category, DEFAULT_COLOR)
 
 
 def app_label(app_id: str) -> str:
@@ -224,6 +261,11 @@ class PhoneLink:
             "title": (item.get("title") or "").strip()[:120],
             "message": (item.get("message") or "").strip()[:300],
             "category": item.get("category", "other"),
+            "appId": app_id,
+            "color": item.get("color") or app_color(app_id, item.get("category", "other")),
+            "important": bool(item.get("important")),
+            # Which of the phone's actions it offers (see perform_action).
+            "actions": {"positive": bool(item.get("positive")), "negative": bool(item.get("negative"))},
             "at": int(time.time() * 1000),
         }
         self.notifications = deque((n for n in self.notifications if n["id"] != entry["id"]), maxlen=KEEP)
@@ -261,6 +303,25 @@ class PhoneLink:
             return True
         except Exception as e:
             log.warning("Media command failed: %s", e)
+            return False
+
+    async def perform_action(self, notification_id: str, positive: bool) -> bool:
+        """Ask the phone to act on one of its notifications (ANCS Perform
+        Notification Action): positive answers a call, negative declines a
+        call or clears anything else. False when it can't be asked: no link,
+        a notification that didn't come from the phone, or one that doesn't
+        offer that action."""
+        char = self._chars.get(ANCS_CONTROL_POINT)
+        note = next((n for n in self.notifications if n["id"] == notification_id), None)
+        if char is None or note is None or not notification_id.isdigit():
+            return False
+        if not note.get("actions", {}).get("positive" if positive else "negative"):
+            return False
+        try:
+            await char.call_write_value(bytes([2]) + struct.pack("<I", int(notification_id)) + bytes([0 if positive else 1]), {})
+            return True
+        except Exception as e:
+            log.warning("Notification action failed: %s", e)
             return False
 
     # --- Bluetooth ---

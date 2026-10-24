@@ -1201,74 +1201,6 @@ void displayConnectingTick(const LumoState& s) {
   }
 }
 
-// A reminder or notification, over whatever was on screen (the sketch goes
-// back to that screen when the card is answered or times out). Cards with
-// actions show what LEFT, OK and RIGHT do along the bottom.
-static void drawCardScreen(const LumoState& s) {
-  const uint16_t panel = tft.color565(21, 26, 34);
-  bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
-  tft.fillScreen(COLOR_BG_BLACK);
-  const int panelH = hasActions ? SH(18, 164) : SH(18, 204);
-  tft.fillRoundRect(12, SY(18), 296, panelH, 10, panel);
-  tft.drawRoundRect(12, SY(18), 296, panelH, 10, COLOR_ACCENT);
-
-  tft.setFont(NULL);
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_ACCENT);
-  tft.setCursor(28, SY(32));
-  tft.print(s.notif_app);
-
-  tft.setFont(&FreeSans12pt7b);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(28, SY(72));
-  tft.print(s.notif_title);
-
-  // The body wraps on spaces, about 30 characters to a line, three lines.
-  tft.setFont(&FreeSans9pt7b);
-  tft.setTextColor(tft.color565(170, 178, 192));
-  const char* p = s.notif_body;
-  int y = SY(104);
-  for (int line = 0; line < 3 && *p; line++) {
-    while (*p == ' ') p++;
-    int len = strlen(p), take = len;
-    if (len > 30) {
-      take = 30;
-      while (take > 0 && p[take] != ' ') take--;
-      if (take == 0) take = 30;
-    }
-    char row[32];
-    strlcpy(row, p, min(take + 1, (int)sizeof(row)));
-    tft.setCursor(28, y);
-    tft.print(row);
-    p += take;
-    y += SH(104, 24);
-  }
-
-  if (hasActions) {
-    const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
-    const char* keys[3]   = { "<", "OK", ">" };
-    const int btnY = SY(196);
-    for (int i = 0; i < 3; i++) {
-      int x = 12 + i * 102;
-      if (!labels[i][0]) continue;
-      bool primary = (i == 1);
-      if (primary) tft.fillRoundRect(x, btnY, 92, 32, 6, COLOR_ACCENT);
-      else tft.drawRoundRect(x, btnY, 92, 32, 6, COLOR_MUTED);
-      char text[20];
-      if (i == 2) snprintf(text, sizeof(text), "%s %s", labels[i], keys[i]);   // "Snooze >"
-      else snprintf(text, sizeof(text), "%s %s", keys[i], labels[i]);         // "< Tomorrow", "OK Done"
-      int16_t x1, y1; uint16_t w, h;
-      tft.setFont(NULL);
-      tft.setTextSize(1);
-      tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-      tft.setTextColor(primary ? COLOR_BG_BLACK : COLOR_WHITE);
-      tft.setCursor(x + (92 - (int)w) / 2, btnY + 12);
-      tft.print(text);
-    }
-  }
-  tft.setFont(NULL);
-}
-
 static void drawMemoryScreen(const LumoState& s, bool full) {
   strncpy(lastMemoryCaption, s.mem_caption, sizeof(lastMemoryCaption) - 1);
   lastMemoryCaption[sizeof(lastMemoryCaption) - 1] = '\0';
@@ -1315,7 +1247,11 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
 
   switch (mode) {
     case SCREEN_CARD:
-      drawCardScreen(s);
+      // A reminder or notification, over whatever was on screen (the sketch
+      // goes back to it when the card is answered or times out). Drawn
+      // smooth, straight onto the card, so not squeezed (faces.cpp).
+      displayFitApply(false);
+      cardDraw(s);
       break;
     case SCREEN_CLOCK:
       drawClockScreen(s, modeChanged);
