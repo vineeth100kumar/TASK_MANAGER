@@ -141,7 +141,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.19.0"
+#define FW_VERSION "2.20.0"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...
@@ -167,6 +167,7 @@ enum Button       { BTN_NONE, BTN_OK, BTN_UP, BTN_DOWN, BTN_LEFT, BTN_RIGHT, BTN
 // The timer, stopwatch and world clock screens (2.7) are drawn in faces.cpp.
 enum ScreenMode   { SCREEN_CLOCK, SCREEN_SYSTEM, SCREEN_SPOTIFY, SCREEN_TASKS, SCREEN_ALARM, SCREEN_CONNECTING, SCREEN_MEMORY, SCREEN_CARD,
                     SCREEN_TIMER, SCREEN_STOPWATCH, SCREEN_WORLD };
+enum CardKind     { CARD_SAGE, CARD_NOTE, CARD_CALL };
 enum NeoMode      { NEO_WARM, NEO_COLOR, NEO_BREATHE, NEO_OFF, NEO_ALARM, NEO_AUTO, NEO_AURORA, NEO_COMET };
 // How the clock screen shows the time (set in Sage, kept in flash). The first
 // three are the classic styles; the rest are the smooth faces in faces.cpp.
@@ -296,9 +297,13 @@ struct LumoState {
   bool          paired = false;
   bool          pair_refused = false;
   char          notif_app[20]   = "";
-  char          notif_title[28] = "";
-  char          notif_body[64]  = "";
+  char          notif_title[32] = "";
+  char          notif_body[120] = "";
   unsigned long notif_start     = 0;
+  // The card's colour (the app's, from the Pi; 2.20) and how it is drawn:
+  // a message from the phone, an incoming call, or Sage's own.
+  uint8_t       notif_r = 255, notif_g = 159, notif_b = 67;
+  CardKind      notif_kind = CARD_SAGE;
 
   // JARVIS Voice Companion State
   char          voice_state[16]    = "IDLE";

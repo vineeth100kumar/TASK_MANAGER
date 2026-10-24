@@ -392,6 +392,9 @@ void loop() {
     }
     toolScreenTick(currentScreen, lumoState);
   }
+  else if (currentScreen == SCREEN_CARD) {
+    cardTick(lumoState);
+  }
   else if (currentScreen == SCREEN_MEMORY) {
     if (lumoState.flag_memory_changed) {
       lumoState.flag_memory_changed = false;

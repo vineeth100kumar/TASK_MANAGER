@@ -18,3 +18,8 @@ float nowPlayingBeat(const LumoState& s, float t);         // 0..1, a soft pulse
 // The timer, stopwatch and world clock screens (firmware 2.7), the same way.
 void toolScreenReset();                                    // redraw everything next tick
 void toolScreenTick(ScreenMode screen, const LumoState& s);   // every loop on one of them
+
+// Cards (2.20): a phone notification, an incoming call or one of Sage's own,
+// in the app's colour, with what LEFT, OK and RIGHT do along the bottom.
+void cardDraw(const LumoState& s);                         // the whole card
+void cardTick(const LumoState& s);                         // every loop on the card: a call's rings

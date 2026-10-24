@@ -256,15 +256,25 @@ static void handleTextMessage(const char* payload, size_t len) {
     const char* app = doc["app"] | "iPhone";
     const char* title = doc["title"] | "Alert";
     const char* body = doc["body"] | "";
-    strncpy(s.notif_app, app, sizeof(s.notif_app) - 1);
-    strncpy(s.notif_title, title, sizeof(s.notif_title) - 1);
-    strncpy(s.notif_body, body, sizeof(s.notif_body) - 1);
+    strlcpy(s.notif_app, app, sizeof(s.notif_app));
+    strlcpy(s.notif_title, title, sizeof(s.notif_title));
+    strlcpy(s.notif_body, body, sizeof(s.notif_body));
+    // 2.20: the app's colour ("#25D366") and the kind of card. A Pi from
+    // before sends neither: Sage's orange and a plain message card.
+    const char* color = doc["color"] | "";
+    unsigned long rgbv = 0;
+    if (color[0] == '#' && strlen(color) == 7) rgbv = strtoul(color + 1, nullptr, 16);
+    else rgbv = 0x5AC8FA;
+    s.notif_r = (rgbv >> 16) & 0xFF; s.notif_g = (rgbv >> 8) & 0xFF; s.notif_b = rgbv & 0xFF;
+    const char* kind = doc["kind"] | "note";
+    s.notif_kind = !strcmp(kind, "call") ? CARD_CALL : !strcmp(kind, "sage") ? CARD_SAGE : CARD_NOTE;
     s.notif_active = true;
     s.notif_start = millis();
     s.flag_card_changed = true;
-    neoPing(90, 170, 255);
-    // A knock for a phone notification; a reminder already brought its own.
-    if (s.hap_notify && millis() - lastHapticCmd > 800) hapticPlay(HAP_NOTIFY);
+    neoNotify(s.notif_r, s.notif_g, s.notif_b, s.notif_kind == CARD_CALL);
+    // A knock for a phone notification (a firmer one for a call); a reminder
+    // already brought its own.
+    if (s.hap_notify && millis() - lastHapticCmd > 800) hapticPlay(s.notif_kind == CARD_CALL ? HAP_REMINDER : HAP_NOTIFY);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
     s.cpu_temp = doc["cpu_temp"] | s.cpu_temp;

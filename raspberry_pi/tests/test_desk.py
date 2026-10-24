@@ -108,12 +108,13 @@ class Controller(unittest.IsolatedAsyncioTestCase):
         async def mark_done():
             done.append("done")
 
-        await desk.show_card("Sage", "Call the plumber about the leak", "Due now", {
+        await desk.show_card("Sage", "Call the plumber about the leak in the attic", "Due now", {
             "OK": ("Done", mark_done),
             "UP": ("ignored", mark_done),  # only LEFT, OK and RIGHT can carry actions
         })
         notif, actions = self.link.sent
-        self.assertEqual(notif["title"], "Call the plumber about the")
+        self.assertEqual(notif["title"], "Call the plumber about the leak")
+        self.assertEqual((notif["color"], notif["kind"]), ("#FF9F43", "sage"))
         self.assertEqual(actions, {"cmd": "ACTIONS", "ok": "Done"})
 
         await desk.on_button("LEFT")  # not on this card: nothing happens

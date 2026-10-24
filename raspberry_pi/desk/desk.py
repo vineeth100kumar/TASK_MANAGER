@@ -56,6 +56,9 @@ SOURCE = "desk"
 WEATHER_EVERY = 30 * 60
 REFRESH_EVERY = 60
 REMINDER_SNOOZE_MINUTES = 60
+# How long a phone notification's card stays up, and an incoming call's.
+NOTE_CARD_SECONDS = 20
+CALL_CARD_SECONDS = 45
 MEDIA_ACTIONS = {"media_previous": "previous", "media_toggle": "toggle", "media_next": "next"}
 NIGHT_EVERY = 20
 WORLD_EVERY = 15 * 60
@@ -258,6 +261,9 @@ class Desk:
                 self._spawn(self._refresh_after_burst())
         elif kind == "PHONE_NOTIFICATION":
             self._spawn(self.show_notification(event.get("notification") or {}))
+        elif kind == "PHONE_NOTIFICATION_REMOVED":
+            # Read, cleared or answered on the phone: its card goes too.
+            self._spawn(self._guard(self.controller.take_down(f"phone:{event.get('id')}")))
         elif kind == "PHONE_MEDIA":
             self._spawn(self.show_media(event.get("media") or {}))
         elif kind == "PHONE_STATUS":
@@ -300,11 +306,47 @@ class Desk:
         })
 
     async def show_notification(self, note: dict) -> None:
-        # A reminder waiting for an answer, or a ringing alarm, comes first.
-        if self.controller.card or self.alarms.ringing or not self.link.connected:
+        """A card for each of the phone's notifications, in the app's colour
+        (the clock's light takes it too). LEFT clears it on the phone as well
+        when the phone allows that, OK closes it. An incoming call gets
+        Decline and Answer instead, and stays while it rings."""
+        card = self.controller.card
+        # A reminder waiting for an answer, or a ringing alarm, comes first;
+        # a newer notification takes over from an older one.
+        if (card and not card.tag.startswith("phone:")) or self.alarms.ringing or not self.link.connected:
             return
+        note_id = str(note.get("id") or "")
+        call = note.get("category") == "incoming call"
+        offers = note.get("actions") or {}
+
+        def act(positive: bool):
+            return lambda: self._guard(self.phone_action(note_id, positive))
+
+        def close():
+            return asyncio.sleep(0)
+
+        actions = {}
+        if call:
+            if offers.get("negative"):
+                actions["LEFT"] = ("Decline", act(False))
+            if offers.get("positive"):
+                actions["RIGHT"] = ("Answer", act(True))
+        elif offers.get("negative"):
+            actions["LEFT"] = ("Clear", act(False))
+        if not (call and actions):
+            actions["OK"] = ("Close", close)
         await self._card_surface()
-        await self.controller.show_card(note.get("app") or "iPhone", note.get("title") or "", note.get("message") or "")
+        await self.controller.show_card(
+            note.get("app") or "iPhone", note.get("title") or "",
+            note.get("message") or ("Calling" if call else ""), actions,
+            seconds=CALL_CARD_SECONDS if call else NOTE_CARD_SECONDS,
+            color=note.get("color") or "", kind="call" if call else "note",
+            tag=f"phone:{note_id}", auto_close=True)
+
+    async def phone_action(self, note_id: str, positive: bool) -> None:
+        perform = getattr(self.phone, "perform_action", None)
+        if perform and not await perform(note_id, positive):
+            log.info("The phone didn't take the %s action for notification %s", "positive" if positive else "negative", note_id)
 
     async def phone_presence(self, home: bool) -> None:
         """PHONE_STATUS: the phone left (it's been gone a few minutes, see

@@ -30,8 +30,13 @@ from typing import Awaitable, Callable, Dict, List, Optional, Tuple
 log = logging.getLogger("desk.controller")
 
 Action = Callable[[], Awaitable[None]]
-# The firmware's buffer sizes for a NOTIF card in bytes, less the terminating 0.
-APP_LEN, TITLE_LEN, BODY_LEN = 19, 27, 63
+# The firmware's buffer sizes for a NOTIF card in bytes, less the terminating 0
+# (firmware 2.20 has room for more; older firmware cuts it to 27 and 63).
+APP_LEN, TITLE_LEN, BODY_LEN = 19, 31, 119
+# Card kinds (firmware 2.20 draws each its own way): a message from the phone,
+# an incoming call, or Sage's own (a reminder, the welcome).
+CARD_KINDS = ("note", "call", "sage")
+SAGE_COLOR = "#FF9F43"
 # An unanswered card stops claiming the buttons after this long.
 CARD_SECONDS = 120
 ACTION_BUTTONS = ("LEFT", "OK", "RIGHT")
@@ -47,6 +52,10 @@ _PLAIN = str.maketrans({"\u2018": "'", "\u2019": "'", "\u201c": '"', "\u201d": '
                         "\u2013": "-", "\u2014": "-", "\u2026": "...", "\u00b7": "-"})
 
 
+def _is_color(value: str) -> bool:
+    return isinstance(value, str) and len(value) == 7 and value[0] == "#" and all(c in "0123456789abcdefABCDEF" for c in value[1:])
+
+
 def fit(text: str, limit: int) -> str:
     """Plain ASCII on one line, cut to the firmware's buffer of `limit` bytes."""
     text = unicodedata.normalize("NFKD", (text or "").translate(_PLAIN))
@@ -55,9 +64,10 @@ def fit(text: str, limit: int) -> str:
 
 
 class Card:
-    def __init__(self, actions: Dict[str, Tuple[str, Action]], expires_at: float) -> None:
+    def __init__(self, actions: Dict[str, Tuple[str, Action]], expires_at: float, tag: str = "") -> None:
         self.actions = actions
         self.expires_at = expires_at
+        self.tag = tag   # who put it up, e.g. "phone:42", so they can take it down
 
 
 class DeskController:
@@ -140,21 +150,45 @@ class DeskController:
         body: str = "",
         actions: Optional[Dict[str, Tuple[str, Action]]] = None,
         seconds: int = CARD_SECONDS,
+        color: str = SAGE_COLOR,
+        kind: str = "sage",
+        tag: str = "",
+        auto_close: bool = False,
     ) -> None:
         """A notification card. With actions, LEFT/OK/RIGHT run them until one
-        is pressed or the card times out; their labels show under the card."""
+        is pressed or the card times out; their labels show under the card.
+        `color` (#RRGGBB) tints the card and the light, `kind` picks how it is
+        drawn (CARD_KINDS). With auto_close the clock is told to take the card
+        down when it times out; otherwise it stays until answered."""
         actions = {b: a for b, a in (actions or {}).items() if b in ACTION_BUTTONS}
         await self.link.send({
             "cmd": "NOTIF",
             "app": fit(app or "Sage", APP_LEN),
             "title": fit(title, TITLE_LEN),
             "body": fit(body, BODY_LEN),
+            "color": color if _is_color(color) else SAGE_COLOR,
+            "kind": kind if kind in CARD_KINDS else "sage",
         })
         if actions:
-            self.card = Card(actions, self._clock() + seconds)
+            card = Card(actions, self._clock() + seconds, tag)
+            self.card = card
             await self.link.send({"cmd": "ACTIONS", **{b.lower(): label for b, (label, _) in actions.items()}})
+            if auto_close:
+                asyncio.ensure_future(self._close_later(card, seconds))
         elif self.card:
             await self.clear_card()
+
+    async def _close_later(self, card: Card, seconds: float) -> None:
+        await asyncio.sleep(seconds)
+        if self.card is card:
+            await self.clear_card()
+
+    async def take_down(self, tag: str) -> bool:
+        """Clear the card if `tag` put it up (the phone dropped the notification)."""
+        if self.card and tag and self.card.tag == tag:
+            await self.clear_card()
+            return True
+        return False
 
     async def clear_card(self) -> None:
         self.card = None
