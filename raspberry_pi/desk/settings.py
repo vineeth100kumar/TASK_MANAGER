@@ -83,7 +83,9 @@ DEFAULTS: Dict[str, Any] = {
     # ("HH:MM-HH:MM", may cross midnight; "" any time) and not while `hold`
     # names a version (set by installing an older build, or by a USB flash).
     "updates": {"auto": True, "hold": "", "window": "03:00-05:00"},
-    "gallery": {"enabled": True, "intervalSeconds": 30, "sources": ["quotes", "memories", "photos"]},
+    # mode: "away" shows the gallery while the phone is out, "always" makes
+    # LUMO a photo frame even when you're home.
+    "gallery": {"enabled": True, "mode": "away", "intervalSeconds": 30, "sources": ["quotes", "memories", "photos"]},
     "buttons": {
         "locked": False,
         "map": {
@@ -95,6 +97,9 @@ DEFAULTS: Dict[str, Any] = {
         },
     },
 }
+
+
+GALLERY_MODES = ("away", "always")
 
 
 def defaults() -> dict:
@@ -278,6 +283,8 @@ def merge(current: dict, update: dict) -> dict:
         gallery = _section(update["gallery"], "gallery")
         if "enabled" in gallery:
             out["gallery"]["enabled"] = _bool(gallery["enabled"], "gallery.enabled")
+        if "mode" in gallery:
+            out["gallery"]["mode"] = _choice(gallery["mode"], "gallery.mode", GALLERY_MODES)
         if "intervalSeconds" in gallery:
             out["gallery"]["intervalSeconds"] = _int(gallery["intervalSeconds"], "gallery.intervalSeconds", 10, 300)
         if "sources" in gallery:

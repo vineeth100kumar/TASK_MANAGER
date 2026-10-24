@@ -59,6 +59,7 @@ REMINDER_SNOOZE_MINUTES = 60
 # How long a phone notification's card stays up, and an incoming call's.
 NOTE_CARD_SECONDS = 20
 CALL_CARD_SECONDS = 45
+GALLERY_PEEK_SECONDS = 120   # a button press in photo frame mode shows the clock this long
 MEDIA_ACTIONS = {"media_previous": "previous", "media_toggle": "toggle", "media_next": "next"}
 NIGHT_EVERY = 20
 WORLD_EVERY = 15 * 60
@@ -124,6 +125,9 @@ class Desk:
         # When the phone was last seen before it went away; None while it's
         # home, or when Sage started with it already gone.
         self.phone_left_at: Optional[float] = None
+        self.phone_away = False
+        # Photo frame mode: a button press shows the clock until this time.
+        self.gallery_peek_until = 0.0
         self.weather: Optional[dict] = None
         self.sent_alarms: Optional[dict] = None
         self.track: Optional[tuple] = None
@@ -352,24 +356,13 @@ class Desk:
         """PHONE_STATUS: the phone left (it's been gone a few minutes, see
         phone_link.AWAY_AFTER) or came back. Away starts the gallery;
         back stops it and optionally shows the welcome card."""
+        self.phone_away = not home
+        await self.sync_gallery()
         if not home:
             if self.phone_left_at is None:
                 self.phone_left_at = getattr(self.phone, "last_seen", 0) or time.time()
-            # Start gallery if enabled
-            gallery_cfg = self.settings.get("gallery", {})
-            if gallery_cfg.get("enabled") and self.link.connected and not self.gallery.active:
-                self.gallery.configure(gallery_cfg)
-                self.gallery.start()
-                await self.gallery.show_current()
-                log.info("Away: gallery started")
             await self.announce()
             return
-        # Coming home: stop gallery and return to clock
-        if self.gallery.active:
-            self.gallery.stop()
-            if self.link.connected:
-                await self.controller.show_screen(self.settings["homeScreen"])
-            log.info("Home: gallery stopped, back to clock")
         left_at, self.phone_left_at = self.phone_left_at, None
         await self.announce()
         welcome = self.settings["welcome"]
@@ -556,6 +549,13 @@ class Desk:
         if self.timer.state == "done":
             await self.timer_do("cancel")
             return True  # any button stops a finished timer
+        if self.gallery.active and not self.phone_away:
+            # Photo frame mode: a press brings the clock back for a while.
+            peeking = time.time() < self.gallery_peek_until
+            self.gallery_peek_until = time.time() + GALLERY_PEEK_SECONDS
+            if not peeking and not self.controller.card:
+                await self.controller.show_screen(self.controller.screen)
+                return True  # the first press only wakes the clock
         return self.settings["buttons"]["locked"] and not remote
 
     def action_for(self, button: str) -> str:
@@ -628,6 +628,30 @@ class Desk:
             self.fit_test = False
             await self.send_fit()
 
+    def gallery_wanted(self) -> bool:
+        """Away mode shows the gallery while the phone is out; photo frame
+        mode ("always") shows it whether you're home or not."""
+        g = self.settings.get("gallery", {})
+        if not g.get("enabled"):
+            return False
+        return g.get("mode", "away") == "always" or self.phone_away
+
+    async def sync_gallery(self) -> None:
+        """Start or stop the gallery to match the settings and the phone."""
+        if self.gallery_wanted():
+            if self.gallery.active or not self.link.connected:
+                return
+            self.gallery.configure(self.settings.get("gallery", {}))
+            self.gallery.start()
+            self.gallery_peek_until = 0.0
+            await self.gallery.show_current()
+            log.info("Gallery started (%s)", "away" if self.phone_away else "photo frame")
+        elif self.gallery.active:
+            self.gallery.stop()
+            if self.link.connected and not self.controller.card:
+                await self.controller.show_screen(self.settings["homeScreen"])
+            log.info("Gallery stopped, back to the clock")
+
     def clock_extra(self) -> dict:
         """How to show the time, sent with every CLOCK (firmware 1.6 ignores
         these; LUMO 2 draws the clock styles from them)."""
@@ -660,6 +684,7 @@ class Desk:
         await self.send_tool_settings(force=True)
         if self.controller.screen not in new["screens"] and not self.controller.card:
             await self.controller.show_screen(new["homeScreen"])
+        await self.sync_gallery()
 
     async def on_screen(self, screen: str) -> None:
         self.depth_sent = None  # a new screen; the clock asks again if it's the face
@@ -690,6 +715,10 @@ class Desk:
         if self.has_tools:
             await self.link.send(self.timer.command())
             await self.link.send(self.stopwatch.command())
+        if self.gallery.active:
+            await self.gallery.show_current()
+        else:
+            await self.sync_gallery()
 
     # --- The LUMO page: timer, stopwatch, world, night, haptics, device ---
 
@@ -817,7 +846,9 @@ class Desk:
             "timer": self.timer.describe(),
             "stopwatch": self.stopwatch.describe(),
             "updates": self.ota.status(),
-            "gallery": {"active": self.gallery.active, "slide": self.gallery.index, "total": len(self.gallery.slides)},
+            "gallery": {"active": self.gallery.active, "mode": self.settings.get("gallery", {}).get("mode", "away"),
+                        "peeking": self.gallery.active and time.time() < self.gallery_peek_until,
+                        "slide": self.gallery.index, "total": len(self.gallery.slides)},
         }
 
     def update_blocker(self) -> str:
@@ -919,9 +950,13 @@ class Desk:
             await self.link.send(self.vitals.command())
 
     async def gallery_tick(self) -> None:
-        """Advance the gallery slide when active."""
-        if self.gallery.active and self.link.connected:
-            await self.gallery.advance()
+        """Advance the gallery slide when active. A card, a ringing alarm or
+        a peek at the clock (photo frame mode) holds it."""
+        if not self.gallery.active or not self.link.connected:
+            return
+        if self.controller.card or self.alarms.ringing or time.time() < self.gallery_peek_until:
+            return
+        await self.gallery.advance()
 
     async def _gallery_loop(self) -> None:
         """Run the gallery on its own interval (it changes with settings)."""

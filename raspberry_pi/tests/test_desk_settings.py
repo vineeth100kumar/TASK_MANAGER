@@ -55,6 +55,14 @@ class Merge(unittest.TestCase):
             s = settings.merge(settings.defaults(), {"clock": {"style": style}})
             self.assertEqual(s["clock"]["style"], style)
 
+    def test_gallery_mode_is_away_or_always(self):
+        self.assertEqual(settings.defaults()["gallery"]["mode"], "away")
+        s = settings.merge(settings.defaults(), {"gallery": {"mode": "always"}})
+        self.assertEqual(s["gallery"]["mode"], "always")
+        self.assertTrue(s["gallery"]["enabled"])
+        with self.assertRaises(ValueError):
+            settings.merge(settings.defaults(), {"gallery": {"mode": "sometimes"}})
+
     def test_screen_fit_defaults_and_limits(self):
         s = settings.defaults()["screen"]
         self.assertEqual(s, {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True})

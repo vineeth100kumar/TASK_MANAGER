@@ -1,7 +1,7 @@
 // The LUMO page's light ring, night mode, haptics and welcome back message.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Home, ImageIcon, Lightbulb, Moon, Plus, Trash2, Vibrate } from 'lucide-react';
-import { LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
+import { GalleryMode, LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
 import { FACES } from './ClockTab';
 import { Panel, Row, Segmented, Slider, Toggle, selectCls } from './parts';
 import { Select } from '../common/Select';
@@ -106,6 +106,7 @@ const GALLERY_SOURCES = [
 
 function GalleryPanel({ settings, save }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void }) {
   const g = settings.gallery;
+  const mode: GalleryMode = g.mode ?? 'away';
   const [photos, setPhotos] = useState<{ name: string; size: number }[]>([]);
   const [uploading, setUploading] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -139,12 +140,18 @@ function GalleryPanel({ settings, save }: { settings: LumoSettings; save: (u: Lu
     ? INTERVAL_CHOICES
     : [...INTERVAL_CHOICES, g.intervalSeconds].sort((a, b) => a - b);
   return (
-    <Panel icon={<ImageIcon size={16} className="text-violet-500" />} title="Away gallery"
+    <Panel icon={<ImageIcon size={16} className="text-violet-500" />} title={mode === 'always' ? 'Photo frame' : 'Away gallery'}
       right={<Toggle on={g.enabled} onChange={on => save({ gallery: { enabled: on } })} label="Away gallery" />}>
       <p className="text-[13px] text-gray-500 dark:text-gray-400">
-        When you leave home, LUMO shows a rotating gallery of quotes, memories and photos instead of the clock.
+        {mode === 'always'
+          ? 'LUMO is a photo frame: it shows the gallery even while you\'re home. Press any button to see the clock for two minutes.'
+          : 'When you leave home, LUMO shows a rotating gallery of quotes, memories and photos instead of the clock.'}
       </p>
       <div className={`space-y-3 ${g.enabled ? '' : 'opacity-50 pointer-events-none'}`}>
+        <Row title="Show it">
+          <Segmented<GalleryMode> size="sm" value={mode} onChange={v => save({ gallery: { mode: v } })}
+            options={[{ id: 'away', label: "When I'm away" }, { id: 'always', label: 'Always (photo frame)' }]} />
+        </Row>
         <Row title="Rotate every">
           <Select className={selectCls} value={String(g.intervalSeconds)}
             onChange={v => save({ gallery: { intervalSeconds: Number(v) } })}>
