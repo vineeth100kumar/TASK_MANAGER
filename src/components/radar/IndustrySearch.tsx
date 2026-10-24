@@ -81,7 +81,7 @@ export function IndustrySearch({ onOpen }: { onOpen: (id: string) => void }) {
             </>
           ) : (
             <div className="px-2 py-1.5 space-y-1.5">
-              <div className="text-[12px] text-gray-500">Size, growth, key companies and tickers, news, trends, risks and openings, in about a minute.</div>
+              <div className="text-[12px] text-gray-500">From Wikipedia, Wikidata, SEC filings, OpenAlex, published market figures and news, in about a minute.</div>
               <div className="flex gap-1.5 flex-wrap">
                 {EXAMPLES.map(x => (
                   <button key={x} onClick={() => search(x)} disabled={busy} className="text-[12px] font-semibold px-2.5 py-1 rounded-lg bg-black/[0.04] dark:bg-white/10 hover:bg-black/10 dark:hover:bg-white/15 text-gray-700 dark:text-gray-200">{x}</button>

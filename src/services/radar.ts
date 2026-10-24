@@ -335,14 +335,20 @@ export function signedPct(n: number | null, digits = 2): string {
 
 // --- Industry search (raspberry_pi/industry.py) ---
 
-export interface IndustryPlayer {
+export interface IndustryCompany {
+  qid: string;
   name: string;
+  country: string;
   ticker: string;
   exchange: string;
-  country: string;
-  type: 'Listed' | 'Private' | 'Startup';
-  role: string;
-  note: string;
+  employees: number | null;
+  founded: number | null;
+  website: string;
+  // From SEC EDGAR 10-K filings, US-listed companies only.
+  revenueUsd?: number;
+  revenueYear?: number;
+  revenueGrowthPct?: number | null;
+  secUrl?: string;
 }
 
 export interface IndustryNews {
@@ -362,36 +368,64 @@ export interface IndustryBoardLine {
   closes: number[];
 }
 
+// One number as a research firm published it, with where it was said.
+export interface IndustryFigure {
+  kind: 'size' | 'forecast' | 'cagr';
+  usdB?: number;
+  year?: number | null;
+  pct?: number;
+  text: string;
+  sentence: string;
+  url: string;
+  site: string;
+}
+
+export interface IndustryMarket {
+  sizeUsdB: number | null;
+  sizeYear: number | null;
+  sizeSites: number;
+  low: number | null;
+  high: number | null;
+  forecastUsdB: number | null;
+  forecastYear: number | null;
+  forecastSites: number;
+  cagrPct: number | null;
+  cagrSites: number;
+}
+
+export interface IndustryAI {
+  trends: { title: string; text: string; news: number | null }[];
+  risks: { title: string; text: string; severity: 'High' | 'Medium' | 'Low' }[];
+  openings: { idea: string; buyer: string; why: string }[];
+  india: string;
+  fit: { score: number; why: string; firstStep: string } | null;
+}
+
 export interface IndustryBrief {
   id: string;
+  version?: number;
   query: string;
   status: 'queued' | 'running' | 'done' | 'partial' | 'failed';
   step: number;
   steps: ResearchStep[];
-  engine: string | null;
   error: string;
   createdAt: string;
   finishedAt: string | null;
+  name: string;
+  oneLiner: string;
+  wiki: { title: string; url: string; description: string; extract: string; thumbnail: string; qid: string } | null;
+  companies: IndustryCompany[];
+  research: { years: { year: number; count: number }[]; lastYear: number; growth5yPct: number | null; url: string } | null;
+  figures: IndustryFigure[];
+  market: IndustryMarket | null;
   news: IndustryNews[];
   board: IndustryBoardLine | null;
-  sources: { title: string; url: string; kind: string; site: string }[];
+  sources: { name: string; title: string; url: string; site: string }[];
+  ai: IndustryAI | null;
+  aiStatus: '' | 'running' | 'done' | 'failed';
+  aiError: string;
+  engine: string | null;
   noteId: string | null;
-  // Written by the AI; missing while it runs or when it failed.
-  name?: string;
-  oneLiner?: string;
-  whatItIs?: string;
-  howMoney?: string;
-  outlook?: { stance: '' | 'Booming' | 'Growing' | 'Steady' | 'Shrinking' | 'Hyped'; text: string };
-  market?: { sizeUsdB: number | null; year: number | null; cagrPct: number | null; forecastUsdB: number | null; forecastYear: number | null; source: number | null; note: string };
-  keyNumbers?: { label: string; value: string; source: number | null }[];
-  segments?: { name: string; sharePct: number }[];
-  valueChain?: { layer: string; players: string; gap: string }[];
-  players?: IndustryPlayer[];
-  trends?: { title: string; text: string; source: number | null }[];
-  risks?: { title: string; text: string; severity: 'High' | 'Medium' | 'Low' }[];
-  openings?: { idea: string; buyer: string; why: string }[];
-  india?: string;
-  fit?: { score: number; why: string; firstStep: string } | null;
 }
 
 export interface IndustryRecent {
@@ -401,15 +435,15 @@ export interface IndustryRecent {
   status: IndustryBrief['status'];
   createdAt: string;
   oneLiner: string;
-  outlook: string;
 }
 
 export const industryApi = {
   search: async (query: string, fresh = false): Promise<IndustryBrief> =>
     (await post<{ brief: IndustryBrief }>('/api/radar/industry', { query, fresh })).brief,
-  get: async (id: string): Promise<IndustryBrief> => (await call<{ brief: IndustryBrief }>(`/api/radar/industry/${id}`)).brief,
+  get: (id: string) => call<{ brief: IndustryBrief; aiLeft: number }>(`/api/radar/industry/${id}`),
   recent: () => call<{ recent: IndustryRecent[]; madeToday: number; dailyCap: number }>('/api/radar/industry'),
   saveNote: async (id: string): Promise<IndustryBrief> => (await post<{ brief: IndustryBrief }>(`/api/radar/industry/${id}/note`)).brief,
+  askAI: async (id: string): Promise<IndustryBrief> => (await post<{ brief: IndustryBrief }>(`/api/radar/industry/${id}/ai`)).brief,
 };
 
 export function billions(n: number | null | undefined): string {
