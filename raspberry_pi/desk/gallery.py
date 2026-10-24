@@ -346,25 +346,25 @@ class Gallery:
         self.sources = settings.get("sources", ["quotes", "memories", "photos"])
 
     def _build_slides(self) -> List[dict]:
-        """Collect all available content into a shuffled slide list."""
-        slides: List[dict] = []
+        """Collect content and interleave: image, quote, image, quote, ..."""
+        images: List[dict] = []
+        quotes: List[dict] = []
 
         if "quotes" in self.sources:
             for text, author in QUOTES:
-                slides.append({"type": "quote", "text": text, "author": author})
+                quotes.append({"type": "quote", "text": text, "author": author})
 
         if "memories" in self.sources:
             try:
                 items = self.items()
                 done = [it for it in items if it.get("status") == "done" and it.get("title")]
-                # Pick up to 15 recently completed tasks
                 for it in done[-15:]:
                     date_str = ""
                     if it.get("completedAt"):
                         date_str = str(it["completedAt"])[:10]
                     elif it.get("dueDate"):
                         date_str = str(it["dueDate"])
-                    slides.append({"type": "memory", "title": it["title"], "date": date_str})
+                    images.append({"type": "memory", "title": it["title"], "date": date_str})
             except Exception as e:
                 log.debug("Could not load completed items for gallery: %s", e)
 
@@ -372,9 +372,9 @@ class Gallery:
             try:
                 lib_dir = self.photos_dir
                 if os.path.isdir(lib_dir):
-                    for fname in os.listdir(lib_dir):
+                    for fname in sorted(os.listdir(lib_dir)):
                         if fname.lower().endswith((".jpg", ".jpeg", ".png", ".bmp")):
-                            slides.append({"type": "photo", "path": os.path.join(lib_dir, fname)})
+                            images.append({"type": "photo", "path": os.path.join(lib_dir, fname)})
             except Exception as e:
                 log.debug("Could not scan photos for gallery: %s", e)
 
@@ -384,11 +384,26 @@ class Gallery:
                     content = (note.get("content") or "").strip()
                     title = note.get("title") or ""
                     if content and len(content) < 200 and title:
-                        slides.append({"type": "note", "title": title, "text": content[:150]})
+                        images.append({"type": "note", "title": title, "text": content[:150]})
             except Exception:
                 pass
 
-        random.shuffle(slides)
+        random.shuffle(images)
+        random.shuffle(quotes)
+
+        # Interleave: image, quote, image, quote, ...
+        slides: List[dict] = []
+        qi = 0
+        for i, img in enumerate(images):
+            slides.append(img)
+            if quotes:
+                slides.append(quotes[qi % len(quotes)])
+                qi += 1
+        # If no images but quotes exist, just show quotes
+        if not images and quotes:
+            slides = quotes
+        # If images but no quotes, images are already in slides without interleaving
+
         return slides or [{"type": "quote", "text": "Your room is waiting\nfor you to come back.", "author": "Sage"}]
 
     def start(self) -> None:

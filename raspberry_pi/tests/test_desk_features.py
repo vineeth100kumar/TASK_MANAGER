@@ -580,6 +580,33 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.gallery_tick()
         self.assertIn("MEMORY_META", self.link.cmds())
 
+    async def test_gallery_interleaves_images_and_quotes(self):
+        g = self.desk.gallery
+        g.sources = ["quotes", "photos"]
+        g.photos_dir = "/tmp/test_gallery_photos"
+        import os, tempfile
+        os.makedirs(g.photos_dir, exist_ok=True)
+        for i in range(3):
+            with open(os.path.join(g.photos_dir, f"img{i}.jpg"), "wb") as f:
+                f.write(b"\xff")
+        slides = g._build_slides()
+        # With 3 photos and quotes: pattern should be photo, quote, photo, quote, photo, quote
+        self.assertEqual(len(slides), 6)
+        for i, s in enumerate(slides):
+            if i % 2 == 0:
+                self.assertEqual(s["type"], "photo", f"slide {i} should be a photo")
+            else:
+                self.assertEqual(s["type"], "quote", f"slide {i} should be a quote")
+        import shutil
+        shutil.rmtree(g.photos_dir, ignore_errors=True)
+
+    async def test_gallery_only_quotes_when_no_images(self):
+        g = self.desk.gallery
+        g.sources = ["quotes"]
+        slides = g._build_slides()
+        self.assertTrue(all(s["type"] == "quote" for s in slides))
+        self.assertGreater(len(slides), 0)
+
     async def test_no_firmware_update_near_an_alarm_or_while_busy(self):
         await self.desk.refresh()
         self.assertEqual(self.desk.update_blocker(), "")            # 6:00, alarm at 7:00
