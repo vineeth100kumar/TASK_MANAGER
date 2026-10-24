@@ -72,7 +72,7 @@ export class LiveStream {
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
         // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
         window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
-      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS' || event?.type === 'RADAR_SPARKS') {
+      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS' || event?.type === 'RADAR_SPARKS' || event?.type === 'RADAR_INDUSTRY') {
         // New headlines or prices, a research run moving on, or new sparks (see RadarView).
         window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
       } else if (event?.type === 'DESK_STATE') {

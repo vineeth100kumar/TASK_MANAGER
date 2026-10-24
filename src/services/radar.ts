@@ -332,3 +332,89 @@ export function signedPct(n: number | null, digits = 2): string {
   if (n === null || n === undefined) return '–';
   return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(digits)}%`;
 }
+
+// --- Industry search (raspberry_pi/industry.py) ---
+
+export interface IndustryPlayer {
+  name: string;
+  ticker: string;
+  exchange: string;
+  country: string;
+  type: 'Listed' | 'Private' | 'Startup';
+  role: string;
+  note: string;
+}
+
+export interface IndustryNews {
+  title: string;
+  url: string;
+  source: string;
+  published: string;
+  kind: 'radar' | 'web';
+}
+
+export interface IndustryBoardLine {
+  region: string;
+  name: string;
+  sector: string;
+  symbol: string;
+  changes: Record<'1D' | '1M' | 'YTD', number | null>;
+  closes: number[];
+}
+
+export interface IndustryBrief {
+  id: string;
+  query: string;
+  status: 'queued' | 'running' | 'done' | 'partial' | 'failed';
+  step: number;
+  steps: ResearchStep[];
+  engine: string | null;
+  error: string;
+  createdAt: string;
+  finishedAt: string | null;
+  news: IndustryNews[];
+  board: IndustryBoardLine | null;
+  sources: { title: string; url: string; kind: string; site: string }[];
+  noteId: string | null;
+  // Written by the AI; missing while it runs or when it failed.
+  name?: string;
+  oneLiner?: string;
+  whatItIs?: string;
+  howMoney?: string;
+  outlook?: { stance: '' | 'Booming' | 'Growing' | 'Steady' | 'Shrinking' | 'Hyped'; text: string };
+  market?: { sizeUsdB: number | null; year: number | null; cagrPct: number | null; forecastUsdB: number | null; forecastYear: number | null; source: number | null; note: string };
+  keyNumbers?: { label: string; value: string; source: number | null }[];
+  segments?: { name: string; sharePct: number }[];
+  valueChain?: { layer: string; players: string; gap: string }[];
+  players?: IndustryPlayer[];
+  trends?: { title: string; text: string; source: number | null }[];
+  risks?: { title: string; text: string; severity: 'High' | 'Medium' | 'Low' }[];
+  openings?: { idea: string; buyer: string; why: string }[];
+  india?: string;
+  fit?: { score: number; why: string; firstStep: string } | null;
+}
+
+export interface IndustryRecent {
+  id: string;
+  query: string;
+  name: string;
+  status: IndustryBrief['status'];
+  createdAt: string;
+  oneLiner: string;
+  outlook: string;
+}
+
+export const industryApi = {
+  search: async (query: string, fresh = false): Promise<IndustryBrief> =>
+    (await post<{ brief: IndustryBrief }>('/api/radar/industry', { query, fresh })).brief,
+  get: async (id: string): Promise<IndustryBrief> => (await call<{ brief: IndustryBrief }>(`/api/radar/industry/${id}`)).brief,
+  recent: () => call<{ recent: IndustryRecent[]; madeToday: number; dailyCap: number }>('/api/radar/industry'),
+  saveNote: async (id: string): Promise<IndustryBrief> => (await post<{ brief: IndustryBrief }>(`/api/radar/industry/${id}/note`)).brief,
+};
+
+export function billions(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '?';
+  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}T`;
+  if (n < 1) return `$${Math.round(n * 1000)}M`;
+  return `$${n.toFixed(n >= 100 ? 0 : 1)}B`;
+}
