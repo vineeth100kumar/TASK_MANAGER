@@ -61,33 +61,90 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
-// The cover's most vivid colour, for the light ring while music plays: each
-// pixel counts by how saturated and bright it is, so a grey sleeve with one
-// red stripe still gives red.
-static uint8_t tintRGB[3] = { 30, 215, 96 };
+// The cover's two main colours, for the light ring while music plays (2.19):
+// the pixels are sorted into 24 hue bins, each counting by how vivid it is
+// (greys don't count at all), so a grey sleeve with one red stripe still gives red. The
+// primary is the heaviest run of three neighbouring bins; the secondary is the
+// heaviest run at least 45 degrees away from it, if it carries enough of the
+// cover to be a real colour there. A cover with one colour gets a paler
+// version of it as the second, and a colourless one warm white and silver.
+static uint8_t tintRGB[3]  = { 30, 215, 96 };
+static uint8_t tint2RGB[3] = { 160, 240, 190 };
+
+static const int HUE_BINS = 24;
+
+static void setTint(uint8_t* out, float r, float g, float b) {
+  float mx = max(r, max(g, b));
+  if (mx < 0.01f) mx = 0.01f;
+  out[0] = (uint8_t)(255 * r / mx);             // full brightness: the ring sets its own
+  out[1] = (uint8_t)(255 * g / mx);
+  out[2] = (uint8_t)(255 * b / mx);
+}
 
 static void measureArtTint() {
   const uint16_t* px = (const uint16_t*)artBuf;
-  float r = 0, g = 0, b = 0, w = 0;
-  for (int i = 0; i < 100 * 100; i += 3) {
+  float br[HUE_BINS] = {0}, bg[HUE_BINS] = {0}, bb[HUE_BINS] = {0}, bw[HUE_BINS] = {0};
+  for (int i = 0; i < 100 * 100; i += 2) {
     uint16_t c = px[i];
     float pr = ((c >> 11) & 31) / 31.0f, pg = ((c >> 5) & 63) / 63.0f, pb = (c & 31) / 31.0f;
     float mx = max(pr, max(pg, pb)), mn = min(pr, min(pg, pb));
-    float wt = (mx - mn) * mx;                  // saturation times value
-    wt *= wt;
-    r += pr * wt; g += pg * wt; b += pb * wt; w += wt;
+    float d = mx - mn;
+    if (d < 0.12f || mx < 0.10f) continue;     // greys, whites and blacks have no hue
+    float wt = d * mx;                          // chroma: vivid pixels count most, area still matters
+    float h;                                    // 0..6
+    if (mx == pr)      h = (pg - pb) / d;
+    else if (mx == pg) h = 2 + (pb - pr) / d;
+    else               h = 4 + (pr - pg) / d;
+    if (h < 0) h += 6;
+    int bin = (int)(h * HUE_BINS / 6) % HUE_BINS;
+    br[bin] += pr * wt; bg[bin] += pg * wt; bb[bin] += pb * wt; bw[bin] += wt;
   }
-  if (w < 0.5f) { tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170; return; }
-  r /= w; g /= w; b /= w;
-  float mx = max(r, max(g, b));
-  if (mx < 0.01f) mx = 0.01f;
-  tintRGB[0] = (uint8_t)(255 * r / mx);         // full brightness: the ring sets its own
-  tintRGB[1] = (uint8_t)(255 * g / mx);
-  tintRGB[2] = (uint8_t)(255 * b / mx);
+  // The weight of each run of three bins centred on a bin.
+  float run[HUE_BINS], total = 0;
+  for (int b = 0; b < HUE_BINS; b++) {
+    run[b] = bw[(b + HUE_BINS - 1) % HUE_BINS] + bw[b] + bw[(b + 1) % HUE_BINS];
+    total += bw[b];
+  }
+  if (total < 0.5f) {
+    tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170;
+    tint2RGB[0] = 150; tint2RGB[1] = 170; tint2RGB[2] = 205;
+    return;
+  }
+  int first = 0;
+  for (int b = 1; b < HUE_BINS; b++) if (run[b] > run[first]) first = b;
+  int second = -1;
+  for (int b = 0; b < HUE_BINS; b++) {
+    int dist = abs(b - first);
+    if (dist > HUE_BINS / 2) dist = HUE_BINS - dist;
+    if (dist < 3) continue;                     // 3 bins = 45 degrees; the runs don't overlap
+    if (second < 0 || run[b] > run[second]) second = b;
+  }
+  if (second >= 0 && run[second] < 0.08f * run[first]) second = -1;   // a speck, not a colour
+
+  float r = 0, g = 0, b = 0, w = 0;
+  for (int k = -1; k <= 1; k++) {
+    int n = (first + k + HUE_BINS) % HUE_BINS;
+    r += br[n]; g += bg[n]; b += bb[n]; w += bw[n];
+  }
+  setTint(tintRGB, r / w, g / w, b / w);
+  if (second >= 0) {
+    r = g = b = w = 0;
+    for (int k = -1; k <= 1; k++) {
+      int n = (second + k + HUE_BINS) % HUE_BINS;
+      r += br[n]; g += bg[n]; b += bb[n]; w += bw[n];
+    }
+    setTint(tint2RGB, r / w, g / w, b / w);
+  } else {
+    for (int k = 0; k < 3; k++) tint2RGB[k] = (uint8_t)(tintRGB[k] + (255 - tintRGB[k]) * 0.55f);
+  }
 }
 
 void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b) {
   r = tintRGB[0]; g = tintRGB[1]; b = tintRGB[2];
+}
+
+void displayArtTint2(uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = tint2RGB[0]; g = tint2RGB[1]; b = tint2RGB[2];
 }
 
 // The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that

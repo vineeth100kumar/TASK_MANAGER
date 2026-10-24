@@ -112,7 +112,8 @@ void displayAlarmReset();
 void displayConnectingTick(const LumoState& s);
 void displayConnectingReset();
 void displaySpotifyTick(const LumoState& s);              // the level bars, ~25 fps
-void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b); // the cover's colour, for the light ring
+void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b); // the cover's main colour, for the light ring
+void displayArtTint2(uint8_t& r, uint8_t& g, uint8_t& b); // its second colour (2.19)
 // Updating over Wi-Fi (ota.cpp): pct 0-100, or -1 with why it failed.
 void displayUpdateScreen(const char* version, int pct, const char* error);
 // A new version failed its trial (ota.cpp): going back to the last one.

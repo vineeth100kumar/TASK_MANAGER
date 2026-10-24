@@ -8,6 +8,7 @@
 #define BUZZER_PIN    9    // Active LOW (BC557): buzzer + vibration motor in parallel, see HAPTICS
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
+#define RING_LEFT_LED 0    // the ring's leftmost LED; the music gradient sweeps from it to the one opposite (2.19)
 
 // ===================== WIFI + PI SERVER =====================
 // The Wi-Fi name, password and the Pi's address live in secrets.h, which is
@@ -141,7 +142,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.18.0"
+#define FW_VERSION "2.19.0"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...

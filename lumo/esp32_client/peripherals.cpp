@@ -573,14 +573,6 @@ static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rg
   k.mark = MARK_NONE; k.markColor = rgb(1, 1, 1); k.count = 0; k.minuteSwell = false;
   switch (screen) {    // the clock faces have their own lights: renderFace
 
-    case SCREEN_SPOTIFY: {
-      uint8_t r, g, b;
-      displayArtTint(r, g, b);
-      k.color = rgb8(r, g, b);
-      k.breathe = false;                          // the song's pulse is its motion (sceneAuto)
-      if (!s.sp_playing) k.level = day * 0.5f;
-      break;
-    }
     case SCREEN_SYSTEM: {
       float heat = clamp01((s.cpu_temp - 45.0f) / 30.0f);
       k.color = heat < 0.5f ? mixc(rgb8(60, 220, 190), rgb8(255, 176, 50), heat * 2)
@@ -792,9 +784,60 @@ static void renderTool(ScreenMode screen, const LumoState& s, float t, float day
   }
 }
 
+// ---- Now playing: the cover's two colours as a gradient (2.19) --------
+//
+// The ring is laid out left to right (RING_LEFT_LED is the leftmost LED, the
+// one opposite it the rightmost), with the cover's main colour on one side
+// and its second colour on the other. While the song plays, the blend glides
+// across to the other side and back, and a soft band of light travels with
+// it: there in MUSIC_SWEEP_S, back in as long again, easing at each end. It
+// keeps no tempo (the clock can't hear the music), so it never fights the
+// song; pausing holds it still where it is, at half the glow. A new cover's
+// colours fade in over about a second instead of jumping.
+
+static const float MUSIC_SWEEP_S  = 6.0f;    // one side to the other
+static const float MUSIC_SOFT     = 0.80f;   // how wide the blend between the colours is
+static const float MUSIC_TRAVEL   = 0.70f;   // how far the blend's middle moves either side (ring is -1..1)
+static const float MUSIC_BAND_W   = 0.60f;   // the light band's width
+static const float MUSIC_BAND     = 0.30f;   // how much brighter the band is than the rest
+
+static float musicPhase = 0;                  // 0..2: there (0..1) and back (1..2)
+static Rgb   musicA = {0.12f, 0.84f, 0.38f}, musicB = {0.63f, 0.94f, 0.75f};   // as shown, easing to the cover's
+
+static void musicTick(float t, bool playing) {
+  static float lastT = 0;
+  float dt = t - lastT;
+  lastT = t;
+  if (dt <= 0 || dt > 0.5f) return;
+  if (playing) musicPhase = fmodf(musicPhase + dt / MUSIC_SWEEP_S, 2.0f);
+  uint8_t r, g, b;
+  float e = 1 - expf(-dt / 0.35f);
+  displayArtTint(r, g, b);
+  musicA = mixc(musicA, rgb8(r, g, b), e);
+  displayArtTint2(r, g, b);
+  musicB = mixc(musicB, rgb8(r, g, b), e);
+}
+
+static void renderMusic(const LumoState& s, float day, Rgb* out) {
+  float u = 0.5f - 0.5f * cosf(3.14159f * musicPhase);   // 0 -> 1 -> 0, easing at the ends
+  float mid  = MUSIC_TRAVEL * (2 * u - 1);
+  float band = 1.25f * (2 * u - 1);                        // the light runs just past each edge
+  float level = GLOW * (s.sp_playing ? day : day * 0.5f);
+  for (int i = 0; i < NUMPIXELS; i++) {
+    float x = -cosf(TWO_PI_F * (i - RING_LEFT_LED) / NUMPIXELS);   // -1 left .. 1 right
+    float m = clamp01((x - mid) / (2 * MUSIC_SOFT) + 0.5f);
+    m = m * m * (3 - 2 * m);
+    Rgb c = mixc(musicA, musicB, m);
+    float d = (x - band) / MUSIC_BAND_W;
+    float lift = 1 + MUSIC_BAND * expf(-d * d);
+    out[i] = scalec(c, level * (1 - MUSIC_BAND * 0.5f) * lift);
+  }
+}
+
 static void renderScreen(ScreenMode screen, const LumoState& s, const ClockNow& c, float t, float since,
                          Rgb dayColor, float day, Rgb* out) {
   if (screen == SCREEN_CLOCK) renderFace(s.clock_style, s, c, t, since, dayColor, day, out);
+  else if (screen == SCREEN_SPOTIFY) renderMusic(s, day, out);
   else if (screen == SCREEN_TIMER || screen == SCREEN_STOPWATCH) renderTool(screen, s, t, day, out);
   else renderLook(lookFor(screen, s, c, dayColor, day), t, c, out);
 }
@@ -816,6 +859,7 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
   }
   const LumoState& s = *ctx;
   float since = (millis() - ctxSince) / 1000.0f;
+  musicTick(t, s.sp_playing);
   renderScreen(ctxScreen, s, c, t, since, dayColor, day, out);
 
   // A new face or screen cross-fades from the last one.
@@ -838,23 +882,7 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
       tintSeen[0] = r; tintSeen[1] = g; tintSeen[2] = b;
     }
     float sw = tintSwellAt ? swellAt((millis() - tintSwellAt) / 1000.0f, SWELL_S) : 0;
-    // While it plays, the cover's colour flows slowly round the ring: a
-    // lighter tint drifts through the deeper one, like light through stained
-    // glass. It keeps no tempo (the clock can't hear the music), so it never
-    // fights the song; pausing holds it still where it is.
-    static float flow = 0, lastT = 0;
-    float dt = t - lastT;
-    lastT = t;
-    if (s.sp_playing && dt > 0 && dt < 0.5f) flow += dt / 14.0f;      // once round every 14 s
-    for (int i = 0; i < NUMPIXELS; i++) {
-      Rgb deep = scalec(out[i], 0.75f), light = mixc(out[i], rgb(1, 1, 1), 0.35f);
-      float a = (flow + (float)i / NUMPIXELS) * TWO_PI_F;
-      float w = 0.5f + 0.5f * sinf(a);                                // one light crest going round
-      w = w * w * (3 - 2 * w);
-      float shimmer = 0.5f + 0.5f * sinf(flow * TWO_PI_F * 2.3f - i * 1.1f);   // a second, slower layer
-      Rgb c = mixc(deep, light, 0.75f * w + 0.25f * shimmer * w);
-      out[i] = scalec(c, 1 + SWELL_GAIN * 1.5f * sw);
-    }
+    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], 1 + SWELL_GAIN * 1.5f * sw);
   }
 }
 
