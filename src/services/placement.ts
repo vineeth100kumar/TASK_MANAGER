@@ -11,8 +11,14 @@ import { isAlarm } from './items';
 export const INBOX_PROJECT_ID = 'inbox';
 export const INBOX_PROJECT_NAME = 'Inbox';
 
-export const needsPlace = (i: Partial<WorkItem>): boolean =>
-  !i.projectId && !i.areaId && !i.deletedAt && !isAlarm(i as any);
+/** No project or area, or a project/area that no longer exists (a name or slug typed by hand, a deleted project). */
+export const needsPlace = (i: Partial<WorkItem>, projects?: Project[], areas?: Area[]): boolean => {
+  if (i.deletedAt || isAlarm(i as any)) return false;
+  if (!i.projectId && !i.areaId) return true;
+  if (!projects) return false;
+  const known = (list: { id: string }[] | undefined, id?: string | null) => !id || !!list?.some(x => x && x.id === id);
+  return !known(projects, i.projectId) || !known(areas, i.areaId);
+};
 
 /** The project/area a loose task most likely belongs to, or null when nothing fits. */
 export function suggestPlace(

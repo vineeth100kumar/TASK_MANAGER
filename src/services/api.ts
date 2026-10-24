@@ -154,7 +154,11 @@ async function ensureInboxProject(): Promise<void> {
 
 // Gives a loose task a project or area; returns whether it changed.
 async function placeItem(item: WorkItem): Promise<boolean> {
-  if (!needsPlace(item)) return false;
+  if (!needsPlace(item, state.projects, state.areas)) return false;
+  // A project or area that no longer exists counts as none.
+  if (item.projectId && !state.projects.some(p => p && p.id === item.projectId)) item.projectId = null;
+  if (item.areaId && !state.areas.some(a => a && a.id === item.areaId)) item.areaId = null;
+  if (item.projectId || item.areaId) return true;
   const guess = suggestPlace(item.title || '', state.projects.filter(Boolean), state.areas.filter(Boolean), state.workItems);
   if (guess) {
     item.projectId = guess.projectId || null;
@@ -390,7 +394,7 @@ export const api = {
       const now = new Date().toISOString();
       const id = uuid();
 
-      if (needsPlace(payload)) {
+      if (needsPlace(payload, state.projects, state.areas)) {
         const loose = { ...payload, title: payload.title || '' } as WorkItem;
         await placeItem(loose);
         payload = { ...payload, projectId: loose.projectId, branchId: loose.branchId, areaId: loose.areaId };

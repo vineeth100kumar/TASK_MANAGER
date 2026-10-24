@@ -300,12 +300,20 @@ async def create_record(table: str, fields: dict) -> dict:
         if not str(record.get("title") or "").strip():
             raise ApiError(400, "A work item needs a title")
         record.setdefault("isInbox", not record.get("dueDate") and not record.get("projectId"))
-        if placement.needs_place(record):
-            record["projectId"] = placement.choose_project(record.get("title"), _rows("projects"), _rows("workItems"))
-            if not record["projectId"]:
-                record["projectId"] = placement.INBOX_PROJECT_ID
-                if _find("projects", placement.INBOX_PROJECT_ID) is None:
-                    await _write("projects", placement.INBOX_PROJECT_ID, "save", placement.inbox_project(now))
+        project_ids = {p.get("id") for p in _rows("projects")}
+        area_ids = {a.get("id") for a in _rows("areas")}
+        if placement.needs_place(record, project_ids, area_ids):
+            # Drop a project/area that doesn't exist, then place by words, else the Inbox project.
+            if record.get("projectId") not in project_ids:
+                record["projectId"] = None
+            if record.get("areaId") not in area_ids:
+                record["areaId"] = None
+            if not record["projectId"] and not record["areaId"]:
+                record["projectId"] = placement.choose_project(record.get("title"), _rows("projects"), _rows("workItems"))
+                if not record["projectId"]:
+                    record["projectId"] = placement.INBOX_PROJECT_ID
+                    if _find("projects", placement.INBOX_PROJECT_ID) is None:
+                        await _write("projects", placement.INBOX_PROJECT_ID, "save", placement.inbox_project(now))
         record.setdefault("source", CLIENT_ID)
         # Written in the one shape the app reads (item_shape.py), so a milestone
         # isn't stored with type "task" and every item has its context and labels.

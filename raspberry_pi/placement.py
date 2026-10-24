@@ -24,8 +24,16 @@ def is_alarm(record: dict) -> bool:
     return any(str(l).lower() == "alarm" for l in labels)
 
 
-def needs_place(record: dict) -> bool:
-    return not record.get("projectId") and not record.get("areaId") and not record.get("deletedAt") and not is_alarm(record)
+def needs_place(record: dict, project_ids=None, area_ids=None) -> bool:
+    """No project or area, or one that doesn't exist (a slug typed by hand, a deleted project)."""
+    if record.get("deletedAt") or is_alarm(record):
+        return False
+    if not record.get("projectId") and not record.get("areaId"):
+        return True
+    if project_ids is None:
+        return False
+    return (bool(record.get("projectId")) and record["projectId"] not in project_ids) or \
+        (bool(record.get("areaId")) and area_ids is not None and record["areaId"] not in area_ids)
 
 
 def choose_project(title: str, projects: Iterable[dict], items: Iterable[dict]) -> Optional[str]:

@@ -21,3 +21,10 @@ describe('placement', () => {
     expect(suggestPlace('Weather jacket', [proj('p2', 'Kolourz')], [], [])).toBeNull();
   });
 });
+
+describe('dangling ids', () => {
+  it('a project that does not exist counts as none', () => {
+    expect(needsPlace(item('a', 'x', 'sage'), [proj('p1', 'Misumi')], [])).toBe(true);
+    expect(needsPlace(item('a', 'x', 'p1'), [proj('p1', 'Misumi')], [])).toBe(false);
+  });
+});
