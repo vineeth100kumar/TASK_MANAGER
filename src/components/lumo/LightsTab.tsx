@@ -1,6 +1,6 @@
 // The LUMO page's light ring, night mode, haptics and welcome back message.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Home, ImageIcon, Lightbulb, Moon, Plus, Trash2, Vibrate } from 'lucide-react';
+import { ChevronDown, ChevronRight, Home, ImageIcon, Lightbulb, Moon, Plus, Smartphone, Trash2, Vibrate } from 'lucide-react';
 import { GalleryMode, LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
 import { FACES } from './ClockTab';
 import { Panel, Row, Segmented, Slider, Toggle, selectCls } from './parts';
@@ -90,6 +90,7 @@ export function LightsTab({ settings, save, night, toolsSupported }: { settings:
 
       <WelcomePanel settings={settings} save={save} />
       <GalleryPanel settings={settings} save={save} />
+      <AutoBackupGuide />
     </div>
   );
 }
@@ -239,6 +240,43 @@ function WelcomePanel({ settings, save }: { settings: LumoSettings; save: (u: Lu
           </Select>
         </Row>
       </div>
+    </Panel>
+  );
+}
+
+function AutoBackupGuide() {
+  const [open, setOpen] = useState(false);
+  return (
+    <Panel icon={<Smartphone size={16} className="text-blue-500" />} title="Auto photo backup">
+      <p className="text-[13px] text-gray-500 dark:text-gray-400">
+        Automatically send new photos from your iPhone to LUMO's gallery using an iOS Shortcut automation.
+      </p>
+      <button onClick={() => setOpen(!open)} className="flex items-center gap-1.5 text-[13px] font-medium text-blue-600 hover:text-blue-700">
+        {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+        Setup guide
+      </button>
+      {open && (
+        <ol className="text-[13px] text-gray-600 dark:text-gray-300 space-y-2 list-decimal list-inside">
+          <li>Open the <strong>Shortcuts</strong> app on your iPhone.</li>
+          <li>Go to the <strong>Automation</strong> tab and tap <strong>+</strong>.</li>
+          <li>Choose <strong>"Photo saved to album"</strong> (pick the album you want, e.g. Recents or a specific album).</li>
+          <li>Set it to <strong>Run Immediately</strong>.</li>
+          <li>Add a <strong>"Get Latest Photos"</strong> action (set count to 1).</li>
+          <li>Add a <strong>"Get Contents of URL"</strong> action:
+            <ul className="list-disc list-inside ml-4 mt-1 space-y-1 text-[12px] text-gray-500 dark:text-gray-400">
+              <li>URL: <code className="bg-gray-100 dark:bg-white/10 px-1 rounded text-[11px]">http://sage.local:8000/api/desk/gallery/photos/upload</code></li>
+              <li>Method: <strong>POST</strong></li>
+              <li>Headers: <code className="bg-gray-100 dark:bg-white/10 px-1 rounded text-[11px]">Authorization: Bearer YOUR_API_KEY</code></li>
+              <li>Request body: <strong>Form</strong></li>
+              <li>Add a field named <strong>file</strong>, type <strong>File</strong>, value: the photo from step 5.</li>
+            </ul>
+          </li>
+          <li>Save the automation. New photos will sync to LUMO automatically.</li>
+        </ol>
+      )}
+      <p className="text-[12px] text-gray-400">
+        Photos are resized to 320×240 on upload. The gallery keeps up to 1 GB.
+      </p>
     </Panel>
   );
 }
