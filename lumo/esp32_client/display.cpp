@@ -61,33 +61,147 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
-// The cover's most vivid colour, for the light ring while music plays: each
-// pixel counts by how saturated and bright it is, so a grey sleeve with one
-// red stripe still gives red.
-static uint8_t tintRGB[3] = { 30, 215, 96 };
+// The cover's two main colours, for the LED row while music plays (2.19).
+// Pixels are sorted into 24 hue bins, each counting by how vivid it is
+// (greys don't count at all), so a grey sleeve with one red stripe still
+// gives red. The cover is checked across and down: it is split into left and
+// right halves, and top and bottom halves, and each half's main colour (its
+// heaviest run of three neighbouring bins) is found. If the two sides differ
+// more than the top and bottom do, by at least 30 degrees, the left side's
+// colour goes on the row's left end and the right side's on the right; if top
+// and bottom differ more, the top's colour goes left and the bottom's right.
+// A cover whose colours don't split that way (a red dot in the middle of a
+// blue sleeve) takes the whole cover's main colour and the heaviest run 45
+// degrees or more away from it, the one sitting further left (or higher)
+// going first. A cover with one colour gets a paler version of it as the
+// second, and a colourless one warm white and silver.
+static uint8_t tintRGB[3]  = { 30, 215, 96 };
+static uint8_t tint2RGB[3] = { 160, 240, 190 };
+
+static const int HUE_BINS = 24;
+
+struct HueHist { float r[HUE_BINS], g[HUE_BINS], b[HUE_BINS], w[HUE_BINS]; };
+
+static void setTint(uint8_t* out, float r, float g, float b) {
+  float mx = max(r, max(g, b));
+  if (mx < 0.01f) mx = 0.01f;
+  out[0] = (uint8_t)(255 * r / mx);             // full brightness: the LEDs set their own
+  out[1] = (uint8_t)(255 * g / mx);
+  out[2] = (uint8_t)(255 * b / mx);
+}
+
+static float runAt(const HueHist& h, int bin) {   // a run of three bins centred on bin
+  return h.w[(bin + HUE_BINS - 1) % HUE_BINS] + h.w[bin] + h.w[(bin + 1) % HUE_BINS];
+}
+
+static int heaviest(const HueHist& h, int awayFrom = -1) {
+  int best = -1;
+  for (int b = 0; b < HUE_BINS; b++) {
+    if (awayFrom >= 0) {
+      int dist = abs(b - awayFrom);
+      if (dist > HUE_BINS / 2) dist = HUE_BINS - dist;
+      if (dist < 3) continue;                   // 3 bins = 45 degrees; the runs don't overlap
+    }
+    if (best < 0 || runAt(h, b) > runAt(h, best)) best = b;
+  }
+  return best;
+}
+
+static int hueGap(int a, int b) {
+  int d = abs(a - b);
+  return d > HUE_BINS / 2 ? HUE_BINS - d : d;
+}
+
+static void runColor(const HueHist& h, int bin, uint8_t* out) {
+  float r = 0, g = 0, b = 0, w = 0;
+  for (int k = -1; k <= 1; k++) {
+    int n = (bin + k + HUE_BINS) % HUE_BINS;
+    r += h.r[n]; g += h.g[n]; b += h.b[n]; w += h.w[n];
+  }
+  setTint(out, r / w, g / w, b / w);
+}
+
+static float total(const HueHist& h) {
+  float t = 0;
+  for (int b = 0; b < HUE_BINS; b++) t += h.w[b];
+  return t;
+}
+
+// The two halves' main colours, if they differ by 30 degrees or more: the
+// gap in bins, else 0.
+static int splitGap(const HueHist& a, const HueHist& b, int& binA, int& binB) {
+  if (total(a) < 0.25f || total(b) < 0.25f) return 0;
+  binA = heaviest(a);
+  binB = heaviest(b);
+  int gap = hueGap(binA, binB);
+  return gap >= 2 ? gap : 0;
+}
 
 static void measureArtTint() {
+  static HueHist left, right, top, bottom;      // static: 1.5 KB off the stack
+  memset(&left, 0, sizeof left); memset(&right, 0, sizeof right);
+  memset(&top, 0, sizeof top);   memset(&bottom, 0, sizeof bottom);
   const uint16_t* px = (const uint16_t*)artBuf;
-  float r = 0, g = 0, b = 0, w = 0;
-  for (int i = 0; i < 100 * 100; i += 3) {
+  for (int i = 0; i < 100 * 100; i += 2) {
     uint16_t c = px[i];
     float pr = ((c >> 11) & 31) / 31.0f, pg = ((c >> 5) & 63) / 63.0f, pb = (c & 31) / 31.0f;
     float mx = max(pr, max(pg, pb)), mn = min(pr, min(pg, pb));
-    float wt = (mx - mn) * mx;                  // saturation times value
-    wt *= wt;
-    r += pr * wt; g += pg * wt; b += pb * wt; w += wt;
+    float d = mx - mn;
+    if (d < 0.12f || mx < 0.10f) continue;     // greys, whites and blacks have no hue
+    float wt = d * mx;                          // chroma: vivid pixels count most, area still matters
+    float h;                                    // 0..6
+    if (mx == pr)      h = (pg - pb) / d;
+    else if (mx == pg) h = 2 + (pb - pr) / d;
+    else               h = 4 + (pr - pg) / d;
+    if (h < 0) h += 6;
+    int bin = (int)(h * HUE_BINS / 6) % HUE_BINS;
+    HueHist& across = (i % 100) < 50 ? left : right;
+    HueHist& down   = (i / 100) < 50 ? top : bottom;
+    across.r[bin] += pr * wt; across.g[bin] += pg * wt; across.b[bin] += pb * wt; across.w[bin] += wt;
+    down.r[bin]   += pr * wt; down.g[bin]   += pg * wt; down.b[bin]   += pb * wt; down.w[bin]   += wt;
   }
-  if (w < 0.5f) { tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170; return; }
-  r /= w; g /= w; b /= w;
-  float mx = max(r, max(g, b));
-  if (mx < 0.01f) mx = 0.01f;
-  tintRGB[0] = (uint8_t)(255 * r / mx);         // full brightness: the ring sets its own
-  tintRGB[1] = (uint8_t)(255 * g / mx);
-  tintRGB[2] = (uint8_t)(255 * b / mx);
+
+  // Across and down.
+  int l = 0, r = 0, t = 0, b = 0;
+  int gapH = splitGap(left, right, l, r);
+  int gapV = splitGap(top, bottom, t, b);
+  if (gapH && gapH >= gapV) { runColor(left, l, tintRGB); runColor(right, r, tint2RGB); return; }
+  if (gapV)                 { runColor(top, t, tintRGB);  runColor(bottom, b, tint2RGB); return; }
+
+  // The whole cover: the two halves added together.
+  static HueHist all;
+  for (int k = 0; k < HUE_BINS; k++) {
+    all.r[k] = left.r[k] + right.r[k]; all.g[k] = left.g[k] + right.g[k];
+    all.b[k] = left.b[k] + right.b[k]; all.w[k] = left.w[k] + right.w[k];
+  }
+  if (total(all) < 0.5f) {
+    tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170;
+    tint2RGB[0] = 150; tint2RGB[1] = 170; tint2RGB[2] = 205;
+    return;
+  }
+  int first = heaviest(all);
+  int second = heaviest(all, first);
+  if (second >= 0 && runAt(all, second) < 0.08f * runAt(all, first)) second = -1;   // a speck, not a colour
+  if (second < 0) {
+    runColor(all, first, tintRGB);
+    for (int k = 0; k < 3; k++) tint2RGB[k] = (uint8_t)(tintRGB[k] + (255 - tintRGB[k]) * 0.55f);
+    return;
+  }
+  // Which sits further left (or, if they barely differ across, higher):
+  // the share of each colour found in the left (top) half.
+  float aL = runAt(left, first) / runAt(all, first), bL = runAt(left, second) / runAt(all, second);
+  float aT = runAt(top, first) / runAt(all, first),  bT = runAt(top, second) / runAt(all, second);
+  bool swap = fabsf(aL - bL) >= fabsf(aT - bT) ? bL > aL : bT > aT;
+  runColor(all, swap ? second : first, tintRGB);
+  runColor(all, swap ? first : second, tint2RGB);
 }
 
 void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b) {
   r = tintRGB[0]; g = tintRGB[1]; b = tintRGB[2];
+}
+
+void displayArtTint2(uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = tint2RGB[0]; g = tint2RGB[1]; b = tint2RGB[2];
 }
 
 // The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that
