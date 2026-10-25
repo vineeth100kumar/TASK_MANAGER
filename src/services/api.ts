@@ -778,7 +778,14 @@ export const api = {
   habits: {
     list: async (): Promise<Habit[]> => {
       await initializeStore();
-      return state.habits.filter(h => h);
+      // A habit written with "title" instead of "name" (as Claude once did) still
+      // shows its name, and one missing a target or history counts as daily, unticked.
+      return state.habits.filter(h => h).map(h => ({
+        ...h,
+        name: h.name || String((h as { title?: string }).title || '').trim() || 'Untitled habit',
+        targetCount: h.targetCount || 7,
+        history: Array.isArray(h.history) ? h.history : [],
+      }));
     },
     create: async (payload: Partial<Habit>): Promise<Habit> => {
       await initializeStore();
@@ -819,7 +826,7 @@ export const api = {
       if (updates.remindTime !== undefined) h.remindTime = /^\d{2}:\d{2}$/.test(updates.remindTime || '') ? updates.remindTime : null;
       if (updates.remindPush !== undefined) h.remindPush = !!updates.remindPush;
       if (updates.remindEmail !== undefined) h.remindEmail = !!updates.remindEmail;
-      if (updates.targetCount !== undefined) h.targetCount = Math.min(7, Math.max(1, Math.round(updates.targetCount)));
+      h.targetCount = updates.targetCount !== undefined ? Math.min(7, Math.max(1, Math.round(updates.targetCount))) : (h.targetCount || 7);
       h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
