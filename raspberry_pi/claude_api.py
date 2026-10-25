@@ -275,6 +275,83 @@ _DEFAULTS = {
 }
 
 
+def project_key(name: str, taken) -> str:
+    """Same as projectKey in src/services/ideaProject.ts: initials, or the
+    first four letters of a one-word name, made unique with a number."""
+    words = re.sub(r"[^A-Z0-9 ]", " ", str(name or "").upper()).split()
+    key = "".join(w[0] for w in words)[:4] if len(words) > 1 else (words[0] if words else "PROJ")[:4]
+    if len(key) < 2:
+        key = ("".join(words) + "PROJ")[:3]
+    used = {str(k or "").upper() for k in taken}
+    if key not in used:
+        return key
+    n = 2
+    while f"{key}{n}" in used:
+        n += 1
+    return f"{key}{n}"
+
+
+def _habit_target(record: dict) -> int:
+    """targetCount (days a week, 1-7) from targetCount or a frequency like
+    "daily" or "5/week"."""
+    try:
+        target = int(record.get("targetCount") or 0)
+    except (TypeError, ValueError):
+        target = 0
+    if not target:
+        m = re.match(r"\s*(\d+)\s*/\s*week", str(record.get("frequency") or ""))
+        target = int(m.group(1)) if m else 7
+    return min(7, max(1, target))
+
+
+def _shape_named(table: str, record: dict, creating: bool) -> None:
+    """Projects, habits and goals in the shape the web app reads
+    (src/services/api.ts create). A habit or project sent with "title" gets it
+    as its "name" (and a goal sent with "name" gets a "title"), so it never
+    shows up blank."""
+    if table in ("habits", "projects") and "title" in record:
+        title = str(record.pop("title") or "").strip()
+        if title and not str(record.get("name") or "").strip():
+            record["name"] = title
+    if table == "goals" and "name" in record:
+        name = str(record.pop("name") or "").strip()
+        if name and not str(record.get("title") or "").strip():
+            record["title"] = name
+    if table == "habits":
+        if "name" in record or creating:
+            if not str(record.get("name") or "").strip():
+                raise ApiError(400, "A habit needs a name")
+            record["name"] = str(record["name"]).strip()
+        if creating or "targetCount" in record or "frequency" in record:
+            record["targetCount"] = _habit_target(record)
+            record["frequency"] = "daily" if record["targetCount"] >= 7 else f"{record['targetCount']}/week"
+        if creating:
+            history = record.get("history")
+            record["history"] = [d for d in history if isinstance(d, str)] if isinstance(history, list) else []
+            record.setdefault("areaId", None)
+            record.setdefault("streak", 0)
+    if table == "projects" and creating:
+        if not str(record.get("name") or "").strip():
+            raise ApiError(400, "A project needs a name")
+        others = [p for p in _rows("projects") if p.get("id") != record.get("id")]
+        if not str(record.get("key") or "").strip():
+            record["key"] = project_key(record["name"], [p.get("key") for p in others])
+        record["key"] = str(record["key"]).strip().upper()
+        record.setdefault("color", "bg-indigo-500")
+        record.setdefault("sequence", len(others) + 1)
+        record.setdefault("type", "other")
+        record.setdefault("description", "")
+    if table == "goals" and creating:
+        if not str(record.get("title") or "").strip():
+            raise ApiError(400, "A goal needs a title")
+        record.setdefault("progress", 0)
+        record.setdefault("targetDate", "")
+        record.setdefault("areaId", None)
+        record.setdefault("projectId", None)
+        record.setdefault("category", "personal")
+        record.setdefault("description", "")
+
+
 def _next_key(record: dict) -> str:
     """Same key scheme as the web app: PROJECTKEY-n, LIFE-n for areas, else TASK-n."""
     prefix = "TASK"
@@ -296,6 +373,7 @@ async def create_record(table: str, fields: dict) -> dict:
         raise ApiError(409, f"{table} {record_id} already exists; update it instead")
     now = _now()
     record = {**_DEFAULTS.get(table, {}), **fields, "id": record_id, "createdAt": fields.get("createdAt") or now, "updatedAt": now}
+    _shape_named(table, record, creating=True)
     if table == "workItems":
         if not str(record.get("title") or "").strip():
             raise ApiError(400, "A work item needs a title")
@@ -360,6 +438,7 @@ async def update_record(table: str, record_id: str, fields: dict) -> dict:
         fields["status"] = "done"  # a milestone can't be reopened; it was logged as done
     if table == "workItems" and fields.get("status") == "done" and "completedAt" not in fields:
         fields["completedAt"] = _now()
+    _shape_named(table, fields, creating=False)
     if table == "notes":
         _note_body(fields, _find(table, record_id).get("kind"))
     if table == "thoughts" and "status" in fields:
@@ -652,7 +731,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
 dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
-projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
+projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals (title, targetDate, projectId), habits (name, targetCount days a week 1-7, history of YYYY-MM-DD days),
 notes (title, content; kind html for a report, code for code), comments and subtasks (workItemId), activities, boards (drawings),
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
@@ -685,7 +764,7 @@ def _tools() -> List[dict]:
              "limit": {"type": "integer", "description": "At most this many (default 50, max 500)"}}}},
         {"name": "sage_get", "description": "One full record by id.",
          "inputSchema": {"type": "object", "required": ["table", "id"], "properties": {"table": _table_prop(), "id": {"type": "string"}}}},
-        {"name": "sage_create", "description": "Create a record. Work items need a title; sensible defaults fill the rest.",
+        {"name": "sage_create", "description": "Create a record. Work items and goals need a title; projects and habits need a name. Sensible defaults fill the rest.",
          "inputSchema": {"type": "object", "required": ["table", "fields"], "properties": {"table": _table_prop(), "fields": obj}}},
         {"name": "sage_update", "description": "Change some fields of a record; fields not sent stay as they are.",
          "inputSchema": {"type": "object", "required": ["table", "id", "fields"], "properties": {"table": _table_prop(), "id": {"type": "string"}, "fields": obj}}},

@@ -107,6 +107,29 @@ class ClaudeApiTests(unittest.TestCase):
         ops = [c["operation"] for c in client.get("/api/claude/history", headers=CLAUDE).json()["changes"]]
         self.assertEqual(sorted(ops), ["delete", "patch", "save", "save"])  # + the Inbox project made on first use
 
+    def test_habits_projects_goals_get_the_shape_the_app_reads(self):
+        # Claude once sent habits with "title": the app showed three blank rows.
+        habit = client.post("/api/claude/habits", json={"title": "Walk 4,000 steps", "frequency": "daily", "projectId": "p1"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((habit["name"], habit["targetCount"], habit["frequency"], habit["history"], habit["streak"]),
+                         ("Walk 4,000 steps", 7, "daily", [], 0))
+        self.assertNotIn("title", habit)
+        weekly = client.post("/api/claude/habits", json={"name": "Gym", "frequency": "3/week"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((weekly["targetCount"], weekly["frequency"]), (3, "3/week"))
+        self.assertEqual(client.post("/api/claude/habits", json={"frequency": "daily"}, headers=CLAUDE).status_code, 400)
+        renamed = client.patch(f"/api/claude/habits/{habit['id']}", json={"title": "Steps"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(renamed["name"], "Steps")
+        self.assertNotIn("title", renamed)
+
+        project = client.post("/api/claude/projects", json={"name": "Health & Fitness", "type": "other"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((project["key"], project["color"]), ("HF", "bg-indigo-500"))
+        again = client.post("/api/claude/projects", json={"title": "Home Food"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((again["name"], again["key"]), ("Home Food", "HF2"))
+        item = client.post("/api/claude/workItems", json={"title": "Walk", "projectId": project["id"]}, headers=CLAUDE).json()["record"]
+        self.assertEqual(item["key"], "HF-1")
+
+        goal = client.post("/api/claude/goals", json={"name": "Get fit", "targetDate": "2027-04-25"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((goal["title"], goal["progress"], goal["category"]), ("Get fit", 0, "personal"))
+
     def test_new_item_gets_project_key(self):
         project = client.post("/api/claude/projects", json={"name": "Keys", "key": "KEYS"}, headers=CLAUDE).json()["record"]
         first = client.post("/api/claude/workItems", json={"title": "One", "projectId": project["id"]}, headers=CLAUDE).json()["record"]
