@@ -87,6 +87,16 @@ def logged_in(request) -> bool:
     return access_gate.enabled and access_gate.session_valid(request.cookies.get(access_gate.COOKIE_NAME))
 
 
+def is_pi_itself(request) -> bool:
+    """A request made on the Pi itself (its own browser), not through the tunnel,
+    which adds a forwarding header, or from another device."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1") and not (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
+
+
+API_SECRET_PATH = "/api/settings/api-secret"
+
+
 def request_key(request) -> str:
     auth = request.headers.get("authorization", "")
     return auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
@@ -100,6 +110,8 @@ async def require_api_key(request, call_next):
     install scripts and monitors can check the server is up.
     """
     path = request.url.path
+    if path == API_SECRET_PATH and is_pi_itself(request):
+        return await call_next(request)  # the Pi's own screen may read its key
     if path.startswith("/api/claude/") and request.method != "OPTIONS":
         # Claude's own routes take only Claude's token, and are off without one.
         if not claude_api.token_matches(request_key(request)):
@@ -1012,6 +1024,14 @@ def canvas_think_status():
 
 class GroqKeyRequest(BaseModel):
     key: str = ""
+
+@app.get(API_SECRET_PATH)
+def api_secret_for_this_device():
+    """So a new device can fill in the server key without a terminal on the Pi.
+    Reaching here took the key itself, the login password, or the Pi's own screen
+    (require_api_key and require_login decide that), so it can show it."""
+    return {"success": True, "set": bool(API_SECRET), "secret": API_SECRET}
+
 
 @app.get("/api/settings/groq-key")
 def groq_key_status():

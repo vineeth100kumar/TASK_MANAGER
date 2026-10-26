@@ -455,7 +455,7 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
             <Step n={5} title={<>Under <Ui>Headers</Ui>, tap <Ui>Add new header</Ui>. Key <Ui>Authorization</Ui>, value below.</>}>
               <CopyField label="Header key" value="Authorization" />
               <CopyField label="Header value" value={keyValue} shown={keyShown} />
-              {!key && <Note>This device doesn't have the server key yet. Paste the API_SECRET from /etc/sage/sage.env under Server &amp; Reset, then copy it from here.</Note>}
+              {!key && <Note>This device doesn't have the server key yet. Under Server &amp; Reset, tap Get it from the Pi (or paste the API_SECRET), then come back and copy it from here.</Note>}
             </Step>
           )}
           <Step
