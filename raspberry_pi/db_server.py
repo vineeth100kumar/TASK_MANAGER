@@ -879,6 +879,33 @@ async def quick_add_endpoint(req: QuickAddRequest):
     return {"success": True, "item": payload, "parsed": parsed.to_dict()}
 
 
+# --- One Siri shortcut for everything (see voice_command.py) ---
+import voice_command
+
+class VoiceRequest(BaseModel):
+    text: str
+    source: str = "siri"
+    dryRun: bool = False
+
+
+@app.get("/api/voice")
+def voice_status():
+    return {"success": True, "ai": voice_command.ai_available(), "engine": chat_capture.engine()}
+
+
+@app.post("/api/voice")
+async def voice_endpoint(req: VoiceRequest):
+    """Whatever was said or typed: understand it, do it, answer in a sentence Siri can speak."""
+    now = datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+    try:
+        return await voice_command.handle(req.text, now, dry_run=req.dryRun)
+    except claude_api.ApiError as e:
+        return {"success": False, "say": f"Sage couldn't save that: {e}", "error": str(e)}
+    except Exception as e:
+        print(f"Voice command failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Couldn't handle that: {e}")
+
+
 # --- Notification quick-actions ---
 class ItemActionRequest(BaseModel):
     source: str = "notification"
