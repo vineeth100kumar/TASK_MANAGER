@@ -7,7 +7,7 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, Thought, ThoughtStatus, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, Thought, ThoughtStatus, LifeContext, DEFAULT_HABIT_REMIND_TIME } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
@@ -798,6 +798,11 @@ export const api = {
         history: [],
         areaId: payload.areaId || null,
         streak: 0,
+        // New habits remind by default; null turns it off, and it can be turned off on the habit.
+        remindTime: payload.remindTime === null ? null
+          : /^\d{2}:\d{2}$/.test(payload.remindTime || '') ? payload.remindTime : DEFAULT_HABIT_REMIND_TIME,
+        remindPush: payload.remindPush !== false,
+        remindEmail: !!payload.remindEmail,
         createdAt: now,
         updatedAt: now
       };

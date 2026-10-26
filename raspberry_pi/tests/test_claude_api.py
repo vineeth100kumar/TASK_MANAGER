@@ -120,6 +120,19 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertEqual(renamed["name"], "Steps")
         self.assertNotIn("title", renamed)
 
+    def test_new_habits_remind_by_default(self):
+        habit = client.post("/api/claude/habits", json={"name": "Read"}, headers=CLAUDE).json()["record"]
+        self.assertEqual((habit["remindTime"], habit["remindPush"], habit["remindEmail"]), ("20:00", True, False))
+        own = client.post("/api/claude/habits", json={"name": "Run", "remindTime": "06:30"}, headers=CLAUDE).json()["record"]
+        self.assertEqual(own["remindTime"], "06:30")
+        off = client.post("/api/claude/habits", json={"name": "Nap", "remindTime": None}, headers=CLAUDE).json()["record"]
+        self.assertIsNone(off["remindTime"])
+        # Turning it off later sticks, and existing habits aren't touched by updates.
+        turned_off = client.patch(f"/api/claude/habits/{habit['id']}", json={"remindTime": None}, headers=CLAUDE).json()["record"]
+        self.assertIsNone(turned_off["remindTime"])
+        renamed = client.patch(f"/api/claude/habits/{habit['id']}", json={"name": "Read more"}, headers=CLAUDE).json()["record"]
+        self.assertIsNone(renamed["remindTime"])
+
         project = client.post("/api/claude/projects", json={"name": "Health & Fitness", "type": "other"}, headers=CLAUDE).json()["record"]
         self.assertEqual((project["key"], project["color"]), ("HF", "bg-indigo-500"))
         again = client.post("/api/claude/projects", json={"title": "Home Food"}, headers=CLAUDE).json()["record"]
