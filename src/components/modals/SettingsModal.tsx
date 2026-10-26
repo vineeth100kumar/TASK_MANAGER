@@ -49,6 +49,42 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
   const [confirmText, setConfirmText] = useState<string>('');
   const [piKey, setPiKey] = useState<string>(() => getPiApiKey());
+  const [showPiKey, setShowPiKey] = useState(false);
+  const [fetchingPiKey, setFetchingPiKey] = useState(false);
+
+  // Asks the Pi for its own key. It answers a browser that is logged in with the
+  // password, one that already holds the key, or the Pi's own screen.
+  const fetchPiKey = async () => {
+    setFetchingPiKey(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/settings/api-secret`, { headers: piHeaders(), credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status === 401 ? 'Log in with your Sage password first, or open Sage on the Pi itself.' : json.detail || `The Pi said ${res.status}`);
+      if (!json.set || !json.secret) {
+        showToast('This Pi has no server key set, so none is needed.');
+        return;
+      }
+      setPiKey(json.secret);
+      setPiApiKey(json.secret);
+      setShowPiKey(true);
+      showToast('Got the key from the Pi and saved it on this device');
+      api.sync.forceSync();
+    } catch (err: any) {
+      showToast(err.message || "Couldn't reach the Pi", 'error');
+    } finally {
+      setFetchingPiKey(false);
+    }
+  };
+
+  const copyPiKey = async () => {
+    try {
+      await navigator.clipboard.writeText(piKey);
+      showToast('Key copied');
+    } catch {
+      setShowPiKey(true);
+      showToast('Press and hold the key to copy it', 'error');
+    }
+  };
   // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
   const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
   const [publicKind, setPublicKind] = useState<string | null>(null);
@@ -459,18 +495,30 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               </label>
               <p className="text-xs text-gray-600 dark:text-gray-400">
                 The API_SECRET from /etc/sage/sage.env on your Pi. It is stored in this browser only.
+                No terminal needed: tap <span className="font-semibold">Get it from the Pi</span> after you have logged in with your password, or when Sage is open on the Pi itself.
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   id="pi-api-key"
-                  type="password"
+                  type={showPiKey ? 'text' : 'password'}
                   autoComplete="off"
                   value={piKey}
                   onChange={e => setPiKey(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
+                  className="flex-1 min-w-[10rem] px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
                 />
                 <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm">
                   Save
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={fetchPiKey} disabled={fetchingPiKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  {fetchingPiKey ? 'Asking the Pi…' : 'Get it from the Pi'}
+                </button>
+                <button type="button" onClick={() => setShowPiKey(v => !v)} disabled={!piKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  {showPiKey ? 'Hide' : 'Show'}
+                </button>
+                <button type="button" onClick={copyPiKey} disabled={!piKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  Copy
                 </button>
               </div>
             </form>

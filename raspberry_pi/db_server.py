@@ -87,6 +87,16 @@ def logged_in(request) -> bool:
     return access_gate.enabled and access_gate.session_valid(request.cookies.get(access_gate.COOKIE_NAME))
 
 
+def is_pi_itself(request) -> bool:
+    """A request made on the Pi itself (its own browser), not through the tunnel,
+    which adds a forwarding header, or from another device."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1") and not (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
+
+
+API_SECRET_PATH = "/api/settings/api-secret"
+
+
 def request_key(request) -> str:
     auth = request.headers.get("authorization", "")
     return auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
@@ -100,6 +110,8 @@ async def require_api_key(request, call_next):
     install scripts and monitors can check the server is up.
     """
     path = request.url.path
+    if path == API_SECRET_PATH and is_pi_itself(request):
+        return await call_next(request)  # the Pi's own screen may read its key
     if path.startswith("/api/claude/") and request.method != "OPTIONS":
         # Claude's own routes take only Claude's token, and are off without one.
         if not claude_api.token_matches(request_key(request)):
@@ -879,6 +891,33 @@ async def quick_add_endpoint(req: QuickAddRequest):
     return {"success": True, "item": payload, "parsed": parsed.to_dict()}
 
 
+# --- One Siri shortcut for everything (see voice_command.py) ---
+import voice_command
+
+class VoiceRequest(BaseModel):
+    text: str
+    source: str = "siri"
+    dryRun: bool = False
+
+
+@app.get("/api/voice")
+def voice_status():
+    return {"success": True, "ai": voice_command.ai_available(), "engine": chat_capture.engine()}
+
+
+@app.post("/api/voice")
+async def voice_endpoint(req: VoiceRequest):
+    """Whatever was said or typed: understand it, do it, answer in a sentence Siri can speak."""
+    now = datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+    try:
+        return await voice_command.handle(req.text, now, dry_run=req.dryRun)
+    except claude_api.ApiError as e:
+        return {"success": False, "say": f"Sage couldn't save that: {e}", "error": str(e)}
+    except Exception as e:
+        print(f"Voice command failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Couldn't handle that: {e}")
+
+
 # --- Notification quick-actions ---
 class ItemActionRequest(BaseModel):
     source: str = "notification"
@@ -985,6 +1024,14 @@ def canvas_think_status():
 
 class GroqKeyRequest(BaseModel):
     key: str = ""
+
+@app.get(API_SECRET_PATH)
+def api_secret_for_this_device():
+    """So a new device can fill in the server key without a terminal on the Pi.
+    Reaching here took the key itself, the login password, or the Pi's own screen
+    (require_api_key and require_login decide that), so it can show it."""
+    return {"success": True, "set": bool(API_SECRET), "secret": API_SECRET}
+
 
 @app.get("/api/settings/groq-key")
 def groq_key_status():

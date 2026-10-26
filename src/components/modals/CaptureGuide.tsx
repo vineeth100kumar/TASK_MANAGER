@@ -1,11 +1,13 @@
-// CaptureGuide.tsx - Settings > Shortcuts. Step-by-step setup for the ways to
-// add tasks without opening Sage: Siri, the Share Sheet, WhatsApp, Home
-// Screen shortcuts, and forwarding email to the Inbox (see /api/quick-add and
+// CaptureGuide.tsx - Settings > Shortcuts. Step-by-step setup for using Sage
+// without opening it: ONE Siri shortcut that sends whatever you say to
+// /api/voice (the Pi works out what you meant and does it), Home Screen
+// shortcuts, and forwarding email to the Inbox (see /api/voice and
 // /api/email-capture on the Pi).
 import { useEffect, useState } from 'react';
-import { Mic, Share, MessageCircle, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
+import { Mic, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
 import { getPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
+import { SiriSetupDemo } from './SiriSetupDemo';
 
 const card = 'rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5';
 const field = 'w-full px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500';
@@ -306,44 +308,79 @@ function EmailSteps() {
   );
 }
 
-function SendTest({ base }: { base: string }) {
-  const [text, setText] = useState('Test from Settings tomorrow 9am #sage');
+type VoiceReply = { say?: string; engine?: string; understood?: { intent?: string; title?: string; date?: string; time?: string } };
+
+// Types a sentence the way Siri would send it and shows what Sage answers.
+function VoiceTest({ base }: { base: string }) {
+  const [text, setText] = useState('tomorrow 5pm call mom urgent');
+  const [dryRun, setDryRun] = useState(true);
   const [busy, setBusy] = useState(false);
+  const [reply, setReply] = useState<VoiceReply | null>(null);
   const { showToast } = useToast();
   const send = async () => {
     setBusy(true);
     try {
-      const res = await fetch(`${base}/api/quick-add`, {
+      const res = await fetch(`${base}/api/voice`, {
         method: 'POST',
         headers: piHeaders({ 'Content-Type': 'application/json' }),
-        body: JSON.stringify({ text, source: 'api' }),
+        body: JSON.stringify({ text, source: 'api', dryRun }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.detail || json.error || `The Pi said ${res.status}`);
-      showToast(`Added "${json.item?.title || text}"`);
+      setReply(json);
     } catch (err: any) {
+      setReply(null);
       showToast(err.message || 'The test failed', 'error');
     } finally {
       setBusy(false);
     }
   };
+  const u = reply?.understood;
   return (
-    <form onSubmit={e => { e.preventDefault(); if (text.trim()) send(); }} className="flex items-center gap-2">
-      <input className={`${field} text-xs`} value={text} onChange={e => setText(e.target.value)} aria-label="Test task" />
-      <button type="submit" disabled={busy || !text.trim()} className={`${smallButton} shrink-0`}>
-        <Send size={13} /> {busy ? 'Sending…' : 'Try it'}
-      </button>
-    </form>
+    <div className="space-y-2">
+      <form onSubmit={e => { e.preventDefault(); if (text.trim()) send(); }} className="flex items-center gap-2">
+        <input className={`${field} text-xs`} value={text} onChange={e => setText(e.target.value)} aria-label="Something to say to Sage" />
+        <button type="submit" disabled={busy || !text.trim()} className={`${smallButton} shrink-0`}>
+          <Send size={13} /> {busy ? 'Sending…' : 'Try it'}
+        </button>
+      </form>
+      <label className="flex items-center gap-2 text-xs text-gray-500">
+        <input type="checkbox" checked={dryRun} onChange={e => setDryRun(e.target.checked)} className="w-3.5 h-3.5 accent-blue-600" />
+        Only show what Sage understood, don't save anything
+      </label>
+      {reply && (
+        <div className="px-3 py-2 rounded-xl bg-white dark:bg-black/20 border border-black/10 dark:border-white/10 text-xs space-y-1">
+          <div className="text-gray-900 dark:text-white">{reply.say}</div>
+          {u && (
+            <div className="text-gray-500 font-mono break-words">
+              {[u.intent, u.title, u.date, u.time].filter(Boolean).join(' · ')}{reply.engine && reply.engine !== 'rules' ? ` · read with ${reply.engine}` : ''}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
+
+const SAY_EXAMPLES: Array<[string, string[]]> = [
+  ['Add a task', ['Call mom tomorrow 5pm', '5pm tomorrow call mom urgent', 'kal subah 6 baje gym']],
+  ['Be reminded', ['Remind me in 20 minutes to check the oven', 'Remind me Friday at 9 about the dentist']],
+  ['Book a meeting', ['Lunch with Priya Friday at 1']],
+  ['Repeat something', ['Water the plants every other day', 'Gym every Mon Wed Fri 7am']],
+  ['Start a habit', ['Start a habit meditation 5 times a week']],
+  ['Save a note', ['Note: the wifi password is in the drawer']],
+  ['Finish or move one', ['Mark call mom as done', 'Snooze the dentist for 2 hours', 'Move call mom to Friday 3pm']],
+  ['Ask', ["What's on today", 'Anything overdue', 'How many tasks do I have']],
+];
 
 export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
   const [open, setOpen] = useState<string | null>('siri');
   const [needsKey, setNeedsKey] = useState<boolean | null>(null);
+  const [voice, setVoice] = useState<{ ai: boolean } | null>(null);
   const toggle = (id: string) => setOpen(o => (o === id ? null : id));
 
   const local = piBackendUrl();
-  // Siri and the Share Sheet run on the phone, often away from home, so
+  // Siri runs on the phone, often away from home, so
   // prefer the public link when the Pi has one.
   const base = (publicUrl || local || '').replace(/\/+$/, '');
   const key = getPiApiKey();
@@ -354,6 +391,10 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
       .then(res => (res.ok ? res.json() : null))
       .then(json => setNeedsKey(json ? Boolean(json.auth) : null))
       .catch(() => setNeedsKey(null));
+    fetch(`${local}/api/voice`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => setVoice(json?.success ? { ai: Boolean(json.ai) } : null))
+      .catch(() => setVoice(null));
   }, [local]);
 
   if (!local) {
@@ -364,106 +405,89 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
     );
   }
 
-  const endpoint = `${base}/api/quick-add`;
+  const endpoint = `${base}/api/voice`;
   const keyValue = key ? `Bearer ${key}` : 'Bearer YOUR_API_SECRET';
   const keyShown = key ? `Bearer ${'•'.repeat(8)}${key.slice(-4)}` : 'Bearer YOUR_API_SECRET';
   const sendsKey = needsKey !== false;
-
-  const urlSteps = (n: number, input: string, source: string) => {
-    const body = JSON.stringify({ text: input, source }, null, 2);
-    return (
-      <>
-        <Step n={n} title={<>Add <Ui>Get Contents of URL</Ui> and paste this address as the URL.</>}>
-          <CopyField label="URL" value={endpoint} />
-        </Step>
-        <Step n={n + 1} title={<>Tap the arrow on that action to show more. Set <Ui>Method</Ui> to <Ui>POST</Ui>.</>} />
-        {sendsKey && (
-          <Step n={n + 2} title={<>Under <Ui>Headers</Ui>, tap <Ui>Add new header</Ui>. Key <Ui>Authorization</Ui>, value below.</>}>
-            <CopyField label="Header key" value="Authorization" />
-            <CopyField label="Header value" value={keyValue} shown={keyShown} />
-            {!key && <Note>This device doesn't have the server key yet. Paste the API_SECRET from /etc/sage/sage.env under Server &amp; Reset, then copy it from here.</Note>}
-          </Step>
-        )}
-        <Step
-          n={n + (sendsKey ? 3 : 2)}
-          title={<>Set <Ui>Request Body</Ui> to <Ui>JSON</Ui> and add two Text fields: <Ui>text</Ui> set to the {input === 'Provided Input' ? <Ui>Provided Input</Ui> : <Ui>Shortcut Input</Ui>} variable, and <Ui>source</Ui> set to <Ui>{source}</Ui>.</>}
-        >
-          <CopyField label="What Sage receives" value={body} multiline />
-        </Step>
-      </>
-    );
-  };
+  const body = JSON.stringify({ text: 'Dictated Text', source: 'siri' }, null, 2);
 
   return (
     <div className="space-y-4">
       <div className={`${card} p-5 space-y-3`}>
         <div className="flex items-center gap-2">
           <Sparkles size={16} className="text-blue-500" />
-          <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Add tasks without opening Sage</h4>
+          <h4 className="font-semibold text-sm text-gray-900 dark:text-white">Talk to Sage without opening it</h4>
         </div>
         <Note>
-          Everything you capture lands in your Inbox, or on its day if you give a date. It reads the same shorthand as Add Item:
-          {' '}<code className="font-mono">tomorrow 3pm</code>, <code className="font-mono">#tag</code>, <code className="font-mono">!high</code>, <code className="font-mono">~30m</code>, <code className="font-mono">every monday</code>.
+          One Siri shortcut does everything. Say it however you like, with the day and time at the start, middle or end, in slang or a mix of languages.
+          Your Pi works out what you meant, does it, and Siri says back what happened.
+          {voice && (voice.ai
+            ? ' When a sentence is hard it asks the AI, and without the AI it still reads the usual ways of saying things.'
+            : ' No AI is set up, so it reads the usual ways of saying things. Add a Groq key under Server & Reset to help with unusual phrasing and mixed languages.')}
+          {' '}If it isn't sure, it saves what you said to your Inbox so nothing is lost.
         </Note>
         <CopyField label="Your Sage address" value={base} />
         {!publicUrl && (
           <Note>This address only works on your home network. For Siri away from home, set up a public link (see Server &amp; Reset) and this guide will use it.</Note>
         )}
-        <SendTest base={local} />
+        <VoiceTest base={local} />
       </div>
+
+      <SiriSetupDemo url={endpoint} />
 
       <Section
         icon={<Mic size={18} />} tint="bg-blue-50 dark:bg-blue-950/40 text-blue-600"
-        title="Siri: “Add to Sage”" hint="iPhone, iPad, Mac and Apple Watch · about 2 minutes"
+        title="Siri: one shortcut for everything" hint="iPhone, iPad, Mac and Apple Watch · about 3 minutes, once"
         open={open === 'siri'} onToggle={() => toggle('siri')}
       >
         <Steps>
-          <Step n={1} title={<>Open the <Ui>Shortcuts</Ui> app, tap <Ui>+</Ui>, and name the shortcut <Ui>Add to Sage</Ui>.</>}>
-            <Note>The name is what you say to Siri.</Note>
+          <Step n={1} title={<>Open the <Ui>Shortcuts</Ui> app, tap <Ui>+</Ui>, and name the shortcut <Ui>Sage</Ui>.</>}>
+            <Note>The name is what you say: “Hey Siri, Sage”.</Note>
           </Step>
-          <Step n={2} title={<>Add <Ui>Ask for Input</Ui>. Leave it on <Ui>Text</Ui> and set the prompt to “What do you need to do?”.</>} />
-          {urlSteps(3, 'Provided Input', 'siri')}
-          <Step n={sendsKey ? 7 : 6} title={<>Tap <Ui>Done</Ui>. Say “Hey Siri, Add to Sage”, then speak the task.</>}>
-            <Note>Try “Call the dentist tomorrow at 3pm #health”. It shows up in Sage within a second.</Note>
+          <Step n={2} title={<>Add <Ui>Dictate Text</Ui>. Set <Ui>Stop Listening</Ui> to <Ui>After Pause</Ui>.</>}>
+            <Note>Leave the language on its default. Sage reads English with Hindi, Spanish and other words mixed in.</Note>
+          </Step>
+          <Step n={3} title={<>Add <Ui>Get Contents of URL</Ui> and paste this address as the URL.</>}>
+            <CopyField label="URL" value={endpoint} />
+          </Step>
+          <Step n={4} title={<>Tap the arrow on that action to show more. Set <Ui>Method</Ui> to <Ui>POST</Ui>.</>} />
+          {sendsKey && (
+            <Step n={5} title={<>Under <Ui>Headers</Ui>, tap <Ui>Add new header</Ui>. Key <Ui>Authorization</Ui>, value below.</>}>
+              <CopyField label="Header key" value="Authorization" />
+              <CopyField label="Header value" value={keyValue} shown={keyShown} />
+              {!key && <Note>This device doesn't have the server key yet. Under Server &amp; Reset, tap Get it from the Pi (or paste the API_SECRET), then come back and copy it from here.</Note>}
+            </Step>
+          )}
+          <Step
+            n={sendsKey ? 6 : 5}
+            title={<>Set <Ui>Request Body</Ui> to <Ui>JSON</Ui> and add two Text fields: <Ui>text</Ui> set to the <Ui>Dictated Text</Ui> variable, and <Ui>source</Ui> set to <Ui>siri</Ui>.</>}
+          >
+            <CopyField label="What Sage receives" value={body} multiline />
+          </Step>
+          <Step n={sendsKey ? 7 : 6} title={<>Add <Ui>Get Dictionary Value</Ui>. Set it to get the value for <Ui>say</Ui> in <Ui>Contents of URL</Ui>.</>}>
+            <Note>That is the sentence Sage sends back, like “Added Call mom tomorrow at 5 pm.”</Note>
+          </Step>
+          <Step n={sendsKey ? 8 : 7} title={<>Add <Ui>Speak Text</Ui> and give it the <Ui>Dictionary Value</Ui>. Tap <Ui>Done</Ui>.</>}>
+            <Note>Prefer to read it? Use <Ui>Show Result</Ui> instead, or add both.</Note>
+          </Step>
+          <Step n={sendsKey ? 9 : 8} title={<>Say “Hey Siri, Sage”, then say anything.</>}>
+            <Note>Optional: to use the same shortcut from the Share Sheet, tap <Ui>ⓘ</Ui>, turn on <Ui>Show in Share Sheet</Ui> for Text and URLs, and put <Ui>If Shortcut Input has any value</Ui> before Dictate Text: use the input as the text, otherwise dictate.</Note>
           </Step>
         </Steps>
-      </Section>
 
-      <Section
-        icon={<Share size={18} />} tint="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
-        title="Share Sheet: send to Sage" hint="Save a link, an email or selected text from any app"
-        open={open === 'share'} onToggle={() => toggle('share')}
-      >
-        <Steps>
-          <Step n={1} title={<>In <Ui>Shortcuts</Ui>, tap <Ui>+</Ui> and name it <Ui>Send to Sage</Ui>.</>} />
-          <Step n={2} title={<>Tap the <Ui>ⓘ</Ui> button at the bottom and turn on <Ui>Show in Share Sheet</Ui>.</>}>
-            <Note>Set it to receive <Ui>Text</Ui> and <Ui>URLs</Ui>, then go back.</Note>
-          </Step>
-          {urlSteps(3, 'Shortcut Input', 'share-sheet')}
-          <Step n={sendsKey ? 7 : 6} title={<>Tap <Ui>Done</Ui>. In Safari, Mail or Notes, tap <Ui>Share</Ui> and pick <Ui>Send to Sage</Ui>.</>}>
-            <Note>Already made the Siri shortcut? Duplicate it and swap Ask for Input for Shortcut Input instead.</Note>
-          </Step>
-        </Steps>
-      </Section>
-
-      <Section
-        icon={<MessageCircle size={18} />} tint="bg-green-50 dark:bg-green-950/40 text-green-600"
-        title="WhatsApp: message to task" hint="Turn a plan or a work ask from a chat into an Inbox item"
-        open={open === 'whatsapp'} onToggle={() => toggle('whatsapp')}
-      >
-        <Steps>
-          <Step n={1} title={<>Make the <Ui>Send to Sage</Ui> shortcut above first.</>} />
-          <Step n={2} title={<>In <Ui>Shortcuts</Ui>, press and hold it, tap <Ui>Duplicate</Ui>, and rename the copy <Ui>WhatsApp to Sage</Ui>.</>} />
-          <Step n={3} title={<>Open the copy and change the <Ui>source</Ui> field to <Ui>whatsapp</Ui>.</>}>
-            <CopyField label="What Sage receives" value={JSON.stringify({ text: 'Shortcut Input', source: 'whatsapp' }, null, 2)} multiline />
-          </Step>
-          <Step n={4} title={<>In WhatsApp, press and hold a message, tap <Ui>Forward</Ui>, tick any others you want, then tap <Ui>Share</Ui> at the bottom right and pick <Ui>WhatsApp to Sage</Ui>.</>}>
-            <Note>
-              The first message becomes the title and the whole chat goes in the item's notes, tagged <code className="font-mono">#whatsapp</code>.
-              A day or time in that first message, like “friday 8pm”, sets the due date. Sage only sees what you send it.
-            </Note>
-          </Step>
-        </Steps>
+        <div className="space-y-2 pt-1">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-gray-400">Things you can say</div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {SAY_EXAMPLES.map(([what, examples]) => (
+              <div key={what} className="p-3 rounded-xl bg-white dark:bg-black/20 border border-black/10 dark:border-white/10">
+                <div className="text-xs font-semibold text-gray-900 dark:text-white mb-1">{what}</div>
+                {examples.map(e => (
+                  <div key={e} className="text-xs text-gray-600 dark:text-gray-300 leading-relaxed">“{e}”</div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
       </Section>
 
       <Section
