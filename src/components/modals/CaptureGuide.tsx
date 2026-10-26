@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { Mic, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
 import { getPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
+import { SiriSetupDemo } from './SiriSetupDemo';
 
 const card = 'rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5';
 const field = 'w-full px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-sm text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500';
@@ -431,6 +432,8 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
         )}
         <VoiceTest base={local} />
       </div>
+
+      <SiriSetupDemo url={endpoint} />
 
       <Section
         icon={<Mic size={18} />} tint="bg-blue-50 dark:bg-blue-950/40 text-blue-600"
