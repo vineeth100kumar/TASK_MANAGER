@@ -13,6 +13,9 @@ the work; the clock is a screen and five buttons that it drives.
 | `lumo/rpi_server/` | LUMO's old server, retired: Sage does its jobs now. Kept until the photo frame moves over. |
 | `deploy/` | Pi installer, systemd units, and the auto-sync that deploys `main`. |
 
+Looking for a file? [CODEMAP.md](CODEMAP.md) maps every folder, feature,
+endpoint and config to its code.
+
 LUMO came from `vineeth100kumar/lumo-pi-system`; its history is kept under
 `lumo/` (use `git log -- lumo/` or `git log --follow`).
 
