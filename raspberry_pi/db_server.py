@@ -19,6 +19,7 @@ import backup
 import claude_api
 import placement
 import desk
+import drop
 import industry
 import item_actions
 import life_mode
@@ -162,6 +163,8 @@ async def require_login(request, call_next):
         # The MCP address carries its own token and checks it (claude_api.py).
         or path.startswith("/mcp/")
         or path.startswith("/api/claude/")
+        # Drop's share links (drop.py) are public by design, and sandboxed.
+        or path.startswith(drop.PREFIX)
         or (API_SECRET and key_matches(request_key(request)))
         or claude_may(request)
     ):
@@ -487,6 +490,7 @@ async def startup_event():
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
     _background(life_mode.run(events.broadcast))
+    _background(drop.run())
     if desk.ENABLED:
         from desk import run as desk_run
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
@@ -1846,6 +1850,10 @@ app.include_router(sparks.router)
 # Radar industry search (industry.py): type an industry, get a full brief.
 industry.connect(DB_PATH, events.broadcast)
 app.include_router(industry.router)
+
+# Drop (drop.py): temporary public links for HTML reports and small sites.
+drop.connect(DB_PATH)
+app.include_router(drop.router)
 
 
 if (DIST_DIR / "index.html").is_file():

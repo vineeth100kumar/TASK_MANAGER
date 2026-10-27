@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, Coffee, Briefcase } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -371,6 +371,8 @@ export function Sidebar({
                 { id: 'all', name: 'All Items', icon: Layers },
                 { id: 'notes', name: 'Notes & Docs', icon: FileText },
                 { id: 'canvas', name: 'Canvas', icon: PenLine },
+                // Temporary share links for reports and site samples.
+                { id: 'drop', name: 'Drop', icon: UploadCloud, color: 'text-sky-500' },
                 // Radar is work, so it stays out of the Personal space.
                 ...(lifeContext === 'personal' ? [] : [{ id: 'radar', name: 'Radar', icon: Radar, color: 'text-purple-500' }]),
                 // The desk clock: alarms, timers and its settings.
@@ -389,6 +391,7 @@ export function Sidebar({
                   item.id === 'canvas' ? activeView === 'canvas' : 
                   item.id === 'radar' ? activeView === 'radar' : 
                   item.id === 'lumo' ? activeView === 'lumo' : 
+                  item.id === 'drop' ? activeView === 'drop' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
                   item.id === 'focus' ? activeView === 'focus' :
                   item.id === 'waiting_for' ? activeView === 'waiting_for' :
@@ -405,6 +408,8 @@ export function Sidebar({
                       setActiveView('radar');
                     } else if (item.id === 'lumo') {
                       setActiveView('lumo');
+                    } else if (item.id === 'drop') {
+                      setActiveView('drop');
                     } else if (item.id === 'inbox') {
                       setActiveView('inbox');
                     } else if (item.id === 'focus') {

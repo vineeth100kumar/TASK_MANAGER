@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Check, Code2, Copy, Download, Eye, FileCode, Maximize2, Minimize2, Palette, Sparkles } from 'lucide-react';
+import { Check, Code2, Copy, Download, Eye, FileCode, Link2, Loader2, Maximize2, Minimize2, Palette, Sparkles } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { Note } from '../../services/types';
+import { EXPIRY_CHOICES, dropAvailable, shareHtml } from '../../services/drop';
+import { useToast } from '../../context/ToastContext';
 import { REPORT_SANDBOX, buildReportDocument, highlightCode, themeVars, HIGHLIGHT_CSS, FrameTheme, ColorMode } from './reportFrame';
 
 /** Follows the app's light/dark switch (the `dark` class on <html>). */
@@ -43,6 +45,10 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
   const [tab, setTab] = useState<'view' | 'source'>('view');
   const [full, setFull] = useState(false);
   const [copied, setCopied] = useState(false);
+  const { showToast } = useToast();
+  // Share as a temporary link (Drop): pick how long, then the link is copied.
+  const [shareOpen, setShareOpen] = useState(false);
+  const [sharing, setSharing] = useState(false);
   // Each report remembers how its colours are shown; Auto fixes unreadable text.
   const modeKey = `sage.reportColors.${note.id}`;
   const readMode = (): ColorMode => { try { return (localStorage.getItem(modeKey) as ColorMode) || 'auto'; } catch { return 'auto'; } };
@@ -75,6 +81,19 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
     a.download = `${(note.title || 'note').replace(/[^\w .-]+/g, '').trim() || 'note'}.${ext}`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  };
+  const share = async (hours: number) => {
+    setShareOpen(false);
+    setSharing(true);
+    try {
+      const link = await shareHtml(body, note.title || 'Report', hours);
+      try { await navigator.clipboard.writeText(link); showToast('Link copied. Find it under Drop.'); }
+      catch { showToast(`Link ready: ${link}`); }
+    } catch (e: any) {
+      showToast(e.message || "Couldn't share the report", 'error');
+    } finally {
+      setSharing(false);
+    }
   };
   const toText = (src: string) => isCode ? src : (new DOMParser().parseFromString(src, 'text/html').body.textContent || '').replace(/\s+/g, ' ').trim();
 
@@ -118,6 +137,24 @@ export function ReportNoteView({ note, body, onChange }: ReportNoteViewProps) {
           )}
           <button onClick={copy} className={btn} title={copied ? 'Copied' : 'Copy'} aria-label="Copy">{copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}</button>
           <button onClick={download} className={btn} title="Download" aria-label="Download"><Download size={16} /></button>
+          {!isCode && dropAvailable() && body.trim() && (
+            <div className="relative">
+              <button onClick={() => setShareOpen(o => !o)} disabled={sharing} className={btn} title="Share as temporary link" aria-label="Share as temporary link" aria-expanded={shareOpen}>
+                {sharing ? <Loader2 size={16} className="animate-spin" /> : <Link2 size={16} />}
+              </button>
+              {shareOpen && (
+                <div role="menu" className="absolute right-0 top-10 z-20 w-52 p-1.5 rounded-2xl bg-white dark:bg-[#2c2c2e] shadow-xl ring-1 ring-black/10 dark:ring-white/10">
+                  <div className="px-2.5 pt-1 pb-1.5 text-[11.5px] font-semibold text-gray-500">Share as a link that lasts</div>
+                  {EXPIRY_CHOICES.map(c => (
+                    <button key={c.hours} role="menuitem" onClick={() => share(c.hours)}
+                      className="w-full text-left px-2.5 py-2 rounded-xl text-[13px] font-medium text-gray-800 dark:text-gray-100 hover:bg-black/5 dark:hover:bg-white/10">
+                      {c.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button onClick={() => setFull(f => !f)} className={btn} title={full ? 'Exit full screen (Esc)' : 'Full screen'} aria-label={full ? 'Exit full screen' : 'Full screen'}>
             {full ? <Minimize2 size={16} /> : <Maximize2 size={16} />}
           </button>
