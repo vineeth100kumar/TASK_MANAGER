@@ -32,7 +32,7 @@ export function DropView() {
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState('');
   // What the Pi is doing with the drop right now, for the status bar.
-  const [status, setStatus] = useState<{ stage: 'reading' | 'uploading' | 'saving' | 'done' | 'error'; text: string; percent: number } | null>(null);
+  const [status, setStatus] = useState<{ stage: 'reading' | 'uploading' | 'saving' | 'done' | 'warning' | 'error'; text: string; percent: number } | null>(null);
   const [fresh, setFresh] = useState<Drop | null>(null);
   // Things the Pi noticed that would make the shared page look wrong (say, an unbuilt project).
   const [warnings, setWarnings] = useState<string[]>([]);
@@ -100,8 +100,13 @@ export function DropView() {
         copiedNow = true;
         setTimeout(() => setCopied(c => (c === drop.id ? '' : c)), 1600);
       } catch { /* the Copy button is right there */ }
-      setStatus({ stage: 'done', text: `Link is live${copiedNow ? ' and copied' : ''}: ${drop.name}, ${drop.files} file${drop.files === 1 ? '' : 's'}`, percent: 100 });
-      setTimeout(() => setStatus(s => (s?.stage === 'done' ? null : s)), 6000);
+      if (warned?.length) {
+        // Stays until dismissed: the link works but the page would come up blank.
+        setStatus({ stage: 'warning', text: warned[0], percent: 100 });
+      } else {
+        setStatus({ stage: 'done', text: `Link is live${copiedNow ? ' and copied' : ''}: ${drop.name}, ${drop.files} file${drop.files === 1 ? '' : 's'}`, percent: 100 });
+        setTimeout(() => setStatus(s => (s?.stage === 'done' ? null : s)), 6000);
+      }
     } catch (e: any) {
       setStatus({ stage: 'error', text: e.message || "Couldn't share that", percent: 0 });
       showToast(e.message || "Couldn't share that", 'error');
@@ -238,18 +243,19 @@ export function DropView() {
 
       {status && (
         <div role="status" aria-live="polite"
-          className={`rounded-2xl px-4 py-3 space-y-2 ring-1 ${status.stage === 'error' ? 'bg-red-500/10 ring-red-500/30' : status.stage === 'done' ? 'bg-emerald-500/10 ring-emerald-500/30' : 'bg-blue-500/[0.07] ring-blue-500/20'}`}>
+          className={`rounded-2xl px-4 py-3 space-y-2 ring-1 ${status.stage === 'error' ? 'bg-red-500/10 ring-red-500/30' : status.stage === 'warning' ? 'bg-amber-500/10 ring-amber-500/30' : status.stage === 'done' ? 'bg-emerald-500/10 ring-emerald-500/30' : 'bg-blue-500/[0.07] ring-blue-500/20'}`}>
           <div className="flex items-center gap-2 text-[13.5px] font-medium text-gray-800 dark:text-gray-100">
             {status.stage === 'error' ? <AlertTriangle size={15} className="text-red-500 shrink-0" />
+              : status.stage === 'warning' ? <AlertTriangle size={15} className="text-amber-500 shrink-0" />
               : status.stage === 'done' ? <Check size={15} className="text-emerald-600 shrink-0" />
               : <Loader2 size={15} className="animate-spin text-blue-600 shrink-0" />}
             <span className="min-w-0 flex-1">{status.text}</span>
             {(status.stage === 'uploading') && <span className="tabular-nums text-gray-500">{status.percent}%</span>}
-            {(status.stage === 'error' || status.stage === 'done') && (
+            {(status.stage === 'error' || status.stage === 'warning' || status.stage === 'done') && (
               <button onClick={() => setStatus(null)} className="text-[12px] font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Dismiss</button>
             )}
           </div>
-          {status.stage !== 'error' && (
+          {status.stage !== 'error' && status.stage !== 'warning' && (
             <div className="h-1.5 rounded-full bg-black/[0.07] dark:bg-white/10 overflow-hidden" aria-hidden>
               <div className={`h-full rounded-full transition-[width] duration-200 ${status.stage === 'done' ? 'bg-emerald-500' : 'bg-blue-600'} ${status.stage === 'saving' || status.stage === 'reading' ? 'animate-pulse' : ''}`}
                 style={{ width: `${status.stage === 'saving' || status.stage === 'done' ? 100 : Math.max(status.percent, status.stage === 'reading' ? 8 : 2)}%` }} />

@@ -187,6 +187,11 @@ class DropTests(unittest.TestCase):
         res = upload([("p.zip", zipped(src))]).json()
         self.assertEqual(len(res["warnings"]), 1)
         self.assertIn("npm run build", res["warnings"][0])
+        # Whoever opens it sees why, not a white page.
+        page = client.get(res["drop"]["path"])
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("not a built site", page.text)
+        self.assertIn("npm run build", page.text)
         ok = upload([("ok.html", b"<h1>hi</h1><script src=app.js></script>")]).json()
         self.assertEqual(ok["warnings"], [])
         self.assertNotIn("warnings", client.get("/api/drops").json()["drops"][0])
