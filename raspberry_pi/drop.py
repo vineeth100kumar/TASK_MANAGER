@@ -8,6 +8,13 @@ copy under DROP_DIR/<slug>/ and serves it at /d/<slug>/ until it expires
 can't be guessed; anyone who has it can open the drop without Sage's password.
 Everything else keeps needing the password and the key.
 
+Sites built to live at a domain's root (Vite, Create React App and most
+frameworks write "/assets/app.js" and "/images/x.webp") would look for those
+files on Sage instead of in the drop. When a page, stylesheet or script is
+served, a root-absolute reference that names a file in the same drop is
+pointed at the drop ("/images/x.webp" becomes "/d/<slug>/images/x.webp"). Only
+paths that really exist in the drop are touched, so nothing else changes.
+
 Safety:
   - Files are only ever read and sent back. Nothing in a drop runs on the Pi,
     whatever its extension.
@@ -29,6 +36,7 @@ before that.
 import asyncio
 import html
 import io
+import re
 import mimetypes
 import os
 import secrets
@@ -38,7 +46,7 @@ import stat
 import time
 import zipfile
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Set, Tuple
 
 from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
@@ -85,7 +93,17 @@ EXTRA_TYPES = {
     ".webmanifest": "application/manifest+json", ".mp4": "video/mp4", ".webm": "video/webm",
 }
 
+# Files whose root-absolute references are pointed at the drop, and the biggest
+# one read into memory to do it.
+REWRITE_TYPES = {".html", ".htm", ".css", ".js", ".mjs"}
+MAX_REWRITE_BYTES = 8 * 1024 * 1024
+# A quote or "(" then "/path" (not "//host"), as in src="/a.js", '/img/x.png', url(/f.woff2).
+ROOT_REF = re.compile(r"""(?P<q>["'`(])/(?P<p>[^\s"'`()<>?#\\/][^\s"'`()<>?#\\]*)""")
+# A page that loads TypeScript or JSX straight from the project's source: not built.
+SOURCE_SCRIPT = re.compile(r"""<script[^>]+src=["'][^"']+\.(?:tsx|ts|jsx)["']""", re.I)
+
 router = APIRouter()
+_files_cache: Dict[str, Set[str]] = {}
 _base_cache: Tuple[float, dict] = (0.0, {})
 
 
@@ -255,9 +273,22 @@ def create(files: List[Tuple[str, bytes]], name: str = "", hours: float = DEFAUL
             (slug, title, now, now + hours * 3600, entry, len(files), sum(len(d) for _, d in files), source[:40]),
         )
         conn.commit()
-        return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+        made = _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+        made["warnings"] = _warnings(files, entry)
+        return made
     finally:
         conn.close()
+
+
+def _warnings(files: List[Tuple[str, bytes]], entry: str) -> List[str]:
+    """Things that make a shared site look blank, said while the person is still looking."""
+    out = []
+    page = next((data for path, data in files if path == entry), b"")
+    if entry and SOURCE_SCRIPT.search(page.decode("utf-8", "ignore")):
+        out.append("This looks like a project's source, not a built site: its page loads a .tsx/.ts file, "
+                   "which browsers can't run, so the link will be blank. Run `npm run build` and drop the "
+                   "`dist` folder instead.")
+    return out
 
 
 def _default_name(paths: List[str], entry: str) -> str:
@@ -298,6 +329,7 @@ def remove(slug: str) -> bool:
         conn.commit()
     finally:
         conn.close()
+    _files_cache.pop(slug, None)
     if _safe_slug(slug):
         shutil.rmtree(DROP_DIR / slug, ignore_errors=True)
     return bool(gone)
@@ -327,6 +359,7 @@ def sweep(now: Optional[float] = None) -> int:
     finally:
         conn.close()
     for slug in expired:
+        _files_cache.pop(slug, None)
         if _safe_slug(slug):
             shutil.rmtree(DROP_DIR / slug, ignore_errors=True)
     if DROP_DIR.is_dir():
@@ -444,7 +477,61 @@ def serve(slug: str, path: str, request: Request):
             conn.commit()
         finally:
             conn.close()
+    if target.suffix.lower() in REWRITE_TYPES and target.stat().st_size <= MAX_REWRITE_BYTES:
+        fixed = _point_at_drop(slug, root, target)
+        if fixed is not None:
+            return Response(fixed, media_type=_media_type(target), headers=SERVE_HEADERS)
     return FileResponse(target, media_type=_media_type(target), headers=SERVE_HEADERS)
+
+
+def _drop_files(slug: str, root: Path) -> Set[str]:
+    """Every file of the drop, and every folder as "folder/", for matching references."""
+    found = _files_cache.get(slug)
+    if found is None:
+        found = set()
+        for p in root.rglob("*"):
+            if p.is_file():
+                rel = str(p.relative_to(root)).replace(os.sep, "/")
+                found.add(rel)
+                parts = rel.split("/")[:-1]
+                found.update("/".join(parts[:i + 1]) + "/" for i in range(len(parts)))
+        _files_cache[slug] = found
+    return found
+
+
+def _names_drop_file(ref: str, files: Set[str]) -> bool:
+    """True for "images/a.webp" (a file here), "images/" (a folder here) and
+    "images/${name}.webp" or "images/" + name (code building a name inside a
+    folder here); the folder is what has to exist."""
+    if ref in files:
+        return True
+    cut = ref.split("${")[0]
+    return "/" in cut and cut.rsplit("/", 1)[0] + "/" in files if "${" in ref else False
+
+
+def _point_at_drop(slug: str, root: Path, target: Path) -> Optional[bytes]:
+    """The file with its root-absolute references to files in this drop made
+    relative to the drop, or None when there is nothing to change."""
+    try:
+        text = target.read_text(encoding="utf-8")
+    except (UnicodeDecodeError, OSError):
+        return None
+    files = _drop_files(slug, root)
+    changed = False
+
+    def fix(m):
+        nonlocal changed
+        if _names_drop_file(m.group("p"), files):
+            changed = True
+            return f"{m.group('q')}{PREFIX}{slug}/{m.group('p')}"
+        return m.group(0)
+
+    out = ROOT_REF.sub(fix, text)
+    if target.suffix.lower() in (".html", ".htm") and 'href="/"' in out:
+        # A "home" link goes to the site's own front page, not to Sage.
+        out = out.replace('href="/"', f'href="{PREFIX}{slug}/"')
+        changed = True
+    return out.encode("utf-8") if changed else None
 
 
 # --- The app's routes (behind the key and the password like any /api route) ---
@@ -491,7 +578,7 @@ async def drops_create(request: Request):
     except DropError as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     base = await asyncio.to_thread(base_url)
-    return {"success": True, "drop": drop, "base": base.get("url")}
+    return {"success": True, "drop": drop, "base": base.get("url"), "warnings": drop.pop("warnings", [])}
 
 
 @router.post("/api/drops/{slug}/extend")

@@ -68,7 +68,7 @@ export const dropApi = {
     form.append('source', source);
     if (name) form.append('name', name);
     // XHR, because fetch can't report how much of an upload has gone.
-    return new Promise<{ drop: Drop; base: string | null }>((resolve, reject) => {
+    return new Promise<{ drop: Drop; base: string | null; warnings?: string[] }>((resolve, reject) => {
       const xhr = new XMLHttpRequest();
       xhr.open('POST', `${piBackendUrl()}/api/drops`);
       for (const [k, v] of Object.entries(piHeaders())) xhr.setRequestHeader(k, v);

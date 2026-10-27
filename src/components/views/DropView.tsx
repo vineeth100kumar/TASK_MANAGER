@@ -34,6 +34,8 @@ export function DropView() {
   // What the Pi is doing with the drop right now, for the status bar.
   const [status, setStatus] = useState<{ stage: 'reading' | 'uploading' | 'saving' | 'done' | 'error'; text: string; percent: number } | null>(null);
   const [fresh, setFresh] = useState<Drop | null>(null);
+  // Things the Pi noticed that would make the shared page look wrong (say, an unbuilt project).
+  const [warnings, setWarnings] = useState<string[]>([]);
   const [copied, setCopied] = useState('');
   const [, tick] = useState(0);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -81,7 +83,7 @@ export function DropView() {
     const size = sizeText(total);
     setStatus({ stage: 'reading', text: `Reading ${files.length} file${files.length === 1 ? '' : 's'} (${size})`, percent: 0 });
     try {
-      const { drop, base: b } = await dropApi.create(files, hours, '', 'upload', (sent, all) => {
+      const { drop, base: b, warnings: warned } = await dropApi.create(files, hours, '', 'upload', (sent, all) => {
         const percent = Math.round((sent / all) * 100);
         setStatus(percent >= 100
           ? { stage: 'saving', text: 'Uploaded. The Pi is saving your files and making the link…', percent: 100 }
@@ -89,6 +91,7 @@ export function DropView() {
       });
       setBase(b);
       setFresh(drop);
+      setWarnings(warned || []);
       setDrops(list => [drop, ...(list || []).filter(d => d.id !== drop.id)]);
       let copiedNow = false;
       try {
@@ -146,7 +149,7 @@ export function DropView() {
     try {
       await dropApi.remove(drop.id);
       setDrops(list => (list || []).filter(d => d.id !== drop.id));
-      if (fresh?.id === drop.id) setFresh(null);
+      if (fresh?.id === drop.id) { setFresh(null); setWarnings([]); }
       showToast('Link turned off');
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -292,6 +295,11 @@ export function DropView() {
                 <ExternalLink size={16} /> Open
               </a>
             </div>
+            {warnings.map(w => (
+              <p key={w} className="text-[12.5px] font-medium text-amber-700 dark:text-amber-400 flex items-start gap-1.5">
+                <AlertTriangle size={14} className="mt-0.5 shrink-0" /> {w}
+              </p>
+            ))}
             <p className="text-[12.5px] text-gray-500">
               {fresh.name} · {fresh.files} file{fresh.files === 1 ? '' : 's'} · {sizeText(fresh.bytes)} · switches off in {timeLeft(fresh.expiresAt)}
             </p>
