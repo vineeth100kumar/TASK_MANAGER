@@ -27,7 +27,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -480,6 +480,8 @@ function MainApp() {
               />
             ) : activeView === 'lumo' ? (
               <LumoView />
+            ) : activeView === 'drop' ? (
+              <DropView />
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (
