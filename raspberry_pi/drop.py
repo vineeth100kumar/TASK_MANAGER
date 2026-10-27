@@ -477,6 +477,12 @@ def serve(slug: str, path: str, request: Request):
             conn.commit()
         finally:
             conn.close()
+    if target.suffix.lower() in (".html", ".htm") and target.stat().st_size <= MAX_REWRITE_BYTES \
+            and SOURCE_SCRIPT.search(target.read_text(encoding="utf-8", errors="ignore")):
+        # It would only come up blank, so say why instead.
+        return _page("This is a project's source, not a built site",
+                     "Its page loads a .tsx or .ts file, which browsers can't run. Ask whoever shared it to run "
+                     "\"npm run build\" and share the \"dist\" folder instead.", 200)
     if target.suffix.lower() in REWRITE_TYPES and target.stat().st_size <= MAX_REWRITE_BYTES:
         fixed = _point_at_drop(slug, root, target)
         if fixed is not None:
