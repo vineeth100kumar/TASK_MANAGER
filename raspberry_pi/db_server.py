@@ -98,8 +98,11 @@ API_SECRET_PATH = "/api/settings/api-secret"
 
 
 def request_key(request) -> str:
-    auth = request.headers.get("authorization", "")
-    return auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
+    auth = request.headers.get("authorization", "").strip()
+    if auth.lower().startswith("bearer "):
+        return auth[7:].strip()
+    # A Siri shortcut often has the bare key in the Authorization field.
+    return request.headers.get("x-sage-key", "") or auth
 
 
 @app.middleware("http")
