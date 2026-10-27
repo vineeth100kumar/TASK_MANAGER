@@ -149,6 +149,48 @@ class DropTests(unittest.TestCase):
         self.assertEqual(client.delete(f"/api/drops/{d['id']}").status_code, 200)
         self.assertEqual(client.get(d["path"]).status_code, 404)
 
+    def test_root_absolute_references_are_pointed_at_the_drop(self):
+        site = {
+            "dist/index.html": '<link rel="icon" href="/favicon.png"><script type="module" src="/assets/app.js"></script>'
+                               '<a href="/">home</a><a href="/api/drops">api</a><script src="//cdn.example.com/x.js"></script>',
+            "dist/assets/app.js": 'const a="/images/cat.webp",b=`/images/dog.webp`,c="/api/sync/all",d="/images/missing.webp",'
+                                  'e=n=>`/images/${n}.webp`,f=n=>"/images/"+n,g=`/api/${n}`;',
+            "dist/assets/app.css": "body{background:url(/images/cat.webp)} .x{background:url('/images/dog.webp')}",
+            "dist/favicon.png": "png", "dist/images/cat.webp": "c", "dist/images/dog.webp": "d",
+        }
+        d = upload([("site.zip", zipped(site))]).json()["drop"]
+        page = client.get(d["path"]).text
+        self.assertIn(f'href="{d["path"]}favicon.png"', page)
+        self.assertIn(f'src="{d["path"]}assets/app.js"', page)
+        self.assertIn(f'<a href="{d["path"]}">home</a>', page)
+        # Not files of this drop: left alone, so they never reach into it or out of it.
+        self.assertIn('href="/api/drops"', page)
+        self.assertIn('src="//cdn.example.com/x.js"', page)
+        js = client.get(d["path"] + "assets/app.js").text
+        self.assertIn(f'"{d["path"]}images/cat.webp"', js)
+        self.assertIn(f"`{d['path']}images/dog.webp`", js)
+        self.assertIn('"/api/sync/all"', js)
+        self.assertIn('"/images/missing.webp"', js)
+        # Names built in code: the folder is what counts.
+        self.assertIn("`" + d["path"] + "images/${n}.webp`", js)
+        self.assertIn('"' + d["path"] + 'images/"+n', js)
+        self.assertIn("`/api/${n}`", js)
+        css = client.get(d["path"] + "assets/app.css").text
+        self.assertIn(f"url({d['path']}images/cat.webp)", css)
+        self.assertIn(f"url('{d['path']}images/dog.webp')", css)
+        # Images and other files are sent untouched.
+        self.assertEqual(client.get(d["path"] + "images/cat.webp").content, b"c")
+
+    def test_a_projects_source_gets_a_warning(self):
+        src = {"p/index.html": '<div id="root"></div><script type="module" src="/src/main.tsx"></script>',
+               "p/src/main.tsx": "import x from 'y'", "p/package.json": "{}"}
+        res = upload([("p.zip", zipped(src))]).json()
+        self.assertEqual(len(res["warnings"]), 1)
+        self.assertIn("npm run build", res["warnings"][0])
+        ok = upload([("ok.html", b"<h1>hi</h1><script src=app.js></script>")]).json()
+        self.assertEqual(ok["warnings"], [])
+        self.assertNotIn("warnings", client.get("/api/drops").json()["drops"][0])
+
     def test_links_are_public_but_the_rest_still_needs_the_password(self):
         d = upload([("a.html", b"hi")]).json()["drop"]
         stored = access_gate.hash_password("1234", iterations=1000)
