@@ -291,6 +291,10 @@ def project_key(name: str, taken) -> str:
     return f"{key}{n}"
 
 
+# Reminder time every new habit starts with (same as src/services/types.ts).
+DEFAULT_HABIT_REMIND_TIME = "20:00"
+
+
 def _habit_target(record: dict) -> int:
     """targetCount (days a week, 1-7) from targetCount or a frequency like
     "daily" or "5/week"."""
@@ -330,6 +334,12 @@ def _shape_named(table: str, record: dict, creating: bool) -> None:
             record["history"] = [d for d in history if isinstance(d, str)] if isinstance(history, list) else []
             record.setdefault("areaId", None)
             record.setdefault("streak", 0)
+            # New habits remind by default (an explicit None keeps it off).
+            record.setdefault("remindTime", DEFAULT_HABIT_REMIND_TIME)
+            if record["remindTime"] is not None and not re.match(r"^\d{2}:\d{2}$", str(record["remindTime"])):
+                record["remindTime"] = DEFAULT_HABIT_REMIND_TIME
+            record.setdefault("remindPush", True)
+            record.setdefault("remindEmail", False)
     if table == "projects" and creating:
         if not str(record.get("name") or "").strip():
             raise ApiError(400, "A project needs a name")
@@ -764,7 +774,7 @@ def _tools() -> List[dict]:
              "limit": {"type": "integer", "description": "At most this many (default 50, max 500)"}}}},
         {"name": "sage_get", "description": "One full record by id.",
          "inputSchema": {"type": "object", "required": ["table", "id"], "properties": {"table": _table_prop(), "id": {"type": "string"}}}},
-        {"name": "sage_create", "description": "Create a record. Work items and goals need a title; projects and habits need a name. Sensible defaults fill the rest.",
+        {"name": "sage_create", "description": "Create a record. Work items and goals need a title; projects and habits need a name. Sensible defaults fill the rest; a new habit reminds at 20:00 by push unless remindTime is sent (null for no reminder).",
          "inputSchema": {"type": "object", "required": ["table", "fields"], "properties": {"table": _table_prop(), "fields": obj}}},
         {"name": "sage_update", "description": "Change some fields of a record; fields not sent stay as they are.",
          "inputSchema": {"type": "object", "required": ["table", "id", "fields"], "properties": {"table": _table_prop(), "id": {"type": "string"}, "fields": obj}}},

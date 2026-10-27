@@ -138,6 +138,9 @@ export interface Goal {
   updatedAt?: string;
 }
 
+/** Reminder time every new habit starts with (same as claude_api.py). */
+export const DEFAULT_HABIT_REMIND_TIME = '20:00';
+
 export interface Habit {
   id: string;
   name: string;
@@ -148,6 +151,7 @@ export interface Habit {
   streak?: number;
   // A daily nudge at this time ("19:30") on days the habit isn't ticked yet,
   // sent by the Pi (raspberry_pi/notifier.py). Unset means no reminder.
+  // New habits start at DEFAULT_HABIT_REMIND_TIME.
   remindTime?: string | null;
   remindPush?: boolean;   // to the website / home-screen app (default on)
   remindEmail?: boolean;  // to the notification email (default off)

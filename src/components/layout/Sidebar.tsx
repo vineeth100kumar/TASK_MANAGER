@@ -252,7 +252,7 @@ export function Sidebar({
         showToast('Goal added!');
       } else if (activeGrowthTab === 'habits') {
         await api.habits.create({ name: growthTitle, targetCount: Number(growthTarget) || 7 });
-        showToast('Habit added!');
+        showToast('Habit added. It reminds you at 8 PM; change or turn it off on the habit.');
       } else if (activeGrowthTab === 'notes') {
         await api.notes.create({ title: growthTitle });
         showToast('Note added!');
