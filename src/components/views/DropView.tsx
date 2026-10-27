@@ -216,11 +216,13 @@ export function DropView() {
             <FolderOpen size={14} /> Pick a folder
           </button>
         </div>
-        <input ref={fileInput} type="file" multiple hidden accept=".html,.htm,.zip,text/html,application/zip,*/*"
-          onChange={e => { const f = filesFromInput(e.target.files); e.target.value = ''; send(f, f.length === 1 ? f[0].path : `${f.length} files`); }} />
-        <input ref={folderInput} type="file" hidden {...({ webkitdirectory: '', directory: '' } as any)}
-          onChange={e => { const f = filesFromInput(e.target.files); e.target.value = ''; send(f, f[0]?.path.split('/')[0] || 'folder'); }} />
       </div>
+
+      {/* Outside the zone, so their own clicks don't bubble up and open the file picker instead. */}
+      <input ref={fileInput} type="file" multiple hidden accept=".html,.htm,.zip,text/html,application/zip,*/*"
+        onChange={e => { const f = filesFromInput(e.target.files); e.target.value = ''; send(f, f.length === 1 ? f[0].path : `${f.length} files`); }} />
+      <input ref={folderInput} type="file" hidden {...({ webkitdirectory: '', directory: '' } as any)}
+        onChange={e => { const f = filesFromInput(e.target.files); e.target.value = ''; send(f, f[0]?.path.split('/')[0] || 'folder'); }} />
 
       <div className="flex items-center justify-center gap-2 flex-wrap">
         <span className="text-[13px] text-gray-500 flex items-center gap-1.5"><Clock size={14} /> Link lasts</span>
