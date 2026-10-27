@@ -58,7 +58,7 @@ export const dropLink = (drop: Drop, base: string | null): string =>
 
 export const dropApi = {
   list: () => call<DropList>('/api/drops'),
-  create: (files: DropFile[], hours: number, name = '', source = 'upload') => {
+  create: (files: DropFile[], hours: number, name = '', source = 'upload', onProgress?: (sent: number, total: number) => void) => {
     const form = new FormData();
     for (const f of files) {
       form.append('files', f.file, f.path.split('/').pop() || 'file');
@@ -67,7 +67,22 @@ export const dropApi = {
     form.append('hours', String(hours));
     form.append('source', source);
     if (name) form.append('name', name);
-    return call<{ drop: Drop; base: string | null }>('/api/drops', { method: 'POST', body: form });
+    // XHR, because fetch can't report how much of an upload has gone.
+    return new Promise<{ drop: Drop; base: string | null }>((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', `${piBackendUrl()}/api/drops`);
+      for (const [k, v] of Object.entries(piHeaders())) xhr.setRequestHeader(k, v);
+      if (onProgress) xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
+      xhr.upload.onload = () => onProgress?.(1, 1);
+      xhr.onerror = () => reject(new Error("Can't reach the Pi"));
+      xhr.onload = () => {
+        let data: any = {};
+        try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+        if (xhr.status >= 200 && xhr.status < 300 && data.success !== false) resolve(data);
+        else reject(new Error(data.error || data.detail || (xhr.status === 413 ? 'That is too big to share.' : `The Pi answered ${xhr.status}`)));
+      };
+      xhr.send(form);
+    });
   },
   extend: (id: string, hours: number) =>
     call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/extend`, { method: 'POST', body: JSON.stringify({ hours }) }).then(d => d.drop),

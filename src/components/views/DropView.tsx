@@ -31,6 +31,8 @@ export function DropView() {
   };
   const [over, setOver] = useState(false);
   const [busy, setBusy] = useState('');
+  // What the Pi is doing with the drop right now, for the status bar.
+  const [status, setStatus] = useState<{ stage: 'reading' | 'uploading' | 'saving' | 'done' | 'error'; text: string; percent: number } | null>(null);
   const [fresh, setFresh] = useState<Drop | null>(null);
   const [copied, setCopied] = useState('');
   const [, tick] = useState(0);
@@ -69,24 +71,36 @@ export function DropView() {
   };
 
   const send = useCallback(async (files: DropFile[], label: string) => {
-    if (!files.length) return;
+    if (!files.length) { setStatus(null); return; }
     const total = files.reduce((n, f) => n + f.file.size, 0);
     if (total > maxMb * 1024 * 1024) {
       showToast(`That's ${sizeText(total)}. A drop can be up to ${maxMb} MB.`, 'error');
       return;
     }
     setBusy(label);
+    const size = sizeText(total);
+    setStatus({ stage: 'reading', text: `Reading ${files.length} file${files.length === 1 ? '' : 's'} (${size})`, percent: 0 });
     try {
-      const { drop, base: b } = await dropApi.create(files, hours);
+      const { drop, base: b } = await dropApi.create(files, hours, '', 'upload', (sent, all) => {
+        const percent = Math.round((sent / all) * 100);
+        setStatus(percent >= 100
+          ? { stage: 'saving', text: 'Uploaded. The Pi is saving your files and making the link…', percent: 100 }
+          : { stage: 'uploading', text: `Uploading ${label}: ${sizeText(Math.round(total * sent / all))} of ${size}`, percent });
+      });
       setBase(b);
       setFresh(drop);
       setDrops(list => [drop, ...(list || []).filter(d => d.id !== drop.id)]);
+      let copiedNow = false;
       try {
         await navigator.clipboard.writeText(dropLink(drop, b));
         setCopied(drop.id);
+        copiedNow = true;
         setTimeout(() => setCopied(c => (c === drop.id ? '' : c)), 1600);
       } catch { /* the Copy button is right there */ }
+      setStatus({ stage: 'done', text: `Link is live${copiedNow ? ' and copied' : ''}: ${drop.name}, ${drop.files} file${drop.files === 1 ? '' : 's'}`, percent: 100 });
+      setTimeout(() => setStatus(s => (s?.stage === 'done' ? null : s)), 6000);
     } catch (e: any) {
+      setStatus({ stage: 'error', text: e.message || "Couldn't share that", percent: 0 });
       showToast(e.message || "Couldn't share that", 'error');
     } finally {
       setBusy('');
@@ -120,6 +134,7 @@ export function DropView() {
     setOver(false);
     if (busy) return;
     try {
+      setStatus({ stage: 'reading', text: 'Reading what you dropped…', percent: 0 });
       const files = await filesFromDataTransfer(e.dataTransfer);
       send(files, files.length === 1 ? files[0].path : `${files.length} files`);
     } catch {
@@ -217,6 +232,28 @@ export function DropView() {
           </button>
         </div>
       </div>
+
+      {status && (
+        <div role="status" aria-live="polite"
+          className={`rounded-2xl px-4 py-3 space-y-2 ring-1 ${status.stage === 'error' ? 'bg-red-500/10 ring-red-500/30' : status.stage === 'done' ? 'bg-emerald-500/10 ring-emerald-500/30' : 'bg-blue-500/[0.07] ring-blue-500/20'}`}>
+          <div className="flex items-center gap-2 text-[13.5px] font-medium text-gray-800 dark:text-gray-100">
+            {status.stage === 'error' ? <AlertTriangle size={15} className="text-red-500 shrink-0" />
+              : status.stage === 'done' ? <Check size={15} className="text-emerald-600 shrink-0" />
+              : <Loader2 size={15} className="animate-spin text-blue-600 shrink-0" />}
+            <span className="min-w-0 flex-1">{status.text}</span>
+            {(status.stage === 'uploading') && <span className="tabular-nums text-gray-500">{status.percent}%</span>}
+            {(status.stage === 'error' || status.stage === 'done') && (
+              <button onClick={() => setStatus(null)} className="text-[12px] font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Dismiss</button>
+            )}
+          </div>
+          {status.stage !== 'error' && (
+            <div className="h-1.5 rounded-full bg-black/[0.07] dark:bg-white/10 overflow-hidden" aria-hidden>
+              <div className={`h-full rounded-full transition-[width] duration-200 ${status.stage === 'done' ? 'bg-emerald-500' : 'bg-blue-600'} ${status.stage === 'saving' || status.stage === 'reading' ? 'animate-pulse' : ''}`}
+                style={{ width: `${status.stage === 'saving' || status.stage === 'done' ? 100 : Math.max(status.percent, status.stage === 'reading' ? 8 : 2)}%` }} />
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Outside the zone, so their own clicks don't bubble up and open the file picker instead. */}
       <input ref={fileInput} type="file" multiple hidden accept=".html,.htm,.zip,text/html,application/zip,*/*"
