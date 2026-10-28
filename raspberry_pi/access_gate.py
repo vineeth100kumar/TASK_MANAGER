@@ -414,7 +414,7 @@ window.SageLoader = (function () {
 
 
 def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> str:
-    """The password page, drawn to match the app: Inter, the Sage logo, the
+    """The password page, drawn to match the app: Inter, the loader mark, the
     app's black/white buttons, and whichever theme the app was last left in
     (it saves that as sage-theme in this browser)."""
     error = f'<p class="error" role="alert">{html.escape(message)}</p>' if message else ""
@@ -476,11 +476,6 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
     -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }}
   .wrap {{ width: 100%; max-width: 360px; animation: rise .5s cubic-bezier(0.16, 1, 0.3, 1) both; }}
-  .logo {{ display: flex; justify-content: center; margin-bottom: 28px; }}
-  .logo img {{ height: 40px; width: auto; user-select: none; }}
-  .logo .dark-only {{ display: none; }}
-  html.dark .logo .light-only {{ display: none; }}
-  html.dark .logo .dark-only {{ display: block; }}
   form {{
     background: var(--card); border: 1px solid var(--line); border-radius: 24px; padding: 28px 24px 24px;
     box-shadow: 0 1px 2px rgba(0,0,0,0.04), 0 12px 32px -12px rgba(0,0,0,0.12); text-align: center;
@@ -528,11 +523,6 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
 </head>
 <body>
 <main class="wrap" id="wrap">
-  <div class="logo">
-    <img class="light-only" src="/logo-light.png" alt="Sage" draggable="false">
-    <img class="dark-only" src="/logo-dark.png" alt="Sage" draggable="false">
-  </div>
-
   {loader_html("Opening Sage", bool(message))}
 
   <form id="form" method="post" action="/login"{form_hidden}>
