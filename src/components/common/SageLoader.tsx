@@ -26,7 +26,7 @@ const ICONS: { label: string; paths: string[] }[] = [
   { label: 'habit', paths: ['M20 7a8 8 0 1 0 1.5 6', 'M20 3v4h-4'] },
 ];
 
-const HOLD_MS = 900;
+const HOLD_MS = 650;
 
 export function SageLoader({ error, onRetry }: { error?: string; onRetry?: () => void }) {
   const [i, setI] = useState(0);
