@@ -9,7 +9,6 @@ import httpx
 from fastapi import FastAPI, File, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from urllib.parse import parse_qs, quote
@@ -32,6 +31,8 @@ import radar
 import radar_research
 import sparks
 import system_health
+import web_files
+from web_files import WebFiles
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -187,6 +188,11 @@ async def require_login(request, call_next):
     if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
         # Each opening of the app takes the password, so this page must not
         # be kept for the back button or reused from the browser's cache.
+        # It must also come back whole: a "304 Not Modified" here spends the
+        # ticket on an empty answer, and with no-store the browser has no copy
+        # to fall back on, so it shows a blank white page.
+        request.scope["headers"] = [(k, v) for k, v in request.scope["headers"]
+                                    if k not in (b"if-none-match", b"if-modified-since")]
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.delete_cookie(access_gate.OPEN_COOKIE)
@@ -651,7 +657,7 @@ def _deleted_ids(cursor, since: int = 0) -> Dict[str, list]:
 
 
 @app.get("/api/sync/all")
-def get_all_data():
+def get_all_data(request: Request):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     server_rev = get_server_revision(cursor)
@@ -659,13 +665,15 @@ def get_all_data():
     data = _rows_by_table(cursor.fetchall())
     deleted = _deleted_ids(cursor)
     conn.close()
-    return {
+    # Every opening of the app pulls this whole copy (megabytes of JSON), so it
+    # travels gzipped to browsers that take it: about a tenth of the size.
+    return web_files.json_maybe_gzip(request, {
         "success": True,
         "schemaVersion": 5,
         "serverRevision": server_rev,
         "data": data,
         "deleted": deleted,
-    }
+    })
 
 @app.get("/api/sync/changes")
 def get_changes_since(sinceRevision: int = 0):
@@ -2031,7 +2039,8 @@ app.include_router(drop.router)
 
 
 if (DIST_DIR / "index.html").is_file():
-    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
+    # Hashed /assets/ files are cached for a year and sent pre-compressed (web_files.py).
+    app.mount("/", WebFiles(directory=str(DIST_DIR), html=True), name="web")
 else:
     print(f"No built web app at {DIST_DIR}; run `npm run build` in the repo root to serve it here.")
 

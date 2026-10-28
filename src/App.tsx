@@ -292,8 +292,9 @@ function MainApp() {
     return () => clearTimeout(debounceTimer);
   }, [filters.search, fetchWorkItems]);
 
-  // Fetch the other pages' code in the background once the first screen is up.
-  useEffect(() => { prefetchViews(); }, []);
+  // Fetch the other pages' code in the background once the first screen is up,
+  // not while the splash is still waiting on the app's own code and data.
+  useEffect(() => { if (booted) prefetchViews(); }, [booted]);
 
   // Never let the splash trap the app: show it for at most a few seconds even
   // if the first data pull is slow or the Pi is unreachable.

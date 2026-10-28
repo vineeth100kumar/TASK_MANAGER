@@ -168,6 +168,16 @@ class PasswordEveryVisitTests(unittest.TestCase):
         self.assertNotEqual(self.browser.get("/assets/app.js", headers={"Sec-Fetch-Dest": "script"}).status_code, 303)
         self.assertEqual(self.browser.get("/notes", headers={"Sec-Fetch-Dest": "document"}).status_code, 303)
 
+    @unittest.skipUnless((db_server.DIST_DIR / "index.html").is_file(), "needs the built web app")
+    def test_a_page_load_after_the_password_is_never_an_empty_304(self):
+        # A browser holding an old copy asks "changed since?"; answering 304
+        # spent the ticket on an empty page (the white screen after login).
+        self.log_in()
+        page = self.browser.get("/", headers={"Sec-Fetch-Dest": "document",
+                                              "If-Modified-Since": "Fri, 01 Jan 2100 00:00:00 GMT"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="root"', page.text)
+
     def test_a_ticket_works_once_even_if_copied(self):
         ticket = self.log_in().cookies[access_gate.OPEN_COOKIE]
         self.assertTrue(access_gate.spend_open_ticket(ticket))
