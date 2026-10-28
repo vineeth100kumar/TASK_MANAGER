@@ -260,7 +260,7 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
       <div className={`flex-1 flex-col bg-white dark:bg-[#1c1c1e] min-w-0 ${isEditorOpen ? 'flex' : 'hidden md:flex'}`}>
         {selectedNoteId ? (
           <>
-            <div className="p-4 md:p-8 pb-3 md:pb-4 border-b border-gray-100 dark:border-white/5 flex items-center gap-2">
+            <div className={`${selectedNote && isMap(selectedNote) ? 'p-3 md:p-4' : 'p-4 md:p-8 pb-3 md:pb-4'} border-b border-gray-100 dark:border-white/5 flex items-center gap-2`}>
               <button onClick={() => setIsEditorOpen(false)} className="md:hidden -ml-1 p-1.5 rounded-lg text-gray-500 hover:bg-black/5 dark:hover:bg-white/10" aria-label="Back to notes">
                 <ChevronLeft size={20} />
               </button>

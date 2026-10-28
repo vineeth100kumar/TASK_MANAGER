@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
-import { GitBranch, GitMerge, ArrowUp, X, Trash2, CornerDownRight, Plus, ListTree, Network } from 'lucide-react';
+import { GitBranch, GitMerge, ArrowUp, X, Trash2, CornerDownRight, Plus, ListTree, Network, Maximize2, Minimize2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { Note, Thought, ThoughtStatus } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -97,12 +97,30 @@ export function ThoughtMapView({ map }: Props) {
   const [topicFilter, setTopicFilter] = useState<string | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const listEnd = useRef<HTMLDivElement>(null);
+  const root = useRef<HTMLDivElement>(null);
+  const [full, setFull] = useState(false);
   const wide = useWide();
   const geo = wide ? WIDE : NARROW;
   const [view, setViewState] = useState<MapView>(() => {
     try { return localStorage.getItem(VIEW_KEY) === 'tree' ? 'tree' : 'timeline'; } catch { return 'timeline'; }
   });
   const setView = (v: MapView) => { setViewState(v); try { localStorage.setItem(VIEW_KEY, v); } catch { /* private window */ } };
+
+  // Full screen: the real Fullscreen API where there is one, a fixed overlay otherwise (iPhone Safari). Esc exits either way.
+  useEffect(() => {
+    if (!full) return;
+    try { root.current?.requestFullscreen?.()?.catch(() => {}); } catch { /* the overlay is enough */ }
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setFull(false); };
+    const onFs = () => { if (!document.fullscreenElement) setFull(false); };
+    window.addEventListener('keydown', onKey);
+    document.addEventListener('fullscreenchange', onFs);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      document.removeEventListener('fullscreenchange', onFs);
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+    };
+  }, [full]);
+  useEffect(() => setFull(false), [map.id]);
 
   const load = async () => setThoughts(await api.thoughts.list(map.id));
   useEffect(() => { setStatusFilter(null); setTopicFilter(null); setOpenId(null); load(); }, [map.id]);
@@ -139,8 +157,8 @@ export function ThoughtMapView({ map }: Props) {
   };
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
-      <div className="px-4 md:px-8 pt-3 pb-3 border-b border-gray-100 dark:border-white/5 space-y-2.5">
+    <div ref={root} className={`flex-1 flex flex-col min-h-0 ${full ? 'fixed inset-0 z-[100] bg-white dark:bg-[#1c1c1e] pt-[env(safe-area-inset-top)]' : ''}`}>
+      <div className="px-3 md:px-6 pt-3 pb-3 border-b border-gray-100 dark:border-white/5 space-y-2.5">
         <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
           {STATUSES.map(s => (
             <button key={s} onClick={() => setStatusFilter(f => f === s ? null : s)}
@@ -166,6 +184,10 @@ export function ThoughtMapView({ map }: Props) {
             </button>
           ))}
         </div>
+        <button onClick={() => setFull(f => !f)} aria-label={full ? 'Exit full screen' : 'Full screen'} title={full ? 'Exit full screen (Esc)' : 'Full screen'}
+          className="order-last shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-[12px] font-semibold bg-black/[0.05] dark:bg-white/[0.06] text-gray-700 dark:text-gray-200">
+          {full ? <Minimize2 size={14} /> : <Maximize2 size={14} />}<span className="hidden sm:inline">{full ? 'Exit' : 'Full screen'}</span>
+        </button>
         {topics.length > 0 && (
           <div className="flex-1 min-w-0 flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-1 px-1">
             <TopicChip name="All topics" color={MAIN_COLOR} active={!topicFilter} onClick={() => setTopicFilter(null)} />
@@ -178,7 +200,7 @@ export function ThoughtMapView({ map }: Props) {
         </div>
       </div>
 
-      <div className="flex-1 overflow-y-auto custom-scrollbar px-2 md:px-6 py-2">
+      <div className="flex-1 overflow-y-auto custom-scrollbar px-1 md:px-3 py-2">
         {thoughts.length === 0 ? (
           <EmptyMap />
         ) : shown.length === 0 ? (
