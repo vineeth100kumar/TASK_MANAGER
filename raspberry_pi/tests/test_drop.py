@@ -209,5 +209,90 @@ class DropTests(unittest.TestCase):
             self.assertEqual(stranger.get("/", headers={"Sec-Fetch-Dest": "document"}).status_code, 303)
 
 
+    # --- Clipboard: temporary text links ---
+
+    def test_a_clip_shares_text_at_a_link_with_a_raw_copy(self):
+        res = client.post("/api/drops/clip", json={"text": "hello world\nsecond line"})
+        self.assertEqual(res.status_code, 200)
+        d = res.json()["drop"]
+        self.assertEqual(d["kind"], "clip")
+        self.assertFalse(d["permanent"])
+        self.assertEqual(d["name"], "hello world")
+        page = client.get(d["path"], headers={"Sec-Fetch-Dest": "document"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("hello world", page.text)
+        self.assertIn("Copy", page.text)
+        raw = client.get(d["path"] + "raw")
+        self.assertEqual(raw.text, "hello world\nsecond line")
+        self.assertIn("text/plain", raw.headers["content-type"])
+
+    def test_an_empty_clip_is_refused(self):
+        self.assertEqual(client.post("/api/drops/clip", json={"text": "   "}).status_code, 400)
+
+    def test_a_clip_cannot_be_made_permanent(self):
+        d = client.post("/api/drops/clip", json={"text": "x"}).json()["drop"]
+        res = client.post(f"/api/drops/{d['id']}/permanent", json={"on": True})
+        self.assertEqual(res.status_code, 400)
+        self.assertIn("temporary", res.json()["error"])
+
+    def test_a_clip_is_capped_at_a_week(self):
+        d = client.post("/api/drops/clip", json={"text": "x", "hours": 9999}).json()["drop"]
+        self.assertLessEqual(d["expiresAt"] - d["createdAt"], drop.CLIP_MAX_HOURS * 3600 + 1)
+
+    # --- Permanent links ---
+
+    def test_a_site_link_can_be_made_permanent_and_temporary_again(self):
+        d = upload([("a.html", b"hi")]).json()["drop"]
+        on = client.post(f"/api/drops/{d['id']}/permanent", json={"on": True}).json()["drop"]
+        self.assertTrue(on["permanent"])
+        # A permanent drop in the past is not swept away.
+        conn = drop._db()
+        conn.execute("UPDATE drops SET expires_at = ? WHERE id = ?", (time.time() - 10, d["id"]))
+        conn.commit(); conn.close()
+        self.assertEqual(drop.sweep(), 0)
+        self.assertEqual(client.get(d["path"], headers={"Sec-Fetch-Dest": "document"}).status_code, 200)
+        off = client.post(f"/api/drops/{d['id']}/permanent", json={"on": False}).json()["drop"]
+        self.assertFalse(off["permanent"])
+        self.assertGreater(off["expiresAt"], time.time())
+
+    # --- Turning a link off and back on ---
+
+    def test_a_link_can_be_turned_off_and_back_on(self):
+        d = upload([("a.html", b"hi")]).json()["drop"]
+        client.post(f"/api/drops/{d['id']}/enabled", json={"on": False})
+        off = client.get(d["path"], headers={"Sec-Fetch-Dest": "document"})
+        self.assertEqual(off.status_code, 403)
+        self.assertIn("turned off", off.text)
+        # The files are still there; turning it back on serves them again.
+        client.post(f"/api/drops/{d['id']}/enabled", json={"on": True})
+        self.assertEqual(client.get(d["path"], headers={"Sec-Fetch-Dest": "document"}).status_code, 200)
+
+    def test_toggles_report_a_gone_drop(self):
+        self.assertEqual(client.post("/api/drops/nope/enabled", json={"on": False}).status_code, 400)
+        self.assertEqual(client.post("/api/drops/nope/permanent", json={"on": True}).status_code, 400)
+
+    # --- Storage stats ---
+
+    def test_drop_usage_counts_sites_clips_and_permanent(self):
+        upload([("a.html", b"hi")])
+        p = upload([("b.html", b"ho")]).json()["drop"]
+        client.post(f"/api/drops/{p['id']}/permanent", json={"on": True})
+        client.post("/api/drops/clip", json={"text": "note"})
+        u = drop.usage()
+        self.assertEqual(u["sites"], 2)
+        self.assertEqual(u["clips"], 1)
+        self.assertEqual(u["permanent"], 1)
+        self.assertGreater(u["bytes"], 0)
+
+    def test_storage_endpoint_reports_disk_and_sage_files(self):
+        upload([("a.html", b"hi there")])
+        s = client.get("/api/storage").json()
+        self.assertTrue(s["success"])
+        self.assertGreater(s["disk"]["total"], 0)
+        self.assertIn("bytes", s["db"])
+        self.assertIn("bytes", s["backups"])
+        self.assertGreaterEqual(s["drop"]["sites"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -19,12 +19,25 @@ export interface Drop {
   views: number;
   lastView: number | null;
   source: string;
+  kind: 'site' | 'clip';
+  permanent: boolean;
+  disabled: boolean;
+  preview?: string;    // first bit of the text, for clips
 }
 
 export interface DropList {
   drops: Drop[];
   base: string | null;   // the public address, if the Pi has one
   maxMb: number;
+  clipMaxHours: number;
+  clipMaxKb: number;
+}
+
+export interface Storage {
+  disk: { total: number; used: number; free: number };
+  db: { bytes: number; path: string };
+  backups: { bytes: number; count: number; folder: string };
+  drop: { bytes: number; sites: number; clips: number; permanent: number; folder: string };
 }
 
 // The file and the folder-relative path it goes under in the drop.
@@ -87,6 +100,13 @@ export const dropApi = {
   extend: (id: string, hours: number) =>
     call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/extend`, { method: 'POST', body: JSON.stringify({ hours }) }).then(d => d.drop),
   remove: (id: string) => call<{ success: boolean }>(`/api/drops/${encodeURIComponent(id)}`, { method: 'DELETE' }),
+  clip: (text: string, hours: number, name = '') =>
+    call<{ drop: Drop; base: string | null }>('/api/drops/clip', { method: 'POST', body: JSON.stringify({ text, hours, name }) }),
+  setPermanent: (id: string, on: boolean) =>
+    call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/permanent`, { method: 'POST', body: JSON.stringify({ on }) }).then(d => d.drop),
+  setEnabled: (id: string, on: boolean) =>
+    call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/enabled`, { method: 'POST', body: JSON.stringify({ on }) }).then(d => d.drop),
+  storage: () => call<Storage>('/api/storage'),
 };
 
 /** Shares one HTML page (a Notes report) and returns its link. */
