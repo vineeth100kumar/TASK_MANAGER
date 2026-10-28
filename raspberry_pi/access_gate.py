@@ -197,20 +197,13 @@ def safe_next(target: Optional[str]) -> str:
     return "/"
 
 
-# The seven Sage glyphs the loading screen draws itself into, in order. Shared
+# The Sage logo mark (the S with its arrow) the loading screen draws itself into,
+# over and over. Shared
 # by the login page here and the app's first-paint splash in index.html, so the
 # animation runs unbroken across the sign-in -> app hand-off. Each is a few
 # single strokes on a 24x24 grid in the app's rounded line style.
 SAGE_LOADER_ICONS_JS = (
-    "["
-    "['M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z','M8.5 12.5l2.5 2.5 5-5.5'],"
-    "['M9 7h11','M9 12h11','M9 17h11','M4 7h.01','M4 12h.01','M4 17h.01'],"
-    "['M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z','M4 10h16','M8 3v4','M16 3v4'],"
-    "['M6 3h8l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z','M14 3v4h4','M8 12h7','M8 16h5'],"
-    "['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z','M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z','M12 11.5a.5.5 0 1 0 0 1 .5.5 0 0 0 0-1z'],"
-    "['M12 3a6 6 0 0 1 4 10.5c-.7.7-1 1.2-1 2.5H9c0-1.3-.3-1.8-1-2.5A6 6 0 0 1 12 3z','M9.5 19h5','M10.5 21.5h3'],"
-    "['M20 7a8 8 0 1 0 1.5 6','M20 3v4h-4']"
-    "]"
+    "[['M11.9,5.7C8.1,5.1 5.7,7 5.9,9.4C6.1,12.5 9.9,14.7 13.7,14.5','M5.7,16.3C6.3,19.6 10.2,19.9 14,19.6C17.5,19.3 18.8,15.8 16.9,12.5C15.9,10.9 14.3,10.2 12.4,10.1L9.8,10.4','M12.7,9.8L18.4,4.1','M14.5,4.5L18.4,4.1L18.1,8.1']]"
 )
 
 
@@ -225,6 +218,7 @@ def loader_css() -> str:
   .loader-label { margin: 22px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
   .loader .bar { margin-top: 16px; width: 92px; height: 4px; border-radius: 999px; background: var(--field); overflow: hidden; }
   .loader .bar i { display: block; width: 45%; height: 100%; border-radius: 999px; background: var(--text); animation: slide 1.1s ease-in-out infinite; }
+  .loader-quote { margin: 20px 0 0; max-width: 300px; font: italic 14px/1.4 Georgia, 'Times New Roman', serif; color: var(--muted); }
   .loader .link { width: auto; height: auto; margin-top: 20px; padding: 6px 10px; background: none; border: 0; box-shadow: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
   .loader .link:hover { filter: none; color: var(--text); }
   @keyframes slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(260%); } }
@@ -238,6 +232,7 @@ def loader_html(label: str, hidden: bool = False) -> str:
     <div class="mark"><svg id="glyph-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g id="glyph"></g></svg></div>
     <p class="loader-label" id="loader-label">{html.escape(label)}</p>
     <div class="bar"><i></i></div>
+    <p class="loader-quote" id="loader-quote"></p>
     <button type="button" id="to-password" class="link" hidden>Use password instead</button>
   </div>"""
 
@@ -255,6 +250,7 @@ def login_script(next_path: str, has_error: bool) -> str:
 window.SageLoader = (function () {
   var ICONS = __ICONS__;
   var HOLD = 650, DRAW = 460, OUT = 240, NS = 'http://www.w3.org/2000/svg';
+  var QUOTES = ['Good things come to those who wait.','Great things take a little time.','Patience is bitter, but its fruit is sweet.','Slow and steady. Your day is coming together.','Almost there. Worth the wait.'];
   var running = false, idx = 0;
   var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
@@ -276,7 +272,8 @@ window.SageLoader = (function () {
       var g = glyph(), s = svg();
       if (!g || !s) { running = false; break; }
       if (!reduce) { s.style.transition = 'none'; s.style.transform = 'rotate(-5deg) scale(.92)'; }
-      var nodes = setPaths(ICONS[idx]);
+      var q = document.getElementById('loader-quote'); if (q && idx % 3 === 0) q.textContent = QUOTES[(idx / 3) % QUOTES.length];
+      var nodes = setPaths(ICONS[idx % ICONS.length]);
       await wait(20);
       if (!running) break;
       if (!reduce) s.style.transition = 'transform ' + DRAW + 'ms cubic-bezier(.16,1,.3,1)';
@@ -289,7 +286,7 @@ window.SageLoader = (function () {
         s.style.transform = 'rotate(5deg) scale(.92)';
         await wait(OUT);
       }
-      idx = (idx + 1) % ICONS.length;
+      idx++;
     }
   }
   return {
