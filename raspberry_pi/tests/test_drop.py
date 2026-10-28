@@ -359,6 +359,33 @@ class DropTests(unittest.TestCase):
         client.post(f"/api/drops/{d['id']}/enabled", json={"on": True})
         self.assertEqual(client.get(d["path"], headers={"Sec-Fetch-Dest": "document"}).status_code, 200)
 
+    def test_deleting_a_site_removes_every_file_from_disk(self):
+        d = upload([("index.html", b"hi"), ("assets/app.js", b"x"), ("img/a.png", b"y")]).json()["drop"]
+        folder = drop.DROP_DIR / d["id"]
+        self.assertTrue((folder / "assets" / "app.js").exists())
+        self.assertEqual(client.delete(f"/api/drops/{d['id']}").status_code, 200)
+        self.assertFalse(folder.exists())
+
+    def test_deleting_a_clip_removes_its_text_images_and_thumbnails(self):
+        d = self.clip_with_images()
+        self.send_image(d, "cat.png", b"\x89PNG" + b"a" * 100)
+        folder = drop.DROP_DIR / d["id"]
+        self.assertTrue(any(folder.rglob("*.png")))
+        self.assertEqual(client.delete(f"/api/drops/{d['id']}").status_code, 200)
+        self.assertFalse(folder.exists())
+
+    def test_turning_a_link_off_keeps_its_files(self):
+        d = upload([("a.html", b"hi")]).json()["drop"]
+        client.post(f"/api/drops/{d['id']}/enabled", json={"on": False})
+        self.assertTrue((drop.DROP_DIR / d["id"] / "a.html").exists())
+
+    def test_sweep_removes_folders_left_behind_without_a_link(self):
+        orphan = drop.DROP_DIR / "orphaned1"
+        orphan.mkdir(parents=True, exist_ok=True)
+        (orphan / "left.html").write_bytes(b"x")
+        drop.sweep(now=time.time() + 120)
+        self.assertFalse(orphan.exists())
+
     def test_toggles_report_a_gone_drop(self):
         self.assertEqual(client.post("/api/drops/nope/enabled", json={"on": False}).status_code, 400)
         self.assertEqual(client.post("/api/drops/nope/permanent", json={"on": True}).status_code, 400)

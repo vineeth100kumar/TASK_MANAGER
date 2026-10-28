@@ -164,7 +164,11 @@ export function DropView() {
     }
   };
 
+  const [confirmDelete, setConfirmDelete] = useState<Drop | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
   const remove = async (drop: Drop) => {
+    setDeleting(true);
     try {
       await dropApi.remove(drop.id);
       setDrops(list => (list || []).filter(d => d.id !== drop.id));
@@ -172,6 +176,9 @@ export function DropView() {
       showToast('Link deleted');
     } catch (e: any) {
       showToast(e.message, 'error');
+    } finally {
+      setDeleting(false);
+      setConfirmDelete(null);
     }
   };
 
@@ -547,7 +554,7 @@ export function DropView() {
                       className={`grid place-items-center w-9 h-9 rounded-xl transition ${d.disabled ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15' : 'text-gray-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white'}`}>
                       <Power size={16} />
                     </button>
-                    <button onClick={() => remove(d)} title="Delete this link for good" aria-label="Delete link"
+                    <button onClick={() => setConfirmDelete(d)} title="Delete this link and its files for good" aria-label="Delete link"
                       className="grid place-items-center w-9 h-9 rounded-xl text-gray-500 hover:bg-red-500/10 hover:text-red-600 transition"><Trash2 size={16} /></button>
                   </div>
                 </motion.li>
@@ -559,6 +566,25 @@ export function DropView() {
           Anyone with a link can open it until it switches off, or you turn it off or delete it. Permanent links stay until you remove them. Nothing else in Sage is shared, and pages run in a sandbox, so their scripts can't reach Sage.
         </p>
       </section>
+      {confirmDelete && (
+        <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={() => !deleting && setConfirmDelete(null)}>
+          <div role="alertdialog" aria-modal="true" aria-labelledby="drop-del-title" onClick={e => e.stopPropagation()}
+            className="w-full max-w-sm rounded-2xl bg-white dark:bg-neutral-900 border border-black/10 dark:border-white/10 p-5 shadow-xl">
+            <h3 id="drop-del-title" className="text-base font-semibold text-gray-900 dark:text-white">Delete “{confirmDelete.name}”?</h3>
+            <p className="mt-2 text-sm text-gray-600 dark:text-gray-400">
+              This deletes the link and permanently removes {confirmDelete.kind === 'clip' ? 'its text and every image' : 'all of its files'} from your Pi. It can't be undone. To keep the files, turn the link off instead.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setConfirmDelete(null)} disabled={deleting}
+                className="h-9 px-4 rounded-xl text-sm font-semibold text-gray-700 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10 transition">Cancel</button>
+              <button onClick={() => remove(confirmDelete)} disabled={deleting}
+                className="h-9 px-4 rounded-xl text-sm font-semibold text-white bg-red-600 hover:bg-red-700 active:scale-95 transition disabled:opacity-60">
+                {deleting ? 'Deleting…' : 'Delete forever'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
