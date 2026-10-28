@@ -197,20 +197,118 @@ def safe_next(target: Optional[str]) -> str:
     return "/"
 
 
-def passkey_script(next_path: str) -> str:
-    """The login page's "unlock with this device" button. It only shows itself
-    once it has checked the browser can do it and that a device is trusted, so a
-    plain-http or never-trusted visitor just sees the password box. All the
-    conversions are base64url <-> bytes; the Pi (passkeys.py) does the crypto."""
+# The seven Sage glyphs the loading screen draws itself into, in order. Shared
+# by the login page here and the app's first-paint splash in index.html, so the
+# animation runs unbroken across the sign-in -> app hand-off. Each is a few
+# single strokes on a 24x24 grid in the app's rounded line style.
+SAGE_LOADER_ICONS_JS = (
+    "["
+    "['M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z','M8.5 12.5l2.5 2.5 5-5.5'],"
+    "['M9 7h11','M9 12h11','M9 17h11','M4 7h.01','M4 12h.01','M4 17h.01'],"
+    "['M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z','M4 10h16','M8 3v4','M16 3v4'],"
+    "['M6 3h8l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z','M14 3v4h4','M8 12h7','M8 16h5'],"
+    "['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z','M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z','M12 11.5a.5.5 0 1 0 0 1 .5.5 0 0 0 0-1z'],"
+    "['M12 3a6 6 0 0 1 4 10.5c-.7.7-1 1.2-1 2.5H9c0-1.3-.3-1.8-1-2.5A6 6 0 0 1 12 3z','M9.5 19h5','M10.5 21.5h3'],"
+    "['M20 7a8 8 0 1 0 1.5 6','M20 3v4h-4']"
+    "]"
+)
+
+
+def loader_css() -> str:
+    """Styles for the morphing loading screen, injected into the login page's
+    stylesheet. Mirrored by index.html's first-paint splash."""
+    return """
+  .loader { display: flex; flex-direction: column; align-items: center; text-align: center; animation: rise .4s cubic-bezier(.16,1,.3,1) both; }
+  .loader .mark { color: var(--text); }
+  .loader .mark svg { width: 84px; height: 84px; overflow: visible; transform-origin: 50% 50%; }
+  .loader .mark svg path { fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 1; }
+  .loader-label { margin: 22px 0 0; font-size: 15px; font-weight: 600; letter-spacing: -0.01em; color: var(--text); }
+  .loader .bar { margin-top: 16px; width: 92px; height: 4px; border-radius: 999px; background: var(--field); overflow: hidden; }
+  .loader .bar i { display: block; width: 45%; height: 100%; border-radius: 999px; background: var(--text); animation: slide 1.1s ease-in-out infinite; }
+  .loader .link { width: auto; height: auto; margin-top: 20px; padding: 6px 10px; background: none; border: 0; box-shadow: none; color: var(--muted); font-size: 13px; font-weight: 500; cursor: pointer; }
+  .loader .link:hover { filter: none; color: var(--text); }
+  @keyframes slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(260%); } }
+  @media (prefers-reduced-motion: reduce) { .loader .bar i { animation: none; } }
+"""
+
+
+def loader_html(label: str, hidden: bool = False) -> str:
+    attr = " hidden" if hidden else ""
+    return f"""<div id="loader" class="loader"{attr}>
+    <div class="mark"><svg id="glyph-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g id="glyph"></g></svg></div>
+    <p class="loader-label" id="loader-label">{html.escape(label)}</p>
+    <div class="bar"><i></i></div>
+    <button type="button" id="to-password" class="link" hidden>Use password instead</button>
+  </div>"""
+
+
+def login_script(next_path: str, has_error: bool) -> str:
+    """The login page's brain. Once a device is trusted, opening Sage unlocks it
+    automatically with the device's own Face ID / fingerprint / PIN (the primary
+    path); the password is the manual fallback. The loading animation covers the
+    whole wait — the trusted-device check, the sign-in, and the app loading."""
     import json
     next_js = json.dumps(next_path)
-    return """
+    has_error_js = "true" if has_error else "false"
+    return (
+        """
+window.SageLoader = (function () {
+  var ICONS = __ICONS__;
+  var HOLD = 650, DRAW = 460, OUT = 240, NS = 'http://www.w3.org/2000/svg';
+  var running = false, idx = 0;
+  var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
+  function glyph() { return document.getElementById('glyph'); }
+  function svg() { return document.getElementById('glyph-svg'); }
+  function setPaths(ps) {
+    var g = glyph(); if (!g) return [];
+    g.textContent = '';
+    return ps.map(function (d, k) {
+      var p = document.createElementNS(NS, 'path');
+      p.setAttribute('d', d); p.setAttribute('pathLength', '1');
+      p.style.strokeDashoffset = '1'; p.style.opacity = '0';
+      p.style.transition = reduce ? 'none' : ('stroke-dashoffset ' + DRAW + 'ms ease ' + (k * 55) + 'ms, opacity 200ms ' + (k * 55) + 'ms');
+      g.appendChild(p); return p;
+    });
+  }
+  async function loop() {
+    while (running) {
+      var g = glyph(), s = svg();
+      if (!g || !s) { running = false; break; }
+      if (!reduce) { s.style.transition = 'none'; s.style.transform = 'rotate(-5deg) scale(.92)'; }
+      var nodes = setPaths(ICONS[idx]);
+      await wait(20);
+      if (!running) break;
+      if (!reduce) s.style.transition = 'transform ' + DRAW + 'ms cubic-bezier(.16,1,.3,1)';
+      s.style.transform = 'rotate(0deg) scale(1)';
+      nodes.forEach(function (p) { p.style.strokeDashoffset = '0'; p.style.opacity = '1'; });
+      await wait(reduce ? 1200 : HOLD + DRAW);
+      if (!running) break;
+      if (!reduce) {
+        nodes.forEach(function (p) { p.style.strokeDashoffset = '1'; p.style.opacity = '0'; });
+        s.style.transform = 'rotate(5deg) scale(.92)';
+        await wait(OUT);
+      }
+      idx = (idx + 1) % ICONS.length;
+    }
+  }
+  return {
+    start: function () { if (running) return; running = true; idx = 0; loop(); },
+    stop: function () { running = false; },
+    label: function (t) { var el = document.getElementById('loader-label'); if (el) el.textContent = t; }
+  };
+})();
+
 (function () {
-  var wrap = document.getElementById('passkey-wrap');
-  var btn = document.getElementById('passkey-btn');
-  var msg = document.getElementById('passkey-msg');
-  var NEXT = __NEXT__;
-  if (!wrap || !btn || !window.PublicKeyCredential || !window.isSecureContext) return;
+  var NEXT = __NEXT__, HAS_ERROR = __HAS_ERROR__;
+  var loader = document.getElementById('loader');
+  var form = document.getElementById('form');
+  var foot = document.getElementById('foot');
+  var pkBtn = document.getElementById('passkey-btn');
+  var pkMsg = document.getElementById('passkey-msg');
+  var toPw = document.getElementById('to-password');
+  var pwInput = form.querySelector('input[type=password]');
+  var supported = !!(window.PublicKeyCredential && window.isSecureContext && navigator.credentials && navigator.credentials.get);
 
   function b64urlToBuf(v) {
     v = v.replace(/-/g, '+').replace(/_/g, '/');
@@ -225,55 +323,97 @@ def passkey_script(next_path: str) -> str:
     return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
   }
 
+  function showForm(focus) {
+    if (window.SageLoader) SageLoader.stop();
+    loader.hidden = true; form.hidden = false; foot.hidden = false;
+    if (focus && pwInput) { try { pwInput.focus(); } catch (e) {} }
+  }
+  function showLoader(label) {
+    form.hidden = true; foot.hidden = true; loader.hidden = false;
+    if (window.SageLoader) { SageLoader.label(label); SageLoader.start(); }
+  }
+
+  async function doPasskey() {
+    var r = await fetch('/api/webauthn/auth/begin', { method: 'POST', credentials: 'include' });
+    var opts = await r.json();
+    if (!r.ok) throw new Error(opts.error || 'No trusted device.');
+    var session = opts.sageSession; delete opts.sageSession;
+    opts.challenge = b64urlToBuf(opts.challenge);
+    opts.allowCredentials = (opts.allowCredentials || []).map(function (c) { c.id = b64urlToBuf(c.id); return c; });
+    var cred = await navigator.credentials.get({ publicKey: opts });
+    var resp = cred.response;
+    var payload = {
+      id: cred.id, rawId: bufToB64url(cred.rawId), type: cred.type,
+      response: {
+        clientDataJSON: bufToB64url(resp.clientDataJSON),
+        authenticatorData: bufToB64url(resp.authenticatorData),
+        signature: bufToB64url(resp.signature),
+        userHandle: resp.userHandle ? bufToB64url(resp.userHandle) : null
+      },
+      clientExtensionResults: cred.getClientExtensionResults(),
+      authenticatorAttachment: cred.authenticatorAttachment
+    };
+    var cr = await fetch('/api/webauthn/auth/complete', {
+      method: 'POST', credentials: 'include',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credential: payload, session: session })
+    });
+    var cd = await cr.json();
+    if (!cr.ok || !cd.success) throw new Error(cd.error || "That didn't work.");
+    return true;
+  }
+
+  async function unlockWithDevice() {
+    if (pkMsg) pkMsg.textContent = '';
+    showLoader('Unlocking Sage');
+    if (toPw) toPw.hidden = false;
+    try {
+      await doPasskey();
+      if (toPw) toPw.hidden = true;
+      if (window.SageLoader) SageLoader.label('Opening Sage');
+      window.location.href = NEXT;
+    } catch (e) {
+      showForm(true);
+      if (pkBtn) pkBtn.hidden = false;
+      var benign = e && (e.name === 'NotAllowedError' || e.name === 'AbortError');
+      if (pkMsg) pkMsg.textContent = benign ? '' : ((e && e.message) || "That didn't work.");
+    }
+  }
+
+  if (toPw) toPw.addEventListener('click', function () { showForm(true); if (pkBtn) pkBtn.hidden = false; });
+  if (pkBtn) pkBtn.addEventListener('click', function () { unlockWithDevice(); });
+
+  // Typing the password: keep the animation up through sign-in and the app load.
+  form.addEventListener('submit', function () { showLoader('Opening Sage'); });
+
+  function offerDeviceButton() {
+    fetch('/api/webauthn/status', { credentials: 'include' })
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (s) { if (s && s.available && s.gate && s.secure && s.hasDevices && pkBtn) pkBtn.hidden = false; })
+      .catch(function () {});
+  }
+
+  if (HAS_ERROR) {
+    // A wrong-password reload: the form is already up. Still offer the device.
+    if (supported) offerDeviceButton();
+    return;
+  }
+  // No error: the loader is the first thing on screen. Start it, then decide.
+  if (window.SageLoader) { SageLoader.label('Opening Sage'); SageLoader.start(); }
+  if (!supported) { showForm(true); return; }
   fetch('/api/webauthn/status', { credentials: 'include' })
     .then(function (r) { return r.ok ? r.json() : null; })
-    .then(function (s) { if (s && s.available && s.gate && s.secure && s.hasDevices) wrap.hidden = false; })
-    .catch(function () {});
-
-  btn.addEventListener('click', function () {
-    msg.textContent = '';
-    btn.disabled = true;
-    var saved = btn.querySelector('span').textContent;
-    btn.querySelector('span').textContent = 'Follow your device…';
-    var session;
-    fetch('/api/webauthn/auth/begin', { method: 'POST', credentials: 'include' })
-      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'No trusted device.'); return d; }); })
-      .then(function (opts) {
-        session = opts.sageSession; delete opts.sageSession;
-        opts.challenge = b64urlToBuf(opts.challenge);
-        opts.allowCredentials = (opts.allowCredentials || []).map(function (c) { c.id = b64urlToBuf(c.id); return c; });
-        return navigator.credentials.get({ publicKey: opts });
-      })
-      .then(function (cred) {
-        var resp = cred.response;
-        var payload = {
-          id: cred.id, rawId: bufToB64url(cred.rawId), type: cred.type,
-          response: {
-            clientDataJSON: bufToB64url(resp.clientDataJSON),
-            authenticatorData: bufToB64url(resp.authenticatorData),
-            signature: bufToB64url(resp.signature),
-            userHandle: resp.userHandle ? bufToB64url(resp.userHandle) : null
-          },
-          clientExtensionResults: cred.getClientExtensionResults(),
-          authenticatorAttachment: cred.authenticatorAttachment
-        };
-        return fetch('/api/webauthn/auth/complete', {
-          method: 'POST', credentials: 'include',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ credential: payload, session: session })
-        });
-      })
-      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.success) throw new Error(d.error || "That didn't work."); }); })
-      .then(function () { window.location.href = NEXT; })
-      .catch(function (e) {
-        if (e && e.name === 'NotAllowedError') msg.textContent = '';
-        else msg.textContent = (e && e.message) || "That didn't work.";
-        btn.disabled = false;
-        btn.querySelector('span').textContent = saved;
-      });
-  });
+    .then(function (s) {
+      if (s && s.available && s.gate && s.secure && s.hasDevices) unlockWithDevice();
+      else showForm(true);
+    })
+    .catch(function () { showForm(true); });
 })();
-""".replace("__NEXT__", next_js)
+"""
+        .replace("__ICONS__", SAGE_LOADER_ICONS_JS)
+        .replace("__NEXT__", next_js)
+        .replace("__HAS_ERROR__", has_error_js)
+    )
 
 
 def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> str:
@@ -281,6 +421,11 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
     app's black/white buttons, and whichever theme the app was last left in
     (it saves that as sage-theme in this browser)."""
     error = f'<p class="error" role="alert">{html.escape(message)}</p>' if message else ""
+    # With a server message (a wrong-password reload) the form shows at once and
+    # takes focus; otherwise the loader shows first and the script decides whether
+    # to auto-unlock with a trusted device or fall back to the form.
+    form_hidden = "" if message else " hidden"
+    autofocus = "autofocus " if message else ""
     font = (
         f'@font-face {{ font-family: "Inter Variable"; font-style: normal; font-display: swap; '
         f'font-weight: 100 900; src: url("{html.escape(font_url)}") format("woff2-variations"); }}'
@@ -381,33 +526,34 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
   @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: none; }} }}
   @keyframes shake {{ 20%, 60% {{ transform: translateX(-6px); }} 40%, 80% {{ transform: translateX(6px); }} }}
   @media (prefers-reduced-motion: reduce) {{ .wrap, .shake form {{ animation: none; }} }}
+  {loader_css()}
 </style>
 </head>
 <body>
-<main class="wrap{' shake' if message else ''}">
+<main class="wrap" id="wrap">
   <div class="logo">
     <img class="light-only" src="/logo-light.png" alt="Sage" draggable="false">
     <img class="dark-only" src="/logo-dark.png" alt="Sage" draggable="false">
   </div>
-  <form method="post" action="/login">
+
+  {loader_html("Opening Sage", bool(message))}
+
+  <form id="form" method="post" action="/login"{form_hidden}>
     <h1>Welcome back</h1>
-    <p class="sub">Enter your password to open Sage.</p>
-    <input type="password" name="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" autofocus required aria-label="Password">
+    <p class="sub" id="form-sub">Enter your password to open Sage.</p>
+    <input type="password" name="password" inputmode="numeric" autocomplete="current-password" placeholder="••••" {autofocus}required aria-label="Password">
     <input type="hidden" name="next" value="{html.escape(next_path)}">
     {error}
     <button type="submit">Unlock</button>
-    <div id="passkey-wrap" hidden>
-      <div class="or"><span>or</span></div>
-      <button type="button" id="passkey-btn" class="ghost">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11a3 3 0 0 0-3 3c0 1.5-.3 2.5-.8 3.3"/><path d="M12 11a3 3 0 0 1 3 3c0 2-.4 3.5-1 4.8"/><path d="M6.5 9a6 6 0 0 1 9-1.3"/><path d="M9 20.5c.6-1.3 1-3 1-6.5"/><path d="M14.7 20a16 16 0 0 0 .3-6 3 3 0 0 0-3-3"/></svg>
-        <span>Unlock with this device</span>
-      </button>
-      <p id="passkey-msg" class="pk-msg" role="status"></p>
-    </div>
+    <button type="button" id="passkey-btn" class="ghost" hidden>
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11a3 3 0 0 0-3 3c0 1.5-.3 2.5-.8 3.3"/><path d="M12 11a3 3 0 0 1 3 3c0 2-.4 3.5-1 4.8"/><path d="M6.5 9a6 6 0 0 1 9-1.3"/><path d="M9 20.5c.6-1.3 1-3 1-6.5"/><path d="M14.7 20a16 16 0 0 0 .3-6 3 3 0 0 0-3-3"/></svg>
+      <span>Unlock with this device</span>
+    </button>
+    <p id="passkey-msg" class="pk-msg" role="status"></p>
   </form>
-  <p class="foot">Sage asks for this each time it opens.</p>
+  <p class="foot" id="foot">Sage asks for this each time it opens.</p>
 </main>
-<script>{passkey_script(next_path)}</script>
+<script>{login_script(next_path, bool(message))}</script>
 </body>
 </html>"""
 
