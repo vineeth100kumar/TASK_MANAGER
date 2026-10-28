@@ -76,7 +76,21 @@ command -v ollama >/dev/null || echo "Ollama is not installed, so AI task parsin
 step "Web app"
 if command -v npm >/dev/null; then
   BACKEND_URL="$(grep '^VITE_PI_BACKEND_URL=' "$ENV_FILE" | cut -d= -f2-)"
-  (cd "$REPO" && as_user npm ci --silent && as_user env VITE_PI_BACKEND_URL="${BACKEND_URL:-/}" npm run build --silent)
+  # Built beside dist/ and swapped in only when it worked, like auto_sync.sh:
+  # a build that fails half way (the Pi running out of memory) must not leave
+  # Sage serving an empty page.
+  rm -rf "$REPO/dist.next"
+  if (cd "$REPO" && as_user npm ci --no-audit --no-fund \
+      && as_user env VITE_PI_BACKEND_URL="${BACKEND_URL:-/}" npm run build -- --outDir dist.next --emptyOutDir) \
+      && [ -s "$REPO/dist.next/index.html" ]; then
+    rm -rf "$REPO/dist.old"
+    [ -d "$REPO/dist" ] && mv "$REPO/dist" "$REPO/dist.old"
+    mv "$REPO/dist.next" "$REPO/dist"
+    rm -rf "$REPO/dist.old"
+  else
+    rm -rf "$REPO/dist.next"
+    echo "The web app build failed (see the lines above); Sage keeps serving the previous version." >&2
+  fi
 else
   echo "npm is not installed, so the web app was not built. Install Node.js 20+ and re-run."
 fi
