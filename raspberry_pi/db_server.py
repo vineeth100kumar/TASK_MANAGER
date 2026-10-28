@@ -174,6 +174,11 @@ async def require_login(request, call_next):
     if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
         # Each opening of the app takes the password, so this page must not
         # be kept for the back button or reused from the browser's cache.
+        # It must also come back whole: a "304 Not Modified" here spends the
+        # ticket on an empty answer, and with no-store the browser has no copy
+        # to fall back on, so it shows a blank white page.
+        request.scope["headers"] = [(k, v) for k, v in request.scope["headers"]
+                                    if k not in (b"if-none-match", b"if-modified-since")]
         response = await call_next(request)
         response.headers["Cache-Control"] = "no-store"
         response.delete_cookie(access_gate.OPEN_COOKIE)
