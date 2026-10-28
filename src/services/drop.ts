@@ -23,6 +23,8 @@ export interface Drop {
   permanent: boolean;
   disabled: boolean;
   preview?: string;    // first bit of the text, for clips
+  images?: number;     // how many images a clip has
+  imageBytes?: number;
 }
 
 export interface DropList {
@@ -31,6 +33,8 @@ export interface DropList {
   maxMb: number;
   clipMaxHours: number;
   clipMaxKb: number;
+  clipImagesMb: number;  // images per clip, in total
+  clipMaxImages: number;
 }
 
 export interface Storage {
@@ -66,6 +70,26 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return data as T;
 }
 
+// XHR, because fetch can't report how much of an upload has gone.
+function upload<T>(path: string, body: FormData | Blob, onProgress?: (sent: number, total: number) => void): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${piBackendUrl()}${path}`);
+    for (const [k, v] of Object.entries(piHeaders())) xhr.setRequestHeader(k, v);
+    if (body instanceof Blob) xhr.setRequestHeader('Content-Type', body.type || 'application/octet-stream');
+    if (onProgress) xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
+    xhr.upload.onload = () => onProgress?.(1, 1);
+    xhr.onerror = () => reject(new Error("Can't reach the Pi"));
+    xhr.onload = () => {
+      let data: any = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && data.success !== false) resolve(data);
+      else reject(new Error(data.error || data.detail || (xhr.status === 413 ? 'That is too big to share.' : `The Pi answered ${xhr.status}`)));
+    };
+    xhr.send(body);
+  });
+}
+
 export const dropLink = (drop: Drop, base: string | null): string =>
   `${(base || piBackendUrl() || window.location.origin).replace(/\/+$/, '')}${drop.path}`;
 
@@ -80,28 +104,19 @@ export const dropApi = {
     form.append('hours', String(hours));
     form.append('source', source);
     if (name) form.append('name', name);
-    // XHR, because fetch can't report how much of an upload has gone.
-    return new Promise<{ drop: Drop; base: string | null; warnings?: string[] }>((resolve, reject) => {
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `${piBackendUrl()}/api/drops`);
-      for (const [k, v] of Object.entries(piHeaders())) xhr.setRequestHeader(k, v);
-      if (onProgress) xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
-      xhr.upload.onload = () => onProgress?.(1, 1);
-      xhr.onerror = () => reject(new Error("Can't reach the Pi"));
-      xhr.onload = () => {
-        let data: any = {};
-        try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
-        if (xhr.status >= 200 && xhr.status < 300 && data.success !== false) resolve(data);
-        else reject(new Error(data.error || data.detail || (xhr.status === 413 ? 'That is too big to share.' : `The Pi answered ${xhr.status}`)));
-      };
-      xhr.send(form);
-    });
+        return upload<{ drop: Drop; base: string | null; warnings?: string[] }>('/api/drops', form, onProgress);
   },
   extend: (id: string, hours: number) =>
     call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/extend`, { method: 'POST', body: JSON.stringify({ hours }) }).then(d => d.drop),
   remove: (id: string) => call<{ success: boolean }>(`/api/drops/${encodeURIComponent(id)}`, { method: 'DELETE' }),
-  clip: (text: string, hours: number, name = '') =>
-    call<{ drop: Drop; base: string | null }>('/api/drops/clip', { method: 'POST', body: JSON.stringify({ text, hours, name }) }),
+  clip: (text: string, hours: number, name = '', images = 0) =>
+    call<{ drop: Drop; base: string | null }>('/api/drops/clip', { method: 'POST', body: JSON.stringify({ text, hours, name, images }) }),
+  /** One image for a clip, sent on its own and written to disk as it arrives. */
+  addImage: (id: string, file: Blob, name: string, onProgress?: (sent: number, total: number) => void) =>
+    upload<{ drop: Drop; name: string }>(`/api/drops/${encodeURIComponent(id)}/images?name=${encodeURIComponent(name)}`, file, onProgress),
+  /** The small preview the clip's page shows for an image it already has. */
+  addThumb: (id: string, thumb: Blob, imageName: string) =>
+    upload<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/images?thumb=${encodeURIComponent(imageName)}`, thumb),
   setPermanent: (id: string, on: boolean) =>
     call<{ drop: Drop }>(`/api/drops/${encodeURIComponent(id)}/permanent`, { method: 'POST', body: JSON.stringify({ on }) }).then(d => d.drop),
   setEnabled: (id: string, on: boolean) =>
@@ -145,6 +160,39 @@ export async function filesFromDataTransfer(dt: DataTransfer): Promise<DropFile[
 /** Files from an <input type=file>, keeping folder paths when a folder was picked. */
 export const filesFromInput = (list: FileList | null): DropFile[] =>
   Array.from(list || []).map(file => ({ file, path: (file as any).webkitRelativePath || file.name }));
+
+const IMAGE_EXT = /\.(jpe?g|png|gif|webp|avif|heic|heif|bmp|svg|tiff?)$/i;
+
+export const isImage = (file: File): boolean => file.type.startsWith('image/') || IMAGE_EXT.test(file.name);
+
+/** The name an image goes up under: pasted screenshots come as "image.png" or with no name at all. */
+export function imageFileName(file: File): string {
+  const name = (file.name || '').trim();
+  if (IMAGE_EXT.test(name)) return name;
+  const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace('svg+xml', 'svg').split(/[^a-z0-9]/)[0];
+  return `${name.replace(/\.[^.]*$/, '') || 'image'}.${ext}`;
+}
+
+/** A small JPEG preview of an image, made here so the Pi never resizes
+ *  anything. Null when the browser can't decode it (a HEIC on Chrome, say). */
+export async function makeThumb(file: Blob, size = 480): Promise<Blob | null> {
+  try {
+    const bitmap = await createImageBitmap(file);
+    const scale = Math.min(1, size / Math.max(bitmap.width, bitmap.height));
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+    canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return null;
+    ctx.fillStyle = '#fff';  // transparent PNGs get a white backing, not black
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+    bitmap.close?.();
+    return await new Promise(ok => canvas.toBlob(b => ok(b), 'image/jpeg', 0.78));
+  } catch {
+    return null;
+  }
+}
 
 export function timeLeft(expiresAt: number, now = Date.now() / 1000): string {
   const s = Math.max(0, expiresAt - now);

@@ -4,17 +4,23 @@
 // Drag an .html file, a folder or a .zip onto the zone (or click to pick, or
 // paste), pick how long the link lives, and copy it. The Pi serves each drop
 // at /d/<slug>/ without the password until it expires (raspberry_pi/drop.py).
+// The clipboard card shares text and/or images (up to clipImagesMb per clip)
+// the same way; images go up one by one, each with a small thumbnail.
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Eye, FileCode, FileText, FolderOpen, Globe, Infinity as InfinityIcon, Link2, Loader2, Power, Send, Server, Trash2, UploadCloud } from 'lucide-react';
+import { AlertTriangle, Check, Clock, Copy, ExternalLink, Eye, FileCode, FileText, FolderOpen, Globe, ImagePlus, Images, Infinity as InfinityIcon, Link2, Loader2, Power, Send, Server, Trash2, UploadCloud, X } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import {
   DEFAULT_HOURS, Drop, DropFile, EXPIRY_CHOICES, dropApi, dropAvailable, dropLink,
-  filesFromDataTransfer, filesFromInput, sizeText, timeLeft,
+  filesFromDataTransfer, filesFromInput, imageFileName, isImage, makeThumb, sizeText, timeLeft,
 } from '../../services/drop';
 
 const HOURS_KEY = 'sage-drop-hours';
+// Thumbnails bigger than this aren't worth sending (the Pi refuses past 512 KB).
+const MAX_THUMB = 500 * 1024;
+
+type ClipImage = { id: string; file: File; name: string; url: string };
 
 export function DropView() {
   const { showToast } = useToast();
@@ -41,6 +47,10 @@ export function DropView() {
   // Clipboard: share a piece of text as a temporary link.
   const [clipText, setClipText] = useState('');
   const [clipBusy, setClipBusy] = useState(false);
+  const [clipImages, setClipImages] = useState<ClipImage[]>([]);
+  const [clipOver, setClipOver] = useState(false);
+  const [clipLimits, setClipLimits] = useState({ mb: 100, count: 500 });
+  const imageInput = useRef<HTMLInputElement>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const depth = useRef(0);
@@ -51,6 +61,7 @@ export function DropView() {
       setDrops(data.drops);
       setBase(data.base);
       setMaxMb(data.maxMb);
+      if (data.clipImagesMb) setClipLimits({ mb: data.clipImagesMb, count: data.clipMaxImages || 500 });
       setError('');
     } catch (e: any) {
       setError(e.message || "Can't reach the Pi");
@@ -187,23 +198,79 @@ export function DropView() {
     }
   };
 
+  const clipImageBytes = clipImages.reduce((n, i) => n + i.file.size, 0);
+  const clipLimitBytes = clipLimits.mb * 1024 * 1024;
+
+  // Previews live as object URLs; let them go when the card is cleared or left.
+  const imagesRef = useRef(clipImages);
+  imagesRef.current = clipImages;
+  useEffect(() => () => imagesRef.current.forEach(i => URL.revokeObjectURL(i.url)), []);
+
+  const addClipImages = (files: File[]) => {
+    const images = files.filter(isImage);
+    if (images.length < files.length) showToast('Only images can go on a clip. Drop sites and files in the box above.', 'error');
+    if (!images.length) return;
+    let bytes = clipImageBytes, count = clipImages.length, skipped = 0;
+    const added: ClipImage[] = [];
+    for (const file of images) {
+      if (bytes + file.size > clipLimitBytes || count >= clipLimits.count) { skipped += 1; continue; }
+      bytes += file.size; count += 1;
+      added.push({ id: `${Date.now()}-${Math.random().toString(36).slice(2)}`, file, name: imageFileName(file), url: URL.createObjectURL(file) });
+    }
+    if (added.length) setClipImages(list => [...list, ...added]);
+    if (skipped) showToast(`Left out ${skipped} image${skipped === 1 ? '' : 's'}: a clip holds up to ${clipLimits.mb} MB of images.`, 'error');
+  };
+
+  const removeClipImage = (id: string) => setClipImages(list => {
+    const gone = list.find(i => i.id === id);
+    if (gone) URL.revokeObjectURL(gone.url);
+    return list.filter(i => i.id !== id);
+  });
+
   const shareClip = async () => {
     const text = clipText.trim();
-    if (!text || clipBusy) return;
+    if ((!text && !clipImages.length) || clipBusy) return;
     setClipBusy(true);
+    const images = clipImages;
+    const total = clipImageBytes;
+    let made: Drop | null = null;
     try {
-      const { drop, base: b } = await dropApi.clip(clipText, hours);
+      const { drop: created, base: b } = await dropApi.clip(text ? clipText : '', hours, '', images.length);
+      made = created;
+      let latest = created;
+      let sentBefore = 0;
+      for (const [n, img] of images.entries()) {
+        const label = images.length === 1 ? img.name : `image ${n + 1} of ${images.length}`;
+        const res = await dropApi.addImage(created.id, img.file, img.name, (sent, all) => {
+          const done = sentBefore + Math.min(img.file.size, Math.round(img.file.size * sent / all));
+          setStatus({ stage: 'uploading', text: `Uploading ${label}: ${sizeText(done)} of ${sizeText(total)}`, percent: Math.round((done / Math.max(1, total)) * 100) });
+        });
+        latest = res.drop;
+        sentBefore += img.file.size;
+        // The clip's page shows these instead of the full photos; it still works without one.
+        const thumb = await makeThumb(img.file);
+        if (thumb && thumb.size <= MAX_THUMB) {
+          try { latest = (await dropApi.addThumb(created.id, thumb, res.name)).drop; } catch { /* the full image stands in */ }
+        }
+      }
+      made = null;
       setBase(b);
-      setFresh(drop);
+      setFresh(latest);
       setWarnings([]);
-      setDrops(list => [drop, ...(list || []).filter(d => d.id !== drop.id)]);
+      setDrops(list => [latest, ...(list || []).filter(d => d.id !== latest.id)]);
       setClipText('');
+      images.forEach(i => URL.revokeObjectURL(i.url));
+      setClipImages([]);
       let copiedNow = false;
-      try { await navigator.clipboard.writeText(dropLink(drop, b)); setCopied(drop.id); copiedNow = true; setTimeout(() => setCopied(c => (c === drop.id ? '' : c)), 1600); } catch { /* button is right there */ }
-      setStatus({ stage: 'done', text: `Text link is live${copiedNow ? ' and copied' : ''}`, percent: 100 });
+      try { await navigator.clipboard.writeText(dropLink(latest, b)); setCopied(latest.id); copiedNow = true; setTimeout(() => setCopied(c => (c === latest.id ? '' : c)), 1600); } catch { /* button is right there */ }
+      const what = images.length ? `${text ? 'Text and ' : ''}${images.length} image${images.length === 1 ? '' : 's'}` : 'Text';
+      setStatus({ stage: 'done', text: `${what} link is live${copiedNow ? ' and copied' : ''}`, percent: 100 });
       setTimeout(() => setStatus(s => (s?.stage === 'done' ? null : s)), 6000);
     } catch (e: any) {
-      showToast(e.message || "Couldn't share that text", 'error');
+      // Half a clip is no use to anyone: take it down, and keep what was picked here to try again.
+      if (made) dropApi.remove(made.id).catch(() => {});
+      setStatus({ stage: 'error', text: e.message || "Couldn't share that", percent: 0 });
+      showToast(e.message || "Couldn't share that", 'error');
     } finally {
       setClipBusy(false);
     }
@@ -320,21 +387,69 @@ export function DropView() {
       </div>
 
       {/* Clipboard: share a piece of text as a temporary link. */}
-      <div className="rounded-3xl p-4 md:p-5 surface-item space-y-3">
+      <div
+        onDragOver={e => { if (Array.from(e.dataTransfer.types).includes('Files')) { e.preventDefault(); e.dataTransfer.dropEffect = 'copy'; setClipOver(true); } }}
+        onDragLeave={e => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setClipOver(false); }}
+        onDrop={e => { e.preventDefault(); setClipOver(false); if (!clipBusy) addClipImages(Array.from(e.dataTransfer.files)); }}
+        className={`rounded-3xl p-4 md:p-5 surface-item space-y-3 transition ${clipOver ? 'ring-2 ring-indigo-500/60 bg-indigo-500/[0.05]' : ''}`}>
         <div className="flex items-center gap-2">
           <span className="grid place-items-center w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shrink-0"><FileText size={18} /></span>
           <div className="min-w-0">
-            <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white leading-tight">Share some text</h2>
-            <p className="text-[12.5px] text-gray-500">A note, a snippet, a list — anyone with the link reads it and can copy it. Text links are always temporary.</p>
+            <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white leading-tight">Share text or images</h2>
+            <p className="text-[12.5px] text-gray-500">A note, a snippet, a few photos — anyone with the link can read, copy and download them. Add as many images as you like, up to {clipLimits.mb} MB in all. Clipboard links are always temporary.</p>
           </div>
         </div>
         <textarea value={clipText} onChange={e => setClipText(e.target.value)}
           onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); shareClip(); } }}
-          placeholder="Paste or type the text you want to share…" rows={4}
+          onPaste={e => {
+            const files = Array.from(e.clipboardData?.files || []).filter(isImage);
+            if (!files.length) return;
+            // A copied screenshot comes as a file; keep any text that came with it.
+            if (!e.clipboardData.getData('text/plain')) e.preventDefault();
+            addClipImages(files);
+          }}
+          placeholder={clipOver ? 'Let go to add the images…' : 'Paste or type the text you want to share, or paste and drop images here…'} rows={4}
           className="w-full resize-y rounded-2xl bg-white dark:bg-black/30 ring-1 ring-black/10 dark:ring-white/10 px-3.5 py-3 text-[14px] text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-indigo-500/40 placeholder:text-gray-400" />
+        {clipImages.length > 0 && (
+          <div className="space-y-2">
+            <ul className="grid grid-cols-[repeat(auto-fill,minmax(4.5rem,1fr))] gap-2" aria-label="Images to share">
+              {clipImages.map(img => (
+                <li key={img.id} className="relative aspect-square rounded-xl overflow-hidden ring-1 ring-black/10 dark:ring-white/10 bg-black/[0.04] dark:bg-white/5 group" title={`${img.name} · ${sizeText(img.file.size)}`}>
+                  <img src={img.url} alt={img.name} className="w-full h-full object-cover"
+                    onError={e => { (e.currentTarget as HTMLImageElement).style.visibility = 'hidden'; }} />
+                  <span className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 text-[10px] font-medium text-white bg-gradient-to-t from-black/60 to-transparent truncate">{sizeText(img.file.size)}</span>
+                  {!clipBusy && (
+                    <button onClick={() => removeClipImage(img.id)} aria-label={`Remove ${img.name}`}
+                      className="absolute top-1 right-1 grid place-items-center w-6 h-6 rounded-full bg-black/60 text-white hover:bg-black/80 transition sm:opacity-0 sm:group-hover:opacity-100 focus:opacity-100">
+                      <X size={13} />
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+            <div className="flex items-center gap-2 text-[12px] text-gray-500">
+              <span className="tabular-nums whitespace-nowrap">{clipImages.length} image{clipImages.length === 1 ? '' : 's'} · {sizeText(clipImageBytes)} of {clipLimits.mb} MB</span>
+              <div className="h-1.5 flex-1 rounded-full bg-black/[0.07] dark:bg-white/10 overflow-hidden" aria-hidden>
+                <div className={`h-full rounded-full ${clipImageBytes > clipLimitBytes * 0.9 ? 'bg-amber-500' : 'bg-indigo-500'}`} style={{ width: `${Math.min(100, (clipImageBytes / clipLimitBytes) * 100)}%` }} />
+              </div>
+              {!clipBusy && (
+                <button onClick={() => { clipImages.forEach(i => URL.revokeObjectURL(i.url)); setClipImages([]); }}
+                  className="font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">Clear</button>
+              )}
+            </div>
+          </div>
+        )}
+        <input ref={imageInput} type="file" multiple hidden accept="image/*,.heic,.heif"
+          onChange={e => { const f = Array.from(e.target.files || []); e.target.value = ''; addClipImages(f); }} />
         <div className="flex items-center justify-between gap-2 flex-wrap">
-          <span className="text-[12px] text-gray-400">Switches off in {timeLeft(Date.now() / 1000 + hours * 3600)} · ⌘/Ctrl+Enter</span>
-          <button onClick={shareClip} disabled={!clipText.trim() || clipBusy}
+          <div className="flex items-center gap-2 flex-wrap">
+            <button onClick={() => imageInput.current?.click()} disabled={clipBusy}
+              className="px-3 py-2 rounded-xl text-[13px] font-semibold text-indigo-600 dark:text-indigo-400 bg-indigo-500/10 hover:bg-indigo-500/15 disabled:opacity-40 flex items-center gap-1.5 active:scale-[0.98] transition">
+              <ImagePlus size={15} /> Add images
+            </button>
+            <span className="text-[12px] text-gray-400">Up to {clipLimits.mb} MB · switches off in {timeLeft(Date.now() / 1000 + hours * 3600)} · ⌘/Ctrl+Enter</span>
+          </div>
+          <button onClick={shareClip} disabled={(!clipText.trim() && !clipImages.length) || clipBusy}
             className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-[14px] flex items-center gap-1.5 active:scale-[0.98] transition">
             {clipBusy ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />} {clipBusy ? 'Sharing…' : 'Share as link'}
           </button>
@@ -385,7 +500,7 @@ export function DropView() {
                 <motion.li key={d.id} layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -20 }}
                   className={`surface-item rounded-2xl p-3 md:p-4 flex items-center gap-x-3 gap-y-2.5 flex-wrap sm:flex-nowrap ${d.disabled ? 'opacity-70' : ''}`}>
                   <span className={`grid place-items-center w-10 h-10 rounded-xl shrink-0 ${d.kind === 'clip' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : d.files > 1 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
-                    {d.kind === 'clip' ? <FileText size={18} /> : d.files > 1 ? <Globe size={18} /> : <FileCode size={18} />}
+                    {d.kind === 'clip' ? (d.images && !d.preview ? <Images size={18} /> : <FileText size={18} />) : d.files > 1 ? <Globe size={18} /> : <FileCode size={18} />}
                   </span>
                   <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] sm:basis-auto">
                     <div className="flex items-center gap-1.5 min-w-0">
@@ -402,8 +517,11 @@ export function DropView() {
                         </span>
                       )}
                       <span className="flex items-center gap-1"><Eye size={12} /> {d.views} view{d.views === 1 ? '' : 's'}</span>
+                      {d.kind === 'clip' && !!d.images && (
+                        <span className="flex items-center gap-1"><Images size={12} /> {d.images} image{d.images === 1 ? '' : 's'} · {sizeText(d.imageBytes || 0)}</span>
+                      )}
                       {d.kind === 'clip'
-                        ? <span className="truncate max-w-[14rem]">{d.preview ? `“${d.preview.replace(/\s+/g, ' ').trim().slice(0, 48)}”` : 'text'}</span>
+                        ? (d.preview || !d.images) && <span className="truncate max-w-[14rem]">{d.preview ? `“${d.preview.replace(/\s+/g, ' ').trim().slice(0, 48)}”` : 'text'}</span>
                         : <span>{d.files} file{d.files === 1 ? '' : 's'} · {sizeText(d.bytes)}</span>}
                       {d.source === 'note' && <span>from Notes</span>}
                     </div>
