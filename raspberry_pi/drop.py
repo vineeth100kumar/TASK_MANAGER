@@ -31,6 +31,16 @@ The clipboard: paste text or a snippet and it gets the same kind of link,
 shown as a plain page with a Copy button (and /raw for the bare text). Clips
 are always temporary, a week at most, and can't be made permanent.
 
+A clip can also carry images, as many as fit in CLIP_IMAGES_MB (100 MB) per
+clip. The app makes the clip first, then sends each image as its own request
+(POST /api/drops/<slug>/images), which is written to disk as it arrives, so
+the Pi never holds an image in memory and a big set never becomes one giant
+upload. The app also sends a small JPEG thumbnail of each image it can decode,
+so the clip's page shows a light grid without the Pi resizing anything. The
+page links each image and offers them all as one .zip, which is streamed file
+by file rather than built first. Images live in the clip's folder, so they
+count in the storage panel and go when the clip expires or is deleted.
+
 A site link can be made permanent (it never expires until it's deleted or
 made temporary again), and any link, site or clip, can be turned off at once
 and back on: a turned-off link shows "This link is turned off" (403) while
@@ -55,9 +65,10 @@ import time
 import zipfile
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+from urllib.parse import quote
 
 from fastapi import APIRouter, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from pydantic import BaseModel
 
 import public_link
@@ -74,6 +85,16 @@ DEFAULT_HOURS = 24
 CLIP_MAX_HOURS = 7 * 24
 MAX_CLIP_BYTES = 1024 * 1024
 CLIP_FILE = "clip.txt"
+# Images on a clip: the total per clip, how many, and the thumbnails the app sends.
+CLIP_IMAGES_MB = int(os.getenv("SAGE_CLIP_IMAGES_MB", "100"))
+CLIP_IMAGES_BYTES = CLIP_IMAGES_MB * 1024 * 1024
+MAX_CLIP_IMAGES = 500
+MAX_THUMB_BYTES = 512 * 1024
+IMAGE_DIR = "images"
+THUMB_DIR = "thumbs"
+IMAGE_TYPES = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".heif", ".bmp", ".svg", ".tif", ".tiff"}
+# Uploads stop before they'd leave the Pi's card with less than this free.
+KEEP_FREE_BYTES = 512 * 1024 * 1024
 SWEEP_SECONDS = 300
 # Set by hand when the links should use another address than Settings'
 # public link (say a second tunnel just for drops).
@@ -103,6 +124,7 @@ EXTRA_TYPES = {
     ".json": "application/json", ".webp": "image/webp", ".avif": "image/avif", ".wasm": "application/wasm",
     ".woff": "font/woff", ".woff2": "font/woff2", ".ico": "image/x-icon", ".md": "text/plain",
     ".webmanifest": "application/manifest+json", ".mp4": "video/mp4", ".webm": "video/webm",
+    ".heic": "image/heic", ".heif": "image/heif",
 }
 
 # Files whose root-absolute references are pointed at the drop, and the biggest
@@ -115,6 +137,8 @@ ROOT_REF = re.compile(r"""(?P<q>["'`(])/(?P<p>[^\s"'`()<>?#\\/][^\s"'`()<>?#\\]*
 SOURCE_SCRIPT = re.compile(r"""<script[^>]+src=["'][^"']+\.(?:tsx|ts|jsx)["']""", re.I)
 
 router = APIRouter()
+# One image upload at a time: keeps the quota check honest and the SD card calm.
+_image_lock = asyncio.Lock()
 _files_cache: Dict[str, Set[str]] = {}
 _base_cache: Tuple[float, dict] = (0.0, {})
 
@@ -338,8 +362,26 @@ def _shape(row) -> dict:
         "kind": row["kind"] or "site",
         "permanent": bool(row["permanent"]),
         "disabled": bool(row["disabled"]),
-        **({"preview": _clip_preview(row["id"])} if row["kind"] == "clip" else {}),
+        **(_clip_extras(row["id"]) if row["kind"] == "clip" else {}),
     }
+
+
+def _clip_extras(slug: str) -> dict:
+    images = _clip_images(DROP_DIR / slug)
+    return {"preview": _clip_preview(slug), "images": len(images), "imageBytes": sum(size for _, size in images)}
+
+
+def _clip_images(root: Path) -> List[Tuple[Path, int]]:
+    """A clip's images, in the order they were added, with their sizes."""
+    folder = root / IMAGE_DIR
+    if not folder.is_dir():
+        return []
+    found = []
+    for p in folder.iterdir():
+        if p.is_file() and not p.name.startswith("."):
+            st = p.stat()
+            found.append((st.st_mtime_ns, p.name, p, st.st_size))
+    return [(p, size) for _, _, p, size in sorted(found)]
 
 
 def _clip_preview(slug: str) -> str:
@@ -419,11 +461,15 @@ def set_enabled(slug: str, on: bool) -> dict:
         conn.close()
 
 
-def create_clip(text: str, name: str = "", hours: float = DEFAULT_HOURS) -> dict:
-    """Shares a piece of text (a note, a snippet, a list) as a temporary link."""
+def create_clip(text: str, name: str = "", hours: float = DEFAULT_HOURS, images: int = 0) -> dict:
+    """Shares a piece of text (a note, a snippet, a list) as a temporary link.
+    With images (how many the app is about to send), the text may be empty."""
     text = str(text or "")
-    if not text.strip():
-        raise DropError("Paste some text to share.")
+    images = max(0, int(images or 0))
+    if not text.strip() and not images:
+        raise DropError("Paste some text or add images to share.")
+    if images > MAX_CLIP_IMAGES:
+        raise DropError(f"A clip can have up to {MAX_CLIP_IMAGES} images.")
     data = text.encode("utf-8")
     if len(data) > MAX_CLIP_BYTES:
         raise DropError(f"That's more than {MAX_CLIP_BYTES // 1024} KB of text.")
@@ -436,17 +482,118 @@ def create_clip(text: str, name: str = "", hours: float = DEFAULT_HOURS) -> dict
         slug = secrets.token_urlsafe(16)
         root = DROP_DIR / slug
         root.mkdir(parents=True)
-        (root / CLIP_FILE).write_bytes(data)
+        if text.strip():
+            (root / CLIP_FILE).write_bytes(data)
         first = next((line.strip() for line in text.splitlines() if line.strip()), "")
-        title = (name or "").strip()[:120] or (first[:60] + ("…" if len(first) > 60 else ""))
+        title = (name or "").strip()[:120] or (first[:60] + ("…" if len(first) > 60 else "")) \
+            or f"{images} image{'' if images == 1 else 's'}"
         now = time.time()
         conn.execute(
             "INSERT INTO drops (id, name, created_at, expires_at, entry, files, bytes, views, source, kind) "
-            "VALUES (?,?,?,?,?,1,?,0,'clipboard','clip')",
-            (slug, title, now, now + hours * 3600, CLIP_FILE, len(data)),
+            "VALUES (?,?,?,?,?,?,?,0,'clipboard','clip')",
+            (slug, title, now, now + hours * 3600, CLIP_FILE, int(bool(text.strip())), len(data) if text.strip() else 0),
         )
         conn.commit()
         return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+    finally:
+        conn.close()
+
+
+def image_name(raw: str) -> Optional[str]:
+    """The file name an image is kept under, or None for one that isn't an image."""
+    base = str(raw or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    base = re.sub(r"[^\w.\- ()+]", "_", base)[-120:].lstrip(". ")
+    if not base or Path(base).suffix.lower() not in IMAGE_TYPES or clean_path(base) != base:
+        return None
+    return base
+
+
+def _clip_for_images(slug: str):
+    if not _safe_slug(slug):
+        raise DropError("There's no clip at that link.")
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()
+    finally:
+        conn.close()
+    if not row or row["kind"] != "clip":
+        raise DropError("There's no clip at that link.")
+    if _expired(row):
+        raise DropError("That clip has expired.")
+    return row
+
+
+class ImageTooBig(DropError):
+    pass
+
+
+async def add_image(slug: str, raw_name: str, length: int, chunks, thumb_for: str = "") -> dict:
+    """Writes one image (or, with thumb_for, the thumbnail of an image already
+    on the clip) to disk as its chunks arrive, refusing it as soon as it goes
+    past what the clip has room for. Returns the clip and the name kept."""
+    async with _image_lock:
+        row = await asyncio.to_thread(_clip_for_images, slug)
+        root = DROP_DIR / slug
+        images = await asyncio.to_thread(_clip_images, root)
+        if thumb_for:
+            name = image_name(thumb_for)
+            if not name or not (root / IMAGE_DIR / name).is_file():
+                raise DropError("That image isn't on this clip.")
+            folder, final, room = root / THUMB_DIR, f"{name}.jpg", MAX_THUMB_BYTES
+            too_big = "That thumbnail is too big."
+        else:
+            name = image_name(raw_name)
+            if not name:
+                raise DropError(f"{str(raw_name)[:80]!r} isn't an image Drop can share.")
+            if len(images) >= MAX_CLIP_IMAGES:
+                raise DropError(f"A clip can have up to {MAX_CLIP_IMAGES} images.")
+            used = sum(size for _, size in images)
+            room = CLIP_IMAGES_BYTES - used
+            too_big = (f"That image would take this clip past {CLIP_IMAGES_MB} MB "
+                       f"({used / 1048576:.1f} MB used).")
+            folder = root / IMAGE_DIR
+            taken = {p.name for p, _ in images}
+            stem, ext, final, n = Path(name).stem, Path(name).suffix, name, 2
+            while final in taken:
+                final, n = f"{stem}-{n}{ext}", n + 1
+        if length > room:
+            raise ImageTooBig(too_big)
+        free = await asyncio.to_thread(lambda: shutil.disk_usage(DROP_DIR).free)
+        if free - length < KEEP_FREE_BYTES:
+            raise ImageTooBig("The Pi is nearly out of space. Delete some links first.")
+        folder.mkdir(parents=True, exist_ok=True)
+        part = folder / f".part-{secrets.token_hex(6)}"
+        written = 0
+        try:
+            with open(part, "wb") as f:
+                async for chunk in chunks:
+                    written += len(chunk)
+                    if written > room or written > length:
+                        raise ImageTooBig(too_big if written > room else "The upload was bigger than it said.")
+                    await asyncio.to_thread(f.write, chunk)
+            if not written:
+                raise DropError("That image is empty.")
+            os.replace(part, folder / final)
+        finally:
+            if part.exists():
+                part.unlink()
+        await asyncio.to_thread(_recount, slug)
+        conn = _db()
+        try:
+            return {"drop": _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()), "name": final}
+        finally:
+            conn.close()
+
+
+def _recount(slug: str) -> None:
+    """Brings a clip's files and bytes up to date with what's on disk."""
+    root = DROP_DIR / slug
+    images = _clip_images(root)
+    conn = _db()
+    try:
+        conn.execute("UPDATE drops SET files = ?, bytes = ? WHERE id = ?",
+                     ((root / CLIP_FILE).is_file() + len(images), _folder_bytes(root), slug))
+        conn.commit()
     finally:
         conn.close()
 
@@ -632,41 +779,144 @@ def _count_view(slug: str) -> None:
 
 
 def _serve_clip(row, root: Path, path: str, request: Request):
-    """A clip's page (the text and a Copy button), or the bare text at raw."""
+    """A clip's page (the text with a Copy button, and its images), the bare
+    text at raw, an image (or its thumbnail) and every image as one .zip."""
     target = root / CLIP_FILE
-    if not target.is_file():
-        return _page("Not found", "There's nothing at this link.", 404)
-    if path.strip("/") in ("raw", CLIP_FILE):
+    images = _clip_images(root)
+    path = path.strip("/")
+    if path in ("raw", CLIP_FILE):
+        if not target.is_file():
+            return _page("Not found", "This clip has no text.", 404)
         return FileResponse(target, media_type="text/plain; charset=utf-8", headers=SERVE_HEADERS)
+    if path == "images.zip":
+        if not images:
+            return _page("Not found", "This clip has no images.", 404)
+        return StreamingResponse(_zip_stream(images), media_type="application/zip",
+                                 headers={**SERVE_HEADERS, "Content-Disposition": _attachment(f"{row['name'] or 'images'}.zip")})
+    folder, _, name = path.partition("/")
+    if folder in (IMAGE_DIR, THUMB_DIR) and name and "/" not in name:
+        file = root / folder / name
+        if name.startswith(".") or not file.is_file() or file.resolve().parent != (root / folder).resolve():
+            return _page("Not found", "That isn't part of this clip.", 404)
+        headers = dict(SERVE_HEADERS)
+        if folder == IMAGE_DIR and request.query_params.get("download"):
+            headers["Content-Disposition"] = _attachment(name)
+        return FileResponse(file, media_type=_media_type(file), headers=headers)
     if path:
         return _page("Not found", "That isn't part of this clip.", 404)
+    if not target.is_file() and not images:
+        return _page("Not found", "There's nothing at this link.", 404)
     if request.headers.get("sec-fetch-dest", "document") == "document":
         _count_view(row["id"])
-    text = target.read_text(encoding="utf-8", errors="replace")
+    text = target.read_text(encoding="utf-8", errors="replace") if target.is_file() else ""
     name = html.escape(row["name"] or "Shared text")
+    buttons = ""
+    if len(images) > 1:
+        total = sum(size for _, size in images)
+        buttons += f"<a class=btn href='images.zip' title='{_size(total)} as a .zip'>Download all ({len(images)})</a>"
+    if text:
+        buttons += f"<a class=btn href='raw' download='{name}.txt'>Download text</a><button id=copy>Copy</button>"
+    thumbs = {p.name[:-4] for p in (root / THUMB_DIR).iterdir()} if (root / THUMB_DIR).is_dir() else set()
+    tiles = "".join(_image_tile(p.name, size, p.name in thumbs) for p, size in images)
     body = (
         "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
         f"<title>{name}</title>"
         "<style>:root{color-scheme:light dark;--bg:#f5f5f7;--card:#fff;--ink:#1c1c1e;--muted:#6b7280;--line:rgba(0,0,0,.08)}"
         "@media (prefers-color-scheme:dark){:root{--bg:#111113;--card:#1c1c1e;--ink:#f2f2f7;--muted:#9ca3af;--line:rgba(255,255,255,.1)}}"
         "body{margin:0;background:var(--bg);color:var(--ink);font:15px system-ui,sans-serif}"
-        "main{max-width:820px;margin:0 auto;padding:28px 16px}"
-        "header{display:flex;align-items:center;gap:12px;margin-bottom:12px}"
-        "h1{font-size:19px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        "main{max-width:980px;margin:0 auto;padding:28px 16px}"
+        "header{display:flex;align-items:center;gap:8px 12px;margin-bottom:12px;flex-wrap:wrap}"
+        "h1{font-size:19px;margin:0;flex:1 1 200px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
         "button,a.btn{font:600 14px system-ui,sans-serif;border:0;border-radius:12px;padding:9px 16px;cursor:pointer;text-decoration:none}"
         "button{background:#2563eb;color:#fff}a.btn{background:var(--line);color:var(--ink)}"
-        "pre{margin:0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;"
+        "pre{margin:0 0 16px;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;"
         "white-space:pre-wrap;word-break:break-word;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}"
-        "p{color:var(--muted);font-size:12.5px;margin:12px 4px 0}</style>"
-        f"<main><header><h1>{name}</h1><a class=btn href='raw' download='{name}.txt'>Download</a>"
-        "<button id=copy>Copy</button></header>"
-        f"<pre id=text>{html.escape(text)}</pre><p>Shared from Sage Drop. This link is temporary and switches itself off.</p></main>"
-        "<script>document.getElementById('copy').onclick=async function(){var b=this,t=document.getElementById('text');"
+        ".grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:12px}"
+        "figure{margin:0;background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;display:flex;flex-direction:column}"
+        "figure>a.pic{display:block;aspect-ratio:1;background:var(--line);position:relative}"
+        "figure img{width:100%;height:100%;object-fit:cover;display:block}"
+        "figure .none{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-size:12px;padding:8px;text-align:center}"
+        "figcaption{display:flex;align-items:center;gap:6px;padding:8px 8px 8px 10px;font-size:12px}"
+        "figcaption span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        "figcaption small{color:var(--muted);display:block}"
+        "figcaption a{flex:none;font-weight:600;font-size:12px;color:#2563eb;text-decoration:none;padding:6px 8px;border-radius:9px;background:rgba(37,99,235,.1)}"
+        "p.foot{color:var(--muted);font-size:12.5px;margin:14px 4px 0}</style>"
+        f"<main><header><h1>{name}</h1>{buttons}</header>"
+        + (f"<pre id=text>{html.escape(text)}</pre>" if text else "")
+        + (f"<div class=grid>{tiles}</div>" if tiles else "")
+        + "<p class=foot>Shared from Sage Drop. This link is temporary and switches itself off.</p></main>"
+        "<script>var c=document.getElementById('copy');if(c)c.onclick=async function(){var b=this,t=document.getElementById('text');"
         "try{await navigator.clipboard.writeText(t.textContent)}catch(e){var r=document.createRange();r.selectNodeContents(t);"
         "var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy')}catch(_){}}"
-        "b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)}</script>"
+        "b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)};"
+        # An image the browser can't show (a HEIC on Chrome, say) becomes its name, still downloadable.
+        "document.querySelectorAll('figure img').forEach(function(i){i.onerror=function(){var d=document.createElement('span');"
+        "d.className='none';d.textContent='No preview';i.replaceWith(d)}})</script>"
     )
     return HTMLResponse(body, headers=SERVE_HEADERS)
+
+
+def _image_tile(name: str, size: int, has_thumb: bool) -> str:
+    url = f"{IMAGE_DIR}/{quote(name)}"
+    src = f"{THUMB_DIR}/{quote(name)}.jpg" if has_thumb else url
+    label = html.escape(name)
+    return (f"<figure><a class=pic href='{url}' target=_blank rel=noopener><img src='{src}' alt='{label}' loading=lazy decoding=async></a>"
+            f"<figcaption><span title='{label}'>{label}<small>{_size(size)}</small></span>"
+            f"<a href='{url}?download=1' download='{label}'>Download</a></figcaption></figure>")
+
+
+def _size(n: int) -> str:
+    return f"{n / 1048576:.1f} MB" if n >= 1048576 else f"{max(1, round(n / 1024))} KB"
+
+
+def _attachment(filename: str) -> str:
+    ascii_name = re.sub(r'[^\w.\- ]', "_", filename).encode("ascii", "replace").decode().replace("?", "_") or "download"
+    return f"attachment; filename=\"{ascii_name}\"; filename*=UTF-8''{quote(filename)}"
+
+
+class _ZipSink:
+    """A write-only file for zipfile that hands back what was written so far."""
+
+    def __init__(self):
+        self.buf = bytearray()
+        self.pos = 0
+
+    def write(self, b) -> int:
+        self.buf += b
+        self.pos += len(b)
+        return len(b)
+
+    def tell(self) -> int:
+        return self.pos
+
+    def flush(self) -> None:
+        pass
+
+    def take(self) -> bytes:
+        out, self.buf = bytes(self.buf), bytearray()
+        return out
+
+
+def _zip_stream(images: List[Tuple[Path, int]]):
+    """Every image as one .zip, written as it's sent: stored, not squeezed
+    (photos are compressed already), so the Pi only ever holds one chunk."""
+    sink = _ZipSink()
+    with zipfile.ZipFile(sink, "w", zipfile.ZIP_STORED) as archive:
+        for path, size in images:
+            info = zipfile.ZipInfo(path.name, date_time=time.localtime(path.stat().st_mtime)[:6])
+            info.file_size = size
+            try:
+                with open(path, "rb") as src, archive.open(info, "w") as dest:
+                    while chunk := src.read(256 * 1024):
+                        dest.write(chunk)
+                        if len(sink.buf) >= 256 * 1024:
+                            yield sink.take()
+            except OSError:
+                continue
+            if sink.buf:
+                yield sink.take()
+    if sink.buf:
+        yield sink.take()
 
 
 def _drop_files(slug: str, root: Path) -> Set[str]:
@@ -726,9 +976,11 @@ class ExtendRequest(BaseModel):
 
 
 class ClipRequest(BaseModel):
-    text: str
+    text: str = ""
     name: str = ""
     hours: float = DEFAULT_HOURS
+    # How many images the app will send next (POST /api/drops/<slug>/images).
+    images: int = 0
 
 
 class ToggleRequest(BaseModel):
@@ -739,17 +991,34 @@ class ToggleRequest(BaseModel):
 async def drops_list():
     base = await asyncio.to_thread(base_url)
     return {"success": True, "drops": list_drops(), "base": base.get("url"), "baseKind": base.get("kind"),
-            "maxMb": MAX_MB, "maxHours": MAX_HOURS, "clipMaxHours": CLIP_MAX_HOURS, "clipMaxKb": MAX_CLIP_BYTES // 1024}
+            "maxMb": MAX_MB, "maxHours": MAX_HOURS, "clipMaxHours": CLIP_MAX_HOURS, "clipMaxKb": MAX_CLIP_BYTES // 1024,
+            "clipImagesMb": CLIP_IMAGES_MB, "clipMaxImages": MAX_CLIP_IMAGES}
 
 
 @router.post("/api/drops/clip")
 async def drops_clip(req: ClipRequest):
     try:
-        clip = await asyncio.to_thread(create_clip, req.text, req.name, req.hours)
+        clip = await asyncio.to_thread(create_clip, req.text, req.name, req.hours, req.images)
     except DropError as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=400)
     base = await asyncio.to_thread(base_url)
     return {"success": True, "drop": clip, "base": base.get("url")}
+
+
+@router.post("/api/drops/{slug}/images")
+async def drops_clip_image(slug: str, request: Request, name: str = "", thumb: str = ""):
+    """The raw bytes of one image for a clip (?name=photo.jpg), or of the
+    thumbnail of one it already has (?thumb=photo.jpg). Streamed to disk."""
+    length = request.headers.get("content-length")
+    if not length or not length.isdigit():
+        return JSONResponse({"success": False, "error": "Upload size unknown."}, status_code=411)
+    try:
+        made = await add_image(slug, name, int(length), request.stream(), thumb_for=thumb)
+    except ImageTooBig as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=413)
+    except DropError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    return {"success": True, **made}
 
 
 @router.post("/api/drops/{slug}/permanent")

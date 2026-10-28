@@ -239,6 +239,98 @@ class DropTests(unittest.TestCase):
         d = client.post("/api/drops/clip", json={"text": "x", "hours": 9999}).json()["drop"]
         self.assertLessEqual(d["expiresAt"] - d["createdAt"], drop.CLIP_MAX_HOURS * 3600 + 1)
 
+    # --- Images on a clip ---
+
+    def clip_with_images(self, text="", images=2):
+        return client.post("/api/drops/clip", json={"text": text, "images": images}).json()["drop"]
+
+    def send_image(self, d, name, data, thumb=""):
+        params = {"thumb": thumb} if thumb else {"name": name}
+        return client.post(f"/api/drops/{d['id']}/images", params=params, content=data)
+
+    def test_a_clip_can_be_just_images(self):
+        d = self.clip_with_images()
+        self.assertEqual(d["name"], "2 images")
+        self.assertEqual(self.send_image(d, "cat.png", b"\x89PNG" + b"a" * 100).status_code, 200)
+        res = self.send_image(d, "dog.jpg", b"\xff\xd8" + b"b" * 50).json()
+        self.assertEqual(res["drop"]["images"], 2)
+        self.assertEqual(res["drop"]["imageBytes"], 104 + 52)
+        page = client.get(d["path"], headers={"Sec-Fetch-Dest": "document"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("images/cat.png", page.text)
+        self.assertIn("Download all (2)", page.text)
+        self.assertNotIn("id=copy", page.text)
+        self.assertEqual(client.get(d["path"] + "raw").status_code, 404)
+        img = client.get(d["path"] + "images/cat.png")
+        self.assertEqual(img.headers["content-type"], "image/png")
+        self.assertIn("sandbox", img.headers["content-security-policy"])
+        self.assertEqual(img.headers["cache-control"], "no-store")
+        self.assertNotIn("content-disposition", img.headers)
+        down = client.get(d["path"] + "images/cat.png?download=1")
+        self.assertIn("attachment", down.headers["content-disposition"])
+
+    def test_the_same_name_twice_is_kept_as_two_images(self):
+        d = self.clip_with_images()
+        self.send_image(d, "image.png", b"one")
+        self.assertEqual(self.send_image(d, "image.png", b"two").json()["name"], "image-2.png")
+
+    def test_images_past_the_clip_limit_are_refused_and_not_kept(self):
+        d = self.clip_with_images()
+        with mock.patch.object(drop, "CLIP_IMAGES_BYTES", 100):
+            self.assertEqual(self.send_image(d, "a.png", b"x" * 80).status_code, 200)
+            res = self.send_image(d, "b.png", b"x" * 40)
+        self.assertEqual(res.status_code, 413)
+        self.assertIn("MB", res.json()["error"])
+        files = sorted(p.name for p in (drop.DROP_DIR / d["id"] / "images").iterdir())
+        self.assertEqual(files, ["a.png"])
+
+    def test_only_images_can_go_on_a_clip(self):
+        d = self.clip_with_images()
+        self.assertEqual(self.send_image(d, "page.html", b"<script>").status_code, 400)
+        self.assertEqual(self.send_image(d, "../../x.png", b"x").json()["name"], "x.png")
+        site = upload([("a.html", b"hi")]).json()["drop"]
+        self.assertEqual(self.send_image(site, "a.png", b"x").status_code, 400)
+
+    def test_a_thumbnail_is_shown_in_the_grid_instead_of_the_image(self):
+        d = self.clip_with_images(images=1)
+        self.send_image(d, "big.png", b"x" * 1000)
+        self.assertEqual(self.send_image(d, "", b"thumb", thumb="nope.png").status_code, 400)
+        self.assertEqual(self.send_image(d, "", b"thumb", thumb="big.png").status_code, 200)
+        page = client.get(d["path"]).text
+        self.assertIn("thumbs/big.png.jpg", page)
+        self.assertEqual(client.get(d["path"] + "thumbs/big.png.jpg").content, b"thumb")
+        # Thumbnails don't count as images.
+        self.assertEqual(drop.list_drops()[0]["images"], 1)
+
+    def test_download_all_streams_every_image_as_a_zip(self):
+        d = self.clip_with_images(text="holiday")
+        self.send_image(d, "a.png", b"A" * 300000)
+        self.send_image(d, "b.jpg", b"B" * 10)
+        res = client.get(d["path"] + "images.zip")
+        self.assertEqual(res.status_code, 200)
+        self.assertIn("attachment", res.headers["content-disposition"])
+        z = zipfile.ZipFile(io.BytesIO(res.content))
+        self.assertEqual(z.namelist(), ["a.png", "b.jpg"])
+        self.assertEqual(z.read("a.png"), b"A" * 300000)
+
+    def test_a_clip_with_images_still_needs_text_or_images(self):
+        self.assertEqual(client.post("/api/drops/clip", json={"text": "", "images": 0}).status_code, 400)
+
+    def test_expired_clips_take_their_images_with_them(self):
+        d = self.clip_with_images(text="x")
+        self.send_image(d, "a.png", b"x" * 10)
+        self.assertGreater(drop.usage()["bytes"], 10)
+        drop.sweep(now=time.time() + drop.CLIP_MAX_HOURS * 3600 + 10)
+        self.assertFalse((drop.DROP_DIR / d["id"]).exists())
+        self.assertEqual(self.send_image(d, "b.png", b"x").status_code, 400)
+
+    def test_image_uploads_need_the_key(self):
+        d = self.clip_with_images()
+        with mock.patch.object(db_server, "API_SECRET", "s3cret"):
+            res = client.post(f"/api/drops/{d['id']}/images", params={"name": "a.png"}, content=b"x")
+        self.assertEqual(res.status_code, 401)
+
+
     # --- Permanent links ---
 
     def test_a_site_link_can_be_made_permanent_and_temporary_again(self):
