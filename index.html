@@ -16,7 +16,34 @@
     <title>Sage</title>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- First-paint splash: shown instantly (before the app's JS parses) so the
+         window is never a white flash between login and the app. React replaces
+         it with the full morphing loader the moment it mounts; the background
+         and layout match, so the handover is invisible. -->
+    <style>
+      #boot { position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+        background: #ffffff; color: #111827; z-index: 300; }
+      html.boot-dark #boot { background: #0a0a0b; color: #f3f4f6; }
+      #boot svg { width: 88px; height: 88px; }
+      #boot path { stroke-dasharray: 1; stroke-dashoffset: 1; animation: boot-draw 1.6s ease-in-out infinite; }
+      #boot .bar { margin-top: 28px; width: 96px; height: 4px; border-radius: 999px; background: rgba(0,0,0,0.08); overflow: hidden; }
+      html.boot-dark #boot .bar { background: rgba(255,255,255,0.10); }
+      #boot .bar i { display: block; width: 50%; height: 100%; border-radius: 999px; background: #111827; animation: boot-slide 1.1s ease-in-out infinite; }
+      html.boot-dark #boot .bar i { background: #ffffff; }
+      @keyframes boot-draw { 0% { stroke-dashoffset: 1; } 45% { stroke-dashoffset: 0; } 75% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -1; } }
+      @keyframes boot-slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(240%); } }
+      @media (prefers-reduced-motion: reduce) { #boot path, #boot .bar i { animation: none; } #boot path { stroke-dashoffset: 0; } }
+    </style>
+    <script>try { if (localStorage.getItem('sage-theme') === 'dark') document.documentElement.classList.add('boot-dark'); } catch (e) {}</script>
+    <div id="root">
+      <div id="boot" role="status" aria-label="Loading Sage">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" pathLength="1" aria-hidden="true">
+          <path d="M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z" pathLength="1" />
+          <path d="M8.5 12.5l2.5 2.5 5-5.5" pathLength="1" style="animation-delay:.15s" />
+        </svg>
+        <div class="bar"><i></i></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

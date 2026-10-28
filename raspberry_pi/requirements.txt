@@ -10,3 +10,4 @@ pywebpush
 dbus-next
 tzdata
 pillow
+webauthn

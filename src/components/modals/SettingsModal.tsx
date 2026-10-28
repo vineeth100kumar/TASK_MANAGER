@@ -8,12 +8,14 @@ import { BluetoothSettings } from './BluetoothSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
 import { ModeSettings } from './ModeSettings';
+import { SecuritySettings } from './SecuritySettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 
 const SETTINGS_TABS = [
   { id: 'attention', label: 'Notifications' },
   { id: 'modes', label: 'Modes' },
   { id: 'capture', label: 'Shortcuts' },
+  { id: 'security', label: 'Sign-in' },
   { id: 'bluetooth', label: 'Bluetooth' },
   { id: 'clock', label: 'Desk Clock' },
   { id: 'radar', label: 'Radar' },
@@ -25,7 +27,7 @@ const SETTINGS_TABS = [
 const SETTINGS_GROUPS = [
   { label: 'Daily', tabs: ['attention', 'modes'] },
   { label: 'Capture', tabs: ['capture'] },
-  { label: 'Devices', tabs: ['clock', 'bluetooth'] },
+  { label: 'Devices', tabs: ['security', 'clock', 'bluetooth'] },
   { label: 'Advanced', tabs: ['radar', 'data', 'system'] },
 ] as const;
 import { importCSVData } from '../../utils/dataImporter';
@@ -38,7 +40,10 @@ interface SettingsModalProps {
   onClose: () => void;
   lifeContext?: LifeContext;
   onDataChanged?: () => void;
+  initialTab?: string;
 }
+
+type SettingsTabId = 'attention' | 'modes' | 'capture' | 'security' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system';
 
 function fmtBytes(bytes: number): string {
   if (!bytes) return '0 B';
@@ -48,9 +53,10 @@ function fmtBytes(bytes: number): string {
   return `${n.toFixed(i === 0 ? 0 : n < 10 ? 1 : 0)} ${u[i]}`;
 }
 
-export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
+export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'modes' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
+  const validTab = (SETTINGS_TABS as readonly { id: string }[]).some(t => t.id === initialTab) ? (initialTab as SettingsTabId) : 'attention';
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(validTab);
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
@@ -313,6 +319,9 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
 
         {/* Work and Chill: what shows, and switching by home and away */}
         {activeTab === 'modes' && <ModeSettings />}
+
+        {/* Sign-in: trusted devices (Face ID / Touch ID / Windows Hello) */}
+        {activeTab === 'security' && <SecuritySettings />}
 
         {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
         {activeTab === 'bluetooth' && <BluetoothSettings />}

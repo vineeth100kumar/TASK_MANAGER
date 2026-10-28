@@ -197,6 +197,85 @@ def safe_next(target: Optional[str]) -> str:
     return "/"
 
 
+def passkey_script(next_path: str) -> str:
+    """The login page's "unlock with this device" button. It only shows itself
+    once it has checked the browser can do it and that a device is trusted, so a
+    plain-http or never-trusted visitor just sees the password box. All the
+    conversions are base64url <-> bytes; the Pi (passkeys.py) does the crypto."""
+    import json
+    next_js = json.dumps(next_path)
+    return """
+(function () {
+  var wrap = document.getElementById('passkey-wrap');
+  var btn = document.getElementById('passkey-btn');
+  var msg = document.getElementById('passkey-msg');
+  var NEXT = __NEXT__;
+  if (!wrap || !btn || !window.PublicKeyCredential || !window.isSecureContext) return;
+
+  function b64urlToBuf(v) {
+    v = v.replace(/-/g, '+').replace(/_/g, '/');
+    while (v.length % 4) v += '=';
+    var s = atob(v), b = new Uint8Array(s.length);
+    for (var i = 0; i < s.length; i++) b[i] = s.charCodeAt(i);
+    return b.buffer;
+  }
+  function bufToB64url(buf) {
+    var b = new Uint8Array(buf), s = '';
+    for (var i = 0; i < b.length; i++) s += String.fromCharCode(b[i]);
+    return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, '');
+  }
+
+  fetch('/api/webauthn/status', { credentials: 'include' })
+    .then(function (r) { return r.ok ? r.json() : null; })
+    .then(function (s) { if (s && s.available && s.gate && s.secure && s.hasDevices) wrap.hidden = false; })
+    .catch(function () {});
+
+  btn.addEventListener('click', function () {
+    msg.textContent = '';
+    btn.disabled = true;
+    var saved = btn.querySelector('span').textContent;
+    btn.querySelector('span').textContent = 'Follow your device…';
+    var session;
+    fetch('/api/webauthn/auth/begin', { method: 'POST', credentials: 'include' })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok) throw new Error(d.error || 'No trusted device.'); return d; }); })
+      .then(function (opts) {
+        session = opts.sageSession; delete opts.sageSession;
+        opts.challenge = b64urlToBuf(opts.challenge);
+        opts.allowCredentials = (opts.allowCredentials || []).map(function (c) { c.id = b64urlToBuf(c.id); return c; });
+        return navigator.credentials.get({ publicKey: opts });
+      })
+      .then(function (cred) {
+        var resp = cred.response;
+        var payload = {
+          id: cred.id, rawId: bufToB64url(cred.rawId), type: cred.type,
+          response: {
+            clientDataJSON: bufToB64url(resp.clientDataJSON),
+            authenticatorData: bufToB64url(resp.authenticatorData),
+            signature: bufToB64url(resp.signature),
+            userHandle: resp.userHandle ? bufToB64url(resp.userHandle) : null
+          },
+          clientExtensionResults: cred.getClientExtensionResults(),
+          authenticatorAttachment: cred.authenticatorAttachment
+        };
+        return fetch('/api/webauthn/auth/complete', {
+          method: 'POST', credentials: 'include',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credential: payload, session: session })
+        });
+      })
+      .then(function (r) { return r.json().then(function (d) { if (!r.ok || !d.success) throw new Error(d.error || "That didn't work."); }); })
+      .then(function () { window.location.href = NEXT; })
+      .catch(function (e) {
+        if (e && e.name === 'NotAllowedError') msg.textContent = '';
+        else msg.textContent = (e && e.message) || "That didn't work.";
+        btn.disabled = false;
+        btn.querySelector('span').textContent = saved;
+      });
+  });
+})();
+""".replace("__NEXT__", next_js)
+
+
 def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> str:
     """The password page, drawn to match the app: Inter, the Sage logo, the
     app's black/white buttons, and whichever theme the app was last left in
@@ -289,6 +368,15 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
   html.dark button:hover {{ filter: brightness(1.04); }}
   button:active {{ transform: scale(0.97); }}
   .foot {{ margin-top: 18px; text-align: center; color: var(--faint); font-size: 12.5px; }}
+  .or {{ display: flex; align-items: center; gap: 10px; margin: 18px 2px 14px; color: var(--faint); font-size: 12px; }}
+  .or::before, .or::after {{ content: ""; flex: 1; height: 1px; background: var(--field-line); }}
+  button.ghost {{
+    background: var(--field); color: var(--text); border: 1px solid var(--field-line);
+    box-shadow: none; display: flex; align-items: center; justify-content: center; gap: 9px; margin-top: 0;
+  }}
+  button.ghost:hover {{ filter: none; background: var(--card); border-color: var(--ring); }}
+  .pk-msg {{ margin: 10px 0 0; min-height: 0; font-size: 12.5px; color: var(--error); }}
+  .pk-msg:empty {{ margin: 0; }}
   .shake form {{ animation: shake .4s cubic-bezier(.36,.07,.19,.97) both; }}
   @keyframes rise {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: none; }} }}
   @keyframes shake {{ 20%, 60% {{ transform: translateX(-6px); }} 40%, 80% {{ transform: translateX(6px); }} }}
@@ -308,9 +396,18 @@ def login_page(next_path: str = "/", message: str = "", font_url: str = "") -> s
     <input type="hidden" name="next" value="{html.escape(next_path)}">
     {error}
     <button type="submit">Unlock</button>
+    <div id="passkey-wrap" hidden>
+      <div class="or"><span>or</span></div>
+      <button type="button" id="passkey-btn" class="ghost">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 11a3 3 0 0 0-3 3c0 1.5-.3 2.5-.8 3.3"/><path d="M12 11a3 3 0 0 1 3 3c0 2-.4 3.5-1 4.8"/><path d="M6.5 9a6 6 0 0 1 9-1.3"/><path d="M9 20.5c.6-1.3 1-3 1-6.5"/><path d="M14.7 20a16 16 0 0 0 .3-6 3 3 0 0 0-3-3"/></svg>
+        <span>Unlock with this device</span>
+      </button>
+      <p id="passkey-msg" class="pk-msg" role="status"></p>
+    </div>
   </form>
   <p class="foot">Sage asks for this each time it opens.</p>
 </main>
+<script>{passkey_script(next_path)}</script>
 </body>
 </html>"""
 
