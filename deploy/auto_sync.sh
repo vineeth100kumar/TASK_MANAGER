@@ -41,7 +41,7 @@ build_web() {
   command -v npm >/dev/null || { log "npm not installed; web app not rebuilt"; return 0; }
   log "rebuilding the web app"
   rm -rf "$REPO/dist.next"
-  (cd "$REPO" && as_user env VITE_PI_BACKEND_URL="${VITE_PI_BACKEND_URL:-/}" npm run build --silent -- --outDir dist.next --emptyOutDir) || {
+  (cd "$REPO" && as_user nice -n 10 env NODE_OPTIONS=--max-old-space-size=2048 VITE_PI_BACKEND_URL="${VITE_PI_BACKEND_URL:-/}" npm run build --silent -- --outDir dist.next --emptyOutDir) || {
     log "web build failed; keeping the previous dist/"; rm -rf "$REPO/dist.next"; return 1; }
   rm -rf "$REPO/dist.old"
   [ -d "$REPO/dist" ] && mv "$REPO/dist" "$REPO/dist.old"
@@ -69,7 +69,7 @@ deploy_changes() {
 
   if grep -qE '^(src/|public/|index\.html$|package(-lock)?\.json$|vite\.config\.|tailwind\.config\.|postcss\.config\.|\.env\.production$)' <<<"$changed"; then
     if grep -qE '^package(-lock)?\.json$' <<<"$changed" && command -v npm >/dev/null; then
-      (cd "$REPO" && as_user npm ci --silent) || { log "npm ci failed"; return 1; }
+      (cd "$REPO" && as_user nice -n 10 env NODE_OPTIONS=--max-old-space-size=1536 npm ci --silent --no-audit --no-fund) || { log "npm ci failed"; return 1; }
     fi
     build_web || return 1
   fi
