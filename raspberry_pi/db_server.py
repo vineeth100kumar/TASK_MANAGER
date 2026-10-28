@@ -26,6 +26,7 @@ import life_mode
 import phone_link
 import quick_add
 import markets
+import passkeys
 import prices
 import radar
 import radar_research
@@ -122,6 +123,7 @@ async def require_api_key(request, call_next):
         API_SECRET
         and path.startswith("/api/")
         and path != "/api/health"
+        and path not in WEBAUTHN_OPEN_PATHS
         and request.method != "OPTIONS"
         and not logged_in(request)
     ):
@@ -150,6 +152,16 @@ GATE_OPEN_PATHS = {
     "/sw.js",
 }
 
+# Trusted-device login (passkeys.py) must work before there is a session: an
+# unlogged-in browser asks whether a passkey is set, gets a challenge, and logs
+# in with it. These three are open; making and managing passkeys still needs a
+# password session (they live under /api/webauthn/ but aren't listed here).
+WEBAUTHN_OPEN_PATHS = {
+    "/api/webauthn/status",
+    "/api/webauthn/auth/begin",
+    "/api/webauthn/auth/complete",
+}
+
 
 @app.middleware("http")
 async def require_login(request, call_next):
@@ -158,6 +170,7 @@ async def require_login(request, call_next):
         not access_gate.enabled
         or request.method == "OPTIONS"
         or path in GATE_OPEN_PATHS
+        or path in WEBAUTHN_OPEN_PATHS
         # The app's own font files, so the login page can use them too.
         or (path.startswith("/assets/inter-") and path.endswith(".woff2"))
         # The MCP address carries its own token and checks it (claude_api.py).
@@ -273,6 +286,116 @@ def logout():
     response = RedirectResponse("/login", status_code=303)
     response.delete_cookie(access_gate.COOKIE_NAME)
     return response
+
+
+def _issue_session(response, request):
+    """Hand a browser the same login + one-page-load cookies that typing the
+    password does, so a passkey login lands in exactly the same place."""
+    secure = access_gate.is_https(request)
+    response.set_cookie(
+        access_gate.COOKIE_NAME, access_gate.new_session(),
+        max_age=access_gate.SESSION_DAYS * 86400, httponly=True, secure=secure, samesite="lax",
+    )
+    response.set_cookie(
+        access_gate.OPEN_COOKIE, access_gate.new_open_ticket(),
+        max_age=access_gate.OPEN_SECONDS, httponly=True, secure=secure, samesite="lax",
+    )
+    return response
+
+
+# --- Trusted devices (passkeys.py) ---
+# Face ID / Touch ID / Windows Hello instead of the password. Making a passkey
+# needs a password session; logging in with one does not (that is the point).
+@app.get("/api/webauthn/status", include_in_schema=False)
+async def webauthn_status(request: Request):
+    return passkeys.status(request, access_gate.enabled)
+
+
+@app.post("/api/webauthn/register/begin", include_in_schema=False)
+async def webauthn_register_begin(request: Request):
+    if not passkeys.AVAILABLE:
+        return JSONResponse({"success": False, "error": "Trusted devices aren't set up on this Pi yet."}, status_code=503)
+    if not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "Set a Sage password first; a trusted device unlocks it."}, status_code=400)
+    return HTMLResponse(passkeys.registration_options(request), media_type="application/json")
+
+
+@app.post("/api/webauthn/register/complete", include_in_schema=False)
+async def webauthn_register_complete(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "Trusted devices aren't available."}, status_code=400)
+    body = await request.json()
+    try:
+        result = passkeys.verify_registration(
+            request,
+            json.dumps(body.get("credential")),
+            str(body.get("session") or ""),
+            str(body.get("name") or ""),
+        )
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc) or "Couldn't trust this device."}, status_code=400)
+    return {"success": True, "device": result}
+
+
+@app.post("/api/webauthn/auth/begin", include_in_schema=False)
+async def webauthn_auth_begin(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    if access_gate.locked_for(ip, device):
+        return JSONResponse({"success": False, "error": "Too many tries. Use your password for now."}, status_code=429)
+    options = passkeys.authentication_options(request)
+    if options is None:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    return HTMLResponse(options, media_type="application/json")
+
+
+@app.post("/api/webauthn/auth/complete", include_in_schema=False)
+async def webauthn_auth_complete(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    if access_gate.locked_for(ip, device):
+        return JSONResponse({"success": False, "error": "Too many tries. Use your password for now."}, status_code=429)
+    body = await request.json()
+    try:
+        ok = passkeys.verify_authentication(
+            request, json.dumps(body.get("credential")), str(body.get("session") or "")
+        )
+    except Exception as exc:
+        # A failed passkey counts against the same limits as a wrong password.
+        access_gate.record_failure(ip, device)
+        print(f"Passkey login failed from {ip}: {exc}")
+        return JSONResponse({"success": False, "error": str(exc) or "That didn't work."}, status_code=401)
+    if not ok:
+        access_gate.record_failure(ip, device)
+        return JSONResponse({"success": False, "error": "That didn't work."}, status_code=401)
+    access_gate.clear_failures(ip, device)
+    return _issue_session(JSONResponse({"success": True}), request)
+
+
+@app.get("/api/webauthn/devices", include_in_schema=False)
+async def webauthn_devices():
+    return {"success": True, "devices": passkeys.list_devices() if passkeys.AVAILABLE else [], "available": passkeys.AVAILABLE}
+
+
+@app.post("/api/webauthn/devices/rename", include_in_schema=False)
+async def webauthn_device_rename(request: Request):
+    body = await request.json()
+    ok = passkeys.AVAILABLE and passkeys.rename(str(body.get("id") or ""), str(body.get("name") or ""))
+    return {"success": bool(ok)}
+
+
+@app.post("/api/webauthn/devices/revoke", include_in_schema=False)
+async def webauthn_device_revoke(request: Request):
+    body = await request.json()
+    if body.get("all"):
+        removed = passkeys.revoke_all() if passkeys.AVAILABLE else 0
+        return {"success": True, "removed": removed}
+    ok = passkeys.AVAILABLE and passkeys.revoke(str(body.get("id") or ""))
+    return {"success": bool(ok)}
 
 
 # --- Live event stream (/ws) ---
@@ -1900,6 +2023,10 @@ app.include_router(industry.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)
+
+# Trusted devices (passkeys.py): credential ids and public keys, Pi-only and
+# never in SYNC_TABLES, so they don't sync to LUMO or any other device.
+passkeys.connect(DB_PATH)
 app.include_router(drop.router)
 
 

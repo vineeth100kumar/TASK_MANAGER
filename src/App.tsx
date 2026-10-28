@@ -35,6 +35,9 @@ import {
 import { PhoneCorner } from './components/common/PhoneCorner';
 import { ModePrompt } from './components/common/ModePrompt';
 import { WelcomeHome } from './components/common/WelcomeHome';
+import { SageLoader } from './components/common/SageLoader';
+import { BootBoundary } from './components/common/BootBoundary';
+import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
@@ -83,9 +86,15 @@ function MainApp() {
   const [shown, setShown] = useState<Shown>({ total: 0, shown: 0, hidden: {} });
   const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
+  // The splash stays up until the first data load finishes, so the app never
+  // flashes empty between login and its data. A safety timer lets it go even
+  // if that first load is slow or offline.
+  const [booted, setBooted] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
+  const openSettings = useCallback((tab?: string) => { setSettingsTab(tab); setIsSettingsOpen(true); }, []);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isMorningOpen, setIsMorningOpen] = useState(false);
@@ -266,6 +275,7 @@ function MainApp() {
       showToast("Failed to load work items.", "error");
     } finally {
       if (seq === fetchSeq.current) setIsLoading(false);
+      setBooted(true);
     }
   }, [filters, activeWorkspace, lifeContext, showToast]);
 
@@ -284,6 +294,13 @@ function MainApp() {
 
   // Fetch the other pages' code in the background once the first screen is up.
   useEffect(() => { prefetchViews(); }, []);
+
+  // Never let the splash trap the app: show it for at most a few seconds even
+  // if the first data pull is slow or the Pi is unreachable.
+  useEffect(() => {
+    const t = setTimeout(() => setBooted(true), 8000);
+    return () => clearTimeout(t);
+  }, []);
 
   // A new page starts at the top, not wherever the last one was scrolled to.
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -433,7 +450,9 @@ function MainApp() {
 
   return (
     <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
-      <Sidebar 
+      <AnimatePresence>{!booted && <SageLoader key="splash" />}</AnimatePresence>
+      <TrustDevicePrompt booted={booted} onOpenSettings={() => openSettings('security')} />
+      <Sidebar
         isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
@@ -577,7 +596,8 @@ function MainApp() {
         {isSettingsOpen && (
           <Suspense key="settings" fallback={null}>
             <SettingsModal
-              onClose={() => setIsSettingsOpen(false)}
+              onClose={() => { setIsSettingsOpen(false); setSettingsTab(undefined); }}
+              initialTab={settingsTab}
               lifeContext={lifeContext}
               onDataChanged={() => fetchWorkItems(false)}
             />
@@ -678,7 +698,9 @@ export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <ToastProvider>
-        <MainApp />
+        <BootBoundary>
+          <MainApp />
+        </BootBoundary>
       </ToastProvider>
     </MotionConfig>
   );
