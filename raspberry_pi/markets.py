@@ -541,7 +541,7 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
     def proxy(symbol: str) -> Optional[str]:
         """The fund standing in for an index, e.g. SPY for the S&P 500."""
         source, via = origin.get(symbol, (None, None))
-        return via if source == "twelve" and via and via != symbol else None
+        return via if source == "twelve" and via and via != symbol and "/" not in via else None  # a pair like XAU/USD is the price itself
 
     gauges = []
     for symbol, label, unit in GAUGES[region]:

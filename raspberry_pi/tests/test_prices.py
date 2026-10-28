@@ -151,5 +151,10 @@ class Freshness(unittest.TestCase):
         self.assertFalse(prices.fresh(None, NOW, NOW, True))
 
 
+class Oil(unittest.TestCase):
+    def test_crude_is_never_the_uso_fund(self):
+        self.assertEqual(prices.routes("CL=F"), [("fred", "DCOILWTICO"), ("yahoo", "CL=F")])
+
+
 if __name__ == "__main__":
     unittest.main()
