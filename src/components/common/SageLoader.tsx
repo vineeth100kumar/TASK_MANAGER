@@ -1,43 +1,28 @@
 import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 
-// The loading screen: one line that draws itself into a Sage icon, rubs itself
-// out, and redraws as the next — tasks, a list, a plan, a note, focus, an idea,
-// a habit. It reads as a single pen sketching what Sage does, rather than a
-// spinner. Shown right after login until the app's data is ready, over the
-// app's own background so there is no white flash on either side of it.
+// The loading screen: the Sage logo (the S with its arrow) draws itself on one
+// stroke at a time, holds, rubs itself out, and draws again until the app's
+// data is ready. It reads as a pen signing Sage rather than a spinner. Shown
+// right after login over the app's own background so there is no white flash
+// on either side of it.
 
-// Each icon is a few single strokes on a 24x24 grid, in the app's rounded line
-// style. Kept deliberately simple so the draw-on / draw-off stays legible.
-const ICONS: { label: string; paths: string[] }[] = [
-  // A ticked task
-  { label: 'done', paths: ['M4 7a3 3 0 0 1 3-3h10a3 3 0 0 1 3 3v10a3 3 0 0 1-3 3H7a3 3 0 0 1-3-3z', 'M8.5 12.5l2.5 2.5 5-5.5'] },
-  // A list of tasks
-  { label: 'tasks', paths: ['M9 7h11', 'M9 12h11', 'M9 17h11', 'M4 7h.01', 'M4 12h.01', 'M4 17h.01'] },
-  // A calendar / plan
-  { label: 'plan', paths: ['M4 7a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z', 'M4 10h16', 'M8 3v4', 'M16 3v4'] },
-  // A note
-  { label: 'note', paths: ['M6 3h8l4 4v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z', 'M14 3v4h4', 'M8 12h7', 'M8 16h5'] },
-  // Focus (a target)
-  { label: 'focus', paths: ['M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z', 'M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8z', 'M12 11.5a.5.5 0 1 0 0 1 .5.5 0 0 0 0-1z'] },
-  // An idea
-  { label: 'idea', paths: ['M12 3a6 6 0 0 1 4 10.5c-.7.7-1 1.2-1 2.5H9c0-1.3-.3-1.8-1-2.5A6 6 0 0 1 12 3z', 'M9.5 19h5', 'M10.5 21.5h3'] },
-  // A habit / streak
-  { label: 'habit', paths: ['M20 7a8 8 0 1 0 1.5 6', 'M20 3v4h-4'] },
-];
+// The mark as a few single strokes on a 24x24 grid, in the app's rounded line
+// style. The same strokes run on the login page and the first-paint splash.
+const LOGO = ['M11.9,5.7C8.1,5.1 5.7,7 5.9,9.4C6.1,12.5 9.9,14.7 13.7,14.5','M5.7,16.3C6.3,19.6 10.2,19.9 14,19.6C17.5,19.3 18.8,15.8 16.9,12.5C15.9,10.9 14.3,10.2 12.4,10.1L9.8,10.4','M12.7,9.8L18.4,4.1','M14.5,4.5L18.4,4.1L18.1,8.1'];
 
-const HOLD_MS = 650;
+const QUOTES = ['Good things come to those who wait.','Great things take a little time.','Patience is bitter, but its fruit is sweet.','Slow and steady. Your day is coming together.','Almost there. Worth the wait.'];
+
+const HOLD_MS = 1350;
 
 export function SageLoader({ error, onRetry }: { error?: string; onRetry?: () => void }) {
   const [i, setI] = useState(0);
 
   useEffect(() => {
     if (error) return;
-    const t = setInterval(() => setI(v => (v + 1) % ICONS.length), HOLD_MS);
+    const t = setInterval(() => setI(v => v + 1), HOLD_MS);
     return () => clearInterval(t);
   }, [error]);
-
-  const icon = ICONS[i];
 
   return (
     <motion.div
@@ -73,7 +58,7 @@ export function SageLoader({ error, onRetry }: { error?: string; onRetry?: () =>
                 strokeLinecap="round"
                 strokeLinejoin="round"
               >
-                {icon.paths.map((d, k) => (
+                {LOGO.map((d, k) => (
                   <motion.path
                     key={k}
                     d={d}
@@ -99,6 +84,18 @@ export function SageLoader({ error, onRetry }: { error?: string; onRetry?: () =>
                 transition={{ duration: 1.1, ease: 'easeInOut', repeat: Infinity }}
               />
             </div>
+            <AnimatePresence mode="wait">
+              <motion.p
+                key={Math.floor(i / 3) % QUOTES.length}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.3 }}
+                className="mt-3 max-w-[18rem] px-6 text-center font-serif text-[14px] italic leading-snug text-gray-500 dark:text-gray-400"
+              >
+                {QUOTES[Math.floor(i / 3) % QUOTES.length]}
+              </motion.p>
+            </AnimatePresence>
           </div>
         </>
       )}
