@@ -109,17 +109,12 @@ part_web() {
   step "Web app"
   # The build is the biggest memory user in the whole install (Excalidraw makes
   # it ~2 GB). On a 4 GB Pi, with Sage and Ollama also resident, it ran the Pi out
-  # of memory and the Pi rebooted. So: stop the other memory users while it runs,
-  # cap Node's heap so it fails with an error instead of taking the Pi down, run
-  # at low priority, and skip npm ci when node_modules already matches the lockfile.
+  # of memory and the Pi rebooted. Sage and Ollama are held stopped for the whole
+  # install (see hold_services). Here: cap Node's heap so it fails with an error
+  # instead of taking the Pi down, run at low priority, and skip npm ci when
+  # node_modules already matches the lockfile.
   if command -v npm >/dev/null; then
     BACKEND_URL="$(grep '^VITE_PI_BACKEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
-    STOPPED=()
-    for svc in sage ollama; do
-      if systemctl is-active --quiet "$svc"; then systemctl stop "$svc"; STOPPED+=("$svc"); fi
-    done
-    restart_stopped() { for svc in "${STOPPED[@]}"; do systemctl start "$svc" || true; done; STOPPED=(); }
-    trap restart_stopped EXIT
     if [ -f "$REPO/node_modules/.package-lock.json" ] && cmp -s "$REPO/package-lock.json" "$REPO/node_modules/.package-lock.json.src" 2>/dev/null; then
       echo "node_modules already matches package-lock.json; skipping npm ci."
     else
@@ -134,8 +129,6 @@ part_web() {
     [ -d "$REPO/dist" ] && mv "$REPO/dist" "$REPO/dist.old"
     mv "$REPO/dist.next" "$REPO/dist"
     rm -rf "$REPO/dist.old"
-    restart_stopped
-    trap - EXIT
   else
     echo "npm is not installed, so the web app was not built. Install Node.js 20+ and re-run."
   fi
@@ -171,7 +164,7 @@ part_services() {
   systemctl daemon-reload
   for unit in "${UNITS[@]}"; do
     systemctl enable --quiet "$unit.service"
-    systemctl restart "$unit.service"
+    held_add "$unit"  # started at the very end, once the install is complete
   done
 }
 
@@ -209,8 +202,31 @@ summary() {
   fi
 }
 
+# Nothing runs while the install is in progress: the services that use memory
+# are stopped before the first part and started again only after the last one
+# has finished (including when a part fails, so the Pi isn't left without Sage).
+HELD=()
+held_add() { [[ " ${HELD[*]:-} " == *" $1 "* ]] || HELD+=("$1"); }
+hold_services() {
+  for svc in sage-autosync sage ollama; do
+    if systemctl is-active --quiet "$svc"; then held_add "$svc"; systemctl stop "$svc"; fi
+  done
+}
+start_held() {
+  [ "${#HELD[@]}" -gt 0 ] || return 0
+  step "Starting ${HELD[*]}"
+  local svc ordered=()
+  for svc in ollama sage sage-autosync; do [[ " ${HELD[*]} " == *" $svc "* ]] && ordered+=("$svc"); done
+  for svc in "${ordered[@]}"; do systemctl start "$svc" || echo "Could not start $svc; see: journalctl -u $svc -n 50" >&2; done
+  HELD=()
+}
+trap start_held EXIT
+hold_services
 for part in "${PARTS[@]}"; do
+  [ "$part" = check ] && continue
   if wanted "$part"; then "part_$part"; fi
 done
+start_held
+wanted check && part_check
 wanted check && summary
 exit 0
