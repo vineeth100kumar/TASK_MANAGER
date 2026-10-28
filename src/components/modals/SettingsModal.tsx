@@ -40,6 +40,14 @@ interface SettingsModalProps {
   onDataChanged?: () => void;
 }
 
+function fmtBytes(bytes: number): string {
+  if (!bytes) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(u.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const n = bytes / Math.pow(1024, i);
+  return `${n.toFixed(i === 0 ? 0 : n < 10 ? 1 : 0)} ${u[i]}`;
+}
+
 export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
   useEscapeKey(onClose);
   const [activeTab, setActiveTab] = useState<'attention' | 'modes' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
@@ -91,6 +99,13 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   // Nightly copy of the Pi's database. undefined = still asking, null = Pi not reachable.
   const [backup, setBackup] = useState<{ lastBackupAt: string | null; count: number; time: string } | null | undefined>(undefined);
   const [backingUp, setBackingUp] = useState(false);
+  // What the Pi is holding on disk. undefined = still asking, null = Pi not reachable.
+  const [storage, setStorage] = useState<{
+    disk: { total: number; used: number; free: number };
+    db: { bytes: number };
+    backups: { bytes: number; count: number };
+    drop: { bytes: number; sites: number; clips: number; permanent: number };
+  } | null | undefined>(undefined);
   const [groqStatus, setGroqStatus] = useState<{ set: boolean; source: string | null; last4: string | null } | null>(null);
   const [groqKey, setGroqKey] = useState('');
   const [savingGroq, setSavingGroq] = useState(false);
@@ -143,6 +158,15 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
       .catch(() => setBackup(null));
   };
   useEffect(loadBackup, []);
+
+  useEffect(() => {
+    const base = piBackendUrl();
+    if (!base) { setStorage(null); return; }
+    fetch(`${base}/api/storage`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => setStorage(json?.success ? json : null))
+      .catch(() => setStorage(null));
+  }, []);
 
   const backUpNow = async () => {
     setBackingUp(true);
@@ -395,6 +419,57 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                       {backingUp ? 'Backing up…' : 'Back up now'}
                     </button>
                   )}
+                </div>
+              );
+            })()}
+
+            {/* What the Pi is holding on disk */}
+            {piBackendUrl() && storage !== undefined && (() => {
+              if (storage === null) {
+                return (
+                  <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400" aria-hidden="true" />
+                      <span>Pi storage</span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Couldn't reach the Pi to read its storage.</p>
+                  </div>
+                );
+              }
+              const { disk, db, backups, drop } = storage;
+              const pct = disk.total ? Math.min(100, Math.round((disk.used / disk.total) * 100)) : 0;
+              const state = pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : 'good';
+              const dot = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500' }[state];
+              const bar = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500' }[state];
+              const rows: { label: string; value: string; note?: string }[] = [
+                { label: 'Database', value: fmtBytes(db.bytes) },
+                { label: 'Backups', value: fmtBytes(backups.bytes), note: `${backups.count} kept` },
+                { label: 'Drop', value: fmtBytes(drop.bytes), note: `${drop.sites} site${drop.sites === 1 ? '' : 's'}${drop.permanent ? ` (${drop.permanent} permanent)` : ''}, ${drop.clips} text clip${drop.clips === 1 ? '' : 's'}` },
+              ];
+              return (
+                <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${dot}`} aria-hidden="true" />
+                    <span>Pi storage</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                      <span>{fmtBytes(disk.used)} used of {fmtBytes(disk.total)}</span>
+                      <span className="font-semibold">{fmtBytes(disk.free)} free</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-black/[0.07] dark:bg-white/10 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Disk used">
+                      <div className={`h-full rounded-full ${bar} transition-[width]`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  <dl className="divide-y divide-black/5 dark:divide-white/5">
+                    {rows.map(r => (
+                      <div key={r.label} className="flex items-baseline justify-between gap-3 py-1.5">
+                        <dt className="text-xs text-gray-600 dark:text-gray-400">{r.label}{r.note && <span className="text-gray-400 dark:text-gray-500"> · {r.note}</span>}</dt>
+                        <dd className="text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">{r.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Sage's own files are a small part of the card; the rest is Raspberry Pi OS and anything else on it.</p>
                 </div>
               );
             })()}

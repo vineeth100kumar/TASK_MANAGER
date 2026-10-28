@@ -782,6 +782,53 @@ async def backup_run():
         raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
     return {"success": True, "file": path.name, **backup.status()}
 
+
+def _dir_bytes(folder) -> int:
+    total = 0
+    for dirpath, _, names in os.walk(folder):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(dirpath, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+@app.get("/api/storage")
+def storage_stats():
+    """What the Pi is holding: the whole disk, and Sage's own files on it."""
+    import shutil as _shutil
+    db_file = Path(DB_PATH).resolve()
+    home = db_file.parent
+    try:
+        disk = _shutil.disk_usage(home)
+        disk_total, disk_used, disk_free = disk.total, disk.used, disk.free
+    except OSError:
+        disk_total = disk_used = disk_free = 0
+
+    def _file_bytes(path) -> int:
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    db_bytes = _file_bytes(db_file)
+    for extra in ("-wal", "-shm"):
+        db_bytes += _file_bytes(str(db_file) + extra)
+
+    backup_status = backup.status()
+    backup_bytes = _dir_bytes(backup_status["folder"]) if os.path.isdir(backup_status["folder"]) else 0
+
+    drop_usage = drop.usage()
+
+    return {
+        "success": True,
+        "disk": {"total": disk_total, "used": disk_used, "free": disk_free},
+        "db": {"bytes": db_bytes, "path": str(db_file)},
+        "backups": {"bytes": backup_bytes, "count": backup_status["count"], "folder": backup_status["folder"]},
+        "drop": drop_usage,
+    }
+
 # --- Quick-Add (Siri Shortcuts / Share Sheet / email capture) ---
 
 class QuickAddRequest(BaseModel):

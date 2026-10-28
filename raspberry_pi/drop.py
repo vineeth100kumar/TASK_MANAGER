@@ -27,10 +27,18 @@ Safety:
   - MAX_MB per drop (zips are counted by what they unpack to), MAX_FILES files
     and MAX_ACTIVE live drops.
 
-Drops live in a Pi-only table, like Radar's headlines: they are temporary, so
-they don't sync and aren't in the Sheets backup. Expired drops are deleted by
-run() every few minutes, and refused (410) straight away if one is asked for
-before that.
+The clipboard: paste text or a snippet and it gets the same kind of link,
+shown as a plain page with a Copy button (and /raw for the bare text). Clips
+are always temporary, a week at most, and can't be made permanent.
+
+A site link can be made permanent (it never expires until it's deleted or
+made temporary again), and any link, site or clip, can be turned off at once
+and back on: a turned-off link shows "This link is turned off" (403) while
+its files stay put.
+
+Drops live in a Pi-only table, like Radar's headlines: they don't sync and
+aren't in the Sheets backup. Expired drops are deleted by run() every few
+minutes, and refused (410) straight away if one is asked for before that.
 """
 
 import asyncio
@@ -62,6 +70,10 @@ MAX_FILES = 1000
 MAX_ACTIVE = 50
 MAX_HOURS = 30 * 24
 DEFAULT_HOURS = 24
+# Clips are temporary only.
+CLIP_MAX_HOURS = 7 * 24
+MAX_CLIP_BYTES = 1024 * 1024
+CLIP_FILE = "clip.txt"
 SWEEP_SECONDS = 300
 # Set by hand when the links should use another address than Settings'
 # public link (say a second tunnel just for drops).
@@ -134,8 +146,21 @@ def connect(db_path: str) -> None:
         );
         """
     )
+    # Columns added after the first version of the table.
+    have = {r[1] for r in conn.execute("PRAGMA table_info(drops)")}
+    for column, kind in (("kind", "TEXT DEFAULT 'site'"), ("permanent", "INTEGER DEFAULT 0"), ("disabled", "INTEGER DEFAULT 0")):
+        if column not in have:
+            conn.execute(f"ALTER TABLE drops ADD COLUMN {column} {kind}")
     conn.commit()
     conn.close()
+
+
+# A permanent drop never expires, whatever its expires_at says.
+EXPIRED = "COALESCE(permanent, 0) = 0 AND expires_at <= ?"
+
+
+def _expired(row, now: Optional[float] = None) -> bool:
+    return not row["permanent"] and row["expires_at"] <= (time.time() if now is None else now)
 
 
 def _db() -> sqlite3.Connection:
@@ -310,7 +335,19 @@ def _shape(row) -> dict:
         "views": row["views"] or 0,
         "lastView": row["last_view"],
         "source": row["source"] or "",
+        "kind": row["kind"] or "site",
+        "permanent": bool(row["permanent"]),
+        "disabled": bool(row["disabled"]),
+        **({"preview": _clip_preview(row["id"])} if row["kind"] == "clip" else {}),
     }
+
+
+def _clip_preview(slug: str) -> str:
+    try:
+        with open(DROP_DIR / slug / CLIP_FILE, encoding="utf-8", errors="replace") as f:
+            return f.read(240)
+    except OSError:
+        return ""
 
 
 def list_drops() -> List[dict]:
@@ -336,10 +373,12 @@ def remove(slug: str) -> bool:
 
 
 def extend(slug: str, hours: float) -> Optional[dict]:
-    hours = min(max(float(hours), 0.25), MAX_HOURS)
     conn = _db()
     try:
-        conn.execute("UPDATE drops SET expires_at = ? WHERE id = ? AND expires_at > ?", (time.time() + hours * 3600, slug, time.time()))
+        row = conn.execute("SELECT kind FROM drops WHERE id = ?", (slug,)).fetchone()
+        top = CLIP_MAX_HOURS if row and row["kind"] == "clip" else MAX_HOURS
+        hours = min(max(float(hours), 0.25), top)
+        conn.execute(f"UPDATE drops SET expires_at = ? WHERE id = ? AND NOT ({EXPIRED})", (time.time() + hours * 3600, slug, time.time()))
         conn.commit()
         row = conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()
         return _shape(row) if row else None
@@ -347,13 +386,107 @@ def extend(slug: str, hours: float) -> Optional[dict]:
         conn.close()
 
 
+def set_permanent(slug: str, on: bool) -> dict:
+    """Makes a site link permanent, or temporary again (a day from now)."""
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()
+        if not row or _expired(row):
+            raise DropError("That drop has expired.")
+        if on and row["kind"] == "clip":
+            raise DropError("Clipboard links are always temporary.")
+        if on:
+            conn.execute("UPDATE drops SET permanent = 1 WHERE id = ?", (slug,))
+        else:
+            conn.execute("UPDATE drops SET permanent = 0, expires_at = ? WHERE id = ?", (time.time() + DEFAULT_HOURS * 3600, slug))
+        conn.commit()
+        return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+    finally:
+        conn.close()
+
+
+def set_enabled(slug: str, on: bool) -> dict:
+    """Turns a link off at once (visitors see "turned off"), or back on."""
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()
+        if not row or _expired(row):
+            raise DropError("That drop has expired.")
+        conn.execute("UPDATE drops SET disabled = ? WHERE id = ?", (0 if on else 1, slug))
+        conn.commit()
+        return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+    finally:
+        conn.close()
+
+
+def create_clip(text: str, name: str = "", hours: float = DEFAULT_HOURS) -> dict:
+    """Shares a piece of text (a note, a snippet, a list) as a temporary link."""
+    text = str(text or "")
+    if not text.strip():
+        raise DropError("Paste some text to share.")
+    data = text.encode("utf-8")
+    if len(data) > MAX_CLIP_BYTES:
+        raise DropError(f"That's more than {MAX_CLIP_BYTES // 1024} KB of text.")
+    hours = min(max(float(hours or DEFAULT_HOURS), 0.25), CLIP_MAX_HOURS)
+    sweep()
+    conn = _db()
+    try:
+        if conn.execute("SELECT COUNT(*) FROM drops").fetchone()[0] >= MAX_ACTIVE:
+            raise DropError(f"You have {MAX_ACTIVE} live drops. Delete some first.")
+        slug = secrets.token_urlsafe(16)
+        root = DROP_DIR / slug
+        root.mkdir(parents=True)
+        (root / CLIP_FILE).write_bytes(data)
+        first = next((line.strip() for line in text.splitlines() if line.strip()), "")
+        title = (name or "").strip()[:120] or (first[:60] + ("…" if len(first) > 60 else ""))
+        now = time.time()
+        conn.execute(
+            "INSERT INTO drops (id, name, created_at, expires_at, entry, files, bytes, views, source, kind) "
+            "VALUES (?,?,?,?,?,1,?,0,'clipboard','clip')",
+            (slug, title, now, now + hours * 3600, CLIP_FILE, len(data)),
+        )
+        conn.commit()
+        return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+    finally:
+        conn.close()
+
+
+def usage() -> dict:
+    """What Drop keeps on the Pi, for Settings' storage panel."""
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT kind, COUNT(*), COALESCE(SUM(bytes), 0), COALESCE(SUM(permanent), 0) FROM drops GROUP BY kind").fetchall()
+    finally:
+        conn.close()
+    sites = next((r for r in rows if (r[0] or "site") == "site"), None)
+    clips = next((r for r in rows if r[0] == "clip"), None)
+    return {
+        "bytes": _folder_bytes(DROP_DIR),
+        "sites": sites[1] if sites else 0,
+        "clips": clips[1] if clips else 0,
+        "permanent": sites[3] if sites else 0,
+        "folder": str(DROP_DIR),
+    }
+
+
+def _folder_bytes(folder: Path) -> int:
+    total = 0
+    for dirpath, _, names in os.walk(folder):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(dirpath, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
 def sweep(now: Optional[float] = None) -> int:
     """Deletes expired drops, and folders left behind without a row."""
     now = time.time() if now is None else now
     conn = _db()
     try:
-        expired = [r[0] for r in conn.execute("SELECT id FROM drops WHERE expires_at <= ?", (now,))]
-        conn.execute("DELETE FROM drops WHERE expires_at <= ?", (now,))
+        expired = [r[0] for r in conn.execute(f"SELECT id FROM drops WHERE {EXPIRED}", (now,))]
+        conn.execute(f"DELETE FROM drops WHERE {EXPIRED}", (now,))
         conn.commit()
         live = {r[0] for r in conn.execute("SELECT id FROM drops")}
     finally:
@@ -447,10 +580,14 @@ def serve(slug: str, path: str, request: Request):
         conn.close()
     if not row:
         return _page("Not found", "There's no drop at this link. It may have been deleted.", 404)
-    if row["expires_at"] <= time.time():
+    if _expired(row):
         remove(slug)
         return _page("This link has expired", "Ask whoever shared it for a new one.", 410)
+    if row["disabled"]:
+        return _page("This link is turned off", "Whoever shared it has switched it off for now.", 403)
     root = (DROP_DIR / slug).resolve()
+    if row["kind"] == "clip":
+        return _serve_clip(row, root, path, request)
     if not path:
         if not row["entry"]:
             return _listing(row)
@@ -471,12 +608,7 @@ def serve(slug: str, path: str, request: Request):
     if not target.is_file():
         return _page("Not found", "That file isn't in this drop.", 404)
     if target.suffix.lower() in (".html", ".htm") and request.headers.get("sec-fetch-dest", "document") == "document":
-        conn = _db()
-        try:
-            conn.execute("UPDATE drops SET views = COALESCE(views, 0) + 1, last_view = ? WHERE id = ?", (time.time(), slug))
-            conn.commit()
-        finally:
-            conn.close()
+        _count_view(slug)
     if target.suffix.lower() in (".html", ".htm") and target.stat().st_size <= MAX_REWRITE_BYTES \
             and SOURCE_SCRIPT.search(target.read_text(encoding="utf-8", errors="ignore")):
         # It would only come up blank, so say why instead.
@@ -488,6 +620,53 @@ def serve(slug: str, path: str, request: Request):
         if fixed is not None:
             return Response(fixed, media_type=_media_type(target), headers=SERVE_HEADERS)
     return FileResponse(target, media_type=_media_type(target), headers=SERVE_HEADERS)
+
+
+def _count_view(slug: str) -> None:
+    conn = _db()
+    try:
+        conn.execute("UPDATE drops SET views = COALESCE(views, 0) + 1, last_view = ? WHERE id = ?", (time.time(), slug))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _serve_clip(row, root: Path, path: str, request: Request):
+    """A clip's page (the text and a Copy button), or the bare text at raw."""
+    target = root / CLIP_FILE
+    if not target.is_file():
+        return _page("Not found", "There's nothing at this link.", 404)
+    if path.strip("/") in ("raw", CLIP_FILE):
+        return FileResponse(target, media_type="text/plain; charset=utf-8", headers=SERVE_HEADERS)
+    if path:
+        return _page("Not found", "That isn't part of this clip.", 404)
+    if request.headers.get("sec-fetch-dest", "document") == "document":
+        _count_view(row["id"])
+    text = target.read_text(encoding="utf-8", errors="replace")
+    name = html.escape(row["name"] or "Shared text")
+    body = (
+        "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<title>{name}</title>"
+        "<style>:root{color-scheme:light dark;--bg:#f5f5f7;--card:#fff;--ink:#1c1c1e;--muted:#6b7280;--line:rgba(0,0,0,.08)}"
+        "@media (prefers-color-scheme:dark){:root{--bg:#111113;--card:#1c1c1e;--ink:#f2f2f7;--muted:#9ca3af;--line:rgba(255,255,255,.1)}}"
+        "body{margin:0;background:var(--bg);color:var(--ink);font:15px system-ui,sans-serif}"
+        "main{max-width:820px;margin:0 auto;padding:28px 16px}"
+        "header{display:flex;align-items:center;gap:12px;margin-bottom:12px}"
+        "h1{font-size:19px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+        "button,a.btn{font:600 14px system-ui,sans-serif;border:0;border-radius:12px;padding:9px 16px;cursor:pointer;text-decoration:none}"
+        "button{background:#2563eb;color:#fff}a.btn{background:var(--line);color:var(--ink)}"
+        "pre{margin:0;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:16px;"
+        "white-space:pre-wrap;word-break:break-word;font:13.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace}"
+        "p{color:var(--muted);font-size:12.5px;margin:12px 4px 0}</style>"
+        f"<main><header><h1>{name}</h1><a class=btn href='raw' download='{name}.txt'>Download</a>"
+        "<button id=copy>Copy</button></header>"
+        f"<pre id=text>{html.escape(text)}</pre><p>Shared from Sage Drop. This link is temporary and switches itself off.</p></main>"
+        "<script>document.getElementById('copy').onclick=async function(){var b=this,t=document.getElementById('text');"
+        "try{await navigator.clipboard.writeText(t.textContent)}catch(e){var r=document.createRange();r.selectNodeContents(t);"
+        "var s=getSelection();s.removeAllRanges();s.addRange(r);try{document.execCommand('copy')}catch(_){}}"
+        "b.textContent='Copied';setTimeout(function(){b.textContent='Copy'},1500)}</script>"
+    )
+    return HTMLResponse(body, headers=SERVE_HEADERS)
 
 
 def _drop_files(slug: str, root: Path) -> Set[str]:
@@ -546,11 +725,47 @@ class ExtendRequest(BaseModel):
     hours: float = DEFAULT_HOURS
 
 
+class ClipRequest(BaseModel):
+    text: str
+    name: str = ""
+    hours: float = DEFAULT_HOURS
+
+
+class ToggleRequest(BaseModel):
+    on: bool
+
+
 @router.get("/api/drops")
 async def drops_list():
     base = await asyncio.to_thread(base_url)
     return {"success": True, "drops": list_drops(), "base": base.get("url"), "baseKind": base.get("kind"),
-            "maxMb": MAX_MB, "maxHours": MAX_HOURS}
+            "maxMb": MAX_MB, "maxHours": MAX_HOURS, "clipMaxHours": CLIP_MAX_HOURS, "clipMaxKb": MAX_CLIP_BYTES // 1024}
+
+
+@router.post("/api/drops/clip")
+async def drops_clip(req: ClipRequest):
+    try:
+        clip = await asyncio.to_thread(create_clip, req.text, req.name, req.hours)
+    except DropError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+    base = await asyncio.to_thread(base_url)
+    return {"success": True, "drop": clip, "base": base.get("url")}
+
+
+@router.post("/api/drops/{slug}/permanent")
+def drops_permanent(slug: str, req: ToggleRequest):
+    try:
+        return {"success": True, "drop": set_permanent(slug, req.on)}
+    except DropError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
+
+
+@router.post("/api/drops/{slug}/enabled")
+def drops_enabled(slug: str, req: ToggleRequest):
+    try:
+        return {"success": True, "drop": set_enabled(slug, req.on)}
+    except DropError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=400)
 
 
 @router.post("/api/drops")
@@ -590,7 +805,7 @@ async def drops_create(request: Request):
 @router.post("/api/drops/{slug}/extend")
 def drops_extend(slug: str, req: ExtendRequest):
     drop = extend(slug, req.hours)
-    if not drop or drop["expiresAt"] <= time.time():
+    if not drop or (not drop["permanent"] and drop["expiresAt"] <= time.time()):
         return JSONResponse({"success": False, "error": "That drop has expired."}, status_code=404)
     return {"success": True, "drop": drop}
 

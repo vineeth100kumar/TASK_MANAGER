@@ -7,7 +7,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AlertTriangle, Check, Clock, Copy, ExternalLink, Eye, FileCode, FolderOpen, Globe, Link2, Loader2, Server, Trash2, UploadCloud } from 'lucide-react';
+import { AlertTriangle, Check, Clock, Copy, ExternalLink, Eye, FileCode, FileText, FolderOpen, Globe, Infinity as InfinityIcon, Link2, Loader2, Power, Send, Server, Trash2, UploadCloud } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import {
   DEFAULT_HOURS, Drop, DropFile, EXPIRY_CHOICES, dropApi, dropAvailable, dropLink,
@@ -38,6 +38,9 @@ export function DropView() {
   const [warnings, setWarnings] = useState<string[]>([]);
   const [copied, setCopied] = useState('');
   const [, tick] = useState(0);
+  // Clipboard: share a piece of text as a temporary link.
+  const [clipText, setClipText] = useState('');
+  const [clipBusy, setClipBusy] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
   const folderInput = useRef<HTMLInputElement>(null);
   const depth = useRef(0);
@@ -155,20 +158,54 @@ export function DropView() {
       await dropApi.remove(drop.id);
       setDrops(list => (list || []).filter(d => d.id !== drop.id));
       if (fresh?.id === drop.id) { setFresh(null); setWarnings([]); }
-      showToast('Link turned off');
+      showToast('Link deleted');
     } catch (e: any) {
       showToast(e.message, 'error');
     }
   };
 
-  const extend = async (drop: Drop, h: number) => {
+  const apply = (updated: Drop) => {
+    setDrops(list => (list || []).map(d => (d.id === updated.id ? updated : d)));
+    if (fresh?.id === updated.id) setFresh(updated);
+  };
+
+  const togglePermanent = async (drop: Drop) => {
     try {
-      const updated = await dropApi.extend(drop.id, h);
-      setDrops(list => (list || []).map(d => (d.id === drop.id ? updated : d)));
-      if (fresh?.id === drop.id) setFresh(updated);
-      showToast(`Link now lasts ${timeLeft(updated.expiresAt)}`);
+      apply(await dropApi.setPermanent(drop.id, !drop.permanent));
+      showToast(drop.permanent ? 'Link now expires again' : 'Link kept permanently');
     } catch (e: any) {
       showToast(e.message, 'error');
+    }
+  };
+
+  const toggleEnabled = async (drop: Drop) => {
+    try {
+      apply(await dropApi.setEnabled(drop.id, drop.disabled));
+      showToast(drop.disabled ? 'Link turned back on' : 'Link turned off');
+    } catch (e: any) {
+      showToast(e.message, 'error');
+    }
+  };
+
+  const shareClip = async () => {
+    const text = clipText.trim();
+    if (!text || clipBusy) return;
+    setClipBusy(true);
+    try {
+      const { drop, base: b } = await dropApi.clip(clipText, hours);
+      setBase(b);
+      setFresh(drop);
+      setWarnings([]);
+      setDrops(list => [drop, ...(list || []).filter(d => d.id !== drop.id)]);
+      setClipText('');
+      let copiedNow = false;
+      try { await navigator.clipboard.writeText(dropLink(drop, b)); setCopied(drop.id); copiedNow = true; setTimeout(() => setCopied(c => (c === drop.id ? '' : c)), 1600); } catch { /* button is right there */ }
+      setStatus({ stage: 'done', text: `Text link is live${copiedNow ? ' and copied' : ''}`, percent: 100 });
+      setTimeout(() => setStatus(s => (s?.stage === 'done' ? null : s)), 6000);
+    } catch (e: any) {
+      showToast(e.message || "Couldn't share that text", 'error');
+    } finally {
+      setClipBusy(false);
     }
   };
 
@@ -182,7 +219,7 @@ export function DropView() {
     );
   }
 
-  const live = (drops || []).filter(d => d.expiresAt > Date.now() / 1000);
+  const live = (drops || []).filter(d => d.permanent || d.expiresAt > Date.now() / 1000);
 
   return (
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6">
@@ -282,6 +319,28 @@ export function DropView() {
         </div>
       </div>
 
+      {/* Clipboard: share a piece of text as a temporary link. */}
+      <div className="rounded-3xl p-4 md:p-5 surface-item space-y-3">
+        <div className="flex items-center gap-2">
+          <span className="grid place-items-center w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-600 dark:text-indigo-400 shrink-0"><FileText size={18} /></span>
+          <div className="min-w-0">
+            <h2 className="text-[15px] font-semibold text-gray-900 dark:text-white leading-tight">Share some text</h2>
+            <p className="text-[12.5px] text-gray-500">A note, a snippet, a list — anyone with the link reads it and can copy it. Text links are always temporary.</p>
+          </div>
+        </div>
+        <textarea value={clipText} onChange={e => setClipText(e.target.value)}
+          onKeyDown={e => { if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); shareClip(); } }}
+          placeholder="Paste or type the text you want to share…" rows={4}
+          className="w-full resize-y rounded-2xl bg-white dark:bg-black/30 ring-1 ring-black/10 dark:ring-white/10 px-3.5 py-3 text-[14px] text-gray-800 dark:text-gray-100 outline-none focus:ring-2 focus:ring-indigo-500/40 placeholder:text-gray-400" />
+        <div className="flex items-center justify-between gap-2 flex-wrap">
+          <span className="text-[12px] text-gray-400">Switches off in {timeLeft(Date.now() / 1000 + hours * 3600)} · ⌘/Ctrl+Enter</span>
+          <button onClick={shareClip} disabled={!clipText.trim() || clipBusy}
+            className="px-4 py-2 rounded-xl bg-indigo-600 hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold text-[14px] flex items-center gap-1.5 active:scale-[0.98] transition">
+            {clipBusy ? <Loader2 size={16} className="animate-spin" /> : <Send size={15} />} {clipBusy ? 'Sharing…' : 'Share as link'}
+          </button>
+        </div>
+      </div>
+
       <AnimatePresence>
         {fresh && (
           <motion.div key={fresh.id} initial={{ opacity: 0, y: 10, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -6 }}
@@ -324,18 +383,28 @@ export function DropView() {
             <AnimatePresence initial={false}>
               {live.map(d => (
                 <motion.li key={d.id} layout initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, x: -20 }}
-                  className="surface-item rounded-2xl p-3 md:p-4 flex items-center gap-x-3 gap-y-2.5 flex-wrap sm:flex-nowrap">
-                  <span className={`grid place-items-center w-10 h-10 rounded-xl shrink-0 ${d.files > 1 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
-                    {d.files > 1 ? <Globe size={18} /> : <FileCode size={18} />}
+                  className={`surface-item rounded-2xl p-3 md:p-4 flex items-center gap-x-3 gap-y-2.5 flex-wrap sm:flex-nowrap ${d.disabled ? 'opacity-70' : ''}`}>
+                  <span className={`grid place-items-center w-10 h-10 rounded-xl shrink-0 ${d.kind === 'clip' ? 'bg-indigo-500/10 text-indigo-600 dark:text-indigo-400' : d.files > 1 ? 'bg-purple-500/10 text-purple-600 dark:text-purple-400' : 'bg-blue-500/10 text-blue-600 dark:text-blue-400'}`}>
+                    {d.kind === 'clip' ? <FileText size={18} /> : d.files > 1 ? <Globe size={18} /> : <FileCode size={18} />}
                   </span>
                   <div className="min-w-0 flex-1 basis-[calc(100%-3.25rem)] sm:basis-auto">
-                    <div className="text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{d.name}</div>
+                    <div className="flex items-center gap-1.5 min-w-0">
+                      <span className="text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{d.name}</span>
+                      {d.permanent && <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-emerald-500/15 text-emerald-700 dark:text-emerald-400"><InfinityIcon size={11} /> Permanent</span>}
+                      {d.disabled && <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-md text-[10.5px] font-semibold bg-gray-500/15 text-gray-600 dark:text-gray-300">Off</span>}
+                    </div>
                     <div className="text-[12.5px] text-gray-500 flex items-center gap-x-3 gap-y-0.5 flex-wrap">
-                      <span className={`flex items-center gap-1 ${d.expiresAt - Date.now() / 1000 < 3600 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
-                        <Clock size={12} /> {timeLeft(d.expiresAt)} left
-                      </span>
+                      {d.permanent ? (
+                        <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><InfinityIcon size={12} /> Never expires</span>
+                      ) : (
+                        <span className={`flex items-center gap-1 ${d.expiresAt - Date.now() / 1000 < 3600 ? 'text-amber-600 dark:text-amber-400' : ''}`}>
+                          <Clock size={12} /> {timeLeft(d.expiresAt)} left
+                        </span>
+                      )}
                       <span className="flex items-center gap-1"><Eye size={12} /> {d.views} view{d.views === 1 ? '' : 's'}</span>
-                      <span>{d.files} file{d.files === 1 ? '' : 's'} · {sizeText(d.bytes)}</span>
+                      {d.kind === 'clip'
+                        ? <span className="truncate max-w-[14rem]">{d.preview ? `“${d.preview.replace(/\s+/g, ' ').trim().slice(0, 48)}”` : 'text'}</span>
+                        : <span>{d.files} file{d.files === 1 ? '' : 's'} · {sizeText(d.bytes)}</span>}
                       {d.source === 'note' && <span>from Notes</span>}
                     </div>
                   </div>
@@ -346,9 +415,21 @@ export function DropView() {
                     </button>
                     <a href={dropLink(d, base)} target="_blank" rel="noreferrer noopener" title="Open" aria-label="Open"
                       className="grid place-items-center w-9 h-9 rounded-xl text-gray-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white transition"><ExternalLink size={16} /></a>
-                    <button onClick={() => extend(d, 168)} title="Keep for 7 more days from now" aria-label="Keep for 7 days"
-                      className="hidden sm:grid place-items-center w-9 h-9 rounded-xl text-gray-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white transition"><Clock size={16} /></button>
-                    <button onClick={() => remove(d)} title="Turn the link off now" aria-label="Turn the link off"
+                    {d.kind !== 'clip' && (
+                      <button onClick={() => togglePermanent(d)}
+                        title={d.permanent ? 'Make it expire again (1 day)' : 'Keep this link permanently'}
+                        aria-label={d.permanent ? 'Make temporary' : 'Make permanent'} aria-pressed={d.permanent}
+                        className={`grid place-items-center w-9 h-9 rounded-xl transition ${d.permanent ? 'text-emerald-600 dark:text-emerald-400 bg-emerald-500/10 hover:bg-emerald-500/15' : 'text-gray-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white'}`}>
+                        <InfinityIcon size={16} />
+                      </button>
+                    )}
+                    <button onClick={() => toggleEnabled(d)}
+                      title={d.disabled ? 'Turn the link back on' : 'Turn the link off (keeps the files)'}
+                      aria-label={d.disabled ? 'Turn on' : 'Turn off'} aria-pressed={!d.disabled}
+                      className={`grid place-items-center w-9 h-9 rounded-xl transition ${d.disabled ? 'text-amber-600 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/15' : 'text-gray-500 hover:bg-black/5 dark:hover:bg-white/10 hover:text-gray-900 dark:hover:text-white'}`}>
+                      <Power size={16} />
+                    </button>
+                    <button onClick={() => remove(d)} title="Delete this link for good" aria-label="Delete link"
                       className="grid place-items-center w-9 h-9 rounded-xl text-gray-500 hover:bg-red-500/10 hover:text-red-600 transition"><Trash2 size={16} /></button>
                   </div>
                 </motion.li>
@@ -357,7 +438,7 @@ export function DropView() {
           </ul>
         )}
         <p className="text-[12px] text-gray-400 px-1 pt-1">
-          Anyone with a link can open it until it switches off; nothing else in Sage is shared. Pages run in a sandbox, so their scripts can't reach Sage.
+          Anyone with a link can open it until it switches off, or you turn it off or delete it. Permanent links stay until you remove them. Nothing else in Sage is shared, and pages run in a sandbox, so their scripts can't reach Sage.
         </p>
       </section>
     </div>
