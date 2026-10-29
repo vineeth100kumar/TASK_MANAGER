@@ -262,6 +262,9 @@ export function NotificationSettings() {
               <Row title="Morning plan">
                 <Toggle label="Email the morning plan" on={email.morningPlan} onChange={on => setEmail({ morningPlan: on })} />
               </Row>
+              <Row title="Evening check-in">
+                <Toggle label="Email the evening check-in" on={email.eveningCheckIn} onChange={on => setEmail({ eveningCheckIn: on })} />
+              </Row>
               <Row title="Reminders too" hint="An email for each reminder, as well as the notification">
                 <Toggle label="Email reminders" on={email.reminders} onChange={on => setEmail({ reminders: on })} />
               </Row>

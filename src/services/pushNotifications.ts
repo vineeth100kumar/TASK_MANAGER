@@ -28,6 +28,7 @@ export interface NotifyPrefs {
     enabled: boolean;
     to: string;
     morningPlan: boolean;
+    eveningCheckIn: boolean;
     reminders: boolean;
     smtpHost: string;
     smtpPort: number;
