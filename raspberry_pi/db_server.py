@@ -4,6 +4,7 @@ import hmac
 import sqlite3
 import datetime
 import asyncio
+import logging
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
@@ -17,6 +18,7 @@ from urllib.parse import parse_qs, quote
 import access_gate
 import backup
 import claude_api
+import logstore
 import desk
 import item_actions
 import phone_link
@@ -164,6 +166,29 @@ async def require_login(request, call_next):
     return RedirectResponse(f"/login?next={quote(target)}", status_code=303)
 
 
+# Registered last, so it wraps the others: Sage's own record of every request,
+# the slow ones, and anything that throws. Only /api/ and /mcp/ routes, so the
+# static web app's asset fetches don't fill the log. See logstore.py.
+@app.middleware("http")
+async def record_requests(request, call_next):
+    path = request.url.path
+    watched = path.startswith("/api/") or path.startswith("/mcp/")
+    if not watched or request.method == "OPTIONS":
+        return await call_next(request)
+    started = asyncio.get_event_loop().time()
+    try:
+        response = await call_next(request)
+    except Exception as e:
+        ms = int((asyncio.get_event_loop().time() - started) * 1000)
+        logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r}")
+        raise
+    ms = int((asyncio.get_event_loop().time() - started) * 1000)
+    status = response.status_code
+    level = "error" if status >= 500 else "warn" if status >= 400 else "info"
+    logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms)")
+    return response
+
+
 def login_page(next_path: str, message: str = "") -> str:
     fonts = sorted((DIST_DIR / "assets").glob("inter-latin-wght-normal-*.woff2"))
     return access_gate.login_page(next_path, message, f"/assets/{fonts[0].name}" if fonts else "")
@@ -201,6 +226,7 @@ async def login(request: Request):
     if not access_gate.verify_password(password):
         access_gate.record_failure(ip, device)
         print(f"Wrong Sage password from {ip}")
+        logstore.warn("auth", f"Wrong Sage password from {ip}")
         return with_device(HTMLResponse(login_page(next_path, "Wrong password."), status_code=401))
     access_gate.clear_failures(ip, device)
     response = with_device(RedirectResponse(next_path, status_code=303))
@@ -243,6 +269,7 @@ async def unlock(request: Request):
     if not access_gate.verify_password(password):
         access_gate.record_failure(ip, device)
         print(f"Wrong Sage password (unlock) from {ip}")
+        logstore.warn("auth", f"Wrong Sage password (unlock) from {ip}")
         return JSONResponse({"success": False, "error": "Wrong password."}, status_code=401)
     access_gate.clear_failures(ip, device)
     return {"success": True, "enabled": True}
@@ -277,6 +304,7 @@ class EventHub:
                 listener(event)
             except Exception as e:
                 print(f"Event listener failed: {e}")
+                logstore.error("sync", f"Event listener failed: {e}")
 
 
 events = EventHub()
@@ -427,17 +455,20 @@ async def google_sheets_backup_worker():
                             reply, ok = {}, False
                         if not ok:
                             print(f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
+                            logstore.error("backup", f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
                             break
                         # A batch can succeed overall while some changes in it were
                         # refused. Say so rather than dropping them silently.
                         refused = [r for r in reply.get('results', []) if isinstance(r, dict) and r.get('status') == 'rejected']
                         if refused:
                             print(f"Google Sheets backup: {len(refused)} change(s) in batch {row_id} were rejected: {refused[:3]}")
+                            logstore.warn("backup", f"{len(refused)} change(s) in batch {row_id} were rejected by Google Sheets: {refused[:3]}")
                         cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
                         conn.commit()
             conn.close()
         except Exception as e:
             print(f"Backup worker error: {e}")
+            logstore.error("backup", f"Backup worker error: {e}")
 
         await asyncio.sleep(GAS_BACKUP_INTERVAL)
 
@@ -459,12 +490,33 @@ def _background(coro) -> None:
     task.add_done_callback(done)
 
 
+class _LogStoreHandler(logging.Handler):
+    """Routes Python's own logging (uvicorn errors, tracebacks, library
+    warnings) into Sage's log store, so the connector sees them too."""
+
+    _LEVELS = {logging.ERROR: "error", logging.CRITICAL: "error", logging.WARNING: "warn"}
+
+    def emit(self, record):
+        try:
+            level = self._LEVELS.get(record.levelno, "info")
+            logstore.log(level, record.name.split(".")[0] or "log", self.format(record))
+        except Exception:
+            pass
+
+
 @app.on_event("startup")
 async def startup_event():
+    # Capture warnings and errors from the framework and libraries.
+    handler = _LogStoreHandler(level=logging.WARNING)
+    handler.setFormatter(logging.Formatter("%(message)s"))
+    logging.getLogger().addHandler(handler)
+    logging.getLogger("uvicorn.error").addHandler(handler)
+    logstore.info("server", "Sage server started")
     if access_gate.enabled:
         print("Password gate is on: browsers must log in at /login.")
     if not API_SECRET:
         print("WARNING: API_SECRET is not set, so anyone who can reach this server can read and change your data.")
+        logstore.warn("server", "API_SECRET is not set; the server is open to anyone who can reach it.")
     _background(google_sheets_backup_worker())
     _background(notifier.scheduler())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
@@ -956,6 +1008,7 @@ def parse_task(req: TaskParseRequest):
         return {"success": True, "data": parsed_data}
     except Exception as e:
         print(f"Error parsing task: {e}")
+        logstore.warn("quick_add", f"Error parsing task: {e}")
         raise HTTPException(status_code=500, detail="AI failed to parse task reliably")
 
 @app.post("/api/daily-briefing")
@@ -1029,12 +1082,45 @@ def save_prices_key(req: GroqKeyRequest):
     prices.save_twelve_key(key)
     return {"success": True, **prices.twelve_status()}
 
+class LogSettingsRequest(BaseModel):
+    enabled: Optional[bool] = None
+    maxBytes: Optional[int] = None
+
+
+@app.get("/api/settings/logs")
+def logs_settings():
+    """The log toggle, size cap, bounds and how much is in use."""
+    return {"success": True, **logstore.settings()}
+
+
+@app.post("/api/settings/logs")
+def save_logs_settings(req: LogSettingsRequest):
+    """Turn Sage's own logging on or off and set how much it keeps."""
+    cfg = logstore.update(enabled=req.enabled, max_bytes=req.maxBytes)
+    logstore.info("server", f"Log settings changed: enabled={cfg['enabled']}, cap={cfg['maxBytes']} bytes")
+    return {"success": True, **cfg}
+
+
+@app.get("/api/logs")
+def read_logs(since: str = "", level: str = "", source: str = "", q: str = "", limit: int = 100):
+    """The recent log, newest first, for the Settings screen and the connector."""
+    return {"success": True, **logstore.read(since=since, level=level, source=source, q=q, limit=limit)}
+
+
+@app.post("/api/logs/clear")
+def clear_logs():
+    logstore.clear()
+    logstore.info("server", "Log cleared")
+    return {"success": True, **logstore.settings()}
+
+
 @app.post("/api/canvas/think")
 def canvas_think(req: canvas_thinker.CanvasThinkRequest):
     try:
         return {"success": True, **canvas_thinker.think(req)}
     except Exception as e:
         print(f"Canvas thinker failed: {e}")
+        logstore.error("canvas", f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
 
 # --- Public link (see public_link.py) ---
@@ -1424,7 +1510,8 @@ def _claude_health() -> dict:
     )
 
 
-claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health)
+claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health,
+                   logs=logstore.read)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 

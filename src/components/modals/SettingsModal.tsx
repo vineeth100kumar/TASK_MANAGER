@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Settings, Calendar, Download, Upload, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink } from 'lucide-react';
+import { Settings, Calendar, Download, Upload, X, Info, Sparkles, Trash2, AlertTriangle, Globe, Copy, ExternalLink, FileText } from 'lucide-react';
 import { api } from '../../services/api';
 import { NotificationSettings } from './NotificationSettings';
 import { CaptureGuide } from './CaptureGuide';
@@ -38,6 +38,10 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   const [groqStatus, setGroqStatus] = useState<{ set: boolean; source: string | null; last4: string | null } | null>(null);
   const [groqKey, setGroqKey] = useState('');
   const [savingGroq, setSavingGroq] = useState(false);
+  // Sage's own log store on the Pi (logstore.py). undefined = still asking.
+  const [logCfg, setLogCfg] = useState<{ enabled: boolean; maxBytes: number; usedBytes: number } | null | undefined>(undefined);
+  const [logMB, setLogMB] = useState<string>('20');
+  const [savingLogs, setSavingLogs] = useState(false);
   const { showToast } = useToast();
 
   useEffect(() => {
@@ -48,6 +52,35 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
       .then(json => json && setGroqStatus(json))
       .catch(() => {});
   }, []);
+
+  useEffect(() => {
+    const base = piBackendUrl();
+    if (!base) { setLogCfg(null); return; }
+    fetch(`${base}/api/settings/logs`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => { if (json) { setLogCfg(json); setLogMB(String(Math.round(json.maxBytes / (1024 * 1024)))); } })
+      .catch(() => setLogCfg(null));
+  }, []);
+
+  const saveLogs = async (next: { enabled?: boolean; maxBytes?: number }) => {
+    setSavingLogs(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/settings/logs`, {
+        method: 'POST',
+        headers: piHeaders({ 'Content-Type': 'application/json' }),
+        body: JSON.stringify(next),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.detail || `The Pi said ${res.status}`);
+      setLogCfg(json);
+      setLogMB(String(Math.round(json.maxBytes / (1024 * 1024))));
+      showToast('Log settings saved on the Pi');
+    } catch (err: any) {
+      showToast(err.message || 'Could not save log settings', 'error');
+    } finally {
+      setSavingLogs(false);
+    }
+  };
 
   const saveGroqKey = async (key: string) => {
     setSavingGroq(true);
@@ -485,6 +518,63 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
                 </button>
               </div>
             </form>
+
+            {/* Sage server logs (logstore.py on the Pi) */}
+            {piBackendUrl() && logCfg !== null && (
+              <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                  <FileText size={16} />
+                  <span>Server logs</span>
+                </div>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Sage can keep its own running record on the Pi — errors, requests, sync, backups, the notifier and
+                  the workers. It never grows past the size you set: once full, the oldest lines are dropped. Claude
+                  can read it through the connector (the sage_logs tool).
+                </p>
+                {logCfg === undefined ? (
+                  <p className="text-xs text-gray-500">Checking…</p>
+                ) : (
+                  <>
+                    <label className="flex items-center justify-between gap-3">
+                      <span className="text-sm text-gray-900 dark:text-white">Keep a log</span>
+                      <button
+                        type="button"
+                        role="switch"
+                        aria-checked={logCfg.enabled}
+                        disabled={savingLogs}
+                        onClick={() => saveLogs({ enabled: !logCfg.enabled })}
+                        className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 ${logCfg.enabled ? 'bg-blue-600' : 'bg-gray-300 dark:bg-white/20'}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform ${logCfg.enabled ? 'translate-x-5' : ''}`} />
+                      </button>
+                    </label>
+                    <form
+                      onSubmit={e => { e.preventDefault(); const mb = parseInt(logMB, 10); if (mb > 0) saveLogs({ maxBytes: mb * 1024 * 1024 }); }}
+                      className="flex items-end gap-2"
+                    >
+                      <div className="flex-1">
+                        <label htmlFor="log-size" className="block text-xs text-gray-600 dark:text-gray-400 mb-1">Size limit (MB)</label>
+                        <input
+                          id="log-size"
+                          type="number"
+                          min={1}
+                          max={500}
+                          value={logMB}
+                          onChange={e => setLogMB(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs outline-none dark:text-white"
+                        />
+                      </div>
+                      <button type="submit" disabled={savingLogs} className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm disabled:opacity-50">
+                        Save
+                      </button>
+                    </form>
+                    <p className="text-xs text-gray-500">
+                      Using {(logCfg.usedBytes / (1024 * 1024)).toFixed(1)} MB of {Math.round(logCfg.maxBytes / (1024 * 1024))} MB.
+                    </p>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* DANGER ZONE: Clear Database */}
             <div className="p-5 rounded-2xl bg-red-50/60 dark:bg-red-950/20 border border-red-200 dark:border-red-900/30 space-y-3">

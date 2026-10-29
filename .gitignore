@@ -34,4 +34,5 @@ __pycache__/
 venv/
 *.db
 raspberry_pi/sage_secrets.json
+raspberry_pi/sage_settings.json
 raspberry_pi/sage_vapid_private.pem
