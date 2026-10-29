@@ -47,11 +47,13 @@ _apply: Optional[Callable[[List[dict]], Awaitable[dict]]] = None
 _quick_add: Optional[Callable[[str], Awaitable[dict]]] = None
 _today: Callable[[], datetime.date] = datetime.date.today
 _health: Optional[Callable[[], dict]] = None
+_logs: Optional[Callable[..., dict]] = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
+    _logs = logs
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -181,6 +183,12 @@ def health() -> dict:
     if _health is None:
         raise ApiError(503, "The health report isn't connected")
     return _health()
+
+
+def logs(since: str = "", level: str = "", source: str = "", q: str = "", limit: int = 100) -> dict:
+    if _logs is None:
+        raise ApiError(503, "The log isn't connected")
+    return _logs(since=since, level=level, source=source, q=q, limit=limit)
 
 
 def history(limit: int = 50) -> dict:
@@ -391,7 +399,9 @@ notes (title, content), comments and subtasks (workItemId), activities, boards (
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
 acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
-Start with sage_overview; sage_health says whether the Pi itself is working. Changes appear in the open web app straight away. Prefer updating
+Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
+running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
+why something failed. Changes appear in the open web app straight away. Prefer updating
 over deleting, and say what you changed."""
 
 
@@ -427,6 +437,15 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
+        {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
+         "the notifier and the background workers, newest first. The server keeps a capped amount and drops the "
+         "oldest when full. Use this to see what the Pi has been doing or to find what went wrong.",
+         "inputSchema": {"type": "object", "properties": {
+             "since": {"type": "string", "description": "Only entries at or after this ISO-8601 time, e.g. 2026-10-29T00:00:00Z"},
+             "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Only this level or louder"},
+             "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier"},
+             "q": {"type": "string", "description": "Only entries whose message contains this text"},
+             "limit": {"type": "integer", "description": "At most this many (default 100, max 1000)"}}}},
     ]
 
 
@@ -449,6 +468,9 @@ async def _call_tool(name: str, args: dict) -> dict:
         return health()
     if name == "sage_history":
         return history(args.get("limit", 50))
+    if name == "sage_logs":
+        return logs(args.get("since", ""), args.get("level", ""), args.get("source", ""),
+                    args.get("q", ""), args.get("limit", 100))
     raise ApiError(404, f"Unknown tool {name}")
 
 

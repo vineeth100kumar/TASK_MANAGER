@@ -26,6 +26,7 @@ import os
 import smtplib
 import sqlite3
 import ssl
+import logstore
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
 from pathlib import Path
@@ -320,9 +321,11 @@ def send_push(message: dict, only_endpoint: Optional[str] = None, prefs: Optiona
             else:
                 body = getattr(e.response, "text", "") or ""
                 print(f"Push to {label} failed ({status}): {body[:200] or e}")
+                logstore.warn("notifier", f"Push to {label} failed ({status}): {body[:200] or e}")
                 results.append({"label": label, "ok": False, "error": f"The push service said {status}: {body[:120] or e}"})
         except Exception as e:  # network errors and the like
             print(f"Push to {label} failed: {e}")
+            logstore.warn("notifier", f"Push to {label} failed: {e}")
             results.append({"label": label, "ok": False, "error": str(e)})
     conn.commit()
     conn.close()
@@ -706,6 +709,7 @@ def check_email_inbox(prefs: dict) -> List[dict]:
         conn.logout()
     except Exception as e:
         print(f"Email capture error: {e}")
+        logstore.error("notifier", f"Email capture error: {e}")
 
     return items
 
@@ -772,6 +776,7 @@ def _deliver(prefs: dict, message: dict, email: Optional[Tuple[str, str, str]]) 
             delivered = True
         except Exception as e:
             print(f"Sage email failed: {e}")
+            logstore.warn("notifier", f"Sage email failed: {e}")
     return delivered
 
 
@@ -907,8 +912,10 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
             if captured:
                 insert_captured_items(captured)
                 print(f"Email capture: {len(captured)} new item(s) from inbox.")
+                logstore.info("notifier", f"Email capture: {len(captured)} new item(s) from inbox.")
         except Exception as e:
             print(f"Email capture failed: {e}")
+            logstore.error("notifier", f"Email capture failed: {e}")
 
     return sent
 
@@ -922,4 +929,5 @@ async def scheduler() -> None:
             await asyncio.to_thread(run_once)
         except Exception as e:
             print(f"Notification scheduler error: {e}")
+            logstore.error("notifier", f"Notification scheduler error: {e}")
         await asyncio.sleep(CHECK_EVERY_SECONDS)
