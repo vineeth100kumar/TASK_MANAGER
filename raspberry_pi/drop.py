@@ -428,6 +428,36 @@ def extend(slug: str, hours: float) -> Optional[dict]:
         conn.close()
 
 
+def replace_page(slug: str, page: bytes, name: str = "") -> dict:
+    """Swaps a site drop's files for one new page (index.html), keeping its
+    link, expiry and on/off state, so a revised report reuses the same URL."""
+    if not _safe_slug(slug):
+        raise DropError("No drop has that id.")
+    if len(page) > MAX_BYTES:
+        raise DropError(f"That's more than {MAX_MB} MB.")
+    conn = _db()
+    try:
+        row = conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone()
+        if not row or _expired(row):
+            raise DropError("No live drop has that id.")
+        if row["kind"] == "clip":
+            raise DropError("That's a clipboard link, not a page.")
+        root = DROP_DIR / slug
+        fresh = DROP_DIR / f".{slug}.new"
+        shutil.rmtree(fresh, ignore_errors=True)
+        fresh.mkdir(parents=True)
+        (fresh / "index.html").write_bytes(page)
+        shutil.rmtree(root, ignore_errors=True)
+        fresh.rename(root)
+        _files_cache.pop(slug, None)
+        conn.execute("UPDATE drops SET name = ?, entry = 'index.html', files = 1, bytes = ? WHERE id = ?",
+                     ((name or "").strip()[:120] or row["name"], len(page), slug))
+        conn.commit()
+        return _shape(conn.execute("SELECT * FROM drops WHERE id = ?", (slug,)).fetchone())
+    finally:
+        conn.close()
+
+
 def set_permanent(slug: str, on: bool) -> dict:
     """Makes a site link permanent, or temporary again (a day from now)."""
     conn = _db()
