@@ -311,6 +311,60 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertEqual(rpc("ping", token="w" * 40).status_code, 404)
         self.assertEqual(client.get(f"/mcp/{TOKEN}").status_code, 405)
 
+    def test_logs_settings_and_connector(self):
+        import logstore
+        logstore.update(enabled=True, max_bytes=20 * 1024 * 1024)
+        logstore.clear()
+        logstore.info("request", "GET /api/overview -> 200 (5ms)")
+        logstore.error("backup", "Backup worker error: boom")
+        logstore.warn("auth", "Wrong Sage password from 1.2.3.4")
+
+        # The settings endpoint reports the knobs, bounds and usage.
+        cfg = client.get("/api/settings/logs", headers=OWNER).json()
+        self.assertTrue(cfg["success"] and cfg["enabled"])
+        self.assertEqual(cfg["maxBytes"], 20 * 1024 * 1024)
+        self.assertIn("usedBytes", cfg)
+
+        # The web app and the connector read the same log; filters work.
+        got = client.get("/api/logs", params={"level": "warn"}, headers=OWNER).json()
+        self.assertEqual(sorted(e["source"] for e in got["entries"]), ["auth", "backup"])
+
+        def rpc(method, params=None):
+            return client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": method, "params": params or {}})
+        names = {t["name"] for t in rpc("tools/list").json()["result"]["tools"]}
+        self.assertIn("sage_logs", names)
+        res = rpc("tools/call", {"name": "sage_logs", "arguments": {"source": "backup"}}).json()["result"]
+        self.assertFalse(res["isError"])
+        entries = json.loads(res["content"][0]["text"])["entries"]
+        self.assertEqual([e["msg"] for e in entries], ["Backup worker error: boom"])
+
+        # Turning it off stops new lines being kept.
+        self.assertTrue(client.post("/api/settings/logs", json={"enabled": False}, headers=OWNER).json()["success"])
+        before = client.get("/api/logs", headers=OWNER).json()["count"]
+        logstore.info("request", "dropped while off")
+        self.assertEqual(client.get("/api/logs", headers=OWNER).json()["count"], before)
+        logstore.update(enabled=True, max_bytes=20 * 1024 * 1024)
+
+
+class LogStoreTests(unittest.TestCase):
+    def test_cap_drops_oldest_and_clamps(self):
+        import tempfile as _tf
+        from pathlib import Path as _P
+        os.environ["SAGE_DB_PATH"] = str(_P(_tf.mkdtemp()) / "cap.db")
+        import importlib, logstore
+        importlib.reload(logstore)
+        # The cap is clamped to a sane floor, never zero.
+        self.assertGreaterEqual(logstore.update(max_bytes=1)["maxBytes"], logstore._MIN_BYTES)
+        logstore.update(enabled=True, max_bytes=logstore._MIN_BYTES)
+        logstore.clear()
+        for i in range(10000):
+            logstore.info("spam", f"line {i} " + "x" * 80)
+        size = logstore._LOG_FILE.stat().st_size
+        self.assertLessEqual(size, logstore._MIN_BYTES)
+        # The newest line survives; the oldest is gone.
+        newest = logstore.read(limit=1)["entries"][0]["msg"]
+        self.assertIn("line 9999", newest)
+
 
 if __name__ == "__main__":
     unittest.main()
