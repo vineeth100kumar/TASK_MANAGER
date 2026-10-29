@@ -531,6 +531,7 @@ export function DropView() {
                         ? (d.preview || !d.images) && <span className="truncate max-w-[14rem]">{d.preview ? `“${d.preview.replace(/\s+/g, ' ').trim().slice(0, 48)}”` : 'text'}</span>
                         : <span>{d.files} file{d.files === 1 ? '' : 's'} · {sizeText(d.bytes)}</span>}
                       {d.source === 'note' && <span>from Notes</span>}
+                      {d.source === 'claude' && <span>from Claude</span>}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 w-full sm:w-auto sm:ml-auto">

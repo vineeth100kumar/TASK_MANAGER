@@ -346,6 +346,67 @@ class ClaudeApiTests(unittest.TestCase):
         logstore.update(enabled=True, max_bytes=20 * 1024 * 1024)
 
 
+    def test_drop_reports(self):
+        import drop
+
+        def call(name, args):
+            res = client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                                      "params": {"name": name, "arguments": args}}).json()["result"]
+            return res["isError"], (json.loads(res["content"][0]["text"]) if not res["isError"] else res["content"][0]["text"])
+
+        names = {t["name"] for t in client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).json()["result"]["tools"]}
+        self.assertTrue({"sage_drop_publish", "sage_drop_list", "sage_drop_set", "sage_drop_delete"} <= names)
+
+        with mock.patch.object(drop, "base_url", lambda: {"url": "https://sage.example.com", "kind": "custom"}):
+            # Body HTML gets a page around it; the link is permanent and full.
+            err, made = call("sage_drop_publish", {"title": "Q3 <report>", "html": "<h1>Revenue</h1>"})
+            self.assertFalse(err, made)
+            d = made["drop"]
+            self.assertTrue(d["permanent"])
+            self.assertIsNone(d["expiresAt"])
+            self.assertEqual(d["url"], f"https://sage.example.com/d/{d['id']}/")
+            self.assertEqual(d["source"], "claude")
+            page = client.get(f"/d/{d['id']}/")
+            self.assertEqual(page.status_code, 200)
+            self.assertIn("<h1>Revenue</h1>", page.text)
+            self.assertIn("<title>Q3 &lt;report&gt;</title>", page.text)
+            self.assertIn("sandbox", page.headers["content-security-policy"])
+
+            # Replacing keeps the link; a full page is kept as sent.
+            err, again = call("sage_drop_publish", {"title": "Q3 v2", "html": "<!doctype html><p>v2</p>", "replace": d["id"]})
+            self.assertFalse(err, again)
+            self.assertTrue(again["replaced"])
+            self.assertEqual(again["drop"]["url"], d["url"])
+            self.assertEqual(client.get(f"/d/{d['id']}/").text, "<!doctype html><p>v2</p>")
+
+            # hours makes a temporary one.
+            err, temp = call("sage_drop_publish", {"title": "Today", "html": "<p>x</p>", "hours": 2})
+            self.assertFalse(temp["drop"]["permanent"])
+            self.assertIsNotNone(temp["drop"]["expiresAt"])
+
+            err, listed = call("sage_drop_list", {})
+            self.assertEqual({x["name"] for x in listed["drops"]} >= {"Q3 v2", "Today"}, True)
+
+            err, off = call("sage_drop_set", {"id": d["id"], "enabled": False})
+            self.assertTrue(off["drop"]["disabled"])
+            self.assertEqual(client.get(f"/d/{d['id']}/").status_code, 403)
+
+            for slug in (d["id"], temp["drop"]["id"]):
+                self.assertFalse(call("sage_drop_delete", {"id": slug})[0])
+            self.assertEqual(client.get(f"/d/{d['id']}/").status_code, 404)
+            self.assertTrue(call("sage_drop_delete", {"id": d["id"]})[0])
+            self.assertTrue(call("sage_drop_publish", {"title": "x", "html": "<p>", "replace": "nope"})[0])
+            self.assertTrue(call("sage_drop_publish", {"title": "", "html": "<p>"})[0])
+
+        # With no public address the path still comes back, with a note.
+        with mock.patch.object(drop, "base_url", lambda: {}):
+            err, home = call("sage_drop_publish", {"title": "Home", "html": "<p>hi</p>"})
+            self.assertIsNone(home["drop"]["url"])
+            self.assertIn("home network", home["note"])
+            self.assertTrue(client.get("/api/claude/drops", headers=CLAUDE).json()["success"])
+            self.assertTrue(client.delete(f"/api/claude/drops/{home['drop']['id']}", headers=CLAUDE).json()["success"])
+
+
 class LogStoreTests(unittest.TestCase):
     def test_cap_drops_oldest_and_clamps(self):
         import tempfile as _tf

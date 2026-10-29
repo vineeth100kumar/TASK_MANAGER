@@ -16,6 +16,7 @@ copies of the web app update straight away and /api/claude/history lists what
 Claude changed. Deletes leave the usual marker row holding the last copy.
 """
 
+import asyncio
 import datetime
 import hmac
 import json
@@ -52,12 +53,14 @@ _quick_add: Optional[Callable[[str], Awaitable[dict]]] = None
 _today: Callable[[], datetime.date] = datetime.date.today
 _health: Optional[Callable[[], dict]] = None
 _logs: Optional[Callable[..., dict]] = None
+# drop.py, for publishing reports as share links.
+_drop: Any = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
-    _logs = logs
+    _logs, _drop = logs, drops
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -644,6 +647,124 @@ async def push_note(args: Any) -> dict:
     return {"updated": False, "note": _short(record)}
 
 
+# --- Web page reports shared through Drop (drop.py) ---
+
+# A page sent as body HTML only gets this around it: readable type, light and dark.
+DROP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+:root{{color-scheme:light dark;--bg:#fbfbfd;--text:#1c1c1e;--muted:#6b7280;--border:#e5e7eb;--accent:#1f3a5f}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#111316;--text:#ececf1;--muted:#9ca3af;--border:#2c3036;--accent:#8fb4e3}}}}
+body{{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}}
+main{{max-width:860px;margin:0 auto;padding:32px 16px 64px}}
+h1,h2,h3{{line-height:1.25}} a{{color:var(--accent)}} img,svg,video{{max-width:100%;height:auto}}
+table{{border-collapse:collapse;width:100%;display:block;overflow-x:auto}} th,td{{border:1px solid var(--border);padding:6px 10px;text-align:left}}
+code,pre{{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em}} pre{{overflow-x:auto;padding:12px;border:1px solid var(--border);border-radius:8px}}
+</style></head>
+<body><main>
+{body}
+</main></body></html>
+"""
+
+
+def _need_drop() -> Any:
+    if _drop is None:
+        raise ApiError(503, "Drop isn't connected")
+    return _drop
+
+
+def _drop_link(d: dict, base: Optional[str]) -> dict:
+    """A drop as Claude sees it, with the full link to hand over."""
+    out = {k: d.get(k) for k in ("id", "name", "kind", "permanent", "disabled", "views", "bytes", "source")}
+    out["url"] = f"{base}{d['path']}" if base else None
+    out["path"] = d["path"]
+    out["expiresAt"] = None if d.get("permanent") else datetime.datetime.fromtimestamp(
+        d["expiresAt"], datetime.timezone.utc).isoformat(timespec="seconds")
+    return out
+
+
+async def _drop_base() -> tuple:
+    """(base URL or None, a note to pass on when links only work at home)."""
+    found = await asyncio.to_thread(_need_drop().base_url)
+    base = (found or {}).get("url")
+    note = None if base else ("Sage has no public address right now, so this link only opens on the home "
+                              "network (Sage's own address + path). Turn on the public link in Settings to share it.")
+    return base, note
+
+
+async def publish_drop(args: Any) -> dict:
+    """Publishes an HTML page as a Drop share link. Sending replace (a drop's
+    id) swaps that page's contents and keeps its link."""
+    drop = _need_drop()
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {title, html}")
+    title = str(args.get("title") or "").strip()[:120]
+    page = str(args.get("html") or "")
+    if not title or not page.strip():
+        raise ApiError(400, "Send a title and the page's html")
+    if not looks_like_html_page(page):
+        page = DROP_PAGE.format(title=escape(title), body=page)
+    data = page.encode("utf-8")
+    replace = str(args.get("replace") or "").strip()
+    try:
+        if replace:
+            made = await asyncio.to_thread(drop.replace_page, replace, data, title)
+        else:
+            hours = args.get("hours")
+            made = await asyncio.to_thread(drop.create, [("index.html", data)], title,
+                                           float(hours) if hours else drop.DEFAULT_HOURS, CLIENT_ID)
+            made.pop("warnings", None)
+            if args.get("permanent", True) and not hours:
+                made = await asyncio.to_thread(drop.set_permanent, made["id"], True)
+    except (drop.DropError, ValueError) as e:
+        raise ApiError(400, str(e))
+    base, note = await _drop_base()
+    out = {"replaced": bool(replace), "drop": _drop_link(made, base)}
+    if note:
+        out["note"] = note
+    return out
+
+
+async def list_drops() -> dict:
+    drops = await asyncio.to_thread(_need_drop().list_drops)
+    base, note = await _drop_base()
+    out = {"drops": [_drop_link(d, base) for d in drops]}
+    if note:
+        out["note"] = note
+    return out
+
+
+async def change_drop(args: Any) -> dict:
+    """Turns a link off or on, makes it permanent or temporary, or gives it more hours."""
+    drop = _need_drop()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, "Send the drop's id")
+    slug = str(args["id"])
+    try:
+        made = None
+        if "enabled" in args:
+            made = await asyncio.to_thread(drop.set_enabled, slug, bool(args["enabled"]))
+        if "permanent" in args:
+            made = await asyncio.to_thread(drop.set_permanent, slug, bool(args["permanent"]))
+        if args.get("hours"):
+            made = await asyncio.to_thread(drop.extend, slug, float(args["hours"]))
+            if made is None:
+                raise ApiError(404, "No drop has that id")
+    except (drop.DropError, ValueError) as e:
+        raise ApiError(400, str(e))
+    if made is None:
+        raise ApiError(400, "Send enabled, permanent or hours")
+    base, _ = await _drop_base()
+    return {"drop": _drop_link(made, base)}
+
+
+async def delete_drop(slug: str) -> dict:
+    if not await asyncio.to_thread(_need_drop().remove, str(slug or "")):
+        raise ApiError(404, "No drop has that id")
+    return {"deleted": str(slug)}
+
+
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
 
 router = APIRouter(prefix="/api/claude")
@@ -711,6 +832,28 @@ async def http_push_note(request: Request):
     return await _answer(lambda: push_note(body))
 
 
+@router.get("/drops")
+async def http_drops():
+    return await _answer(list_drops)
+
+
+@router.post("/drops")
+async def http_publish_drop(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: publish_drop(body))
+
+
+@router.post("/drops/{slug}")
+async def http_change_drop(slug: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: change_drop({**(body if isinstance(body, dict) else {}), "id": slug}))
+
+
+@router.delete("/drops/{slug}")
+async def http_delete_drop(slug: str):
+    return await _answer(lambda: delete_drop(slug))
+
+
 @router.get("/{table}")
 async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50):
     return await _answer(lambda: list_records(table, q, status, due_by, limit))
@@ -759,7 +902,8 @@ record per thought in the thoughts table (mapId, text, status open|unsure|good|b
 source). When he talks a decision through, put each point into his map with sage_thought_add: good for a
 point that holds up (a pro), bad for one that doesn't (a con), unsure for confusion, open for unsorted
 questions. Re-sort a thought by changing its status with sage_update. Use sage_maps and sage_map to read them.
-To hand Vineeth a report, plan or snippet to keep, push it into Notes with sage_note_push.
+To hand Vineeth a report, plan or snippet to keep, push it into Notes with sage_note_push. When he wants a
+web page to open or share with others, publish it with sage_drop_publish and give him the url it returns.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
 why something failed. Changes appear in the open web app straight away. Prefer updating
@@ -830,6 +974,30 @@ def _tools() -> List[dict]:
              "replace": {"type": "string", "description": "Id or title of an existing report or code note to overwrite"},
              "projectId": {"type": "string"},
              "lifeContext": {"type": "string", "enum": ["work", "personal"]}}}},
+        {"name": "sage_drop_publish", "description": "Publish an HTML web page (a report, dashboard, summary) "
+         "as a Drop share link and get its url back to give Vineeth. Anyone with the link can open it without "
+         "Sage's password. Send a full self-contained page, or just body HTML and it gets a clean readable layout "
+         "with light and dark. Scripts run in a sandbox; styles and scripts may load from cdnjs, jsdelivr or unpkg. "
+         "Links are permanent by default (they stay until deleted); send hours for a link that expires. To revise "
+         "a page and keep its link, send the drop's id as replace.",
+         "inputSchema": {"type": "object", "required": ["title", "html"], "properties": {
+             "title": {"type": "string", "description": "The page's name, shown in Sage's Drop list"},
+             "html": {"type": "string", "description": "A full page or just body HTML"},
+             "permanent": {"type": "boolean", "description": "Default true; false makes a 24-hour link"},
+             "hours": {"type": "number", "description": "Make it temporary: expires after this many hours (0.25 to 720)"},
+             "replace": {"type": "string", "description": "Id of an existing page drop to overwrite, keeping its url"}}}},
+        {"name": "sage_drop_list", "description": "Every live Drop link: id, name, url, kind (site or clip), "
+         "permanent, turned off, views and when it expires.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_drop_set", "description": "Change a Drop link: turn it off or back on (enabled), make it "
+         "permanent or temporary, or give a temporary one more hours.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "enabled": {"type": "boolean"},
+             "permanent": {"type": "boolean"},
+             "hours": {"type": "number", "description": "Expire this many hours from now"}}}},
+        {"name": "sage_drop_delete", "description": "Delete a Drop link and its files. Only when asked; it can't be undone.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
         {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
@@ -869,6 +1037,14 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await add_thoughts(args.get("map", ""), args.get("thoughts"), bool(args.get("create_map")))
     if name == "sage_note_push":
         return await push_note(args)
+    if name == "sage_drop_publish":
+        return await publish_drop(args)
+    if name == "sage_drop_list":
+        return await list_drops()
+    if name == "sage_drop_set":
+        return await change_drop(args)
+    if name == "sage_drop_delete":
+        return await delete_drop(args.get("id", ""))
     if name == "sage_history":
         return history(args.get("limit", 50))
     if name == "sage_logs":

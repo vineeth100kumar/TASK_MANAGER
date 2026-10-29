@@ -2085,7 +2085,7 @@ def _claude_health() -> dict:
 
 
 claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health,
-                   logs=logstore.read)
+                   logs=logstore.read, drops=drop)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 
