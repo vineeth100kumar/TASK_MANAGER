@@ -130,9 +130,16 @@ def _joined(record: dict, count_key: str, prefix: str) -> Optional[str]:
     return "".join(str(record.get(f"{prefix}{i}") or "").removeprefix("~") for i in range(parts))
 
 
-def list_records(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50) -> dict:
+def list_records(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50, hidden: str = "") -> dict:
     _check_table(table)
     records = _rows(table)
+    if table == "workItems":
+        # Hidden tasks stay out unless asked for, as in the app.
+        hidden = (hidden or "exclude").strip().lower()
+        if hidden == "only":
+            records = [r for r in records if item_shape.is_hidden(r)]
+        elif hidden != "include":
+            records = [r for r in records if not item_shape.is_hidden(r)]
     if q:
         needle = q.lower()
         records = [r for r in records if needle in json.dumps(r, ensure_ascii=False).lower()]
@@ -177,8 +184,10 @@ def overview() -> dict:
         counts[table] = len(_rows(table))
     types = item_shape.project_types(_rows("projects")) if "projects" in TABLES else {}
     items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in _rows("workItems")] if "workItems" in TABLES else []
-    # LUMO alarms are reminders underneath but not tasks.
-    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i)]
+    # LUMO alarms are reminders underneath but not tasks; hidden tasks are
+    # counted but not listed (sage_list with hidden "only" shows them).
+    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and not item_shape.is_hidden(i)]
+    hidden_open = sum(1 for i in items if item_shape.is_open(i) and item_shape.is_hidden(i))
 
     def brief(i: dict) -> dict:
         return {k: i.get(k) for k in ("id", "title", "status", "priority", "dueDate", "dueTime", "projectId") if i.get(k) is not None}
@@ -189,6 +198,7 @@ def overview() -> dict:
         "today": today,
         "counts": counts,
         "openItems": len(open_items),
+        "hiddenOpenItems": hidden_open,
         "dueTodayOrOverdue": [brief(i) for i in due[:50]],
         "focus": [brief(i) for i in open_items if i.get("isFocus")][:20],
         "inbox": [brief(i) for i in open_items if i.get("isInbox")][:20],
@@ -855,8 +865,8 @@ async def http_delete_drop(slug: str):
 
 
 @router.get("/{table}")
-async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50):
-    return await _answer(lambda: list_records(table, q, status, due_by, limit))
+async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50, hidden: str = ""):
+    return await _answer(lambda: list_records(table, q, status, due_by, limit, hidden))
 
 
 @router.get("/{table}/{record_id}")
@@ -891,7 +901,10 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
-dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
+dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, isHidden, description).
+A hidden work item (isHidden true) is private: the app keeps it out of every list and shows it only on its
+password-locked Hidden page. sage_list leaves hidden items out unless hidden is "include" or "only"; hide or
+unhide one with sage_update {isHidden: true|false}, and don't repeat a hidden item's title unless asked.
 projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals (title, targetDate, projectId), habits (name, targetCount days a week 1-7, history of YYYY-MM-DD days),
 notes (title, content; kind html for a report, code for code), comments and subtasks (workItemId), activities, boards (drawings),
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
@@ -925,6 +938,7 @@ def _tools() -> List[dict]:
              "q": {"type": "string", "description": "Text to search for anywhere in the record"},
              "status": {"type": "string", "description": "Only these statuses, comma separated (work items)"},
              "due_by": {"type": "string", "description": "Only records due on or before this YYYY-MM-DD"},
+             "hidden": {"type": "string", "enum": ["exclude", "include", "only"], "description": "Work items: hidden ones are left out (exclude, the default), listed too (include), or listed alone (only)"},
              "limit": {"type": "integer", "description": "At most this many (default 50, max 500)"}}}},
         {"name": "sage_get", "description": "One full record by id.",
          "inputSchema": {"type": "object", "required": ["table", "id"], "properties": {"table": _table_prop(), "id": {"type": "string"}}}},
@@ -1016,7 +1030,7 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "sage_overview":
         return overview()
     if name == "sage_list":
-        return list_records(args.get("table", ""), args.get("q", ""), args.get("status", ""), args.get("due_by", ""), args.get("limit", 50))
+        return list_records(args.get("table", ""), args.get("q", ""), args.get("status", ""), args.get("due_by", ""), args.get("limit", 50), args.get("hidden", ""))
     if name == "sage_get":
         return get_record(args.get("table", ""), str(args.get("id", "")))
     if name == "sage_create":

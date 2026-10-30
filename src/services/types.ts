@@ -95,6 +95,8 @@ export interface WorkItem {
   // Attention & Cognitive Flow (Sage Attention Engine)
   isInbox?: boolean;
   isFocus?: boolean;
+  /** Private: kept out of every list and count, shown only on the locked Hidden page. */
+  isHidden?: boolean;
   focusOrder?: number | null;
   snoozedUntil?: string | null; // ISO Datetime
   snoozeCount?: number;

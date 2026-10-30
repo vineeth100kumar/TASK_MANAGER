@@ -306,6 +306,7 @@
   .hero-personal { --hero-a: rgb(251 146 60 / 0.20); --hero-b: rgb(244 63 94 / 0.08); }
   .hero-waiting { --hero-a: rgb(168 85 247 / 0.16); --hero-b: rgb(59 130 246 / 0.06); }
   .hero-focus { --hero-a: rgb(245 158 11 / 0.18); --hero-b: rgb(251 191 36 / 0.08); }
+  .hero-hidden { --hero-a: rgb(100 116 139 / 0.18); --hero-b: rgb(71 85 105 / 0.08); }
   .dark .hero {
     border-color: rgb(255 255 255 / 0.07);
     background:

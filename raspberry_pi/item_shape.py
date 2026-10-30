@@ -106,10 +106,19 @@ def normalize_item(raw: dict, project_type: Optional[str] = None) -> dict:
         "labels": _labels(raw.get("labels")),
         "isInbox": _truthy(raw.get("isInbox")),
         "isFocus": _truthy(raw.get("isFocus")),
+        "isHidden": _truthy(raw.get("isHidden")),
     })
     if kind == "milestone" and not raw.get("completedAt"):
         out["completedAt"] = str(raw.get("dueDate") or raw.get("startDate") or raw.get("createdAt") or "")[:10] or None
     return out
+
+
+def is_hidden(item: dict) -> bool:
+    """A hidden task: kept out of every list, count, plan and digest, and
+    only shown on the app's password-locked Hidden page (the web app's
+    items.ts uses the same test). Its own reminder still comes, without
+    its title."""
+    return _truthy(item.get("isHidden"))
 
 
 def is_alarm(item: dict) -> bool:
