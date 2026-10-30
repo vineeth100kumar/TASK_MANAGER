@@ -73,6 +73,8 @@ DEFAULT_PREFS: Dict[str, Any] = {
         "morningPlan": True,
         "eveningCheckIn": False,
         "reminders": False,
+        # "Sage is back up" after any downtime (uptime.py).
+        "backUp": True,
         "smtpHost": "smtp.gmail.com",
         "smtpPort": 587,
         "smtpUser": os.getenv("SAGE_EMAIL_FROM", "reminder.vk@gmail.com"),

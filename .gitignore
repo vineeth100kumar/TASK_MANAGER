@@ -36,6 +36,7 @@ venv/
 raspberry_pi/sage_secrets.json
 raspberry_pi/sage_settings.json
 raspberry_pi/sage_vapid_private.pem
+raspberry_pi/sage_uptime.json
 
 # LUMO firmware downloaded from GitHub for updates over Wi-Fi (desk/ota.py)
 raspberry_pi/firmware/

@@ -271,6 +271,9 @@ export function NotificationSettings() {
               <Row title="Reminders too" hint="An email for each reminder, as well as the notification">
                 <Toggle label="Email reminders" on={email.reminders} onChange={on => setEmail({ reminders: on })} />
               </Row>
+              <Row title="Sage is back up" hint="After an update, restart, crash or power cut: when it went down, for how long and why">
+                <Toggle label="Email when Sage is back up" on={email.backUp !== false} onChange={on => setEmail({ backUp: on })} />
+              </Row>
 
               <button onClick={() => setShowAdvanced(v => !v)} className="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
                 {showAdvanced ? 'Hide' : 'Not using Gmail?'}
