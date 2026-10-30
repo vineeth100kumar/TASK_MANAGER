@@ -29,6 +29,7 @@ import smtplib
 import sqlite3
 import ssl
 import time
+import zlib
 import logstore
 from email.message import EmailMessage
 from email.utils import formataddr, make_msgid
@@ -61,6 +62,8 @@ DEFAULT_PREFS: Dict[str, Any] = {
     "morningTime": "08:00",
     "eveningCheckIn": True,
     "eveningTime": "18:00",
+    # Friendlier wording and emoji. Off gives the plain, short versions.
+    "playful": True,
     # Email starts switched on but sends nothing until the sending account's
     # app password is entered in Settings. The addresses can be changed there,
     # or set per install in /etc/sage/sage.env.
@@ -569,7 +572,7 @@ def habit_due(habit: dict, now: datetime.datetime) -> bool:
     return this_week < target
 
 
-def habit_message(habit: dict, now: datetime.datetime) -> dict:
+def habit_message(habit: dict, now: datetime.datetime, playful: bool = False) -> dict:
     name = habit.get("name") or "Habit"
     history = {d for d in (habit.get("history") or []) if isinstance(d, str)}
     streak, day = 0, now.date() - datetime.timedelta(days=1)
@@ -577,6 +580,10 @@ def habit_message(habit: dict, now: datetime.datetime) -> dict:
         streak += 1
         day -= datetime.timedelta(days=1)
     body = f"Keep your {streak}-day streak going. Tick it in Sage." if streak > 1 else "Not ticked yet today. Tick it in Sage when it's done."
+    if playful:
+        name = f"🔥 {name}"
+        body = f"{streak}-day streak! Don't break the chain 🔗" if streak > 1 else _pick(
+            ["Not ticked yet today. A tiny start counts 🌱", "Today's tick is waiting ✅", "Start the streak today 🔥"], f"{habit.get('id')}{now.date()}")
     return {
         "title": name,
         "body": body,
@@ -658,11 +665,20 @@ def _list_titles(items: List[dict], limit: int = 3) -> str:
     return titles[0] if titles else ""
 
 
+def _pick(options: List[str], seed: str) -> str:
+    """A stable choice per seed (item and day), so wording varies from one
+    reminder to the next but a retry of the same one never changes."""
+    return options[zlib.crc32(seed.encode()) % len(options)]
+
+
+CHEERS = ["You've got this 💪", "Quick win incoming ✨", "Go on, knock it out 🎯", "Future you says thanks 🙌", "Easy does it 🌿"]
+
+
 def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
-def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
+def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime, playful: bool = False) -> dict:
     title = item.get("title") or "Reminder"
     start = parse_when(item.get("startAt"), tz)
     today = now.date().isoformat()
@@ -683,6 +699,11 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime) -> dict:
         body = "Reminder"
     if item.get("description") and body == "Reminder":
         body = str(item["description"])[:120]
+    if playful:
+        is_event = item.get("entityType") == "event"
+        title = f"{'📅' if is_event else '⏰'} {title}"
+        if not is_event:
+            body = f"{body} · {_pick(CHEERS, str(item.get('id')) + now.date().isoformat())}"
     return {
         "title": title,
         "body": body,
@@ -951,7 +972,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     life_mode.hold(item)
                     _mark_sent(conn, key)
                     continue
-                message = reminder_message(item, tz, now)
+                message = reminder_message(item, tz, now, prefs["playful"])
                 if _taken_by_clock(item, message):
                     _mark_sent(conn, key)
                     sent.append(key)
@@ -962,7 +983,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     desc = str(item.get("description") or "").strip()
                     sections = [("Notes", [desc[:300]])] if desc and desc[:120] != message["body"] else []
                     email = (
-                        f"Reminder: {message['title']} · {message['body']}" if message["body"] != "Reminder" else f"Reminder: {message['title']}",
+                        f"{message['title']} · {message['body']}" if message["body"] != "Reminder" else message["title"],
                         email_text(message["title"], message["body"], sections, link, "Open task"),
                         email_html(message["title"], message["body"], sections, link, "Open task"),
                     )
@@ -989,7 +1010,7 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 key = f"habit:{habit.get('id')}:{today_iso}:{hhmm}"
                 if _already_sent(conn, key):
                     continue
-                message = habit_message(habit, now)
+                message = habit_message(habit, now, prefs["playful"])
                 delivered = push and any(r.get("ok") for r in send_push(message, prefs=prefs))
                 if mail and email_ready(prefs):
                     link = _view_link("view=today")
@@ -1021,6 +1042,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 _mark_sent(conn, key)  # nothing to say today
             else:
                 title = f"Today: {_plural(len(due), 'thing')} planned" if due else f"{_plural(len(overdue), 'thing')} overdue"
+                if prefs["playful"]:
+                    title = (f"☀️ Good morning! {_plural(len(due), 'thing')} on deck" if due
+                             else f"☀️ Good morning! {_plural(len(overdue), 'thing')} could use a rescue")
                 body = _list_titles(due or overdue)
                 if due and overdue:
                     body += f". Plus {len(overdue)} overdue."
@@ -1032,11 +1056,13 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     link = _view_link("ritual=morning") or _app_link()
                     sections = [("Due today", _item_rows(due, tz, now)), ("Overdue", _item_rows(overdue, tz, now, with_time=False))]
                     intro = "Here's what's on your plate. Pick one and start there."
+                    if prefs["playful"]:
+                        intro = "☀️ Rise and shine! Pick one thing and start there. Momentum does the rest."
                     if hidden_work:
                         intro += f" {_plural(hidden_work, 'work task')} held for Work mode."
                     heading = now.strftime("%A, %B %-d")
                     email = (
-                        f"Your plan for {now.strftime('%A')}: {title.split(': ')[-1]}",
+                        f"Your plan for {now.strftime('%A')}: {_plural(len(due), 'thing')} planned" if due else f"Your plan for {now.strftime('%A')}: {_plural(len(overdue), 'thing')} overdue",
                         email_text(heading, intro, sections, link, "Plan my day"),
                         email_html(heading, intro, sections, link, "Plan my day", preheader=body),
                     )
@@ -1052,9 +1078,11 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
             if not still_open:
                 _mark_sent(conn, key)
             else:
+                playful = prefs["playful"]
                 message = {
-                    "title": f"{_plural(len(still_open), 'thing')} still open from today",
-                    "body": f"{_list_titles(still_open)}. Finish one, or move it to tomorrow.",
+                    "title": f"🌙 {_plural(len(still_open), 'thing')} still open" if playful else f"{_plural(len(still_open), 'thing')} still open from today",
+                    "body": f"{_list_titles(still_open)}. One more win before bed? Or send it to tomorrow 😴" if playful
+                            else f"{_list_titles(still_open)}. Finish one, or move it to tomorrow.",
                     "tag": "evening-check-in",
                     "url": "/?ritual=evening",
                     "ttl": 3 * 3600,
@@ -1065,9 +1093,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     sections = [("Still open", _item_rows(still_open, tz, now))]
                     intro = "Finish one, or move the rest to tomorrow."
                     email = (
-                        f"Evening check-in: {message['title']}",
-                        email_text("Before you wrap up", intro, sections, link, "Check in"),
-                        email_html("Before you wrap up", intro, sections, link, "Check in", preheader=message["body"]),
+                        f"Evening check-in: {_plural(len(still_open), 'thing')} still open",
+                        email_text("🌙 Before you wrap up" if playful else "Before you wrap up", intro, sections, link, "Check in"),
+                        email_html("🌙 Before you wrap up" if playful else "Before you wrap up", intro, sections, link, "Check in", preheader=message["body"]),
                     )
                 if _deliver(prefs, message, email):
                     _mark_sent(conn, key)
@@ -1083,6 +1111,10 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
             if done_items or stale or due or overdue:
                 review_title = f"Week in review: {_plural(len(done_items), 'task')} completed"
                 review_body = _list_titles(done_items[:5]) if done_items else "Nothing completed this week."
+                if prefs["playful"]:
+                    review_title = f"🏆 Week in review: {_plural(len(done_items), 'task')} done" if done_items else "🌱 Fresh week ahead"
+                    if not done_items:
+                        review_body = "Nothing checked off last week. A small win on Monday sets the tone."
                 if stale:
                     review_body += f" {_plural(len(stale), 'stale item')} to triage."
                 message = {"title": review_title, "body": review_body, "tag": "weekly-review", "url": "/?ritual=weekly", "ttl": 12 * 3600}

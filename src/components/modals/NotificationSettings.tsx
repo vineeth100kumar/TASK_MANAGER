@@ -190,6 +190,9 @@ export function NotificationSettings() {
               onChange={v => v && update({ eveningTime: v })} />
             <Toggle label="Evening check-in" on={prefs.eveningCheckIn} onChange={on => update({ eveningCheckIn: on })} />
           </Row>
+          <Row title="Playful wording" hint="Emoji, cheers and friendlier lines in notifications and emails">
+            <Toggle label="Playful wording" on={prefs.playful} onChange={on => update({ playful: on })} />
+          </Row>
           <Row title="Time zone" hint="Used for reminders, the plan and LUMO's alarms">
             <input list="sage-timezones" className="field !w-[11rem] !py-1 !px-2 text-sm" defaultValue={prefs.timezone} key={prefs.timezone}
               onBlur={e => { const v = e.target.value.trim(); if (v && v !== prefs.timezone) update({ timezone: v }); }} />

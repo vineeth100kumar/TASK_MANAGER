@@ -24,6 +24,7 @@ export interface NotifyPrefs {
   morningTime: string;
   eveningCheckIn: boolean;
   eveningTime: string;
+  playful: boolean;
   email: {
     enabled: boolean;
     to: string;

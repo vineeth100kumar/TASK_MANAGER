@@ -62,7 +62,7 @@ class SchedulerTests(unittest.TestCase):
         conn.close()
         notifier.save_smtp_password("")  # no email unless a test sets it up
         # India is UTC+5:30, so a wrong timezone shows up as a wrong hour.
-        notifier.save_prefs({"timezone": "Asia/Kolkata"})
+        notifier.save_prefs({"timezone": "Asia/Kolkata", "playful": False})
         self.pushed = []
         patcher = mock.patch.object(notifier, "send_push", side_effect=lambda message, *a, **k: self.pushed.append(message) or [{"ok": True}])
         patcher.start()
@@ -280,6 +280,13 @@ class SchedulerTests(unittest.TestCase):
             notifier.run_once(utc(2026, 10, 1, 13, 5))
         msg = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
         self.assertIn("Evening check-in", msg["Subject"])
+
+    def test_playful_wording(self):
+        notifier.save_prefs({"playful": True})
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00", "dueDate": "2026-10-01"})
+        notifier.run_once(utc(2026, 10, 1, 3, 30))
+        self.assertEqual(self.pushed[0]["title"], "⏰ Call the bank")
+        self.assertTrue(self.pushed[0]["body"].startswith("Due today · "))
 
     def test_email_refuses_to_log_in_without_starttls(self):
         notifier.save_smtp_password("abcd efgh ijkl mnop")
