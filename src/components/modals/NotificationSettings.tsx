@@ -190,6 +190,9 @@ export function NotificationSettings() {
               onChange={v => v && update({ eveningTime: v })} />
             <Toggle label="Evening check-in" on={prefs.eveningCheckIn} onChange={on => update({ eveningCheckIn: on })} />
           </Row>
+          <Row title="Playful wording" hint="Emoji, cheers and friendlier lines in notifications and emails">
+            <Toggle label="Playful wording" on={prefs.playful} onChange={on => update({ playful: on })} />
+          </Row>
           <Row title="Time zone" hint="Used for reminders, the plan and LUMO's alarms">
             <input list="sage-timezones" className="field !w-[11rem] !py-1 !px-2 text-sm" defaultValue={prefs.timezone} key={prefs.timezone}
               onBlur={e => { const v = e.target.value.trim(); if (v && v !== prefs.timezone) update({ timezone: v }); }} />
@@ -261,6 +264,9 @@ export function NotificationSettings() {
               </label>
               <Row title="Morning plan">
                 <Toggle label="Email the morning plan" on={email.morningPlan} onChange={on => setEmail({ morningPlan: on })} />
+              </Row>
+              <Row title="Evening check-in">
+                <Toggle label="Email the evening check-in" on={email.eveningCheckIn} onChange={on => setEmail({ eveningCheckIn: on })} />
               </Row>
               <Row title="Reminders too" hint="An email for each reminder, as well as the notification">
                 <Toggle label="Email reminders" on={email.reminders} onChange={on => setEmail({ reminders: on })} />
