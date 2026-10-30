@@ -31,6 +31,8 @@ export interface NotifyPrefs {
     morningPlan: boolean;
     eveningCheckIn: boolean;
     reminders: boolean;
+    /** "Sage is back up" after an update, restart, crash or power cut. */
+    backUp?: boolean;
     smtpHost: string;
     smtpPort: number;
     smtpUser: string;

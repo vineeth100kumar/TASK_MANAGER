@@ -668,6 +668,7 @@ async def startup_event():
         logstore.warn("server", "API_SECRET is not set; the server is open to anyone who can reach it.")
     _background(google_sheets_backup_worker())
     _background(notifier.scheduler())
+    _background(uptime.run())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
     _background(life_mode.run(events.broadcast))
@@ -679,6 +680,15 @@ async def startup_event():
         _background(radar.collector.run(events.broadcast))
         _background(markets.collector.run())
         _background(sparks.run())
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    # Marks this stop as on purpose, for the "Sage is back up" email.
+    try:
+        uptime.on_stop()
+    except Exception as e:
+        print(f"Couldn't record the shutdown: {e}")
 
 
 @app.get("/api/health")
@@ -1370,6 +1380,7 @@ def public_url():
 
 # --- Notifications (see notifier.py) ---
 import notifier
+import uptime
 notifier.init_tables()
 
 
