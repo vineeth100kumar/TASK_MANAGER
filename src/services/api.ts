@@ -17,7 +17,7 @@ import { dateEntries, streakOf } from '../utils/habits';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 import { needsPlace, suggestPlace, INBOX_PROJECT_ID, INBOX_PROJECT_NAME } from './placement';
-import { normalizeItem, nextKey, selectItems, isLive, type ItemFilters, type Selection } from './items';
+import { normalizeItem, nextKey, selectItems, isLive, isHidden, type ItemFilters, type Selection } from './items';
 import { contextOf, inContext, isAlarm, isOpen, isSnoozedNow, isOnToday, compareToday, compareInbox, checkVisibility, VisibilityCheck } from '../utils/taskLists';
 
 export interface LocalState {
@@ -186,9 +186,10 @@ async function sweepLooseItems(): Promise<void> {
 // Every live item, read into the one shape (see items.ts). Lists start here.
 // LUMO alarms are reminders underneath but not tasks: they live on the LUMO
 // page, so no list, count, board, calendar or export starts with them.
+// Hidden tasks are the same: they live on the locked Hidden page.
 function liveItems(): WorkItem[] {
   const projects = state.projects.filter(Boolean);
-  return state.workItems.filter(i => isLive(i) && !isAlarm(i)).map(i => normalizeItem(i, projects));
+  return state.workItems.filter(i => isLive(i) && !isAlarm(i) && !isHidden(i)).map(i => normalizeItem(i, projects));
 }
 
 function hydrateWorkItem(raw: WorkItem): WorkItem {
@@ -377,6 +378,18 @@ export const api = {
     /** Every live item in the one shape, right now (for strips and counts that can't wait). */
     snapshot: (): WorkItem[] => liveItems(),
 
+    /** The hidden tasks, open ones first, for the locked Hidden page. */
+    hidden: async (): Promise<WorkItem[]> => {
+      await initializeStore();
+      const projects = state.projects.filter(Boolean);
+      return state.workItems.filter(i => isLive(i) && !isAlarm(i) && isHidden(i))
+        .map(i => hydrateWorkItem(normalizeItem(i, projects)))
+        .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    },
+
+    /** Hides a task from every list (or brings it back). */
+    setHidden: async (id: string, hidden: boolean): Promise<WorkItem> => api.workItems.updateDetails(id, { isHidden: hidden }),
+
     getDeleted: async (): Promise<WorkItem[]> => {
       await initializeStore();
       return state.workItems.filter(i => i && !!i.deletedAt).map(hydrateWorkItem);
@@ -444,6 +457,7 @@ export const api = {
           ? payload.isInbox
           : !(payload.dueDate || payload.startDate || payload.startAt || payload.isFocus || payload.waitingFor),
         isFocus: payload.isFocus || false,
+        ...(payload.isHidden ? { isHidden: true } : {}),
         focusOrder: payload.focusOrder || null,
         snoozedUntil: payload.snoozedUntil || null,
         snoozeCount: payload.snoozeCount || 0,

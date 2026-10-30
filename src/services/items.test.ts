@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import sage from './__fixtures__/sage-project-2026-10-16.json';
-import { normalizeItem, selectItems, onlyDated, describeShown, nextKey, kindOf, statusOf, contextOf, dayOf, isAlarm } from './items';
+import { normalizeItem, selectItems, onlyDated, describeShown, nextKey, kindOf, statusOf, contextOf, dayOf, isAlarm, isHidden } from './items';
 import { statusesFor, stageOf, DEFAULT_STATUSES } from './projectTypes';
 import type { Project, WorkItem } from './types';
 
@@ -163,5 +163,15 @@ describe('LUMO alarms', () => {
     expect(isAlarm(norm({ id: 'b', entityType: 'reminder', labels: ['Alarm'], source: 'lumo' }))).toBe(true);
     expect(isAlarm(norm({ id: 'c', entityType: 'reminder', labels: ['home'] }))).toBe(false);
     expect(isAlarm(norm({ id: 'd', entityType: 'task' }))).toBe(false);
+  });
+});
+
+describe('hidden tasks', () => {
+  it('reads isHidden the way old records and tools store it', () => {
+    expect(normalizeItem({ id: 'a', title: 'A', isHidden: true }).isHidden).toBe(true);
+    expect(normalizeItem({ id: 'b', title: 'B', isHidden: 'true' }).isHidden).toBe(true);
+    expect(normalizeItem({ id: 'c', title: 'C' }).isHidden).toBe(false);
+    expect(isHidden({ isHidden: 1 })).toBe(true);
+    expect(isHidden({})).toBe(false);
   });
 });

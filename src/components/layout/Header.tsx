@@ -99,6 +99,8 @@ export function Header({
       setActiveTitle('Focus');
     } else if (activeView === 'waiting_for') {
       setActiveTitle('Waiting For');
+    } else if (activeView === 'hidden') {
+      setActiveTitle('Hidden');
     } else if (activeView === 'notes') {
       setActiveTitle('Notes & Docs');
     } else if (activeView === 'canvas') {

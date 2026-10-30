@@ -1206,7 +1206,7 @@ def load_context() -> Context:
     projects = claude_api._rows("projects")
     types = item_shape.project_types(projects)
     items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in claude_api._rows("workItems")]
-    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and i.get("entityType") != "milestone"]
+    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and not item_shape.is_hidden(i) and i.get("entityType") != "milestone"]
     return Context(open_items, projects, claude_api._rows("habits"))
 
 

@@ -535,7 +535,7 @@ def completed_since(since_date: str) -> List[dict]:
             continue
         item = item_shape.normalize_item(item)
         ca = item.get("completedAt") or ""
-        if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt") and not item_shape.is_alarm(item):
+        if item.get("status") == "done" and ca[:10] >= since_date and not item.get("deletedAt") and not item_shape.is_alarm(item) and not item_shape.is_hidden(item):
             items.append(item)
     items.sort(key=lambda i: i.get("completedAt", ""))
     return items
@@ -656,7 +656,7 @@ def _describe(item: dict, tz: ZoneInfo, now: datetime.datetime) -> str:
 
 
 def _list_titles(items: List[dict], limit: int = 3) -> str:
-    titles = [i.get("title") or "Untitled" for i in items[:limit]]
+    titles = [_title(i) for i in items[:limit]]
     extra = len(items) - len(titles)
     if extra > 0:
         return f"{', '.join(titles)} and {extra} more"
@@ -678,8 +678,17 @@ def _plural(n: int, word: str) -> str:
     return f"{n} {word}" if n == 1 else f"{n} {word}s"
 
 
+HIDDEN_TITLE = "Hidden task"
+
+
+def _title(item: dict) -> str:
+    """What a push, email or the clock may say about an item: a hidden
+    task never shows its title outside its locked page."""
+    return HIDDEN_TITLE if item_shape.is_hidden(item) else item.get("title") or "Untitled"
+
+
 def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime, playful: bool = False) -> dict:
-    title = item.get("title") or "Reminder"
+    title = HIDDEN_TITLE if item_shape.is_hidden(item) else item.get("title") or "Reminder"
     start = parse_when(item.get("startAt"), tz)
     today = now.date().isoformat()
     tomorrow = (now.date() + datetime.timedelta(days=1)).isoformat()
@@ -697,7 +706,7 @@ def reminder_message(item: dict, tz: ZoneInfo, now: datetime.datetime, playful: 
         body = "Overdue"
     else:
         body = "Reminder"
-    if item.get("description") and body == "Reminder":
+    if item.get("description") and body == "Reminder" and not item_shape.is_hidden(item):
         body = str(item["description"])[:120]
     if playful:
         is_event = item.get("entityType") == "event"
@@ -997,7 +1006,6 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                 key = _send_held(conn, prefs, items)
                 if key:
                     sent.append(key)
-
             # Habits are personal, so Chill mode doesn't hold them back.
             for habit in habits():
                 hhmm = str(habit.get("remindTime") or "")
@@ -1026,6 +1034,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     _mark_sent(conn, key)
                     sent.append(key)
 
+        # Hidden tasks got their own reminder above; plans, nudges and
+        # reviews leave them out.
+        items = [i for i in items if not item_shape.is_hidden(i)]
         # In Chill the digests only talk about personal things.
         hidden_work = 0
         if chill:

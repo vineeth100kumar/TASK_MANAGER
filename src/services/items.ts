@@ -40,6 +40,12 @@ export function isAlarm(i: { labels?: unknown }): boolean {
   return labelsOf(i.labels).some(l => l.toLowerCase() === 'alarm');
 }
 
+/** A hidden task: private, so no list, count, board or plan shows it; only the
+ * password-locked Hidden page does (the Pi's item_shape.is_hidden is the same test). */
+export function isHidden(i: { isHidden?: unknown }): boolean {
+  return truthy(i.isHidden);
+}
+
 /** Older or imported records can say "Personal" or "life"; anything else is work. */
 export function contextOf(i: { lifeContext?: unknown }): LifeContext {
   const c = word(i.lifeContext);
@@ -98,6 +104,7 @@ export function normalizeItem(raw: any, projects: Project[] = []): WorkItem {
     labels: labelsOf(raw.labels),
     isInbox: truthy(raw.isInbox),
     isFocus: truthy(raw.isFocus),
+    isHidden: truthy(raw.isHidden),
     startDate: toInputDateValue(raw.startDate) || null,
     dueDate: toInputDateValue(raw.dueDate) || null,
     dueTime: raw.dueTime || null,

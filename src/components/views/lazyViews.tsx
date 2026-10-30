@@ -11,6 +11,7 @@ const loaders = {
   radar: () => import('./RadarView'),
   lumo: () => import('./LumoView'),
   drop: () => import('./DropView'),
+  hidden: () => import('./HiddenView'),
   branches: () => import('../branches/ProjectBranchesView'),
   calendar: () => import('./CalendarView'),
   timeline: () => import('./TimelineView'),
@@ -47,6 +48,7 @@ export const CanvasView = named(loaders.canvas, 'CanvasView');
 export const RadarView = named(loaders.radar, 'RadarView');
 export const LumoView = named(loaders.lumo, 'LumoView');
 export const DropView = named(loaders.drop, 'DropView');
+export const HiddenView = named(loaders.hidden, 'HiddenView');
 export const ProjectBranchesView = named(loaders.branches, 'ProjectBranchesView');
 export const CalendarView = named(loaders.calendar, 'CalendarView');
 export const TimelineView = named(loaders.timeline, 'TimelineView');
@@ -68,9 +70,10 @@ const forSidebar: Record<string, () => Promise<unknown>> = {
   radar: () => preloads.RadarView(),
   lumo: () => preloads.LumoView(),
   drop: () => preloads.DropView(),
+  hidden: () => Promise.all([preloads.NotesLock(), preloads.HiddenView()]),
 };
 
-/** Starts loading a page's code (sidebar ids: notes, canvas, radar, lumo, drop). */
+/** Starts loading a page's code (sidebar ids: notes, canvas, radar, lumo, drop, hidden). */
 export function prefetchView(id: string) {
   forSidebar[id]?.().catch(() => {});
 }

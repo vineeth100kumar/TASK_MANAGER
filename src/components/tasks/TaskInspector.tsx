@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch } from 'lucide-react';
+import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch, Eye, EyeOff } from 'lucide-react';
 import { api } from '../../services/api';
 import { PRIORITIES, WORK_ITEM_TYPES, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
@@ -68,6 +68,26 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
       onClose();
     } catch (e: any) {
       showToast('Failed to duplicate item', 'error');
+    }
+  };
+
+  const handleToggleHidden = async () => {
+    if (!task) return;
+    try {
+      await api.workItems.setHidden(task.id, !task.isHidden);
+      if (task.isHidden) {
+        showToast('Back in your lists');
+        loadData();
+      } else {
+        // Hiding takes it off every list, so the panel closes with it.
+        showToast('Hidden. Find it under More > Hidden', 'success', {
+          label: 'Undo',
+          onAction: () => { api.workItems.setHidden(task.id, false).catch(() => {}); },
+        });
+        onClose();
+      }
+    } catch {
+      showToast('Could not change it', 'error');
     }
   };
 
@@ -217,6 +237,10 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
           <div className="flex items-center gap-2">
             {task.status !== 'done' && <SnoozeMenu itemId={task.id} onSnoozed={() => loadData()} />}
             <button onClick={() => { downloadTaskImage(task, task.project); showToast('Task picture (.png) downloaded!'); }} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download Task Picture (PNG)"><Camera size={17} /></button>
+            <button onClick={handleToggleHidden} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
+              title={task.isHidden ? 'Unhide: show it in your lists again' : 'Hide: only the locked Hidden page shows it'} aria-pressed={!!task.isHidden}>
+              {task.isHidden ? <Eye size={17} /> : <EyeOff size={17} />}
+            </button>
             <button onClick={handleDuplicate} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Duplicate Item"><Copy size={17} /></button>
             <button onClick={() => { if(window.confirm("Move item to trash?")) { onDelete(task.id); onClose(); } }} className="p-2 rounded-xl hover:bg-red-50 dark:hover:bg-red-900/20 text-red-500" aria-label="Delete item"><Trash2 size={18} /></button>
             <div className="w-px h-5 bg-gray-200 dark:bg-white/10 mx-1"></div>

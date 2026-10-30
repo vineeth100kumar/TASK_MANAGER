@@ -187,6 +187,20 @@ class ClaudeApiTests(unittest.TestCase):
         self.assertEqual(len(full["content"]), 5000)
         self.assertTrue(full["bodyHtml"].startswith("<div>xxx"))
 
+    def test_hidden_items_stay_out_unless_asked(self):
+        client.post("/api/claude/workItems", json={"title": "Plain hidden check"}, headers=CLAUDE)
+        made = client.post("/api/claude/workItems", json={"title": "Secret hidden check", "isHidden": True}, headers=CLAUDE).json()["record"]
+        before = client.get("/api/claude/overview", headers=CLAUDE).json()
+        self.assertGreaterEqual(before["hiddenOpenItems"], 1)
+        titles = lambda **p: [r["title"] for r in client.get("/api/claude/workItems", params={"q": "hidden check", **p}, headers=CLAUDE).json()["records"]]
+        self.assertEqual(titles(), ["Plain hidden check"])
+        self.assertEqual(titles(hidden="only"), ["Secret hidden check"])
+        self.assertEqual(sorted(titles(hidden="include")), ["Plain hidden check", "Secret hidden check"])
+        client.patch(f"/api/claude/workItems/{made['id']}", json={"isHidden": False}, headers=CLAUDE)
+        self.assertEqual(sorted(titles()), ["Plain hidden check", "Secret hidden check"])
+        after = client.get("/api/claude/overview", headers=CLAUDE).json()
+        self.assertEqual(after["openItems"], before["openItems"] + 1)
+
     def test_bad_requests(self):
         self.assertEqual(client.get("/api/claude/secrets", headers=CLAUDE).status_code, 404)
         self.assertEqual(client.post("/api/claude/workItems", json={"status": "todo"}, headers=CLAUDE).status_code, 400)

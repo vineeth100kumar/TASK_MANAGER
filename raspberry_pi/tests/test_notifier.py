@@ -151,6 +151,19 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(message["body"], "Ship report and Gym. Plus 1 overdue.")
         self.assertNotIn("morning:2026-10-01", notifier.run_once(utc(2026, 10, 1, 2, 40)))
 
+    def test_hidden_task_reminds_without_its_title_and_stays_out_of_the_plan(self):
+        put_items(
+            {"id": "h", "title": "Secret gift", "description": "For Anu", "remindAt": "2026-10-01T08:00", "dueDate": "2026-10-01", "isHidden": True},
+            {"id": "g", "title": "Gym", "dueDate": "2026-10-01"},
+        )
+        sent = notifier.run_once(utc(2026, 10, 1, 2, 30))  # 08:00
+        self.assertIn("remind:h:2026-10-01T08:00", sent)
+        reminder = next(m for m in self.pushed if m.get("tag") == "item-h")
+        self.assertEqual((reminder["title"], reminder["body"]), ("Hidden task", "Due today"))
+        morning = next(m for m in self.pushed if m.get("tag") == "morning-plan")
+        self.assertEqual((morning["title"], morning["body"]), ("Today: 1 thing planned", "Gym"))
+        self.assertNotIn("Secret", json.dumps(self.pushed))
+
     def test_habit_reminder_once_a_day_when_not_ticked(self):
         put_items()
         notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})

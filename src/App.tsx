@@ -27,7 +27,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, HiddenView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -502,6 +502,10 @@ function MainApp() {
               <LumoView />
             ) : activeView === 'drop' ? (
               <DropView />
+            ) : activeView === 'hidden' ? (
+              <NotesLock title="Hidden tasks are locked" hint="Enter your password to see them.">
+                <HiddenView onSelectTask={setSelectedItemId} />
+              </NotesLock>
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (

@@ -2,11 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { Lock } from 'lucide-react';
 import { piBackendUrl, piHeaders } from '../../services/piBackend';
 
-// Notes ask for the Sage password every time they are opened. The Pi checks
-// it (with the same wrong-try limits as the login page), and the unlock lives
-// only as long as Notes stays on screen. Without a Pi, or with no password
-// set on it, there is nothing to check against and Notes open straight away.
-export function NotesLock({ children }: { children: React.ReactNode }) {
+// Notes (and hidden tasks) ask for the Sage password every time they are
+// opened. The Pi checks it (with the same wrong-try limits as the login page),
+// and the unlock lives only as long as the page stays on screen. Without a Pi,
+// or with no password set on it, there is nothing to check against and the
+// page opens straight away.
+export function NotesLock({ children, title = 'Notes are locked', hint = 'Enter your password to open them.' }: { children: React.ReactNode; title?: string; hint?: string }) {
   const [state, setState] = useState<'checking' | 'locked' | 'open'>('checking');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -53,8 +54,8 @@ export function NotesLock({ children }: { children: React.ReactNode }) {
           <Lock size={22} className="text-gray-700 dark:text-gray-200" strokeWidth={2.2} />
         </div>
         <div className="mb-5">
-          <h2 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">Notes are locked</h2>
-          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">Enter your password to open them.</p>
+          <h2 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white">{title}</h2>
+          <p className="mt-1 text-sm text-gray-500 dark:text-gray-400">{hint}</p>
         </div>
         <div>
           <input type="password" inputMode="numeric" autoComplete="current-password" autoFocus required placeholder="••••"

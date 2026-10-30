@@ -4,6 +4,7 @@ import datetime
 from typing import List
 from zoneinfo import ZoneInfo
 
+import item_shape
 import notifier
 from desk.alarms import is_alarm
 from desk.controller import fit
@@ -15,8 +16,9 @@ LINE_LEN = 95
 
 def lines(items: List[dict], now: datetime.datetime, tz: ZoneInfo) -> List[str]:
     """What's due today in Today's order, then what's overdue, as
-    "07:30 Gym" or "Pay rent (overdue)". Alarms have their own place."""
-    due, overdue = notifier.plan_for_today([i for i in items if not is_alarm(i)], now, tz)
+    "07:30 Gym" or "Pay rent (overdue)". Alarms have their own place;
+    hidden tasks stay off the clock."""
+    due, overdue = notifier.plan_for_today([i for i in items if not is_alarm(i) and not item_shape.is_hidden(i)], now, tz)
     out = []
     for item in due:
         at = notifier._time_of_day(item, tz)
