@@ -157,7 +157,7 @@ class ChillRemindersTests(unittest.TestCase):
         conn.commit()
         conn.close()
         notifier.save_smtp_password("")
-        notifier.save_prefs({"timezone": "UTC", "morningPlan": False, "eveningCheckIn": False})
+        notifier.save_prefs({"timezone": "UTC", "morningPlan": False, "eveningCheckIn": False, "playful": False})
         self.pushed = []
         p1 = mock.patch.object(notifier, "send_push", side_effect=lambda message, *a, **k: self.pushed.append(message) or [{"ok": True}])
         self.presence = Presence()
@@ -211,7 +211,7 @@ class ChillRemindersTests(unittest.TestCase):
         self.assertEqual(life_mode.held(), [])
 
     def test_morning_plan_in_chill_lists_personal_only(self):
-        notifier.save_prefs({"morningPlan": True, "morningTime": "08:00", "reminders": False})
+        notifier.save_prefs({"morningPlan": True, "morningTime": "08:00", "reminders": False, "playful": False})
         notifier.run_once(datetime.datetime(2026, 10, 16, 8, 0, tzinfo=UTC))
         self.assertEqual(self.pushed[0]["title"], "Today: 1 thing planned")
         self.assertEqual(self.pushed[0]["body"], "Call mum. 1 work task waits for Work mode.")

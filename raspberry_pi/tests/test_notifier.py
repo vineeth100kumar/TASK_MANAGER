@@ -62,7 +62,7 @@ class SchedulerTests(unittest.TestCase):
         conn.close()
         notifier.save_smtp_password("")  # no email unless a test sets it up
         # India is UTC+5:30, so a wrong timezone shows up as a wrong hour.
-        notifier.save_prefs({"timezone": "Asia/Kolkata"})
+        notifier.save_prefs({"timezone": "Asia/Kolkata", "playful": False})
         self.pushed = []
         patcher = mock.patch.object(notifier, "send_push", side_effect=lambda message, *a, **k: self.pushed.append(message) or [{"ok": True}])
         patcher.start()
@@ -266,6 +266,40 @@ class SchedulerTests(unittest.TestCase):
         self.assertIn("1 thing planned", msg["Subject"])
         html_part = msg.get_body(("html",)).get_content()
         self.assertIn("Ship &lt;report&gt;", html_part)
+
+    def test_email_rows_link_to_each_item(self):
+        notifier.save_smtp_password("abcd efgh ijkl mnop")
+        notifier.save_prefs({"email": {"enabled": True, "to": "me@example.com"}})
+        put_items({"id": "abc", "title": "Ship report", "dueDate": "2026-10-01", "priority": "high"})
+        with mock.patch.object(notifier, "_app_link", return_value="https://sage.example"), mock.patch("smtplib.SMTP") as smtp:
+            notifier.run_once(utc(2026, 10, 1, 2, 30))
+        msg = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertIn("https://sage.example/?open=abc", msg.get_body(("html",)).get_content())
+        self.assertIn("https://sage.example/?open=abc", msg.get_body(("plain",)).get_content())
+
+    def test_evening_email_is_opt_in(self):
+        notifier.save_smtp_password("abcd efgh ijkl mnop")
+        notifier.save_prefs({"morningPlan": False, "email": {"enabled": True, "to": "me@example.com"}})
+        put_items({"id": "1", "title": "Ship report", "dueDate": "2026-10-01"})
+        with mock.patch("smtplib.SMTP") as smtp:
+            notifier.run_once(utc(2026, 10, 1, 13, 0))
+        smtp.return_value.__enter__.return_value.send_message.assert_not_called()
+        conn = sqlite3.connect(notifier.DB_PATH)
+        conn.execute("DELETE FROM notification_log")
+        conn.commit()
+        conn.close()
+        notifier.save_prefs({"email": {"eveningCheckIn": True}})
+        with mock.patch("smtplib.SMTP") as smtp:
+            notifier.run_once(utc(2026, 10, 1, 13, 5))
+        msg = smtp.return_value.__enter__.return_value.send_message.call_args[0][0]
+        self.assertIn("Evening check-in", msg["Subject"])
+
+    def test_playful_wording(self):
+        notifier.save_prefs({"playful": True})
+        put_items({"id": "a", "title": "Call the bank", "remindAt": "2026-10-01T09:00", "dueDate": "2026-10-01"})
+        notifier.run_once(utc(2026, 10, 1, 3, 30))
+        self.assertEqual(self.pushed[0]["title"], "⏰ Call the bank")
+        self.assertTrue(self.pushed[0]["body"].startswith("Due today · "))
 
     def test_email_refuses_to_log_in_without_starttls(self):
         notifier.save_smtp_password("abcd efgh ijkl mnop")

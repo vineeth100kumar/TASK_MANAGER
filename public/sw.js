@@ -18,6 +18,9 @@ self.addEventListener('push', (event) => {
     self.registration.showNotification(data.title || 'Sage', {
       body: data.body || '',
       tag: data.tag || undefined,
+      // Same tag replaces the older banner; renotify makes the update buzz again.
+      renotify: !!data.tag,
+      timestamp: Date.now(),
       icon: '/icon-192.png',
       badge: '/icon-192.png',
       data: { url: data.url || '/', itemId },
