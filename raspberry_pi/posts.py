@@ -30,6 +30,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import threading
 import time
 import uuid
 import zipfile
@@ -404,6 +405,7 @@ async def _run(post: dict) -> None:
         await save_async(post)
         await _announce(post)
         if post["status"] == "done":
+            await asyncio.to_thread(prepare_copies, post)
             await _after_done(post)
         else:
             logstore.warn("posts", f"Post {post['id']} failed: {post['error']}")
@@ -796,20 +798,61 @@ def posts_slide(post_id: str, n: int):
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
 
 
+PREVIEW_WIDTH = 540  # the post page shows slides about 330 px wide; 540 stays sharp on 2x screens
+
+
+def _jpeg_copy(post: dict, n: int, kind: str, width: int, quality: int, subsampling: int) -> Optional[Path]:
+    """A JPEG copy of slide n, made once and kept in out/<kind>/. Written to a
+    temp name and renamed, so two requests making it at once can't serve half a file."""
+    src = slide_path(post, n)
+    if not src:
+        return None
+    dest = POSTS_DIR / post["id"] / "out" / kind / f"{src.stem}.jpg"
+    if not dest.is_file() or dest.stat().st_mtime < src.stat().st_mtime:
+        from PIL import Image
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dest.with_name(f".{dest.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
+        with Image.open(src) as im:
+            im = im.convert("RGB")
+            if im.width > width:
+                im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
+            im.save(tmp, "JPEG", quality=quality, optimize=True, subsampling=subsampling)
+        os.replace(tmp, dest)
+    return dest
+
+
 def share_jpeg(post: dict, n: int) -> Optional[Path]:
     """The slide as a JPEG for the phone's share sheet. Instagram lists itself
     for JPEG pictures, and several phones leave it out for large PNGs, so Share
     sends these. Made once, kept beside the PNGs, and the ZIP keeps the PNGs."""
-    src = slide_path(post, n)
-    if not src:
-        return None
-    dest = POSTS_DIR / post["id"] / "out" / "share" / f"{src.stem}.jpg"
-    if not dest.is_file() or dest.stat().st_mtime < src.stat().st_mtime:
-        from PIL import Image
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        with Image.open(src) as im:
-            im.convert("RGB").save(dest, "JPEG", quality=92, optimize=True, subsampling=0)
-    return dest
+    return _jpeg_copy(post, n, "share", 10_000, 92, 0)
+
+
+def preview_jpeg(post: dict, n: int) -> Optional[Path]:
+    """A small JPEG of the slide (540 px wide, a few dozen KB) for the post
+    page. The full PNGs are a few MB together, so showing those made the page
+    sit on grey boxes over a slow link."""
+    return _jpeg_copy(post, n, "preview", PREVIEW_WIDTH, 82, 2)
+
+
+def prepare_copies(post: dict) -> None:
+    """Make every preview and share JPEG ahead of time, so the first visit to
+    the post page doesn't wait for the Pi to encode 2 x 12 images."""
+    for n in range(1, len(post.get("slides") or []) + 1):
+        try:
+            preview_jpeg(post, n)
+            share_jpeg(post, n)
+        except OSError as e:
+            logstore.warn("posts", f"Couldn't make the JPEG copies of slide {n} of post {post['id']}: {e}")
+
+
+@router.get("/api/posts/{post_id}/preview/{n}.jpg")
+def posts_slide_preview(post_id: str, n: int):
+    post = get(post_id)
+    path = preview_jpeg(post, n) if post else None
+    if not path:
+        return _missing()
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/api/posts/{post_id}/slides/{n}.jpg")

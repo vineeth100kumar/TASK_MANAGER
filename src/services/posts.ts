@@ -110,6 +110,9 @@ export async function fetchBlob(path: string): Promise<Blob> {
 export const slidePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.png`;
 /** JPEG copy of a slide, for the share sheet (Instagram lists itself for JPEGs). */
 export const sharePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.jpg`;
+/** Small JPEG of a slide (540 px wide) for the post page; the full PNGs are far too heavy to show. */
+export const previewPath = (id: string, n: number, version = '') =>
+  `/api/posts/${enc(id)}/preview/${n}.jpg${version ? `?v=${encodeURIComponent(version)}` : ''}`;
 export const zipPath = (id: string) => `/api/posts/${enc(id)}/zip`;
 export const qrPath = (id: string) => `/api/posts/${enc(id)}/qr.svg`;
 
