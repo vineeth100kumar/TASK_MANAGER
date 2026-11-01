@@ -130,7 +130,7 @@ class DatabaseMode(unittest.TestCase):
         # A post saves while it draws; in the old journal mode each save blocked
         # every read and the Pi logged "database is locked".
         import sqlite3
-        conn = sqlite3.connect(os.environ["SAGE_DB_PATH"])
+        conn = sqlite3.connect(db_server.DB_PATH)
         try:
             self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
         finally:
