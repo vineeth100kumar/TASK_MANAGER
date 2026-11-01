@@ -168,6 +168,8 @@ def _pill_split(headline: str, pill: str):
     m = _re.match(r"^(.*?)([\s]*[?!.,:;\u2026\u201d\u2019\"')]+)?$", plain, _re.S)
     core, tail = (m.group(1), (m.group(2) or "").strip()) if m else (plain, "")
     want = _re.sub(r"==|\*\*", "", pill).strip()
+    if want and tail and plain.lower().endswith(want.lower()):
+        core, tail = plain, ""  # the spec's pill phrase already includes the punctuation
     if not want or not core.lower().endswith(want.lower()) or len(want) >= len(core):
         return None
     before = core[:len(core) - len(want)].strip()
