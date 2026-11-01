@@ -1,0 +1,150 @@
+@font-face {
+  font-family: 'League Spartan';
+  src: url('{{ league_spartan_url }}') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: 'League Spartan';
+  src: url('{{ league_spartan_url }}') format('truetype');
+  font-weight: 100 900;
+  font-style: italic;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('{{ inter_url }}') format('truetype');
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: var(--canvas-width, 1080px);
+  height: var(--canvas-height, 1350px);
+  background-color: #FFFFFF;
+  background-image: url('{{ grid_pattern_url }}');
+  background-repeat: repeat;
+  background-size: 135px 135px;
+  color: #000000;
+  position: relative;
+  overflow: hidden;
+  font-family: 'Inter', sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+.header-row {
+  position: absolute;
+  top: var(--header-y, 114px);
+  left: 110px;
+  width: 860px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.header-left {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 26px;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: #000000;
+}
+
+.topic-pill {
+  background-color: #000000;
+  color: #FFFFFF;
+  border-radius: 9999px;
+  padding: 10px 28px;
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 22px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.footer-row {
+  position: absolute;
+  top: var(--footer-y, 1215px);
+  left: 110px;
+  width: 860px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.footer-left {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #000000;
+}
+
+.footer-right {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.slide-counter {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 24px;
+  letter-spacing: 0.06em;
+  color: #000000;
+}
+
+.accent-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #EE4425;
+  color: #FFFFFF;
+  font-family: 'League Spartan', sans-serif;
+  font-style: italic;
+  font-weight: 800;
+  font-size: 168px;
+  line-height: 0.82;
+  letter-spacing: -0.015em;
+  text-transform: uppercase;
+  border-radius: 46px;
+  padding: 22px 64px 34px 55px;
+  margin-top: 18px;
+  margin-left: -55px;
+  box-sizing: border-box;
+}
+
+.accent-pill span {
+  display: inline-block;
+  transform: skewX(-4deg);
+}
+
+/* Source / credit line above the footer (spec decks: point, list, stat, quote, image) */
+.slide-source {
+  position: absolute;
+  left: 110px;
+  width: 860px;
+  /* anchored from the bottom, so a two-line credit grows upward, never into the footer */
+  bottom: calc(var(--canvas-height, 1350px) - var(--footer-y, 1215px) + 30px);
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: #777777;
+  z-index: 5;
+}

@@ -1381,6 +1381,7 @@ def public_url():
 # --- Notifications (see notifier.py) ---
 import notifier
 import uptime
+import posts
 notifier.init_tables()
 
 
@@ -2081,6 +2082,11 @@ def _depth_status() -> dict:
             "cutoutProblem": depth.cutout_problem(), "updatedAt": meta.get("updatedAt")}
 
 
+def _slide_maker_status() -> dict:
+    state = posts.status()
+    return {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"], "emailReady": state["emailReady"]}
+
+
 def _claude_health() -> dict:
     return system_health.report(
         DB_PATH,
@@ -2092,6 +2098,7 @@ def _claude_health() -> dict:
         phone=lambda: {**phone_link.link.snapshot(), "lifeMode": life_mode.current()},
         clock=_clock_status,
         depth_face=_depth_status,
+        slide_maker=_slide_maker_status,
     )
 
 
@@ -2126,6 +2133,10 @@ app.include_router(sparks.router)
 # Radar industry search (industry.py): type an industry, get a full brief.
 industry.connect(DB_PATH, events.broadcast)
 app.include_router(industry.router)
+
+# Posts (posts.py): paste a script, the Pi draws the carousel slides and emails when done.
+posts.connect(DB_PATH, events.broadcast, claude_api.create_record, claude_api.update_record, claude_api._find)
+app.include_router(posts.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)

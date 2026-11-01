@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 110px;
+      top: var(--content-top, 260px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .compare-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 84px;
+      line-height: 0.92;
+      letter-spacing: -0.01em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+
+    .accent-bar { width: 80px; height: 6px; background-color: #EE4425; border-radius: 3px; margin: 40px 0 40px 0; }
+
+    .compare-body {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 34px;
+      line-height: 1.35;
+      color: #111111;
+      margin-bottom: 32px;
+    }
+
+    .compare-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 28px;
+      font-size: 36px;
+    }
+
+    .compare-col {
+      border: 3px solid #000000;
+      border-radius: 28px;
+      padding: 0.75em 0.7em 0.85em 0.7em;
+      display: flex;
+      flex-direction: column;
+      gap: 0.55em;
+    }
+
+    .compare-col.right {
+      border-color: #EE4425;
+      box-shadow: 10px 10px 0 #EE4425;
+    }
+
+    .compare-label {
+      align-self: flex-start;
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 34px;
+      line-height: 1;
+      text-transform: uppercase;
+      letter-spacing: 0.02em;
+      padding: 12px 22px 8px 22px;
+      border-radius: 999px;
+      background-color: #000000;
+      color: #FFFFFF;
+      margin-bottom: 0.15em;
+    }
+
+    .compare-col.right .compare-label { background-color: #EE4425; }
+
+    .compare-item {
+      display: flex;
+      gap: 0.45em;
+      align-items: flex-start;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      line-height: 1.28;
+      color: #111111;
+      overflow-wrap: normal;
+      word-break: normal;
+    }
+
+    .compare-mark {
+      flex-shrink: 0;
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      line-height: 1.1;
+      color: #000000;
+      opacity: 0.55;
+    }
+
+    .compare-col.right .compare-mark { color: #EE4425; opacity: 1; }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="content-container">
+    {% if headline %}<h2 class="compare-headline">{{ headline }}</h2>
+    <div class="accent-bar"></div>{% endif %}
+    {% if body %}<p class="compare-body">{{ body }}</p>{% endif %}
+    <div class="compare-grid">
+      <div class="compare-col left">
+        <div class="compare-label">{{ left.label }}</div>
+        {% for it in left['items'] %}<div class="compare-item"><span class="compare-mark">&#x2715;</span><span>{{ it }}</span></div>{% endfor %}
+      </div>
+      <div class="compare-col right">
+        <div class="compare-label">{{ right.label }}</div>
+        {% for it in right['items'] %}<div class="compare-item"><span class="compare-mark">&#x2713;</span><span>{{ it }}</span></div>{% endfor %}
+      </div>
+    </div>
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="slide-counter">{{ counter }}</div>
+  </div>
+</body>
+</html>

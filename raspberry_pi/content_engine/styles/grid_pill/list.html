@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 110px;
+      top: var(--content-top, 240px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .list-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 84px;
+      line-height: 0.92;
+      letter-spacing: -0.01em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      margin-bottom: 28px;
+    }
+
+    .accent-bar {
+      width: 80px;
+      height: 6px;
+      background-color: #EE4425;
+      border-radius: 3px;
+      margin-bottom: 40px;
+    }
+
+    .items-list {
+      display: flex;
+      flex-direction: column;
+      gap: 40px;
+      width: 100%;
+    }
+
+    .list-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+    }
+
+    .item-bullet {
+      min-width: 56px;
+      height: 56px;
+      border-radius: 50%;
+      background-color: #EE4425;
+      color: #FFFFFF;
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 26px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 6px;
+      flex-shrink: 0;
+    }
+
+    .item-text {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 50px;
+      line-height: 1.34;
+      color: #111111;
+      text-align: left;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="content-container">
+    <h2 class="list-headline">{{ headline }}</h2>
+    <div class="accent-bar"></div>
+    <div class="items-list">
+      {% for item in items %}
+      <div class="list-item">
+        <div class="item-bullet">{{ loop.index }}</div>
+        <div class="item-text">{{ item }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="slide-counter">{{ counter }}</div>
+  </div>
+</body>
+</html>
