@@ -421,6 +421,98 @@ class ClaudeApiTests(unittest.TestCase):
             self.assertTrue(client.delete(f"/api/claude/drops/{home['drop']['id']}", headers=CLAUDE).json()["success"])
 
 
+    def test_posts_connector(self):
+        import posts
+
+        def call(name, args):
+            res = client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                                      "params": {"name": name, "arguments": args}}).json()["result"]
+            return res["isError"], (json.loads(res["content"][0]["text"]) if not res["isError"] else res["content"][0]["text"])
+
+        names = {t["name"] for t in client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).json()["result"]["tools"]}
+        self.assertTrue({"sage_post_format", "sage_post_check", "sage_post_create", "sage_post_get",
+                         "sage_post_list", "sage_post_redo"} <= names)
+
+        # The format is the engine's own prompt, plus an example that passes the check.
+        err, fmt = call("sage_post_format", {})
+        self.assertFalse(err, fmt)
+        self.assertIn("## cover", fmt["format"])
+        self.assertNotIn("PROMPT", fmt["format"])
+        err, checked = call("sage_post_check", {"script": fmt["example"]})
+        self.assertFalse(err, checked)
+        self.assertTrue(checked["check"]["ok"])
+        err, bad = call("sage_post_check", {"script": fmt["example"] + "\n## chart\nheadline: Nothing to plot\n"})
+        self.assertFalse(err)
+        self.assertFalse(bad["check"]["ok"])
+        self.assertTrue(call("sage_post_check", {"script": ""})[0])
+
+        make = lambda fields: client.post("/api/claude/projects", json=fields, headers=CLAUDE).json()["record"]
+        on = make({"name": "Mind Deeds", "type": "content", "autoContent": True})
+        make({"name": "Vlog", "type": "content"})
+        make({"name": "Robot", "type": "technical"})
+
+        ready = {"ready": True, "problems": [], "queued": 0, "emailReady": True, "emailOn": True}
+        started = []
+        with mock.patch.object(posts, "status", lambda: ready), \
+                mock.patch.object(posts, "_spawn", lambda coro: (started.append(1), coro.close())), \
+                mock.patch.object(posts, "post_link", lambda p: f"https://sage.example.com/?post={p['id']}"):
+            # A project with the switch off, a non-content one, or a missing one is refused, by name.
+            for ref, words in (("Vlog", "Use Auto Content switched off"), ("Robot", "isn't a content project"),
+                               ("Nope", "No project called")):
+                err, text = call("sage_post_create", {"script": fmt["example"], "project": ref})
+                self.assertTrue(err, ref)
+                self.assertIn(words, text)
+                self.assertIn("Mind Deeds", text)
+            self.assertEqual(started, [])
+
+            # A script with errors comes back with the reason.
+            err, text = call("sage_post_create", {"script": "hello world"})
+            self.assertTrue(err)
+            self.assertIn("sage_post_check", text)
+
+            err, made = call("sage_post_create", {"script": fmt["example"], "project": "mind deeds", "title": "AI post"})
+            self.assertFalse(err, made)
+            post = made["post"]
+            self.assertEqual((post["status"], post["title"], post["projectId"]), ("queued", "AI post", on["id"]))
+            self.assertEqual(made["project"], "Mind Deeds")
+            self.assertIn("sage_post_get", made["note"])
+            self.assertEqual(started, [1])
+
+            # Once the Pi finishes, get returns the link and the caption.
+            saved = posts.get(post["id"])
+            saved.update(status="done", slideCount=7, slides=[f"slide_0{n}.png" for n in range(1, 8)],
+                         caption="Finished caption", audit="pass", emailed=True)
+            posts.save(saved)
+            err, got = call("sage_post_get", {"id": post["id"], "wait": 5})
+            self.assertFalse(err, got)
+            self.assertEqual(got["post"]["status"], "done")
+            self.assertEqual(got["post"]["caption"], "Finished caption")
+            self.assertEqual(got["post"]["link"], f"https://sage.example.com/?post={post['id']}")
+            self.assertIn("email has been sent", got["note"])
+
+            err, listed = call("sage_post_list", {"project": "Mind Deeds"})
+            self.assertFalse(err, listed)
+            self.assertEqual([p["id"] for p in listed["posts"]], [post["id"]])
+            self.assertEqual(listed["projectsWithAutoContent"], [{"id": on["id"], "name": "Mind Deeds"}])
+            self.assertTrue(listed["slideMaker"]["ready"])
+
+            err, again = call("sage_post_redo", {"id": post["id"], "style": "beige_grain"})
+            self.assertFalse(err, again)
+            self.assertEqual((again["post"]["status"], again["post"]["style"]), ("queued", "beige_grain"))
+            self.assertTrue(call("sage_post_redo", {"id": post["id"]})[0])  # still being made
+            self.assertTrue(call("sage_post_get", {"id": "000000000000"})[0])
+
+            # The same through plain HTTP.
+            self.assertTrue(client.get(f"/api/claude/posts/{post['id']}", headers=CLAUDE).json()["success"])
+            self.assertTrue(client.get("/api/claude/posts/format", headers=CLAUDE).json()["success"])
+            posts.delete(post["id"])
+
+        # When the slide maker isn't ready, nothing is queued and the reason comes back.
+        with mock.patch.object(posts, "status", lambda: {**ready, "ready": False, "problems": ["No Chromium found."]}):
+            err, text = call("sage_post_create", {"script": fmt["example"]})
+            self.assertTrue(err)
+            self.assertIn("No Chromium", text)
+
 class LogStoreTests(unittest.TestCase):
     def test_cap_drops_oldest_and_clamps(self):
         import tempfile as _tf
