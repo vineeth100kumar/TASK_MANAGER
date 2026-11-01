@@ -108,6 +108,8 @@ export async function fetchBlob(path: string): Promise<Blob> {
 }
 
 export const slidePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.png`;
+/** JPEG copy of a slide, for the share sheet (Instagram lists itself for JPEGs). */
+export const sharePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.jpg`;
 export const zipPath = (id: string) => `/api/posts/${enc(id)}/zip`;
 export const qrPath = (id: string) => `/api/posts/${enc(id)}/qr.svg`;
 
@@ -117,8 +119,8 @@ export function postLink(post: Post, status: MakerStatus | null): string {
   return `${base}/?post=${post.id}`;
 }
 
-export const fileName = (post: Post, n: number) =>
-  `${post.title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'post'}-${String(n).padStart(2, '0')}.png`;
+export const fileName = (post: Post, n: number, ext = 'png') =>
+  `${post.title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 30) || 'post'}-${String(n).padStart(2, '0')}.${ext}`;
 
 /** Can this browser hand image files to the share sheet? */
 export function canShareFiles(files: File[]): boolean {
