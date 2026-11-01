@@ -103,6 +103,28 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(posts.check(EXAMPLE)["ok"])
 
 
+class PillSplit(unittest.TestCase):
+    """The cover's pill word: marks and closing punctuation must not hide it."""
+
+    def split(self, headline, pill):
+        posts._engine_on_path()
+        from autocontent.render.renderer import _pill_split
+        return _pill_split(headline, pill)
+
+    def test_bold_word_then_question_mark(self):
+        self.assertEqual(self.split("How can the Iran war affect your **dinner**?", "dinner"),
+                         ("How can the Iran war affect your", "dinner?"))
+
+    def test_highlight_marks_and_plain(self):
+        self.assertEqual(self.split("Why ==cash== wins", "cash wins"), ("Why", "cash wins"))
+        self.assertEqual(self.split("Save more, spend ==less==", "less"), ("Save more, spend", "less"))
+        self.assertEqual(self.split("Your move.", "move."), ("Your", "move."))
+
+    def test_phrase_not_at_the_end(self):
+        self.assertIsNone(self.split("Dinner is served", "dinner"))
+        self.assertIsNone(self.split("dinner", "dinner"))
+
+
 class StartRules(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         posts.connect(db_server.DB_PATH, None, None, None, None)

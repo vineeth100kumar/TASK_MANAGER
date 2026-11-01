@@ -153,6 +153,29 @@ FIT_PROBE_JS = """
 """
 
 
+
+def _pill_split(headline: str, pill: str):
+    """Split a cover headline into (words before, pill phrase) for a spec's `pill:`.
+
+    The pill phrase may be followed by closing punctuation ("...your dinner?"), and
+    the headline may carry its own **bold** / ==highlight== marks around it. Both
+    used to stop the phrase being found, so the whole last word fell into the pill
+    with its marks showing and the word itself vanished. The marks are dropped here
+    (the pill is the emphasis) and the punctuation stays with the pill. Returns None
+    when the headline does not end with the phrase."""
+    import re as _re
+    plain = _re.sub(r"==|\*\*", "", headline).strip()
+    m = _re.match(r"^(.*?)([\s]*[?!.,:;\u2026\u201d\u2019\"')]+)?$", plain, _re.S)
+    core, tail = (m.group(1), (m.group(2) or "").strip()) if m else (plain, "")
+    want = _re.sub(r"==|\*\*", "", pill).strip()
+    if not want or not core.lower().endswith(want.lower()) or len(want) >= len(core):
+        return None
+    before = core[:len(core) - len(want)].strip()
+    if not before:
+        return None
+    return before, core[len(core) - len(want):] + tail
+
+
 class SlideRenderer:
     def __init__(self, style_name: str = "beige_grain", canvas_format: str = "portrait",
                  colors: Optional[Dict[str, str]] = None):
@@ -246,9 +269,8 @@ class SlideRenderer:
                 if pill_req.lower() in ("none", "no", "off", "-") or ("==" in head and not pill_req):
                     # `pill: none`, or a headline with its own ==highlight==: no pill
                     main_words, pill_word = headline_text, ""
-                elif pill_req and head.lower().endswith(pill_req.lower()) and len(pill_req) < len(head):
-                    main_words = head[:len(head) - len(pill_req)].strip()
-                    pill_word = head[len(head) - len(pill_req):]
+                elif pill_req and _pill_split(head, pill_req):
+                    main_words, pill_word = _pill_split(head, pill_req)
                 elif trailing_num and len(trailing_num.group(1).split()) < len(words):
                     pill_word = trailing_num.group(1)
                     main_words = headline_text[:trailing_num.start(1)].strip()
