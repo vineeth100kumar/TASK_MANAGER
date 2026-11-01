@@ -490,6 +490,16 @@ async def event_stream(socket: WebSocket):
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+    # WAL lets readers carry on while one writer saves. Without it every save
+    # (a post's progress, a sync, the notifier) blocked every read for up to
+    # 5 s and the logs filled with "database is locked". The mode is stored
+    # in the file, so setting it once here covers every connection.
+    try:
+        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            logstore.warn("db", f"SQLite stayed in {mode} mode instead of WAL; saves may block reads")
+    except sqlite3.Error as e:
+        logstore.warn("db", f"Couldn't switch SQLite to WAL: {e}")
     cursor = conn.cursor()
     # Document Store Table
     cursor.execute('''

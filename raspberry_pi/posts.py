@@ -30,6 +30,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import time
 import uuid
 import zipfile
 from pathlib import Path
@@ -97,12 +98,20 @@ def _db() -> sqlite3.Connection:
 
 
 def save(post: dict) -> None:
+    _write((post["id"], post["createdAt"], post["status"], json.dumps(post)))
+
+
+async def save_async(post: dict) -> None:
+    """save() for code on the event loop: the post is turned into JSON here, so
+    nothing changes it mid-write, and the write itself runs on a thread, so a
+    busy database can't freeze every other request while it waits."""
+    await asyncio.to_thread(_write, (post["id"], post["createdAt"], post["status"], json.dumps(post)))
+
+
+def _write(row: tuple) -> None:
     conn = _db()
     try:
-        conn.execute(
-            "INSERT OR REPLACE INTO posts (id, created_at, status, payload) VALUES (?, ?, ?, ?)",
-            (post["id"], post["createdAt"], post["status"], json.dumps(post)),
-        )
+        conn.execute("INSERT OR REPLACE INTO posts (id, created_at, status, payload) VALUES (?, ?, ?, ?)", row)
         old = conn.execute("SELECT id FROM posts WHERE id NOT IN (SELECT id FROM posts ORDER BY created_at DESC LIMIT ?)", (KEEP,)).fetchall()
         for row in old:
             shutil.rmtree(POSTS_DIR / row["id"], ignore_errors=True)
@@ -380,7 +389,7 @@ async def _run(post: dict) -> None:
         post["status"] = "running"
         post["slides"], post["slideCount"] = [], 0
         _note(post, "Started")
-        save(post)
+        await save_async(post)
         await _announce(post)
         await _ensure_task(post)
         code = None
@@ -392,7 +401,7 @@ async def _run(post: dict) -> None:
             post["status"], post["error"] = "failed", str(e)[:300] or e.__class__.__name__
         _finish(post, folder, code)
         post["finishedAt"] = _utc()
-        save(post)
+        await save_async(post)
         await _announce(post)
         if post["status"] == "done":
             await _after_done(post)
@@ -408,6 +417,7 @@ async def _draw(post: dict, folder: Path, script_file: Path) -> int:
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
     )
     errors: List[str] = []
+    last_save = [0.0]
 
     async def read() -> None:
         assert proc.stdout is not None
@@ -428,8 +438,13 @@ async def _draw(post: dict, folder: Path, script_file: Path) -> int:
             if step:
                 post["progress"] = {"done": int(step.group(1)) - 1, "total": int(step.group(2))}
             _note(post, text)
-            save(post)
-            await _announce(post)
+            # Save on each new slide, or at most once a second: the engine prints
+            # many lines, and each save is a database write.
+            now = time.monotonic()
+            if step or now - last_save[0] >= 1.0:
+                last_save[0] = now
+                await save_async(post)
+                await _announce(post)
 
     started = datetime.datetime.now()
     try:
@@ -505,7 +520,7 @@ async def _ensure_task(post: dict) -> None:
             **_stage_fields(post, "scripting", "in_progress"),
         })
         post["taskId"] = item.get("id")
-        save(post)
+        await save_async(post)
     except Exception as e:
         logstore.warn("posts", f"Couldn't add the task for post {post['id']}: {e}")
 
@@ -584,12 +599,12 @@ def _esc(value: str) -> str:
 
 
 async def _email(post: dict, *, force: bool = False) -> bool:
-    prefs = notifier.get_prefs()
+    prefs = await asyncio.to_thread(notifier.get_prefs)
     if not force and not prefs["email"].get("postReady", True):
         return False
     if not notifier.email_ready(prefs):
         post["emailError"] = "Email isn't set up yet (Settings > Notifications)."
-        save(post)
+        await save_async(post)
         return False
     try:
         thumbs = await asyncio.to_thread(thumbnails, post)
@@ -600,7 +615,7 @@ async def _email(post: dict, *, force: bool = False) -> bool:
     except Exception as e:
         post["emailed"], post["emailError"] = False, str(e)[:200] or e.__class__.__name__
         logstore.warn("posts", f"Email for post {post['id']} failed: {post['emailError']}")
-    save(post)
+    await save_async(post)
     await _announce(post)
     return post["emailed"]
 
@@ -739,7 +754,7 @@ async def posts_posted(post_id: str, undo: bool = False):
         return _bad("Only a finished post can be marked as posted.", 409)
     post["posted"] = not undo
     post["postedAt"] = None if undo else _utc()
-    save(post)
+    await save_async(post)
     if undo:
         await _move_task(post, "editing", "in_progress")
     else:
