@@ -166,10 +166,16 @@ class DrawTests(unittest.IsolatedAsyncioTestCase):
             post = posts.start(SMALL, project_id="p1")
             self.assertEqual(post["status"], "queued")
             post = await self.finish(post)
+            # "done" is saved before the email goes, so give the email its moment.
+            for _ in range(40):
+                if post["emailed"] or post["emailError"]:
+                    break
+                await asyncio.sleep(0.25)
+                post = posts.get(post["id"])
         self.assertEqual(post["status"], "done", post.get("error"))
         self.assertEqual(post["slideCount"], 3)
         self.assertEqual(post["audit"] in ("pass", "fail"), True)
-        self.assertTrue(post["emailed"])
+        self.assertTrue(post["emailed"], post.get("emailError"))
         self.assertIn("Tiny post", sent["subject"])
         self.assertEqual(len(sent["images"]), 3)
         self.assertIn("cid:slide1", sent["html"])
