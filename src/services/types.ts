@@ -15,6 +15,8 @@ export interface Project {
   id: string;
   name: string;
   key: string;
+  /** On: this content project has a Posts tab and makes slides with Auto Content (see posts.ts). */
+  autoContent?: boolean;
   type?: string; // technical | nontech | content | other | a custom name; see projectTypes.ts
   color: string;
   sequence: number;

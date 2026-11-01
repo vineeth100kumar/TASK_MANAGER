@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -11,6 +11,7 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
 import { DatePicker } from '../common/DatePicker';
+import { openPosts } from '../../services/posts';
 import { ProjectTypePicker } from '../common/ProjectTypePicker';
 import { groupProjectsByType, projectTypeId } from '../../services/projectTypes';
 
@@ -103,17 +104,19 @@ export function Sidebar({
   const [newProjKey, setNewProjKey] = useState('');
   const [newProjColor, setNewProjColor] = useState('bg-indigo-500');
   const [newProjType, setNewProjType] = useState('other');
+  // Content projects only: makes carousel posts with Auto Content (Posts tab on the project).
+  const [newProjAuto, setNewProjAuto] = useState(false);
   // Set while the project form edits an existing project instead of making one.
   const [editingProjId, setEditingProjId] = useState<string | null>(null);
   const openNewProject = () => {
     setEditingProjId(null);
-    setNewProjName(''); setNewProjKey(''); setNewProjColor('bg-indigo-500'); setNewProjType('other');
+    setNewProjName(''); setNewProjKey(''); setNewProjColor('bg-indigo-500'); setNewProjType('other'); setNewProjAuto(false);
     setIsAddProjectOpen(true);
   };
   const openEditProject = (project: Project) => {
     setEditingProjId(project.id);
     setNewProjName(project.name || ''); setNewProjKey(project.key || ''); setNewProjColor(project.color || 'bg-indigo-500');
-    setNewProjType(projectTypeId(project));
+    setNewProjType(projectTypeId(project)); setNewProjAuto(Boolean(project.autoContent));
     setIsAddProjectOpen(true);
   };
   // The project page's Edit button asks for the form by id.
@@ -193,7 +196,8 @@ export function Sidebar({
           name: newProjName.trim(),
           key: newProjKey.trim().toUpperCase(),
           color: newProjColor,
-          type: newProjType
+          type: newProjType,
+          autoContent: newProjType === 'content' && newProjAuto
         });
         setIsAddProjectOpen(false);
         setEditingProjId(null);
@@ -205,7 +209,8 @@ export function Sidebar({
         name: newProjName.trim(),
         key: newProjKey.trim().toUpperCase(),
         color: newProjColor,
-        type: newProjType
+        type: newProjType,
+        autoContent: newProjType === 'content' && newProjAuto
       });
       setNewProjName('');
       setNewProjKey('');
@@ -373,6 +378,8 @@ export function Sidebar({
                 { id: 'canvas', name: 'Canvas', icon: PenLine },
                 // Temporary share links for reports and site samples.
                 { id: 'drop', name: 'Drop', icon: UploadCloud, color: 'text-sky-500' },
+                // Instagram carousels the Pi draws from a pasted script (Auto Content).
+                ...(lifeContext === 'personal' ? [] : [{ id: 'posts', name: 'Posts', icon: GalleryHorizontal, color: 'text-pink-500' }]),
                 // Private tasks no other list shows, behind the password.
                 { id: 'hidden', name: 'Hidden', icon: EyeOff },
                 // Radar is work, so it stays out of the Personal space.
@@ -394,6 +401,7 @@ export function Sidebar({
                   item.id === 'radar' ? activeView === 'radar' : 
                   item.id === 'lumo' ? activeView === 'lumo' : 
                   item.id === 'drop' ? activeView === 'drop' : 
+                  item.id === 'posts' ? activeView === 'posts' : 
                   item.id === 'hidden' ? activeView === 'hidden' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
                   item.id === 'focus' ? activeView === 'focus' :
@@ -413,6 +421,8 @@ export function Sidebar({
                       setActiveView('lumo');
                     } else if (item.id === 'drop') {
                       setActiveView('drop');
+                    } else if (item.id === 'posts') {
+                      openPosts();
                     } else if (item.id === 'hidden') {
                       setActiveView('hidden');
                     } else if (item.id === 'inbox') {
@@ -636,6 +646,15 @@ export function Sidebar({
                   <label className="field-label mb-1.5">Type</label>
                   <ProjectTypePicker value={newProjType} onChange={setNewProjType} projects={projects} />
                 </div>
+                {newProjType === 'content' && (
+                  <label className="flex items-start gap-3 rounded-2xl bg-black/[0.03] dark:bg-white/5 p-3 cursor-pointer">
+                    <input type="checkbox" checked={newProjAuto} onChange={e => setNewProjAuto(e.target.checked)} className="mt-1 w-4 h-4 accent-purple-600" />
+                    <span className="text-[13px] leading-snug">
+                      <b className="text-gray-900 dark:text-white">Use Auto Content</b>
+                      <span className="block text-gray-500">Adds a Posts tab to this project: paste a script and the Pi draws the Instagram slides. Each post becomes a task here.</span>
+                    </span>
+                  </label>
+                )}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="field-label mb-1.5">Key Prefix</label>
