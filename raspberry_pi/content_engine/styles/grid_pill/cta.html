@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .headline-container {
+      position: absolute;
+      left: 110px;
+      top: var(--cover-top, 420px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .cta-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 130px;
+      line-height: 0.86;
+      letter-spacing: -0.015em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      margin-bottom: 36px;
+    }
+
+    .cta-pill-wrapper {
+      display: inline-flex;
+      align-items: center;
+      gap: 24px;
+      margin-bottom: 24px;
+    }
+
+    .cta-pill {
+      background-color: #EE4425;
+      color: #FFFFFF;
+      font-family: 'League Spartan', sans-serif;
+      font-style: italic;
+      font-weight: 800;
+      font-size: 50px;
+      border-radius: 9999px;
+      padding: 16px 44px 16px 44px;
+      line-height: 1;
+      text-transform: uppercase;
+      white-space: nowrap;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .cta-pill span {
+      display: inline-block;
+      transform: translateY(3px) skewX(-4deg);
+    }
+
+    .cta-subtext {
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      font-size: 32px;
+      letter-spacing: 0.04em;
+      color: #555555;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="headline-container">
+    <h1 class="cta-headline">{{ headline }}<span id="baseline-anchor" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span></h1>
+    <div class="cta-pill-wrapper">
+      <div class="cta-pill"><span>{{ brand.cta_pill or 'JOIN US' }}</span></div>
+      <div class="cta-subtext">{{ brand.cta_pill_subtext or 'FOR DAILY STRATEGY' }}</div>
+    </div>
+  </div>
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="footer-right">
+      {{ arrow_svg | safe }}
+    </div>
+  </div>
+</body>
+</html>

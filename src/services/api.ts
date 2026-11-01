@@ -659,6 +659,7 @@ export const api = {
         color: payload.color || 'bg-indigo-500',
         sequence: state.projects.length + 1,
         type: payload.type || 'other',
+        ...(payload.autoContent ? { autoContent: true } : {}),
         description: payload.description || '',
         createdAt: now,
         updatedAt: now

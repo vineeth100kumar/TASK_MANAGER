@@ -33,6 +33,8 @@ export interface NotifyPrefs {
     reminders: boolean;
     /** "Sage is back up" after an update, restart, crash or power cut. */
     backUp?: boolean;
+    /** "Your post is ready" when Posts finishes drawing slides. */
+    postReady?: boolean;
     smtpHost: string;
     smtpPort: number;
     smtpUser: string;

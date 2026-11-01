@@ -75,6 +75,8 @@ DEFAULT_PREFS: Dict[str, Any] = {
         "reminders": False,
         # "Sage is back up" after any downtime (uptime.py).
         "backUp": True,
+        # "Your post is ready" after Posts finishes drawing slides (posts.py).
+        "postReady": True,
         "smtpHost": "smtp.gmail.com",
         "smtpPort": 587,
         "smtpUser": os.getenv("SAGE_EMAIL_FROM", "reminder.vk@gmail.com"),
@@ -351,7 +353,8 @@ def email_ready(prefs: dict) -> bool:
     return bool(email["enabled"] and email["to"] and email["smtpHost"] and smtp_password())
 
 
-def send_email(prefs: dict, subject: str, text: str, html_body: str) -> None:
+def send_email(prefs: dict, subject: str, text: str, html_body: str, images: Optional[Dict[str, bytes]] = None) -> None:
+    """images: content-id -> JPEG bytes, shown inline where the HTML says cid:<id>."""
     email = prefs["email"]
     user = email["smtpUser"] or email["to"]
     msg = EmailMessage()
@@ -361,6 +364,8 @@ def send_email(prefs: dict, subject: str, text: str, html_body: str) -> None:
     msg["Message-ID"] = make_msgid(domain=user.split("@")[-1] if "@" in user else None)
     msg.set_content(text)
     msg.add_alternative(html_body, subtype="html")
+    for cid, data in (images or {}).items():
+        msg.get_body(preferencelist=("html",)).add_related(data, "image", "jpeg", cid=f"<{cid}>")
     context = ssl.create_default_context()
     port = int(email["smtpPort"])
     if port == 465:
@@ -417,7 +422,7 @@ def _row(row: Any) -> Tuple[str, str, str]:
 
 
 def email_html(heading: str, intro: str, sections: List[Tuple[str, List[Any]]], link: str,
-               cta: str = "Open Sage", preheader: str = "") -> str:
+               cta: str = "Open Sage", preheader: str = "", extra_html: str = "") -> str:
     """The email body. Rows may be (text, link, note) so each item opens in
     Sage; a light/dark aware card, with a hidden preheader for the inbox list."""
     parts = [
@@ -448,6 +453,8 @@ def email_html(heading: str, intro: str, sections: List[Tuple[str, List[Any]]], 
                 label = f'<a class="item" href="{html.escape(row_link)}" style="color:#1c1c1e;text-decoration:none">{label}</a>'
             note_html = f' <span class="mut" style="font-size:12px;color:#888">{html.escape(note)}</span>' if note else ""
             parts.append(f'<div class="row" style="font-size:15px;line-height:1.4;padding:8px 0;border-bottom:1px solid #eee">{label}{note_html}</div>')
+    if extra_html:
+        parts.append(extra_html)
     if link:
         parts.append(
             f'<p style="margin:26px 0 0"><a class="btn" href="{html.escape(link)}" style="display:inline-block;background:#2b275a;color:#fff;'

@@ -95,6 +95,13 @@ part_server() {
   as_user python3 -m venv "$REPO/raspberry_pi/venv"
   as_user "$REPO/raspberry_pi/venv/bin/pip" install -q --upgrade pip
   as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt"
+  # Posts (slide maker): headless Chromium for the carousel PNGs. Playwright's own
+  # build first; if that can't install on this Pi, the system chromium is used.
+  step "Slide maker browser (Posts)"
+  "$REPO/raspberry_pi/venv/bin/playwright" install-deps chromium >/dev/null 2>&1 || true
+  as_user "$REPO/raspberry_pi/venv/bin/playwright" install chromium \
+    || { echo "Playwright's Chromium didn't install; trying the system one."; apt-get install -y -qq chromium >/dev/null 2>&1 || apt-get install -y -qq chromium-browser >/dev/null 2>&1 \
+         || echo "No Chromium installed, so Posts can't draw slides. Run: playwright install chromium"; }
   command -v ollama >/dev/null || echo "Ollama is not installed, so AI task parsing will fail. See raspberry_pi/README.md."
 }
 
