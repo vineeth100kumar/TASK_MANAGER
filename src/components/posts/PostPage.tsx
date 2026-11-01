@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, RefreshCw, Send, Share2, Smartphone, Trash2,
 } from 'lucide-react';
 import {
-  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, saveBlob, sharePath, slidePath, zipPath,
+  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, previewPath, saveBlob, sharePath, zipPath,
 } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
 
@@ -71,12 +71,19 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     let alive = true;
     (async () => {
       try {
-        const blobs = await Promise.all(post.slides.map((_, i) => fetchBlob(slidePath(post.id, i + 1))));
+        // Small previews first, each shown the moment it lands, so the page fills in at once.
+        setUrls(old => { old.forEach(URL.revokeObjectURL); return []; });
+        await Promise.all(post.slides.map(async (_, i) => {
+          const blob = await fetchBlob(previewPath(post.id, i + 1, post.finishedAt || ''));
+          if (!alive) return;
+          const url = URL.createObjectURL(blob);
+          setUrls(old => { const next = [...old]; if (next[i]) URL.revokeObjectURL(next[i]); next[i] = url; return next; });
+        }));
         // Share sends JPEGs: Instagram shows up in the share sheet for them, where it can miss big PNGs.
+        // These are full size, so they come after the previews and don't hold them up.
         const jpegs = await Promise.all(post.slides.map((_, i) => fetchBlob(sharePath(post.id, i + 1))));
         if (!alive) return;
         setFiles(jpegs.map((b, i) => new File([b], fileName(post, i + 1, 'jpg'), { type: 'image/jpeg' })));
-        setUrls(old => { old.forEach(URL.revokeObjectURL); return blobs.map(b => URL.createObjectURL(b)); });
       } catch (e: any) {
         if (alive) setError(e.message || "Couldn't load the slides");
       }
