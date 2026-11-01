@@ -7,7 +7,8 @@ server is writing. The newest KEEP copies are kept in SAGE_BACKUP_DIR (by
 default a "backups" folder beside the database). Copy that folder somewhere
 off the Pi now and then, since a dead SD card takes both with it.
 
-To restore: stop sage, copy a backup over the database file, start sage.
+To restore: stop sage, copy a backup over the database file, delete the
+sage_sync.db-wal and sage_sync.db-shm files beside it if they are there, start sage.
 """
 
 import asyncio

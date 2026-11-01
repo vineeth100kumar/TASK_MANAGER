@@ -125,6 +125,24 @@ class PillSplit(unittest.TestCase):
         self.assertIsNone(self.split("dinner", "dinner"))
 
 
+class DatabaseMode(unittest.TestCase):
+    def test_database_is_in_wal_mode(self):
+        # A post saves while it draws; in the old journal mode each save blocked
+        # every read and the Pi logged "database is locked".
+        import sqlite3
+        conn = sqlite3.connect(os.environ["SAGE_DB_PATH"])
+        try:
+            self.assertEqual(conn.execute("PRAGMA journal_mode").fetchone()[0], "wal")
+        finally:
+            conn.close()
+
+    def test_save_async_writes_the_post(self):
+        post = {"id": "abcdefabcdef", "createdAt": "2026-11-01T00:00:00Z", "status": "done", "title": "x"}
+        asyncio.run(posts.save_async(post))
+        self.assertEqual(posts.get("abcdefabcdef")["title"], "x")
+        posts.delete("abcdefabcdef")
+
+
 class StartRules(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         posts.connect(db_server.DB_PATH, None, None, None, None)

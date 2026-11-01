@@ -31,9 +31,11 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
 
   useEffect(() => { if (postsAvailable()) load(); }, [load]);
   useEffect(() => {
-    const onEvent = () => load();
+    // Events come in bursts while the Pi draws, so wait for a quiet moment and load once.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onEvent = () => { clearTimeout(timer); timer = setTimeout(load, 400); };
     window.addEventListener(POST_EVENT, onEvent);
-    return () => window.removeEventListener(POST_EVENT, onEvent);
+    return () => { clearTimeout(timer); window.removeEventListener(POST_EVENT, onEvent); };
   }, [load]);
   useEffect(() => {
     if (!focus) return;

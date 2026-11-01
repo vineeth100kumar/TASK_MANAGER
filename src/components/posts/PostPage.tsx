@@ -45,9 +45,15 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
 
   useEffect(() => { setPost(null); loadedFor.current = ''; load(); }, [load]);
   useEffect(() => {
-    const onEvent = (e: Event) => { if ((e as CustomEvent).detail?.id === postId) load(); };
+    // Events come in bursts while the Pi draws, so wait for a quiet moment and load once.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onEvent = (e: Event) => {
+      if ((e as CustomEvent).detail?.id !== postId) return;
+      clearTimeout(timer);
+      timer = setTimeout(load, 400);
+    };
     window.addEventListener(POST_EVENT, onEvent);
-    return () => window.removeEventListener(POST_EVENT, onEvent);
+    return () => { clearTimeout(timer); window.removeEventListener(POST_EVENT, onEvent); };
   }, [postId, load]);
   // A backstop for a missed live event while it is being drawn.
   const running = post?.status === 'queued' || post?.status === 'running';
