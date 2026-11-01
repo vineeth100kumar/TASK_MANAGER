@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, RefreshCw, Send, Share2, Smartphone, Trash2,
 } from 'lucide-react';
 import {
-  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, saveBlob, slidePath, zipPath,
+  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, saveBlob, sharePath, slidePath, zipPath,
 } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
 
@@ -66,8 +66,10 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     (async () => {
       try {
         const blobs = await Promise.all(post.slides.map((_, i) => fetchBlob(slidePath(post.id, i + 1))));
+        // Share sends JPEGs: Instagram shows up in the share sheet for them, where it can miss big PNGs.
+        const jpegs = await Promise.all(post.slides.map((_, i) => fetchBlob(sharePath(post.id, i + 1))));
         if (!alive) return;
-        setFiles(blobs.map((b, i) => new File([b], fileName(post, i + 1), { type: 'image/png' })));
+        setFiles(jpegs.map((b, i) => new File([b], fileName(post, i + 1, 'jpg'), { type: 'image/jpeg' })));
         setUrls(old => { old.forEach(URL.revokeObjectURL); return blobs.map(b => URL.createObjectURL(b)); });
       } catch (e: any) {
         if (alive) setError(e.message || "Couldn't load the slides");
@@ -93,7 +95,8 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     // Instagram drops the caption of shared pictures, so it goes to the clipboard first.
     const copied = caption ? await copyText(caption) : false;
     try {
-      await navigator.share({ files, title: post.title });
+      // Files only: any title or text makes some apps, Instagram included, drop out of the list.
+      await navigator.share({ files });
       showToast(copied ? 'Shared. Paste the caption in Instagram (it is copied).' : 'Shared');
     } catch (e: any) {
       if (e?.name !== 'AbortError') showToast("Couldn't open the share sheet. Download the ZIP instead.", 'error');
@@ -247,6 +250,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
                 <button onClick={() => onEdit(post)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Pencil size={14} /> Edit script</button>
                 <button onClick={remove} className="h-9 px-3.5 rounded-xl text-red-600 text-[13px] font-semibold flex items-center gap-1.5 hover:bg-red-50 dark:hover:bg-red-500/10"><Trash2 size={14} /> Delete</button>
               </div>
+              {shareable && <p className="text-[12px] text-gray-400">Instagram not in the share sheet? Pick <b>Save Image</b> (or Save to Photos) there, then add the photos from Instagram's + button. The caption is already copied.</p>}
               {!status?.secureLink && <p className="text-[12px] text-gray-400">The share button needs the https link to Sage (your tunnel). On the home network use the ZIP.</p>}
               {post.emailed && <p className="text-[12px] text-gray-400 flex items-center gap-1.5"><Mail size={13} /> Emailed to {status?.emailTo}</p>}
               {post.emailError && !post.emailed && <p className="text-[12px] text-amber-700 dark:text-amber-300">Email: {post.emailError}</p>}

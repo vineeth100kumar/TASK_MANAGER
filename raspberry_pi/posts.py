@@ -13,7 +13,7 @@ code-only audit checks the result.
   GET  /api/posts            recent posts + whether the slide maker is ready
   GET  /api/posts/{id}       one post: progress log, slides, caption, audit
   POST /api/posts/{id}/rerender, /posted, /send ; DELETE /api/posts/{id}
-  GET  /api/posts/{id}/slides/{n}.png, /zip, /qr.svg
+  GET  /api/posts/{id}/slides/{n}.png (or .jpg for sharing), /zip, /qr.svg
 
 Posts live in a Pi-only table; the PNGs live in sage_posts/<id>/ next to the
 database (so they are in the nightly backup, and never sync to other devices).
@@ -779,6 +779,31 @@ def posts_slide(post_id: str, n: int):
     if not path:
         return _missing()
     return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+
+
+def share_jpeg(post: dict, n: int) -> Optional[Path]:
+    """The slide as a JPEG for the phone's share sheet. Instagram lists itself
+    for JPEG pictures, and several phones leave it out for large PNGs, so Share
+    sends these. Made once, kept beside the PNGs, and the ZIP keeps the PNGs."""
+    src = slide_path(post, n)
+    if not src:
+        return None
+    dest = POSTS_DIR / post["id"] / "out" / "share" / f"{src.stem}.jpg"
+    if not dest.is_file() or dest.stat().st_mtime < src.stat().st_mtime:
+        from PIL import Image
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        with Image.open(src) as im:
+            im.convert("RGB").save(dest, "JPEG", quality=92, optimize=True, subsampling=0)
+    return dest
+
+
+@router.get("/api/posts/{post_id}/slides/{n}.jpg")
+def posts_slide_jpeg(post_id: str, n: int):
+    post = get(post_id)
+    path = share_jpeg(post, n) if post else None
+    if not path:
+        return _missing()
+    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
 
 
 @router.get("/api/posts/{post_id}/zip")

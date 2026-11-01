@@ -181,6 +181,12 @@ class DrawTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(res.content.startswith(b"\x89PNG"))
         from PIL import Image
         self.assertEqual(Image.open(io.BytesIO(res.content)).size, (1080, 1350))
+        # the share sheet gets JPEGs of the same size
+        jpg = client.get(f"/api/posts/{post['id']}/slides/1.jpg")
+        self.assertEqual(jpg.headers["content-type"], "image/jpeg")
+        self.assertTrue(jpg.content.startswith(b"\xff\xd8"))
+        self.assertEqual(Image.open(io.BytesIO(jpg.content)).size, (1080, 1350))
+        self.assertEqual(client.get(f"/api/posts/{post['id']}/slides/99.jpg").status_code, 404)
         names = zipfile.ZipFile(io.BytesIO(client.get(f"/api/posts/{post['id']}/zip").content)).namelist()
         self.assertIn("slide_01.png", names)
         self.assertIn("caption.txt", names)
