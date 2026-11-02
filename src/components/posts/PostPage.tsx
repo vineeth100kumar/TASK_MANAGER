@@ -7,7 +7,7 @@
 // phone, and the ZIP holds the slides and caption.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, RefreshCw, Send, Share2, Smartphone, Trash2,
+  AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, ImageDown, RefreshCw, Send, Share2, Smartphone, Trash2,
 } from 'lucide-react';
 import {
   MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, previewPath, saveBlob, sharePath, zipPath,
@@ -115,6 +115,18 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
       if (e?.name !== 'AbortError') showToast("Couldn't open the share sheet. Download the ZIP instead.", 'error');
     }
   };
+  // Save to the phone's gallery: the share sheet's "Save Image" on iOS, a plain download (which Android
+  // files into the gallery) where file sharing isn't available. Full-size JPEGs, same ones Share sends.
+  const saveSlides = async (list: File[]) => {
+    if (!list.length) { showToast('Slides are still loading, try again in a moment', 'info'); return; }
+    try {
+      if (canShareFiles(list)) { await navigator.share({ files: list }); return; }
+      list.forEach((f, i) => setTimeout(() => saveBlob(f, f.name), i * 400));
+      showToast(list.length > 1 ? `Saving ${list.length} images` : 'Saving image');
+    } catch (e: any) {
+      if (e?.name !== 'AbortError') showToast("Couldn't save. Press and hold a slide, or use the ZIP.", 'error');
+    }
+  };
   const copyCaption = async () => {
     if (!post?.caption) return;
     showToast((await copyText(post.caption)) ? 'Caption copied' : "Couldn't copy. Press and hold the text.", 'info');
@@ -218,7 +230,10 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
                 {urls[i]
                   ? <img src={urls[i]} alt={`Slide ${i + 1}`} className={`w-full rounded-2xl border border-black/10 dark:border-white/10 ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'} object-cover`} />
                   : <div className={`skeleton w-full rounded-2xl ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'}`} />}
-                <div className="text-[11px] text-gray-400 text-center mt-1 tabular-nums">{i + 1}</div>
+                <div className="flex items-center justify-center gap-2 mt-1 text-[11px] text-gray-400 tabular-nums">
+                  {i + 1}
+                  <button onClick={() => saveSlides(files[i] ? [files[i]] : [])} aria-label={`Save slide ${i + 1} to photos`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><ImageDown size={13} /> Save</button>
+                </div>
               </div>
             ))}
           </div>
@@ -256,6 +271,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 space-y-3">
               <h3 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400">More ways to get it</h3>
               <div className="flex flex-wrap gap-2">
+                <button onClick={() => saveSlides(files)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ImageDown size={14} /> Save all to photos</button>
                 {shareable && <button onClick={download} disabled={busy === 'zip'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> ZIP</button>}
                 <button onClick={sendToPhone} disabled={busy === 'send'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5">
                   {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />} Send to my phone
