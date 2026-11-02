@@ -2,6 +2,7 @@ import json
 import os
 import hmac
 import sqlite3
+import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy timeout)
 import datetime
 import asyncio
 import logging

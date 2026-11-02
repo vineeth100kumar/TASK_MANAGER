@@ -173,5 +173,17 @@ class BackupBackoffTests(unittest.TestCase):
         self.assertEqual(db_server.backup_wait(2), base * 2)
         self.assertLessEqual(db_server.backup_wait(50), max(db_server.GAS_BACKUP_MAX_WAIT, base))
 
+
+class SqliteTuningTests(unittest.TestCase):
+    def test_every_connection_skips_the_per_commit_disk_wait(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            conn = sqlite3.connect(os.path.join(d, "t.db"))
+            try:
+                self.assertEqual(conn.execute("PRAGMA synchronous").fetchone()[0], 1)  # NORMAL
+            finally:
+                conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()
