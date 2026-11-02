@@ -411,12 +411,28 @@ async def _run(post: dict) -> None:
             logstore.warn("posts", f"Post {post['id']} failed: {post['error']}")
 
 
+# Drawing a post runs Chromium, which can take every core of the Pi for a
+# minute or more. At normal priority the web server waited behind it, so Sage
+# opened slowly or stalled on its splash while a post was being made. The
+# engine and the Chromium it starts run at a low CPU priority (nice 15),
+# so the app always gets served first; the post just takes a little longer.
+ENGINE_NICE = int(os.environ.get("SAGE_POSTS_NICE", "15"))
+
+
+def _lower_priority() -> None:
+    try:
+        os.nice(ENGINE_NICE)
+    except OSError:
+        pass
+
+
 async def _draw(post: dict, folder: Path, script_file: Path) -> int:
     argv = [sys.executable, "-m", "autocontent", "run", str(script_file), "--spec",
             "-o", str(folder / "out"), "--style", post["style"], "--format", post["format"]]
     proc = await asyncio.create_subprocess_exec(
         *argv, cwd=str(ENGINE_DIR), env=_engine_env(),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
+        preexec_fn=_lower_priority if os.name == "posix" else None,
     )
     errors: List[str] = []
     last_save = [0.0]

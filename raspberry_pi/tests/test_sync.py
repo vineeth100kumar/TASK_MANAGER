@@ -123,8 +123,6 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in changes["changes"]["workItems"]], ["b"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class QuickActionTests(unittest.TestCase):
@@ -165,3 +163,15 @@ class QuickActionTests(unittest.TestCase):
             self.assertEqual(client.post(f"/api/items/nope/{action}", json={}).status_code, 404)
         self.assertEqual(self.sent, [])
 
+
+
+class BackupBackoffTests(unittest.TestCase):
+    def test_waits_longer_while_google_sheets_refuses(self):
+        base = db_server.GAS_BACKUP_INTERVAL
+        self.assertEqual(db_server.backup_wait(0), base)
+        self.assertEqual(db_server.backup_wait(1), base)
+        self.assertEqual(db_server.backup_wait(2), base * 2)
+        self.assertLessEqual(db_server.backup_wait(50), max(db_server.GAS_BACKUP_MAX_WAIT, base))
+
+if __name__ == "__main__":
+    unittest.main()

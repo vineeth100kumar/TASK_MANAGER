@@ -34,6 +34,10 @@
       html.boot-dark #boot .q { color: #9ca3af; }
       @keyframes boot-slide { 0% { transform: translateX(-120%); } 100% { transform: translateX(260%); } }
       @media (prefers-reduced-motion: reduce) { #boot .bar i { animation: none; } }
+      #boot .stuck { display: none; margin-top: 18px; text-align: center; font: 14px/1.4 system-ui, sans-serif; }
+      #boot.is-stuck .stuck { display: block; }
+      #boot .stuck a { display: inline-block; margin-top: 10px; padding: 8px 18px; border-radius: 999px; background: #111827; color: #fff; text-decoration: none; }
+      html.boot-dark #boot .stuck a { background: #fff; color: #111827; }
     </style>
     <script>try { if (localStorage.getItem('sage-theme') === 'dark') document.documentElement.classList.add('boot-dark'); } catch (e) {}</script>
     <div id="root">
@@ -41,6 +45,7 @@
         <svg id="boot-svg" viewBox="0 0 24 24" fill="none" aria-hidden="true"><g id="boot-glyph"></g></svg>
         <div class="bar"><i></i></div>
         <p class="q" id="boot-q"></p>
+        <div class="stuck"><span id="boot-why">Sage is taking longer than usual to open.</span><br /><a href="/">Try again</a></div>
       </div>
     </div>
     <!-- The same morph the login page runs, so sign-in flows straight into the
@@ -55,6 +60,20 @@
         var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         var QUOTES = ['Good things come to those who wait.','Great things take a little time.','Patience is bitter, but its fruit is sweet.','Slow and steady. Your day is coming together.','Almost there. Worth the wait.'];
         var idx = 0;
+        // If the app's script never runs (the Pi was busy or the connection
+        // dropped mid-download), the splash would spin forever on a white
+        // page. Offer a way out instead: after a while, or at once when the
+        // script itself fails to load.
+        function stuck(why) {
+          var b = document.getElementById('boot'); if (!b) return;
+          if (why) document.getElementById('boot-why').textContent = why;
+          b.classList.add('is-stuck');
+        }
+        setTimeout(function () { stuck(); }, 20000);
+        window.addEventListener('error', function (e) {
+          var t = e.target;
+          if (t && (t.tagName === 'SCRIPT' || t.tagName === 'LINK')) stuck('Part of Sage did not download. The Pi may be busy.');
+        }, true);
         function wait(ms) { return new Promise(function (r) { setTimeout(r, ms); }); }
         function alive() { return document.getElementById('boot-glyph'); }
         function setPaths(ps) {
