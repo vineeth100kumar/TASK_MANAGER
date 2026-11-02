@@ -314,5 +314,17 @@ class EmailPrefs(unittest.TestCase):
         self.assertEqual(ids, ["<slide1>"])
 
 
+
+
+class EnginePriorityTests(unittest.TestCase):
+    def test_engine_runs_below_the_web_server(self):
+        # The engine and its Chromium must not starve Sage's web server.
+        self.assertGreater(posts.ENGINE_NICE, 0)
+        if os.name == "posix":
+            import subprocess
+            out = subprocess.run([sys.executable, "-c", "import os; print(os.nice(0))"],
+                                 preexec_fn=posts._lower_priority, capture_output=True, text=True)
+            self.assertGreater(int(out.stdout), os.nice(0))
+
 if __name__ == "__main__":
     unittest.main()

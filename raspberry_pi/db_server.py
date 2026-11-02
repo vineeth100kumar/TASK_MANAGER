@@ -2,6 +2,7 @@ import json
 import os
 import hmac
 import sqlite3
+import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy timeout)
 import datetime
 import asyncio
 import logging
@@ -53,6 +54,15 @@ GOOGLE_SHEETS_URL = os.getenv(
 GAS_AUTH_KEY = os.getenv("SAGE_GAS_AUTH_KEY", "").strip()
 # How often queued changes are copied to Apps Script, in seconds.
 GAS_BACKUP_INTERVAL = int(os.getenv("SAGE_GAS_BACKUP_INTERVAL", "300"))
+GAS_BACKUP_PAGE = 50
+# While Google Sheets keeps refusing, try less often: 5, 10, 20, 40, then every 60 min.
+GAS_BACKUP_MAX_WAIT = 3600
+
+
+def backup_wait(failures: int) -> int:
+    if failures <= 0:
+        return GAS_BACKUP_INTERVAL
+    return min(GAS_BACKUP_INTERVAL * 2 ** (failures - 1), max(GAS_BACKUP_MAX_WAIT, GAS_BACKUP_INTERVAL))
 # The shared key every client sends as "Authorization: Bearer <key>". LUMO
 # reads the same value from the same file. Empty means no key check, which is
 # only safe when the server is not reachable from outside the Pi.
@@ -587,11 +597,16 @@ async def google_sheets_backup_worker():
     sync batches to Apps Script in order, stopping at the first failure so
     nothing is applied out of order.
     """
+    failures = 0
     while True:
+        failed, rows = False, []
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC")
+            # A few at a time: while Google Sheets refuses the first one, the
+            # queue grows, and reading all of it every round cost the Pi memory
+            # and time for batches that were never going to be sent.
+            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC LIMIT ?", (GAS_BACKUP_PAGE,))
             rows = cursor.fetchall()
 
             if rows:
@@ -615,6 +630,7 @@ async def google_sheets_backup_worker():
                         if not ok:
                             print(f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
                             logstore.error("backup", f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
+                            failed = True
                             break
                         # A batch can succeed overall while some changes in it were
                         # refused. Say so rather than dropping them silently.
@@ -628,8 +644,11 @@ async def google_sheets_backup_worker():
         except Exception as e:
             print(f"Backup worker error: {e}")
             logstore.error("backup", f"Backup worker error: {e}")
+            failed = True
 
-        await asyncio.sleep(GAS_BACKUP_INTERVAL)
+        failures = failures + 1 if failed else 0
+        more = not failed and len(rows) == GAS_BACKUP_PAGE
+        await asyncio.sleep(1 if more else backup_wait(failures))
 
 # The event loop only holds weak references to tasks, so one nobody keeps can
 # be garbage collected mid-await (the desk clock's port closed that way).
