@@ -65,6 +65,20 @@ def _final_caption(spec: ParsedSpec, slides: List[Dict[str, Any]], handle: str, 
     return text + "\n"
 
 
+def with_photo_credits(caption: str, slides: List[Dict[str, Any]]) -> str:
+    """Stock pictures must stay credited: add a 'Photo credits' line per picture to the caption (once each)."""
+    credits: List[str] = []
+    for s in slides:
+        if s.get("type") != "image" or not s.get("image_source"):
+            continue
+        credit = stock.credit_for(str(s["image_source"]))
+        if credit and credit not in credits and credit not in caption:
+            credits.append(credit)
+    if not credits:
+        return caption
+    return caption.rstrip("\n") + "\n\nPhoto credits: " + "; ".join(credits) + "\n"
+
+
 def _cache_dir() -> Path:
     return OUTPUT_DIR / "_cache" / "images"
 
@@ -316,7 +330,7 @@ def build_from_spec(
 
     data = _assemble_deck(spec, slides, brand, title, timestamp, spec_path.name, style, canvas_format, tag)
     deck_brand = data["brand"]
-    caption = _final_caption(spec, slides, deck_brand["handle"], brand.hashtags)
+    caption = with_photo_credits(_final_caption(spec, slides, deck_brand["handle"], brand.hashtags), slides)
     data["caption"] = caption
 
     if spec_path.parent.resolve() != target.resolve():

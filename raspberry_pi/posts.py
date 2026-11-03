@@ -218,6 +218,7 @@ def status() -> dict:
         "qr": qr,
         "queued": queue_length(),
         "maxScript": MAX_SCRIPT,
+        "pictureSources": picture_sources(),
     }
 
 
@@ -360,8 +361,41 @@ def _spawn(coro) -> None:
     task.add_done_callback(_tasks.discard)
 
 
+# Free picture sources. Wikimedia Commons needs no key; the others use a free key saved from Settings
+# (kept in sage_secrets.json beside the database, handed to the slide engine's environment).
+PICTURE_KEYS = {"unsplash": "UNSPLASH_ACCESS_KEY", "pexels": "PEXELS_API_KEY", "pixabay": "PIXABAY_API_KEY"}
+
+
+def picture_keys() -> Dict[str, str]:
+    secrets = notifier._secrets()
+    return {name: str(secrets.get(env) or os.getenv(env, "")).strip() for name, env in PICTURE_KEYS.items()}
+
+
+def picture_sources() -> dict:
+    """Which picture sources are on, never the keys themselves."""
+    keys = picture_keys()
+    out = {name: {"set": bool(k), "last4": k[-4:] if len(k) >= 8 else ""} for name, k in keys.items()}
+    out["wikimedia"] = {"set": True, "last4": ""}
+    return out
+
+
+def save_picture_key(name: str, value: str) -> None:
+    env = PICTURE_KEYS[name]
+    secrets = notifier._secrets()
+    value = "".join(value.split())
+    if value:
+        secrets[env] = value
+    else:
+        secrets.pop(env, None)
+    notifier.SECRETS_FILE.touch(mode=0o600, exist_ok=True)
+    notifier.SECRETS_FILE.write_text(json.dumps(secrets))
+
+
 def _engine_env() -> Dict[str, str]:
     env = dict(os.environ)
+    for name, key in picture_keys().items():
+        if key:
+            env[PICTURE_KEYS[name]] = key
     env["PYTHONPATH"] = str(ENGINE_DIR / "src") + os.pathsep + env.get("PYTHONPATH", "")
     env["PYTHONIOENCODING"] = "utf-8"
     env["PYTHONUNBUFFERED"] = "1"
@@ -718,6 +752,29 @@ def posts_list(projectId: str = ""):
 @router.get("/api/posts/status")
 def posts_status():
     return {"success": True, "status": status()}
+
+
+class PictureKeys(BaseModel):
+    unsplash: Optional[str] = None
+    pexels: Optional[str] = None
+    pixabay: Optional[str] = None
+
+
+@router.get("/api/posts/pictures")
+def posts_pictures():
+    return {"success": True, "sources": picture_sources()}
+
+
+@router.put("/api/posts/pictures")
+def posts_pictures_save(body: PictureKeys):
+    """A key is replaced when sent, removed when sent empty, and left alone when left out."""
+    for name in PICTURE_KEYS:
+        value = getattr(body, name)
+        if value is not None:
+            if len(value) > 200:
+                return _bad("That key is too long to be right.")
+            save_picture_key(name, value)
+    return {"success": True, "sources": picture_sources()}
 
 
 @router.post("/api/posts/check")

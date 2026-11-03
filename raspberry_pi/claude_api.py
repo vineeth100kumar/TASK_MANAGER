@@ -1288,7 +1288,8 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
         {"name": "sage_post_format", "description": "How to write a script for an Instagram carousel post: "
          "the header, every slide type and its fields, caption and hashtags, plus a full example. Read it before "
-         "writing a script for sage_post_create.",
+         "writing a script for sage_post_create. Includes how to ask for a free, credited stock photo "
+         "(an image slide with search: and a short description).",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_post_check", "description": "Check a post script without drawing it: every error and warning "
          "with its line and slide number, and the slides, caption and hashtags it found.",

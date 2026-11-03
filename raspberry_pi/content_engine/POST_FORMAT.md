@@ -58,6 +58,9 @@ SLIDE TYPES
 ## cta         headline (the closing line), optional pill: SAVE THIS
 After the slides: `## caption` (the Instagram caption: a hook line, 3-6 short paragraphs of value, a question for the comments) and `## hashtags` (3 to 5 specific hashtags).
 
+PICTURES (free, copyright-free photos found and credited for you)
+When a slide needs a photo, write an `## image` slide with `search: <2 to 4 plain words describing the picture>` (e.g. `search: street food stall night`). Sage finds a free photo (Unsplash, Pexels, Pixabay or Wikimedia Commons), puts "Photo by NAME on SOURCE" on the slide and adds a "Photo credits" line to the caption. Describe things, places and scenes, not people, brands, logos or text; those are hidden. Use 1 to 3 picture slides per post. Never invent a file name or link.
+
 DESIGN KNOBS (any slide; all optional)
 theme: light | dark | accent      (dark = black page, accent = page in the accent colour)
 align: top | center | bottom      (where the content sits; stat, quote and statement are centred by default)
@@ -102,6 +105,11 @@ headline: Go online this weekend
 2. Build a WhatsApp Business catalogue
 3. Put a QR code on the counter
 4. Message 30 regulars with one offer
+
+## image
+headline: A shop that sells online
+search: small shop counter market
+caption: Start where your customers already are.
 
 ## cta
 headline: Which step comes first? Comment 1 to 4.
