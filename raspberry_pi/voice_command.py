@@ -986,8 +986,19 @@ def _ask_groq(system: str, user: str) -> str:
     raise RuntimeError(last or "Groq gave no answer")
 
 
+def _voice_local_on() -> bool:
+    # Honour the old SAGE_VOICE_LOCAL override, but default to the shared
+    # SAGE_LOCAL_AI flag (off), so the Pi doesn't keep a model resident.
+    override = os.getenv("SAGE_VOICE_LOCAL")
+    if override is not None:
+        return override != "0"
+    return canvas_thinker.local_ai_enabled()
+
+
 def _ask_local(system: str, user: str) -> str:
-    import ollama
+    if not _voice_local_on():
+        raise RuntimeError(canvas_thinker.NO_AI_MESSAGE)
+    import ollama  # only reached when local AI is enabled and Ollama is installed
 
     client = ollama.Client(timeout=LLM_TIMEOUT_S)
     res = client.generate(model=canvas_thinker.LOCAL_MODEL, prompt=f"{system}\n\n{user}", format="json", options={"temperature": 0})
@@ -1001,13 +1012,13 @@ def ask_llm(system: str, user: str) -> Tuple[str, str]:
             return _ask_groq(system, user), "groq"
         except Exception as e:
             print(f"Voice: Groq failed: {e}")
-    if os.getenv("SAGE_VOICE_LOCAL", "1") != "0":
+    if _voice_local_on():
         return _ask_local(system, user), "local"
     raise RuntimeError("no AI available")
 
 
 def ai_available() -> bool:
-    return bool(canvas_thinker.groq_key()) or os.getenv("SAGE_VOICE_LOCAL", "1") != "0"
+    return bool(canvas_thinker.groq_key()) or _voice_local_on()
 
 
 _REPEAT_OK = re.compile(r"^(?:daily|weekdays|weekly|monthly|yearly|weekly:[0-6](?:,[0-6])*|monthly:last|every:\d{1,3}:(?:days|weeks|months))$")

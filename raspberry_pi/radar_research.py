@@ -228,7 +228,10 @@ def engines() -> List[str]:
     first = radar.get_settings()["engine"]
     have = {"groq": bool(canvas_thinker.groq_key()), "claude": canvas_thinker.claude_available()}
     order = ["claude", "groq"] if first == "claude" else ["groq", "claude"]
-    return [e for e in order if have[e]] + ["local"]
+    usable = [e for e in order if have[e]]
+    if canvas_thinker.local_ai_enabled():
+        usable.append("local")
+    return usable
 
 
 async def _groq(prompt: str, max_tokens: int) -> str:

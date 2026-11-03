@@ -34,6 +34,7 @@ from config import (
     SAGE_API_URL,
     SAGE_ENV_FILE,
     SAGE_REQUEST_TIMEOUT,
+    SAGE_RETRY_TIMEOUT,
     SAGE_SECRET_FILE,
 )
 
@@ -251,10 +252,20 @@ class SageClient:
         One call to Sage. Returns None rather than raising when Sage is down,
         so a restarting server leaves the desk companion showing its last
         known list instead of an error.
+
+        A single timeout is retried once with a longer deadline: on the Pi a
+        write (complete a task, set an alarm) can stall for several seconds
+        while the slow boot drive flushes, and a one-off 8 s timeout would
+        otherwise report "Sage unreachable" for a request that was about to
+        succeed.
         """
         try:
             client = await self._get_client()
-            response = await client.request(method, path, **kwargs)
+            try:
+                response = await client.request(method, path, **kwargs)
+            except httpx.TimeoutException as exc:
+                logger.info(f"Sage slow on {path} ({exc!r}); retrying once with a longer timeout")
+                response = await client.request(method, path, timeout=SAGE_RETRY_TIMEOUT, **kwargs)
             response.raise_for_status()
             self.online = True
             self.last_error = ""
@@ -270,6 +281,11 @@ class SageClient:
                     else "Sage wants an API key and Lumo has none"
                 )
             logger.error(self.last_error)
+            return None
+        except httpx.TimeoutException as exc:
+            self.online = False
+            self.last_error = f"Sage timed out on {path} after {SAGE_RETRY_TIMEOUT:.0f}s (Pi busy or slow drive)"
+            logger.warning(self.last_error)
             return None
         except Exception as exc:
             self.online = False

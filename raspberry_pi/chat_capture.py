@@ -9,7 +9,7 @@ like "make gym a habit" changes.
 
 Which AI answers, first match wins:
   1. Groq, with the key Canvas already uses (Settings, or GROQ_API_KEY on the Pi).
-  2. The Pi's local Ollama model, with a short time limit.
+  2. The Pi's local Ollama model, only if SAGE_LOCAL_AI=1 (off by default).
 If neither answers, the app keeps what it worked out on its own.
 
 Plans ("I want to launch a YouTube channel about LUMO", "split C-13 into
@@ -204,7 +204,9 @@ def _ask_groq(system: str, user: str) -> str:
 
 
 def _ask_local(system: str, user: str) -> str:
-    import ollama
+    if not canvas_thinker.local_ai_enabled():
+        raise RuntimeError(canvas_thinker.NO_AI_MESSAGE)
+    import ollama  # only reached when SAGE_LOCAL_AI=1 and Ollama is installed
 
     client = ollama.Client(timeout=LOCAL_TIMEOUT_S)
     res = client.generate(model=canvas_thinker.LOCAL_MODEL, prompt=f"{system}\n\n{user}", format="json", options={"temperature": 0.1})
@@ -212,15 +214,19 @@ def _ask_local(system: str, user: str) -> str:
 
 
 def engine() -> str:
-    return "groq" if canvas_thinker.groq_key() else "local"
+    if canvas_thinker.groq_key():
+        return "groq"
+    return "local" if canvas_thinker.local_ai_enabled() else "none"
 
 
 def _answer(system: str, user: str) -> tuple:
     if canvas_thinker.groq_key():
         try:
             return _ask_groq(system, user), "groq"
-        except Exception as e:  # fall through to the local model
+        except Exception as e:  # fall through to the local model (if enabled)
             print(f"Chat capture: Groq failed: {e}")
+    # When neither answers, this raises; the endpoint catches it and the app
+    # keeps the item it worked out on its own (quickAddParser.ts).
     return _ask_local(system, user), "local"
 
 

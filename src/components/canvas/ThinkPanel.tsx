@@ -45,7 +45,7 @@ interface Turn extends ThinkTurn {
   proposal?: Proposal;
 }
 
-const ENGINE_NAMES: Record<ThinkEngine, string> = { groq: 'Groq', claude: 'Claude', local: "the Pi's small model" };
+const ENGINE_NAMES: Record<ThinkEngine, string> = { groq: 'Groq', claude: 'Claude', local: "the Pi's small model", none: 'no AI' };
 
 // Groq and Claude answer in seconds; the Pi's local model can take minutes.
 // Past this the request is dropped rather than leaving the panel waiting forever.
@@ -507,6 +507,9 @@ export function ThinkPanel({ boardId, selectedCount, boardTitle, getSnapshot, de
           </div>
           {engine === 'local' && (
             <p className="text-[11px] text-gray-400 leading-snug">Using the Pi's small built-in model, which only reads text and misses a lot. Add a Groq key in Settings, under Server & Reset, for fast, sharper answers.</p>
+          )}
+          {engine === 'none' && (
+            <p className="text-[11px] text-gray-400 leading-snug">No AI is set up. Add a Groq key in Settings, under Server & Reset, to use the thinking partner.</p>
           )}
         </div>
       )}

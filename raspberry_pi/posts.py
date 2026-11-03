@@ -133,7 +133,7 @@ def get(post_id: str) -> Optional[dict]:
     return json.loads(row["payload"]) if row else None
 
 
-def recent(project_id: str = "") -> List[dict]:
+def recent(project_id: str = "", limit: int = 60) -> List[dict]:
     conn = _db()
     try:
         rows = conn.execute("SELECT payload FROM posts ORDER BY created_at DESC").fetchall()
@@ -145,13 +145,23 @@ def recent(project_id: str = "") -> List[dict]:
         if project_id and post.get("projectId") != project_id:
             continue
         out.append(summary(post))
+        if limit and len(out) >= limit:
+            break
     return out
 
 
+# Fields the list row never needs: the heavy or per-slide parts. The app loads
+# the full post (GET /api/posts/{id}) when you open one.
+_ROW_DROP = ("script", "log", "caption", "slides", "auditNote")
+
+
 def summary(post: dict) -> dict:
-    """The list row: everything except the script and the long log."""
-    keep = {k: v for k, v in post.items() if k not in ("script", "log", "caption")}
+    """The list row: light metadata only (title, status, counts, stage).
+    The script, log, caption and the per-slide list are left for the open view;
+    slide images are served from disk only when a post is opened."""
+    keep = {k: v for k, v in post.items() if k not in _ROW_DROP}
     keep["captionStart"] = (post.get("caption") or "")[:140]
+    keep["slides"] = []  # kept for the Post type; filled in by the open view
     return keep
 
 
@@ -745,8 +755,8 @@ def _bad(message: str, code: int = 400) -> JSONResponse:
 
 
 @router.get("/api/posts")
-def posts_list(projectId: str = ""):
-    return {"success": True, "status": status(), "posts": recent(projectId)}
+def posts_list(projectId: str = "", limit: int = 60):
+    return {"success": True, "status": status(), "posts": recent(projectId, max(1, min(limit, 100)))}
 
 
 @router.get("/api/posts/status")

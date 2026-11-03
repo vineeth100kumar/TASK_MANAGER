@@ -25,6 +25,9 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # as one more sync client next to the web app. See services/sage_client.py.
 SAGE_API_URL = os.getenv("SAGE_API_URL", "http://127.0.0.1:8000")
 SAGE_REQUEST_TIMEOUT = float(os.getenv("SAGE_REQUEST_TIMEOUT", "8.0"))
+# Second-attempt deadline when the first call times out: a Pi write can stall
+# for several seconds while the slow boot drive flushes.
+SAGE_RETRY_TIMEOUT = float(os.getenv("SAGE_RETRY_TIMEOUT", "20.0"))
 
 # The key lives in exactly one place, Sage's environment file, which systemd
 # reads for both services. These two are fallbacks for running main.py by hand.
