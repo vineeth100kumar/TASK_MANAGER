@@ -57,12 +57,14 @@ _logs: Optional[Callable[..., dict]] = None
 _drop: Any = None
 # posts.py, the Auto Content slide maker (Posts).
 _posts: Any = None
+# diagnostics.py, the blackout probe (summary + raw recent samples).
+_diagnostics: Any = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None, diagnostics=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts, _diagnostics
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
-    _logs, _drop, _posts = logs, drops, posts
+    _logs, _drop, _posts, _diagnostics = logs, drops, posts, diagnostics
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -218,6 +220,17 @@ def logs(since: str = "", level: str = "", source: str = "", q: str = "", limit:
     if _logs is None:
         raise ApiError(503, "The log isn't connected")
     return _logs(since=since, level=level, source=source, q=q, limit=limit)
+
+
+def diagnostics(hours: float = 24, samples: int = 0) -> dict:
+    """Blackout diagnostics: the 'blackouts in the last N hours' summary, and
+    optionally the raw recent samples when ``samples`` is given."""
+    if _diagnostics is None:
+        raise ApiError(503, "Diagnostics isn't connected")
+    out = _diagnostics.summary(hours or 24)
+    if samples:
+        out["recent"] = _diagnostics.recent(samples)["samples"]
+    return out
 
 
 def history(limit: int = 50) -> dict:
@@ -1049,6 +1062,11 @@ async def http_history(limit: int = 50):
     return await _answer(lambda: history(limit))
 
 
+@router.get("/diagnostics")
+async def http_diagnostics(hours: float = 24, samples: int = 0):
+    return await _answer(lambda: diagnostics(hours, samples))
+
+
 @router.post("/quick-add")
 async def http_quick_add(request: Request):
     body = await _body(request) or {}
@@ -1193,8 +1211,10 @@ gives back a link and the caption (wait for it with sage_post_get). A post can g
 that project has Use Auto Content switched on.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
-why something failed. Changes appear in the open web app straight away. Prefer updating
-over deleting, and say what you changed."""
+why something failed. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
+explains it: a probe on the Pi tracks whether the server answered on localhost and on the public Funnel URL, event-
+loop lag, under-voltage and the system, and sorts outages into network/Funnel vs server vs power. Changes appear in
+the open web app straight away. Prefer updating over deleting, and say what you changed."""
 
 
 def _table_prop() -> dict:
@@ -1225,7 +1245,8 @@ def _tools() -> List[dict]:
         {"name": "sage_quick_add", "description": "Add a work item from a sentence, the way Siri quick add does, e.g. 'Call the bank tomorrow 5pm !high #money'.",
          "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
         {"name": "sage_health", "description": "Is the Pi working? Server version and uptime, background workers, "
-         "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, plus a "
+         "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, a short "
+         "blackout/under-voltage summary from the probe (see sage_diagnostics for the full story), plus a "
          "plain list of problems.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_maps", "description": "Vineeth's thought maps (mind maps in Notes): title, how many thoughts are "
@@ -1336,6 +1357,16 @@ def _tools() -> List[dict]:
              "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier"},
              "q": {"type": "string", "description": "Only entries whose message contains this text"},
              "limit": {"type": "integer", "description": "At most this many (default 100, max 1000)"}}}},
+        {"name": "sage_diagnostics", "description": "Explain Sage blackouts (the public URL showing "
+         "\"took too long to respond\"). A running probe on the Pi records, every ~30s, whether the server "
+         "answers on localhost and on the public Funnel URL, plus event-loop lag, requests in flight and the "
+         "slowest request, load/memory/CPU temperature, disk I/O wait, under-voltage (power dips), Wi-Fi signal, "
+         "and Tailscale/kernel state. This returns the 'blackouts in the last N hours' story (each outage with how "
+         "long it lasted and a likely cause: network/Funnel vs the server itself vs power), the current snapshot, "
+         "and a plain verdict. Use it when Sage was unreachable to find out why.",
+         "inputSchema": {"type": "object", "properties": {
+             "hours": {"type": "number", "description": "How far back to summarise (default 24)"},
+             "samples": {"type": "integer", "description": "Also return this many raw recent samples, newest first (0 = none)"}}}},
     ]
 
 
@@ -1389,6 +1420,8 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "sage_logs":
         return logs(args.get("since", ""), args.get("level", ""), args.get("source", ""),
                     args.get("q", ""), args.get("limit", 100))
+    if name == "sage_diagnostics":
+        return diagnostics(args.get("hours", 24), args.get("samples", 0))
     raise ApiError(404, f"Unknown tool {name}")
 
 

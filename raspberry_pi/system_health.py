@@ -131,6 +131,7 @@ def report(
     clock: Callable[[], dict],
     depth_face: Optional[Callable[[], dict]] = None,
     slide_maker: Optional[Callable[[], dict]] = None,
+    diagnostics: Optional[Callable[[], dict]] = None,
 ) -> dict:
     def safe(part: Callable[[], dict]) -> dict:
         try:
@@ -167,6 +168,8 @@ def report(
         data["depthFace"] = safe(depth_face)
     if slide_maker:
         data["slideMaker"] = safe(slide_maker)
+    if diagnostics:
+        data["diagnostics"] = safe(diagnostics)
     data["problems"] = problems(data)
     return data
 
@@ -248,6 +251,17 @@ def problems(data: dict) -> List[str]:
             out.append(f"The desk clock's screen stood still for {stall / 1000:.1f} s at once in its last half minute.")
         if isinstance(clock.get("rssi"), (int, float)) and clock["rssi"] < -78:
             out.append(f"The desk clock's Wi-Fi signal is weak ({clock['rssi']} dBm), which can drop the link.")
+    diag = data.get("diagnostics") or {}
+    if diag.get("enabled"):
+        if diag.get("blackoutOngoing"):
+            out.append("A blackout is happening now: the public URL isn't answering. " + (diag.get("verdict") or ""))
+        elif diag.get("blackouts24h"):
+            longest = diag.get("longestDownSeconds") or 0
+            out.append(f"{diag['blackouts24h']} blackout(s) in the last 24h (longest {longest}s). {diag.get('verdict') or ''}".strip())
+        if diag.get("underVoltageNow"):
+            out.append("The Pi is under-voltage right now — check the power supply and cable.")
+        elif diag.get("underVoltageEver"):
+            out.append("The Pi has seen under-voltage since boot — the power supply or cable may be dipping.")
     face = data.get("depthFace", {})
     if face.get("hasPhoto") and not face.get("cutout"):
         out.append(f"The depth face's photo has no cutout: {face.get('cutoutError') or face.get('cutoutProblem') or 'no reason kept'}.")
