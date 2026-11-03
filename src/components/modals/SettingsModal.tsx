@@ -7,7 +7,6 @@ import { CaptureGuide } from './CaptureGuide';
 import { BluetoothSettings } from './BluetoothSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
-import { PostPictureKeys } from './PostPictureKeys';
 import { ModeSettings } from './ModeSettings';
 import { SecuritySettings } from './SecuritySettings';
 import { downloadICSFile } from '../../utils/calendarExport';
@@ -349,7 +348,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab 
         )}
 
         {/* Tab 2: Setup guide for Siri, Share Sheet, Home Screen and email capture */}
-        {activeTab === 'capture' && (<div className="space-y-4"><PostPictureKeys /><CaptureGuide publicUrl={publicUrl} /></div>)}
+        {activeTab === 'capture' && (<CaptureGuide publicUrl={publicUrl} />)}
 
         {/* Work and Chill: what shows, and switching by home and away */}
         {activeTab === 'modes' && <ModeSettings />}

@@ -55,16 +55,14 @@ _health: Optional[Callable[[], dict]] = None
 _logs: Optional[Callable[..., dict]] = None
 # drop.py, for publishing reports as share links.
 _drop: Any = None
-# posts.py, the Auto Content slide maker (Posts).
-_posts: Any = None
 # diagnostics.py, the blackout probe (summary + raw recent samples).
 _diagnostics: Any = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None, diagnostics=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts, _diagnostics
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, diagnostics=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _diagnostics
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
-    _logs, _drop, _posts, _diagnostics = logs, drops, posts, diagnostics
+    _logs, _drop, _diagnostics = logs, drops, diagnostics
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -790,241 +788,6 @@ async def delete_drop(slug: str) -> dict:
     return {"deleted": str(slug)}
 
 
-# --- Instagram carousel posts made on the Pi (posts.py) ---
-
-POST_WAIT_MAX = 120  # seconds a tool call may wait for a post to finish
-_UNFINISHED = ("queued", "running")
-
-
-def _need_posts() -> Any:
-    if _posts is None:
-        raise ApiError(503, "Posts isn't connected")
-    return _posts
-
-
-def post_format() -> dict:
-    """The script format, cut from the engine's own POST_FORMAT.md, plus a full example."""
-    posts = _need_posts()
-    guide = (posts.ENGINE_DIR / "POST_FORMAT.md").read_text(encoding="utf-8")
-    m = re.search(r"<!-- PROMPT START -->(.*?)<!-- PROMPT END -->", guide, re.S)
-    rules = (m.group(1) if m else guide).strip()
-    rules = re.sub(r"\n*NOW WRITE the script for the topic and facts below\.\s*$", "", rules).strip()
-    example = (posts.ENGINE_DIR / "example_script.md").read_text(encoding="utf-8")
-    return {"format": rules, "example": example, "styles": list(posts.STYLES), "sizes": list(posts.FORMATS)}
-
-
-def _content_projects() -> List[dict]:
-    return [p for p in _rows("projects") if _project_type(p) == "content"]
-
-
-def _post_project(ref: Any) -> Optional[dict]:
-    """The project a post goes into, by id or name. It has to be a content
-    project with Use Auto Content switched on, the same rule as the app's
-    New post screen."""
-    ref = str(ref or "").strip()
-    if not ref:
-        return None
-    projects = [p for p in _rows("projects") if isinstance(p, dict)]
-    lower = ref.lower()
-    found = next((p for p in projects if p.get("id") == ref), None) \
-        or next((p for p in projects if str(p.get("name") or "").strip().lower() == lower), None) \
-        or next((p for p in projects if str(p.get("key") or "").strip().lower() == lower), None)
-    if not found:
-        partial = [p for p in projects if lower in str(p.get("name") or "").lower()]
-        if len(partial) == 1:
-            found = partial[0]
-        elif partial:
-            raise ApiError(400, "More than one project matches that: " + ", ".join(str(p.get("name")) for p in partial)
-                           + ". Send the exact name or the id.")
-    ready = [str(p.get("name")) for p in _content_projects() if p.get("autoContent")]
-    choices = (" Projects that can take posts: " + ", ".join(ready) + ".") if ready else \
-        " No project has it switched on yet."
-    if not found:
-        raise ApiError(404, f"No project called {ref}.{choices}")
-    name = found.get("name") or ref
-    if _project_type(found) != "content":
-        raise ApiError(400, f"{name} isn't a content project, so it can't take posts. Make the post without a "
-                       f"project, or pick a content project with Use Auto Content on.{choices}")
-    if not found.get("autoContent"):
-        raise ApiError(400, f"{name} has Use Auto Content switched off, so posts can't go into it. Vineeth can "
-                       f"switch it on in the project's settings (Sidebar > the project's edit button), or make the "
-                       f"post without a project.{choices}")
-    return found
-
-
-def _post_view(post: dict, full: bool = True) -> dict:
-    """A post as Claude sees it: where it is, the link to open it, and the caption."""
-    posts = _need_posts()
-    keys = ("id", "title", "status", "error", "style", "format", "projectId", "taskId", "slideCount", "audit",
-            "auditNote", "seconds", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
-    out = {k: post.get(k) for k in keys}
-    out["progress"] = post.get("progress") or {}
-    out["link"] = posts.post_link(post) or None
-    if full:
-        out["caption"] = post.get("caption") or ""
-        out["hashtags"] = post.get("hashtags") or []
-        out["log"] = [line.get("text") for line in (post.get("log") or [])[-8:]]
-    else:
-        out["captionStart"] = post.get("captionStart") if "captionStart" in post else (post.get("caption") or "")[:140]
-    return out
-
-
-def _post_note(post: dict) -> Optional[str]:
-    status = post.get("status")
-    if status in _UNFINISHED:
-        return ("The Pi is drawing the slides (about 30 to 60 seconds). Call sage_post_get with this id and wait "
-                "to get the finished link and caption.")
-    if status == "failed":
-        return "It failed; fix the script and call sage_post_redo with the id, or read the error."
-    if status == "done":
-        bits = []
-        if post.get("emailed"):
-            bits.append("The post-ready email has been sent.")
-        elif post.get("emailError"):
-            bits.append(f"The email didn't go: {post['emailError']}")
-        elif notifier_on(post):
-            bits.append("The post-ready email is on its way.")
-        if not _need_posts().post_link(post):
-            bits.append("Sage has no public address right now, so open it from Sage > Posts on the home network.")
-        if post.get("audit") == "fail":
-            bits.append("The audit flagged something; tell Vineeth to check the slides.")
-        return " ".join(bits) or None
-    return None
-
-
-def notifier_on(post: dict) -> bool:
-    """Is the post-ready email still to come? (done is saved just before it goes)"""
-    try:
-        import notifier
-        prefs = notifier.get_prefs()
-        return bool(prefs["email"].get("postReady", True)) and notifier.email_ready(prefs)
-    except Exception:
-        return False
-
-
-async def _wait_for(post_id: str, seconds: Any) -> dict:
-    posts = _need_posts()
-    try:
-        limit = max(0.0, min(float(seconds or 0), POST_WAIT_MAX))
-    except (TypeError, ValueError):
-        limit = 0.0
-    loop = asyncio.get_running_loop()
-    end = loop.time() + limit
-    post = await asyncio.to_thread(posts.get, post_id)
-    while post and post.get("status") in _UNFINISHED and loop.time() < end:
-        await asyncio.sleep(1)
-        post = await asyncio.to_thread(posts.get, post_id)
-    if not post:
-        raise ApiError(404, "No post has that id")
-    return post
-
-
-def _post_answer(post: dict, **extra) -> dict:
-    out = {**extra, "post": _post_view(post)}
-    note = _post_note(post)
-    if note:
-        out["note"] = note
-    return out
-
-
-def check_post(args: Any) -> dict:
-    posts = _need_posts()
-    script = str((args or {}).get("script") or "") if isinstance(args, dict) else ""
-    if not script.strip():
-        raise ApiError(400, "Send the script")
-    if len(script) > posts.MAX_SCRIPT:
-        raise ApiError(400, f"That script is {len(script):,} characters; the limit is {posts.MAX_SCRIPT:,}.")
-    try:
-        return {"check": posts.check(posts._clean_script(script))}
-    except Exception as e:
-        raise ApiError(400, f"Couldn't read that script: {str(e)[:200]}")
-
-
-async def create_post(args: Any) -> dict:
-    """Queues a script on the Pi's slide maker, the same as pressing Make in
-    Posts: it draws the slides, emails when done and, with a project, adds the
-    post's task there."""
-    posts = _need_posts()
-    if not isinstance(args, dict):
-        raise ApiError(400, "Send {script}")
-    project = _post_project(args.get("project"))
-    state = await asyncio.to_thread(posts.status)
-    if not state["ready"]:
-        raise ApiError(503, "The slide maker isn't ready on the Pi: " + " ".join(state["problems"]))
-    try:
-        post = posts.start(str(args.get("script") or ""), str(args.get("title") or ""),
-                           str(args.get("style") or ""), str(args.get("size") or args.get("format") or ""),
-                           project["id"] if project else "")
-    except posts.Busy as e:
-        raise ApiError(429, str(e))
-    except ValueError as e:
-        raise ApiError(400, f"{e} Run sage_post_check for every issue with its line.")
-    if args.get("wait"):
-        post = await _wait_for(post["id"], args["wait"])
-    extra = {"project": project.get("name") if project else None}
-    if not state["emailReady"]:
-        extra["emailSetUp"] = False
-    return _post_answer(post, **extra)
-
-
-async def get_post(args: Any) -> dict:
-    post_id = str((args or {}).get("id") or "").strip() if isinstance(args, dict) else ""
-    if not post_id:
-        raise ApiError(400, "Send the post's id")
-    return _post_answer(await _wait_for(post_id, args.get("wait")))
-
-
-async def list_posts(args: Any) -> dict:
-    posts = _need_posts()
-    args = args if isinstance(args, dict) else {}
-    project_id = ""
-    if args.get("project"):
-        ref = str(args["project"]).strip()
-        found = next((p for p in _rows("projects") if p.get("id") == ref or
-                      str(p.get("name") or "").strip().lower() == ref.lower()), None)
-        if not found:
-            raise ApiError(404, f"No project called {ref}")
-        project_id = found["id"]
-    try:
-        limit = max(1, min(int(args.get("limit") or 20), 100))
-    except (TypeError, ValueError):
-        limit = 20
-    rows = await asyncio.to_thread(posts.recent, project_id)
-    state = await asyncio.to_thread(posts.status)
-    ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
-    return {
-        "posts": [_post_view(p, full=False) for p in rows[:limit]],
-        "slideMaker": {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"],
-                       "emailReady": state["emailReady"], "emailOn": state["emailOn"]},
-        "projectsWithAutoContent": ready,
-    }
-
-
-async def redo_post(args: Any) -> dict:
-    """Draws a post again, with an edited script, style or size if sent."""
-    posts = _need_posts()
-    if not isinstance(args, dict) or not args.get("id"):
-        raise ApiError(400, "Send the post's id")
-    post = await asyncio.to_thread(posts.get, str(args["id"]))
-    if not post:
-        raise ApiError(404, "No post has that id")
-    style = str(args.get("style") or "")
-    size = str(args.get("size") or args.get("format") or "")
-    if style and style not in posts.STYLES:
-        raise ApiError(400, f"Style must be one of {', '.join(posts.STYLES)}.")
-    if size and size not in posts.FORMATS:
-        raise ApiError(400, f"Size must be one of {', '.join(posts.FORMATS)}.")
-    try:
-        post = posts.restart(post, str(args.get("script") or ""), style, size)
-    except posts.Busy as e:
-        raise ApiError(429, str(e))
-    except ValueError as e:
-        raise ApiError(409 if "still being made" in str(e) else 400, str(e))
-    if args.get("wait"):
-        post = await _wait_for(post["id"], args["wait"])
-    return _post_answer(post)
-
-
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
 
 router = APIRouter(prefix="/api/claude")
@@ -1119,39 +882,6 @@ async def http_delete_drop(slug: str):
     return await _answer(lambda: delete_drop(slug))
 
 
-@router.get("/posts/format")
-async def http_post_format():
-    return await _answer(post_format)
-
-
-@router.post("/posts/check")
-async def http_post_check(request: Request):
-    body = await _body(request)
-    return await _answer(lambda: check_post(body))
-
-
-@router.get("/posts")
-async def http_posts(project: str = "", limit: int = 20):
-    return await _answer(lambda: list_posts({"project": project, "limit": limit}))
-
-
-@router.post("/posts")
-async def http_create_post(request: Request):
-    body = await _body(request)
-    return await _answer(lambda: create_post(body))
-
-
-@router.get("/posts/{post_id}")
-async def http_get_post(post_id: str, wait: float = 0):
-    return await _answer(lambda: get_post({"id": post_id, "wait": wait}))
-
-
-@router.post("/posts/{post_id}/redo")
-async def http_redo_post(post_id: str, request: Request):
-    body = await _body(request)
-    return await _answer(lambda: redo_post({**(body if isinstance(body, dict) else {}), "id": post_id}))
-
-
 @router.get("/{table}")
 async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50, hidden: str = ""):
     return await _answer(lambda: list_records(table, q, status, due_by, limit, hidden))
@@ -1205,10 +935,6 @@ point that holds up (a pro), bad for one that doesn't (a con), unsure for confus
 questions. Re-sort a thought by changing its status with sage_update. Use sage_maps and sage_map to read them.
 To hand Vineeth a report, plan or snippet to keep, push it into Notes with sage_note_push. When he wants a
 web page to open or share with others, publish it with sage_drop_publish and give him the url it returns.
-To make an Instagram carousel post, read the script format with sage_post_format, write the script, check it with
-sage_post_check, then send it with sage_post_create: the Pi draws the slides, emails Vineeth when they're ready and
-gives back a link and the caption (wait for it with sage_post_get). A post can go into a content project only when
-that project has Use Auto Content switched on.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
 why something failed. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
@@ -1307,45 +1033,6 @@ def _tools() -> List[dict]:
              "hours": {"type": "number", "description": "Expire this many hours from now"}}}},
         {"name": "sage_drop_delete", "description": "Delete a Drop link and its files. Only when asked; it can't be undone.",
          "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
-        {"name": "sage_post_format", "description": "How to write a script for an Instagram carousel post: "
-         "the header, every slide type and its fields, caption and hashtags, plus a full example. Read it before "
-         "writing a script for sage_post_create. Includes how to ask for a free, credited stock photo "
-         "(an image slide with search: and a short description).",
-         "inputSchema": {"type": "object", "properties": {}}},
-        {"name": "sage_post_check", "description": "Check a post script without drawing it: every error and warning "
-         "with its line and slide number, and the slides, caption and hashtags it found.",
-         "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
-        {"name": "sage_post_create", "description": "Send a script to Sage to be made into an Instagram carousel "
-         "post. The Pi draws the slides (about 30 to 60 seconds), emails Vineeth the slides and caption when done, "
-         "and the post appears in Sage > Posts. With a project it also becomes a task there that moves Script > "
-         "Ready > Posted; the project must be a content project with Use Auto Content switched on. Returns the "
-         "post's id, status, link and caption; send wait (seconds) to wait for it to finish.",
-         "inputSchema": {"type": "object", "required": ["script"], "properties": {
-             "script": {"type": "string", "description": "The whole script in the sage_post_format format"},
-             "title": {"type": "string", "description": "Name in Sage; default the script's title"},
-             "project": {"type": "string", "description": "Content project id or name (needs Use Auto Content on)"},
-             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"], "description": "Default: the script's style, else grid_pill"},
-             "size": {"type": "string", "enum": ["portrait", "square"], "description": "Default: the script's format, else portrait"},
-             "wait": {"type": "number", "description": f"Seconds to wait for the slides (0 to {POST_WAIT_MAX}); default 0 returns at once"}}}},
-        {"name": "sage_post_get", "description": "One post: status (queued, running, done, failed), progress, the "
-         "error if it failed, the link that opens it in Sage (with the Share-to-Instagram button), caption, "
-         "hashtags, slide count, audit result and whether the email went. Send wait to wait until it finishes.",
-         "inputSchema": {"type": "object", "required": ["id"], "properties": {
-             "id": {"type": "string"},
-             "wait": {"type": "number", "description": f"Seconds to wait while it is still being drawn (max {POST_WAIT_MAX})"}}}},
-        {"name": "sage_post_list", "description": "Recent posts, newest first, with status, link and the start of "
-         "the caption; whether the slide maker and email are ready; and which projects have Use Auto Content on.",
-         "inputSchema": {"type": "object", "properties": {
-             "project": {"type": "string", "description": "Only this project's posts (id or name)"},
-             "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
-        {"name": "sage_post_redo", "description": "Draw a post again, keeping its id and link: send an edited "
-         "script to fix it, or a new style or size. Emails again when done.",
-         "inputSchema": {"type": "object", "required": ["id"], "properties": {
-             "id": {"type": "string"},
-             "script": {"type": "string", "description": "The fixed script; leave out to draw the same one"},
-             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
-             "size": {"type": "string", "enum": ["portrait", "square"]},
-             "wait": {"type": "number", "description": f"Seconds to wait for the slides (max {POST_WAIT_MAX})"}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
         {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
@@ -1403,18 +1090,6 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await change_drop(args)
     if name == "sage_drop_delete":
         return await delete_drop(args.get("id", ""))
-    if name == "sage_post_format":
-        return post_format()
-    if name == "sage_post_check":
-        return check_post(args)
-    if name == "sage_post_create":
-        return await create_post(args)
-    if name == "sage_post_get":
-        return await get_post(args)
-    if name == "sage_post_list":
-        return await list_posts(args)
-    if name == "sage_post_redo":
-        return await redo_post(args)
     if name == "sage_history":
         return history(args.get("limit", 50))
     if name == "sage_logs":
