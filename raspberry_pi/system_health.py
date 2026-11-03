@@ -131,6 +131,7 @@ def report(
     clock: Callable[[], dict],
     depth_face: Optional[Callable[[], dict]] = None,
     diagnostics: Optional[Callable[[], dict]] = None,
+    storage: Optional[Callable[[], dict]] = None,
 ) -> dict:
     def safe(part: Callable[[], dict]) -> dict:
         try:
@@ -165,6 +166,8 @@ def report(
     }
     if depth_face:
         data["depthFace"] = safe(depth_face)
+    if storage:
+        data["storage"] = safe(storage)
     if diagnostics:
         data["diagnostics"] = safe(diagnostics)
     data["problems"] = problems(data)
@@ -213,6 +216,13 @@ def problems(data: dict) -> List[str]:
     markets = data["markets"]
     if markets.get("symbols") and markets.get("failing"):
         out.append(f"Markets board: {markets['failing']} of {markets['symbols']} symbols failing.")
+    card = data.get("storage") or {}
+    if card.get("mode") in ("fallback", "unmounted"):
+        out.append(f"Sage is NOT on the SD card: {card.get('reason')}")
+    if card.get("readOnly"):
+        out.append(f"The SD card at {card.get('mount')} is mounted read-only (disk errors?); saves will fail.")
+    if card.get("freePercent") is not None and (card["freePercent"] < 10 or card.get("freeBytes", 1 << 60) < 2_000_000_000):
+        out.append(f"The SD card is almost full: {round(card['freeBytes'] / 1e9, 1)} GB free ({card['freePercent']}%).")
     last_backup = data["backups"].get("lastBackupAt")
     if "lastBackupAt" in data["backups"]:
         when = datetime.datetime.fromisoformat(last_backup) if last_backup else None

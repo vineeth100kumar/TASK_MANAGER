@@ -1,6 +1,8 @@
 [Unit]
 Description=Sage sync server and web app (Raspberry Pi)
-After=network-online.target
+# mnt-sagedata.mount is the SD card for Sage's data. Ordering only (no Requires),
+# so Sage still boots when the card is missing and falls back (data_dir.py).
+After=network-online.target mnt-sagedata.mount
 Wants=network-online.target
 
 [Service]

@@ -2,6 +2,7 @@ import json
 import os
 import hmac
 import sqlite3
+import data_dir  # noqa: F401  (first: picks the SD card or the safe fallback for SAGE_DB_PATH)
 import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy timeout)
 import datetime
 import asyncio
@@ -1058,6 +1059,7 @@ def storage_stats():
         "db": {"bytes": db_bytes, "path": str(db_file)},
         "backups": {"bytes": backup_bytes, "count": backup_status["count"], "folder": backup_status["folder"]},
         "drop": drop_usage,
+        "card": data_dir.status(),
     }
 
 # --- Quick-Add (Siri Shortcuts / Share Sheet / email capture) ---
@@ -2156,6 +2158,7 @@ def _claude_health() -> dict:
         clock=_clock_status,
         depth_face=_depth_status,
         diagnostics=diagnostics.health_summary,
+        storage=data_dir.status,
     )
 
 

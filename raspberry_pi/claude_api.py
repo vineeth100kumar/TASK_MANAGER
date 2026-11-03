@@ -228,6 +228,11 @@ def diagnostics(hours: float = 24, samples: int = 0) -> dict:
     out = _diagnostics.summary(hours or 24)
     if samples:
         out["recent"] = _diagnostics.recent(samples)["samples"]
+    try:  # which disk Sage is writing to; a failing card shows up as slow writes
+        import data_dir
+        out["storage"] = data_dir.status()
+    except Exception as e:  # never let this hide the blackout story
+        out["storage"] = {"error": f"{e.__class__.__name__}: {e}"[:200]}
     return out
 
 
