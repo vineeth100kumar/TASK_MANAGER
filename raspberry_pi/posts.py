@@ -34,6 +34,7 @@ import threading
 import time
 import uuid
 import zipfile
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
@@ -69,6 +70,184 @@ PROGRESS = re.compile(r"^\[\s*([\d.]+)s \|\s*\+([\d.]+)s\]\s*(.*)$")
 SLIDE_STEP = re.compile(r"Rendering slide (\d+) of (\d+)")
 
 
+# --- This week's slides, kept hot in RAM ---
+#
+# The Pi has memory to spare but can read its slides off a slow USB drive, so
+# the first open of a post waits while a dozen images come off the disk. We
+# keep this week's slide images in a bounded in-process cache: served straight
+# from RAM, so reads never touch the drive. Older posts aren't cached -- they
+# stay on disk and load on demand ("this week ready, older waits in storage").
+#
+# The cache holds the small derived images the Posts page actually fetches
+# (540 px previews and the share JPEGs) plus the full PNGs, all keyed by post.
+# It is capped by size (SAGE_HOT_CACHE_MB, default 150 MB) and evicts least-
+# recently-used entries first; set it to 0 to turn the cache off entirely.
+
+
+def _hot_days() -> int:
+    """Posts newer than this many days are kept hot; 0 disables the window."""
+    try:
+        return max(0, int(float(os.getenv("SAGE_HOT_DAYS", "7"))))
+    except (TypeError, ValueError):
+        return 7
+
+
+def _hot_cap_bytes() -> int:
+    try:
+        return max(0, int(float(os.getenv("SAGE_HOT_CACHE_MB", "150")))) * 1024 * 1024
+    except (TypeError, ValueError):
+        return 150 * 1024 * 1024
+
+
+class HotImageCache:
+    """A thread-safe, size-bounded LRU cache of image bytes.
+
+    FastAPI serves these images from its sync threadpool, so every method is
+    guarded by a lock. Entries are keyed ``"<post_id>/<kind>/<n>"`` so a whole
+    post can be dropped at once when it is remade or deleted.
+    """
+
+    def __init__(self, cap_bytes: int):
+        self.cap = cap_bytes
+        self._store: "OrderedDict[str, bytes]" = OrderedDict()
+        self._bytes = 0
+        self._lock = threading.Lock()
+        self.hits = 0
+        self.misses = 0
+
+    def get(self, key: str) -> Optional[bytes]:
+        with self._lock:
+            data = self._store.get(key)
+            if data is None:
+                self.misses += 1
+                return None
+            self._store.move_to_end(key)
+            self.hits += 1
+            return data
+
+    def put(self, key: str, data: bytes) -> None:
+        if self.cap <= 0 or not data or len(data) > self.cap:
+            return
+        with self._lock:
+            old = self._store.pop(key, None)
+            if old is not None:
+                self._bytes -= len(old)
+            self._store[key] = data
+            self._bytes += len(data)
+            while self._bytes > self.cap and self._store:
+                _, evicted = self._store.popitem(last=False)
+                self._bytes -= len(evicted)
+
+    def invalidate(self, post_id: str) -> None:
+        prefix = f"{post_id}/"
+        with self._lock:
+            for key in [k for k in self._store if k.startswith(prefix)]:
+                self._bytes -= len(self._store.pop(key))
+
+    def stats(self) -> dict:
+        with self._lock:
+            return {
+                "entries": len(self._store),
+                "bytes": self._bytes,
+                "capBytes": self.cap,
+                "hits": self.hits,
+                "misses": self.misses,
+            }
+
+
+_hot = HotImageCache(_hot_cap_bytes())
+
+
+def _hot_key(post_id: str, kind: str, n: int) -> str:
+    return f"{post_id}/{kind}/{n}"
+
+
+def _is_fresh(post: dict) -> bool:
+    """True while a post is young enough to keep its slides hot in RAM."""
+    days = _hot_days()
+    if days == 0:
+        return True
+    created = str(post.get("createdAt") or "")
+    try:
+        when = datetime.datetime.strptime(created[:19], "%Y-%m-%dT%H:%M:%S")
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    except ValueError:
+        return False
+    age = datetime.datetime.now(datetime.timezone.utc) - when
+    return age <= datetime.timedelta(days=days)
+
+
+def _serve_file(post: dict, path: Path, kind: str, n: int, media_type: str) -> Response:
+    """Serve an image from RAM when its post is in this week's window, reading
+    the file (and caching it) only on the first miss. Older posts are streamed
+    straight off disk and never fill the cache."""
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if _hot.cap <= 0 or not _is_fresh(post):
+        return FileResponse(path, media_type=media_type, headers=headers)
+    key = _hot_key(post["id"], kind, n)
+    data = _hot.get(key)
+    if data is None:
+        try:
+            data = path.read_bytes()
+        except OSError:
+            return FileResponse(path, media_type=media_type, headers=headers)
+        _hot.put(key, data)
+    return Response(data, media_type=media_type, headers=headers)
+
+
+def warm_cache() -> None:
+    """Fill the cache with this week's slides in the background, at low
+    priority so it never slows the boot. Runs once, shortly after start."""
+    if _hot.cap <= 0:
+        return
+    try:
+        os.nice(15)
+    except (OSError, AttributeError):
+        pass
+    time.sleep(8)  # let the server finish coming up first
+    loaded = warmed_bytes = 0
+    try:
+        posts = [p for p in recent(limit=0) if _is_fresh(p)]
+    except Exception as e:  # a cold cache is never worth crashing a thread over
+        logstore.warn("posts", f"Couldn't list posts to warm the cache: {e}")
+        return
+    for summary_row in posts:
+        post = get(summary_row["id"])
+        if not post:
+            continue
+        try:
+            prepare_copies(post)  # make the preview/share JPEGs if missing
+        except Exception:
+            pass
+        for n in range(1, len(post.get("slides") or []) + 1):
+            for kind, maker, mt in (
+                ("preview", preview_jpeg, "image/jpeg"),
+                ("share", share_jpeg, "image/jpeg"),
+                ("png", slide_path, "image/png"),
+            ):
+                if warmed_bytes >= _hot.cap:
+                    break
+                try:
+                    path = maker(post, n) if kind != "png" else slide_path(post, n)
+                except Exception:
+                    path = None
+                if not path or not Path(path).is_file():
+                    continue
+                try:
+                    data = Path(path).read_bytes()
+                except OSError:
+                    continue
+                _hot.put(_hot_key(post["id"], kind, n), data)
+                warmed_bytes += len(data)
+                loaded += 1
+        if warmed_bytes >= _hot.cap:
+            break
+    logstore.info(
+        "posts",
+        f"Warmed {loaded} slide images ({warmed_bytes // 1024} KB) for {len(posts)} recent posts into RAM",
+    )
+
+
 def _utc() -> str:
     return datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -88,6 +267,10 @@ def connect(db_path: str, broadcast=None, create_record=None, update_record=None
             conn.execute("UPDATE posts SET status = ?, payload = ? WHERE id = ?", (post["status"], json.dumps(post), post_id))
     conn.commit()
     conn.close()
+    # Pull this week's slides into RAM after the server is up, off the main
+    # thread and at low priority so booting stays quick.
+    if _hot.cap > 0:
+        threading.Thread(target=warm_cache, name="posts-warm-cache", daemon=True).start()
 
 
 # --- Storage ---
@@ -229,6 +412,7 @@ def status() -> dict:
         "queued": queue_length(),
         "maxScript": MAX_SCRIPT,
         "pictureSources": picture_sources(),
+        "hotCache": _hot.stats(),
     }
 
 
@@ -360,6 +544,7 @@ def restart(post: dict, script: str = "", style: str = "", fmt: str = "") -> dic
     post.update(status="queued", error="", log=[], audit=None, auditNote="", seconds=None, finishedAt=None,
                 emailed=False, emailError="", posted=False, postedAt=None)
     post["progress"]["done"] = 0
+    _hot.invalidate(post["id"])  # the slides are about to be redrawn
     save(post)
     _spawn(_run(post))
     return post
@@ -719,6 +904,7 @@ def delete(post_id: str) -> bool:
         conn.commit()
     finally:
         conn.close()
+    _hot.invalidate(post_id)
     shutil.rmtree(POSTS_DIR / post_id, ignore_errors=True)
     return cur.rowcount > 0
 
@@ -878,7 +1064,7 @@ def posts_slide(post_id: str, n: int):
     path = slide_path(post, n) if post else None
     if not path:
         return _missing()
-    return FileResponse(path, media_type="image/png", headers={"Cache-Control": "private, max-age=86400"})
+    return _serve_file(post, path, "png", n, "image/png")
 
 
 PREVIEW_WIDTH = 540  # the post page shows slides about 330 px wide; 540 stays sharp on 2x screens
@@ -935,7 +1121,7 @@ def posts_slide_preview(post_id: str, n: int):
     path = preview_jpeg(post, n) if post else None
     if not path:
         return _missing()
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+    return _serve_file(post, path, "preview", n, "image/jpeg")
 
 
 @router.get("/api/posts/{post_id}/slides/{n}.jpg")
@@ -944,7 +1130,7 @@ def posts_slide_jpeg(post_id: str, n: int):
     path = share_jpeg(post, n) if post else None
     if not path:
         return _missing()
-    return FileResponse(path, media_type="image/jpeg", headers={"Cache-Control": "private, max-age=86400"})
+    return _serve_file(post, path, "share", n, "image/jpeg")
 
 
 @router.get("/api/posts/{post_id}/zip")
