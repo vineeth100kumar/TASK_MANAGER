@@ -274,9 +274,6 @@ export function NotificationSettings() {
               <Row title="Sage is back up" hint="After an update, restart, crash or power cut: when it went down, for how long and why">
                 <Toggle label="Email when Sage is back up" on={email.backUp !== false} onChange={on => setEmail({ backUp: on })} />
               </Row>
-              <Row title="Post is ready" hint="When Posts finishes drawing a carousel: the slides and caption in the email, and a link to share it from your phone">
-                <Toggle label="Email when a post is ready" on={email.postReady !== false} onChange={on => setEmail({ postReady: on })} />
-              </Row>
 
               <button onClick={() => setShowAdvanced(v => !v)} className="text-xs font-medium text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
                 {showAdvanced ? 'Hide' : 'Not using Gmail?'}

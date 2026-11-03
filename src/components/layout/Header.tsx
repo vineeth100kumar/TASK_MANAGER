@@ -111,8 +111,6 @@ export function Header({
       setActiveTitle('LUMO');
     } else if (activeView === 'drop') {
       setActiveTitle('Drop');
-    } else if (activeView === 'posts') {
-      setActiveTitle('Posts');
     } else if (activeWorkspace === 'all') {
       setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : lifeContext === 'work' ? 'All Work Items' : 'All Items');
     } else {

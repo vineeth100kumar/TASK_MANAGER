@@ -11,7 +11,6 @@ const loaders = {
   radar: () => import('./RadarView'),
   lumo: () => import('./LumoView'),
   drop: () => import('./DropView'),
-  posts: () => import('./PostsView'),
   hidden: () => import('./HiddenView'),
   branches: () => import('../branches/ProjectBranchesView'),
   calendar: () => import('./CalendarView'),
@@ -49,7 +48,6 @@ export const CanvasView = named(loaders.canvas, 'CanvasView');
 export const RadarView = named(loaders.radar, 'RadarView');
 export const LumoView = named(loaders.lumo, 'LumoView');
 export const DropView = named(loaders.drop, 'DropView');
-export const PostsView = named(loaders.posts, 'PostsView');
 export const HiddenView = named(loaders.hidden, 'HiddenView');
 export const ProjectBranchesView = named(loaders.branches, 'ProjectBranchesView');
 export const CalendarView = named(loaders.calendar, 'CalendarView');
@@ -72,7 +70,6 @@ const forSidebar: Record<string, () => Promise<unknown>> = {
   radar: () => preloads.RadarView(),
   lumo: () => preloads.LumoView(),
   drop: () => preloads.DropView(),
-  posts: () => preloads.PostsView(),
   hidden: () => Promise.all([preloads.NotesLock(), preloads.HiddenView()]),
 };
 
