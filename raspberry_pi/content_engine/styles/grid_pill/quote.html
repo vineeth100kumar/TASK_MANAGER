@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 110px;
+      top: var(--content-top, 260px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .quote-mark {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 900;
+      font-size: 190px;
+      line-height: 0.6;
+      color: #EE4425;
+      margin-bottom: 24px;
+      user-select: none;
+    }
+
+    .quote-body {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 64px;
+      line-height: 1.08;
+      letter-spacing: -0.01em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      margin-bottom: 44px;
+    }
+
+    .author-wrapper {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .author-pill {
+      background-color: #000000;
+      color: #FFFFFF;
+      border-radius: 9999px;
+      padding: 10px 28px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 22px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      display: inline-flex;
+      align-items: center;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="content-container">
+    <div class="quote-mark">&ldquo;</div>
+    <blockquote class="quote-body">{{ body }}</blockquote>
+    {% if author %}
+    <div class="author-wrapper">
+      <div class="author-pill">{{ author }}</div>
+    </div>
+    {% endif %}
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="slide-counter">{{ counter }}</div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,114 @@
+@font-face {
+  font-family: 'League Spartan';
+  src: url('{{ league_spartan_url }}') format('truetype');
+  font-weight: 100 900;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Montserrat';
+  src: url('{{ montserrat_url }}') format('truetype');
+  font-weight: 100 900;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Inter';
+  src: url('{{ inter_url }}') format('truetype');
+  font-weight: 100 900;
+  font-display: block;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  width: var(--canvas-width, 1080px);
+  height: var(--canvas-height, 1350px);
+  overflow: hidden;
+  background-color: #EDE4D4;
+  background-image: url('{{ paper_texture_url }}');
+  background-size: var(--canvas-width, 1080px) var(--canvas-height, 1350px);
+  position: relative;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header Row */
+.header-row {
+  position: absolute;
+  top: var(--header-y, 110px);
+  left: 112px;
+  width: 856px;
+  height: 36px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.header-left {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 32px;
+  color: #000000;
+  text-transform: uppercase;
+  letter-spacing: 0;
+  white-space: nowrap;
+}
+
+.header-right {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: #000000;
+  white-space: nowrap;
+}
+
+/* Footer Row */
+.footer-row {
+  position: absolute;
+  top: var(--footer-y, 1203px);
+  left: 112px;
+  width: 856px;
+  height: 36px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  z-index: 10;
+}
+
+.footer-left {
+  font-family: 'Inter', sans-serif;
+  font-weight: 400;
+  font-size: 32px;
+  color: #000000;
+  white-space: nowrap;
+}
+
+.footer-right {
+  font-family: 'Inter', sans-serif;
+  font-weight: 700;
+  font-size: 32px;
+  color: #000000;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* Source / credit line above the footer (spec decks: point, list, stat, quote, image) */
+.slide-source {
+  position: absolute;
+  left: 112px;
+  width: 860px;
+  /* anchored from the bottom, so a two-line credit grows upward, never into the footer */
+  bottom: calc(var(--canvas-height, 1350px) - var(--footer-y, 1221px) + 30px);
+  font-family: 'Inter', sans-serif;
+  font-weight: 500;
+  font-size: 24px;
+  line-height: 1.3;
+  letter-spacing: 0.02em;
+  color: #6B6458;
+  z-index: 5;
+}
