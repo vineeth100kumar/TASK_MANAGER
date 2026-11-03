@@ -5,6 +5,7 @@ are dropped, and Groq falls back to the local model.
 """
 
 import json
+import os
 import sys
 import unittest
 from pathlib import Path
@@ -121,8 +122,22 @@ class TestEngines(unittest.TestCase):
             self.assertEqual(chat_capture._answer("s", "u"), ('{"items": []}', "local"))
             local.assert_called_once()
 
-    def test_no_key_goes_local(self):
+    def test_no_key_no_local_by_default(self):
+        # Ollama was removed to save memory, so with no Groq key and the local
+        # model off (the default) there is no engine and _answer raises; the
+        # endpoint then lets the app keep its own parse.
         with mock.patch.object(chat_capture.canvas_thinker, "groq_key", return_value=""), \
+             mock.patch.dict(os.environ, {}, clear=False), \
+             mock.patch.object(chat_capture, "_ask_groq") as groq:
+            os.environ.pop("SAGE_LOCAL_AI", None)
+            self.assertEqual(chat_capture.engine(), "none")
+            with self.assertRaises(RuntimeError):
+                chat_capture._answer("s", "u")
+            groq.assert_not_called()
+
+    def test_no_key_goes_local_when_enabled(self):
+        with mock.patch.object(chat_capture.canvas_thinker, "groq_key", return_value=""), \
+             mock.patch.dict(os.environ, {"SAGE_LOCAL_AI": "1"}), \
              mock.patch.object(chat_capture, "_ask_groq") as groq, \
              mock.patch.object(chat_capture, "_ask_local", return_value="{}"):
             self.assertEqual(chat_capture._answer("s", "u")[1], "local")
