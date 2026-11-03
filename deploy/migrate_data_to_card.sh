@@ -58,7 +58,7 @@ fi
 # What gets copied from the old folder. A whitelist, because on a default
 # install the old folder is the repo's raspberry_pi/, which also holds code.
 ITEMS=(sage.log sage.log.1 sage.log.2 sage_settings.json sage_secrets.json sage_vapid_private.pem
-       sage_uptime.json song_cache.json desk_token.txt desk_link.json drops depth_face gallery_photos posts)
+       sage_uptime.json song_cache.json desk_token.txt desk_link.json drops depth_face gallery_photos posts sage_posts)
 
 say "Stopping sage"
 systemctl stop sage 2>/dev/null || true
