@@ -370,7 +370,7 @@ export function ChatCapture({ lifeContext, projects, areas, onChanged, onOpenFor
   // --- Plans: a goal broken into a project, stages and dated tasks ---
 
   const setPlan = (id: string, fn: (p: PlanState) => PlanState) => setPlans(prev => (prev[id] ? { ...prev, [id]: fn(prev[id]) } : prev));
-  const groqOn = () => aiReady !== false && engine !== 'local';
+  const groqOn = () => aiReady !== false && engine !== 'local' && engine !== 'none';
   const today = () => new Date().toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
   const planForAi = (p: ProjectPlan) => ({
     name: p.name, type: p.type, phases: p.phases,

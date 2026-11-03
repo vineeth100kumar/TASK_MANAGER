@@ -1228,9 +1228,6 @@ async def item_tomorrow(item_id: str, req: ItemActionRequest):
 
 
 import re
-import ollama
-
-MODEL_NAME = "qwen2.5:1.5b"
 
 # --- AI Models ---
 class TaskParseRequest(BaseModel):
@@ -1278,16 +1275,44 @@ def parse_task(req: TaskParseRequest):
     If the user enters multiple tasks, separate them into multiple objects in the array.
     User Input: {req.natural_language}
     """
+    # Groq, not the Pi's local Ollama model (which was removed to save memory).
+    import canvas_thinker
+    if canvas_thinker.groq_key():
+        try:
+            model = canvas_thinker._setting("GROQ_LLM_MODEL") or canvas_thinker.GROQ_DEFAULT_MODEL
+            for name in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
+                res = httpx.post(
+                    canvas_thinker.GROQ_URL,
+                    headers={"Authorization": f"Bearer {canvas_thinker.groq_key()}"},
+                    json={"model": name, "temperature": 0.0, "max_tokens": 1024,
+                          "messages": [{"role": "user", "content": prompt}]},
+                    timeout=30,
+                )
+                if res.status_code == 200:
+                    parsed = safe_parse_json(res.json()["choices"][0]["message"].get("content") or "")
+                    return {"success": True, "data": parsed}
+                if res.status_code == 401:
+                    break  # bad key: no point trying the fallback model
+        except Exception as e:
+            print(f"parse-task: Groq failed, using the local parser: {e}")
+            logstore.warn("quick_add", f"parse-task Groq failed: {e}")
+
+    # No Groq key, or Groq couldn't answer: fall back to the offline regex
+    # parser so "add milk at 6" still becomes a task without any AI running.
     try:
-        response = ollama.generate(
-            model=MODEL_NAME, prompt=prompt, format='json', options={"temperature": 0.0}
-        )
-        parsed_data = safe_parse_json(response['response'])
-        return {"success": True, "data": parsed_data}
+        q = quick_add.parse_quick_add((req.natural_language or "").strip())
+        title = quick_add.strip_lead_in(q.title) or (req.natural_language or "").strip()
+        return {"success": True, "data": [{
+            "title": title,
+            "dueDate": q.date,
+            "priority": q.priority or "medium",
+            "estimatedMinutes": q.duration_minutes or 30,
+            "isInbox": not q.date,
+        }]}
     except Exception as e:
         print(f"Error parsing task: {e}")
         logstore.warn("quick_add", f"Error parsing task: {e}")
-        raise HTTPException(status_code=500, detail="AI failed to parse task reliably")
+        raise HTTPException(status_code=500, detail="Could not parse the task")
 
 # --- Canvas thinking partner (see canvas_thinker.py) ---
 import canvas_thinker

@@ -16,7 +16,8 @@ Which AI answers, first match wins:
      /etc/sage/sage.env or LUMO's lumo/rpi_server/.env (the same key the voice
      assistant uses). Fast, text only.
   2. Claude, when ANTHROPIC_API_KEY is set. Reads the outline and the picture.
-  3. The Pi's local Ollama model. Free, but slow and much weaker.
+  3. The Pi's local Ollama model, only if SAGE_LOCAL_AI=1. Off by default: it
+     held a model resident in RAM on a small Pi, so Groq is the path now.
 """
 
 import json
@@ -30,6 +31,7 @@ from pydantic import BaseModel
 
 CLAUDE_MODEL = os.getenv("SAGE_CANVAS_MODEL", "claude-opus-5-5")
 LOCAL_MODEL = os.getenv("SAGE_CANVAS_LOCAL_MODEL", "qwen2.5:1.5b")
+NO_AI_MESSAGE = "No AI is set up. Add a Groq key in Settings > Server & Reset (the local Ollama model was removed to save memory)."
 GROQ_URL = "https://api.groq.com/openai/v1/chat/completions"
 # Same defaults as LUMO's voice assistant.
 GROQ_DEFAULT_MODEL = "qwen/qwen3.8-27b"
@@ -295,10 +297,19 @@ def claude_available() -> bool:
     return bool(os.getenv("ANTHROPIC_API_KEY", "").strip())
 
 
+def local_ai_enabled() -> bool:
+    """The Pi's local Ollama model. Off by default: it kept a model resident in
+    RAM on a small Pi for a fallback that almost never fired now a Groq key is
+    set. Set SAGE_LOCAL_AI=1 (and install Ollama) to turn it back on."""
+    return os.getenv("SAGE_LOCAL_AI", "0") == "1"
+
+
 def engine() -> str:
     if groq_key():
         return "groq"
-    return "claude" if claude_available() else "local"
+    if claude_available():
+        return "claude"
+    return "local" if local_ai_enabled() else "none"
 
 
 def think_with_claude(req: CanvasThinkRequest) -> str:
@@ -363,7 +374,9 @@ def think_with_groq(req: CanvasThinkRequest) -> str:
 
 
 def think_locally(req: CanvasThinkRequest) -> str:
-    import ollama
+    if not local_ai_enabled():
+        raise RuntimeError(NO_AI_MESSAGE)
+    import ollama  # only reached when SAGE_LOCAL_AI=1 and Ollama is installed
 
     prompt = "\n\n".join(filter(None, [SYSTEM_PROMPT, _transcript(req), _board_text(req), _ask_text(req)]))
     response = ollama.generate(model=LOCAL_MODEL, prompt=prompt, options={"temperature": 0.3})
@@ -375,7 +388,9 @@ def _raw_answer(req: CanvasThinkRequest) -> tuple:
         return think_with_groq(req), "groq"
     if claude_available():
         return think_with_claude(req), "claude"
-    return think_locally(req), "local"
+    if local_ai_enabled():
+        return think_locally(req), "local"
+    raise RuntimeError(NO_AI_MESSAGE)
 
 
 def _parse_edits(text: str) -> dict:

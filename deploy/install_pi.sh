@@ -102,7 +102,7 @@ part_server() {
   as_user "$REPO/raspberry_pi/venv/bin/playwright" install chromium \
     || { echo "Playwright's Chromium didn't install; trying the system one."; apt-get install -y -qq chromium >/dev/null 2>&1 || apt-get install -y -qq chromium-browser >/dev/null 2>&1 \
          || echo "No Chromium installed, so Posts can't draw slides. Run: playwright install chromium"; }
-  command -v ollama >/dev/null || echo "Ollama is not installed, so AI task parsing will fail. See raspberry_pi/README.md."
+  echo "AI (voice, chat capture, canvas, radar) uses Groq. Add a key in Settings > Server & Reset, or set GROQ_API_KEY in $ENV_FILE."
 }
 
 part_depth() {
@@ -115,9 +115,9 @@ part_depth() {
 part_web() {
   step "Web app"
   # The build is the biggest memory user in the whole install (Excalidraw makes
-  # it ~2 GB). On a 4 GB Pi, with Sage and Ollama also resident, it ran the Pi out
-  # of memory and the Pi rebooted. Sage and Ollama are held stopped for the whole
-  # install (see hold_services). Here: cap Node's heap so it fails with an error
+  # it ~2 GB). On a 4 GB Pi, with Sage also resident, it ran the Pi out of
+  # memory and the Pi rebooted. Sage is held stopped for the whole install (see
+  # hold_services). Here: cap Node's heap so it fails with an error
   # instead of taking the Pi down, run at low priority, and skip npm ci when
   # node_modules already matches the lockfile.
   if command -v npm >/dev/null; then
@@ -168,6 +168,13 @@ part_services() {
       rm -f "/etc/systemd/system/$old.service"
     fi
   done
+  # Ollama is no longer used: all AI goes to Groq. Stop and disable it so it
+  # doesn't start on boot and hold its model (~1-2 GB) resident on the Pi. The
+  # package and downloaded models are left in place; `ollama rm` frees the disk.
+  if systemctl list-unit-files "ollama.service" >/dev/null 2>&1; then
+    systemctl disable --now "ollama.service" 2>/dev/null || true
+    echo "Disabled the ollama service (AI now uses Groq). Run 'ollama rm <model>' to reclaim its disk."
+  fi
   systemctl daemon-reload
   for unit in "${UNITS[@]}"; do
     systemctl enable --quiet "$unit.service"
@@ -215,15 +222,18 @@ summary() {
 HELD=()
 held_add() { [[ " ${HELD[*]:-} " == *" $1 "* ]] || HELD+=("$1"); }
 hold_services() {
-  for svc in sage-autosync sage ollama; do
+  for svc in sage-autosync sage; do
     if systemctl is-active --quiet "$svc"; then held_add "$svc"; systemctl stop "$svc"; fi
   done
+  # Ollama is no longer used; stop it now so it isn't resident during the heavy
+  # web build. part_services disables it, so it isn't added to HELD to restart.
+  systemctl stop ollama 2>/dev/null || true
 }
 start_held() {
   [ "${#HELD[@]}" -gt 0 ] || return 0
   step "Starting ${HELD[*]}"
   local svc ordered=()
-  for svc in ollama sage sage-autosync; do [[ " ${HELD[*]} " == *" $svc "* ]] && ordered+=("$svc"); done
+  for svc in sage sage-autosync; do [[ " ${HELD[*]} " == *" $svc "* ]] && ordered+=("$svc"); done
   for svc in "${ordered[@]}"; do systemctl start "$svc" || echo "Could not start $svc; see: journalctl -u $svc -n 50" >&2; done
   HELD=()
 }

@@ -11,7 +11,7 @@ const getAiUrl = (endpoint: string) => {
 
 export type ThinkMode = 'review' | 'summarize' | 'ask' | 'edit';
 // Which AI answered: Groq, Claude, or the Pi's own small model.
-export type ThinkEngine = 'groq' | 'claude' | 'local';
+export type ThinkEngine = 'groq' | 'claude' | 'local' | 'none';
 // How big a chart the AI draws: a short chain, the main steps, or full detail.
 export type ThinkDetail = 'simple' | 'moderate' | 'complex';
 export interface ThinkTurn { role: 'user' | 'assistant'; text: string }
