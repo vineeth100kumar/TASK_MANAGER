@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { Pencil } from 'lucide-react';
+import { GalleryHorizontal, Pencil, Plus } from 'lucide-react';
+import { openPosts } from '../../services/posts';
 import { api } from '../../services/api';
 import type { LifeContext, Project } from '../../services/types';
 import { selectItems } from '../../services/items';
@@ -52,6 +53,19 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { pro
           title="Edit name, key, colour and type">
           <Pencil size={12} /> Edit
         </button>
+        {project.autoContent && (
+          <>
+            <button type="button" onClick={() => openPosts({ projectId: project.id })}
+              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-300 hover:opacity-80 transition-opacity"
+              title="Posts made with Auto Content">
+              <GalleryHorizontal size={12} /> Posts
+            </button>
+            <button type="button" onClick={() => openPosts({ projectId: project.id, newPost: true })}
+              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors">
+              <Plus size={12} /> New post
+            </button>
+          </>
+        )}
       </div>
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0" role="group" aria-label="Statuses">
         {type.statuses.map((st, i) => {

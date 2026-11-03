@@ -1,0 +1,34 @@
+{
+  "safety_factors": {
+    "tpm_factor": 0.85,
+    "max_requests_per_minute": 25
+  },
+  "stage_max_completion_tokens": {
+    "extract_claims": 1800,
+    "compose": 1400,
+    "verify_slides": 800
+  },
+  "models": {
+    "openai/gpt-oss-120b": {
+      "requests_per_minute": 30,
+      "requests_per_day": 1000,
+      "tokens_per_minute": 8000,
+      "tokens_per_day": 200000,
+      "role": "composer"
+    },
+    "openai/gpt-oss-20b": {
+      "requests_per_minute": 30,
+      "requests_per_day": 1000,
+      "tokens_per_minute": 8000,
+      "tokens_per_day": 200000,
+      "role": "extractor"
+    },
+    "qwen/qwen3.8-27b": {
+      "requests_per_minute": 30,
+      "requests_per_day": 1000,
+      "tokens_per_minute": 8000,
+      "tokens_per_day": 200000,
+      "role": "verifier"
+    }
+  }
+}

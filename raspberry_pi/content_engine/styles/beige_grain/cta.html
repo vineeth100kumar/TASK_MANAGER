@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .cta-container {
+      position: absolute;
+      left: 112px;
+      top: var(--cover-top, 400px);
+      width: 856px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      z-index: 5;
+    }
+
+    .cta-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 140px;
+      line-height: 0.85;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+
+    .cta-handle {
+      position: absolute;
+      left: 114px;
+      top: var(--cta-handle-y, 960px);
+      font-family: 'Inter', sans-serif;
+      font-weight: 700;
+      font-size: 44px;
+      color: #F86036;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="header-right">{{ brand.tag }}</div>
+  </div>
+
+  <div class="cta-container">
+    <h1 class="cta-headline">{{ headline }}<span id="cta-baseline-anchor" style="display:inline-block;width:0;height:0;vertical-align:baseline"></span></h1>
+  </div>
+
+
+  {{ underline_svg | safe }}
+  <div class="cta-handle">{{ brand.handle }}</div>
+  {{ loop_svg | safe }}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="footer-right"></div>
+  </div>
+</body>
+</html>

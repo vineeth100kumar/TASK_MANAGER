@@ -27,7 +27,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, HiddenView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, HiddenView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -52,6 +52,9 @@ function MainApp() {
   
   // Navigation State
   const [activeView, setActiveView] = useState('dashboard');
+  // Posts page: a project to show posts of, and a post or New post to open (nonce makes a repeat tap count).
+  const [postsProject, setPostsProject] = useState('');
+  const [postsFocus, setPostsFocus] = useState<{ postId?: string; newPost?: boolean; nonce: number } | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
@@ -157,15 +160,26 @@ function MainApp() {
     const openId = params.get('open');
     const actionParam = params.get('action');
     const viewParam = params.get('view');
+    const postParam = params.get('post');
     const ritualParam = params.get('ritual');
-    if (openId || actionParam || viewParam || ritualParam) {
+    if (openId || actionParam || viewParam || ritualParam || postParam) {
       params.delete('open');
       params.delete('action');
       params.delete('view');
       params.delete('ritual');
+      params.delete('post');
       const rest = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
+    // A "your post is ready" email opens the post.
+    if (postParam) { setActiveView('posts'); setPostsFocus({ postId: postParam, nonce: Date.now() }); }
+    const onOpenPosts = (e: Event) => {
+      const d = (e as CustomEvent<{ postId?: string; projectId?: string; newPost?: boolean }>).detail || {};
+      setPostsProject(d.projectId || '');
+      setPostsFocus({ postId: d.postId, newPost: d.newPost, nonce: Date.now() });
+      setActiveView('posts');
+    };
+    window.addEventListener('sage:open-posts', onOpenPosts);
     if (actionParam === 'new-task') setIsCreateModalOpen(true);
     if (ritualParam === 'morning') setIsMorningOpen(true);
     if (ritualParam === 'evening') setIsEveningOpen(true);
@@ -216,6 +230,7 @@ function MainApp() {
       unsubEntity();
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
       window.removeEventListener('sage:ritual', onRitual);
+      window.removeEventListener('sage:open-posts', onOpenPosts);
     };
   }, []);
 
@@ -502,6 +517,8 @@ function MainApp() {
               <LumoView />
             ) : activeView === 'drop' ? (
               <DropView />
+            ) : activeView === 'posts' ? (
+              <PostsView projectId={postsProject} focus={postsFocus} />
             ) : activeView === 'hidden' ? (
               <NotesLock title="Hidden tasks are locked" hint="Enter your password to see them.">
                 <HiddenView onSelectTask={setSelectedItemId} />

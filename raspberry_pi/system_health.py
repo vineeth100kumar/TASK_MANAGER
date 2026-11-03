@@ -130,6 +130,7 @@ def report(
     phone: Callable[[], dict],
     clock: Callable[[], dict],
     depth_face: Optional[Callable[[], dict]] = None,
+    slide_maker: Optional[Callable[[], dict]] = None,
     diagnostics: Optional[Callable[[], dict]] = None,
     storage: Optional[Callable[[], dict]] = None,
 ) -> dict:
@@ -168,6 +169,8 @@ def report(
         data["depthFace"] = safe(depth_face)
     if storage:
         data["storage"] = safe(storage)
+    if slide_maker:
+        data["slideMaker"] = safe(slide_maker)
     if diagnostics:
         data["diagnostics"] = safe(diagnostics)
     data["problems"] = problems(data)
@@ -228,6 +231,9 @@ def problems(data: dict) -> List[str]:
         when = datetime.datetime.fromisoformat(last_backup) if last_backup else None
         if not when or time.time() - when.timestamp() > 48 * 3600:
             out.append(f"No nightly backup in the last 2 days (last: {last_backup or 'never'}).")
+    maker = data.get("slideMaker") or {}
+    for line in maker.get("problems") or []:
+        out.append(f"Slide maker (Posts): {line}")
     phone = data["phone"]
     if phone.get("connected") and phone.get("ble") is False:
         out.append(f"The phone ({phone.get('deviceName') or 'unnamed'}) is connected but its BLE link to the Pi is not, "

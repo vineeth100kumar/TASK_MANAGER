@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 112px;
+      top: var(--content-top, 260px);
+      width: 856px;
+      z-index: 5;
+    }
+
+    .list-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 100px;
+      line-height: 0.9;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+
+    .list-items {
+      display: flex;
+      flex-direction: column;
+      gap: 36px;
+    }
+
+    .list-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 24px;
+    }
+
+    .list-num {
+      width: 80px;
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 56px;
+      line-height: 1.0;
+      color: #F86036;
+      flex-shrink: 0;
+    }
+
+    .list-text {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 50px;
+      line-height: 1.3;
+      color: #0A0A0A;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="header-right">{{ brand.tag }}</div>
+  </div>
+
+  <div class="content-container">
+    <h2 class="list-headline">{{ headline }}</h2>
+    {{ underline_svg | safe }}
+    <div class="list-items">
+      {% for item in items %}
+      <div class="list-row">
+        <div class="list-num">{{ "%02d"|format(loop.index) }}</div>
+        <div class="list-text">{{ item }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="footer-right">{{ counter }}</div>
+  </div>
+</body>
+</html>
