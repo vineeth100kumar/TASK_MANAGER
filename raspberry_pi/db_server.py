@@ -34,6 +34,7 @@ import radar
 import radar_research
 import sparks
 import system_health
+import diagnostics
 import web_files
 from web_files import WebFiles
 
@@ -224,17 +225,24 @@ async def record_requests(request, call_next):
     watched = path.startswith("/api/") or path.startswith("/mcp/")
     if not watched or request.method == "OPTIONS":
         return await call_next(request)
+    diagnostics.request_begin()
     started = asyncio.get_event_loop().time()
     try:
         response = await call_next(request)
     except Exception as e:
         ms = int((asyncio.get_event_loop().time() - started) * 1000)
+        diagnostics.request_end(path, ms, 0)
         logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r}")
         raise
     ms = int((asyncio.get_event_loop().time() - started) * 1000)
     status = response.status_code
-    level = "error" if status >= 500 else "warn" if status >= 400 else "info"
-    logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms)")
+    diagnostics.request_end(path, ms, status)
+    # /api/health is a liveness ping (install scripts, monitors, and the
+    # diagnostics self-probe) — counted above, but kept out of the log so it
+    # doesn't bury the real requests.
+    if path != "/api/health":
+        level = "error" if status >= 500 else "warn" if status >= 400 else "info"
+        logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms)")
     return response
 
 
@@ -698,6 +706,7 @@ async def startup_event():
     _background(google_sheets_backup_worker())
     _background(notifier.scheduler())
     _background(uptime.run())
+    _background(diagnostics.run())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
     _background(life_mode.run(events.broadcast))
@@ -2153,11 +2162,12 @@ def _claude_health() -> dict:
         clock=_clock_status,
         depth_face=_depth_status,
         slide_maker=_slide_maker_status,
+        diagnostics=diagnostics.health_summary,
     )
 
 
 claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health,
-                   logs=logstore.read, drops=drop, posts=posts)
+                   logs=logstore.read, drops=drop, posts=posts, diagnostics=diagnostics)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 
