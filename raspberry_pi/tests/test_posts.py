@@ -328,3 +328,43 @@ class EnginePriorityTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PictureSourceTests(unittest.TestCase):
+    def setUp(self):
+        self.old = notifier.SECRETS_FILE
+        notifier.SECRETS_FILE = Path(TMP) / "pic_secrets.json"
+        for env in posts.PICTURE_KEYS.values():
+            os.environ.pop(env, None)
+
+    def tearDown(self):
+        notifier.SECRETS_FILE = self.old
+
+    def test_keys_saved_hidden_and_passed_to_the_engine(self):
+        res = client.put("/api/posts/pictures", json={"pexels": "abcd efgh 1234 wxyz"}).json()
+        self.assertTrue(res["sources"]["pexels"]["set"])
+        self.assertEqual(res["sources"]["pexels"]["last4"], "wxyz")
+        self.assertNotIn("abcdefgh", json.dumps(res))
+        self.assertFalse(res["sources"]["unsplash"]["set"])
+        self.assertTrue(res["sources"]["wikimedia"]["set"])
+        self.assertEqual(posts._engine_env()["PEXELS_API_KEY"], "abcdefgh1234wxyz")
+        self.assertIn("pictureSources", posts.status())
+        res = client.put("/api/posts/pictures", json={"pexels": ""}).json()    # empty removes it
+        self.assertFalse(res["sources"]["pexels"]["set"])
+        self.assertNotIn("PEXELS_API_KEY", posts._engine_env())
+
+    def test_prompt_tells_the_ai_about_search_pictures(self):
+        text = (Path(posts.ENGINE_DIR) / "POST_FORMAT.md").read_text(encoding="utf-8")
+        prompt = text.split("<!-- PROMPT START -->")[1].split("<!-- PROMPT END -->")[0]
+        self.assertIn("search:", prompt)
+        self.assertIn("Photo credits", prompt)
+
+    def test_caption_gets_a_photo_credit(self):
+        sys.path.insert(0, str(Path(posts.ENGINE_DIR) / "src"))
+        from autocontent.spec import build, stock
+        with mock.patch.object(stock, "credit_for", return_value="Photo by Ann on Pexels"):
+            out = build.with_photo_credits("Hello\n", [{"type": "image", "image_source": "a.jpg"},
+                                                       {"type": "image", "image_source": "b.jpg"}])
+        self.assertEqual(out.count("Photo by Ann on Pexels"), 1)
+        self.assertIn("Photo credits:", out)
+        self.assertEqual(build.with_photo_credits("Hi\n", [{"type": "point"}]), "Hi\n")
