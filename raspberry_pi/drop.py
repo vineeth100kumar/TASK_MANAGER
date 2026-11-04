@@ -72,6 +72,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from pydantic import BaseModel
 
 import public_link
+import system_health
 
 DB_PATH = "sage_sync.db"
 DROP_DIR = Path(os.getenv("SAGE_DROP_DIR", "") or "drops")
@@ -682,6 +683,7 @@ def sweep(now: Optional[float] = None) -> int:
 
 async def run() -> None:
     while True:
+        system_health.beat(SWEEP_SECONDS)
         try:
             sweep()
         except Exception as e:

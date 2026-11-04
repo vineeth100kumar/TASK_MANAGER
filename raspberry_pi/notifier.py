@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import item_shape
 import life_mode
+import system_health
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 DATA_DIR = Path(DB_PATH).resolve().parent
@@ -1186,6 +1187,7 @@ async def scheduler() -> None:
     if not push_available():
         print("pywebpush is not installed, so push notifications are off (pip install -r requirements.txt).")
     while True:
+        system_health.beat(CHECK_EVERY_SECONDS)
         try:
             await asyncio.to_thread(run_once)
         except Exception as e:

@@ -45,6 +45,7 @@ from fastapi import APIRouter
 
 import prices
 import radar
+import system_health
 
 RANGES = ["1D", "1W", "1M", "YTD"]
 # Trading days back for each range (YTD is worked out from the calendar).
@@ -804,6 +805,7 @@ class Collector:
     async def run(self) -> None:
         await asyncio.sleep(20)  # after Radar's own first fetch
         while True:
+            system_health.beat(60)
             try:
                 await self.tick(radar._utcnow())
             except Exception as e:

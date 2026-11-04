@@ -7,6 +7,7 @@ import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy 
 import datetime
 import asyncio
 import logging
+import time
 import uuid
 from pathlib import Path
 import httpx
@@ -623,6 +624,7 @@ async def google_sheets_backup_worker():
     """
     failures = 0
     while True:
+        system_health.beat(GAS_BACKUP_MAX_WAIT)
         failed, rows = False, []
         try:
             conn = sqlite3.connect(DB_PATH)
@@ -681,7 +683,7 @@ _background_tasks: set = set()
 
 def _background(coro) -> None:
     name = system_health.worker_name(coro)
-    task = asyncio.create_task(coro)
+    task = asyncio.create_task(coro, name=name)  # system_health.beat() finds its worker by this name
     _background_tasks.add(task)
     system_health.worker_started(name)
 
@@ -746,6 +748,29 @@ def shutdown_event():
         uptime.on_stop()
     except Exception as e:
         print(f"Couldn't record the shutdown: {e}")
+
+
+@app.get("/api/health/services")
+def health_services():
+    """Every background worker with a status (ok, stale, running, stopped, down),
+    plus the database writer. Needs the key like the rest of /api/ (the plain
+    /api/health stays open as a liveness ping)."""
+    rows = system_health.service_rows()
+    w = db_writer.writer
+    writer = {"running": w.running, "waiting": w.waiting, "done": w.done, "failed": w.failed} if w else None
+    bad = [r["name"] for r in rows if r["status"] in ("down", "stale")]
+    if writer and not writer["running"]:
+        bad.append("db_writer")
+    return {
+        "success": True,
+        "checkedAt": system_health._iso(time.time()),
+        "ok": not bad,
+        "unhealthy": bad,
+        "services": rows,
+        "dbWriter": writer,
+        "uptimeMinutes": int((time.time() - system_health.STARTED) // 60),
+        "commit": system_health.COMMIT,
+    }
 
 
 @app.get("/api/health")

@@ -43,6 +43,7 @@ from typing import Any, Deque, Dict, List, Optional
 import httpx
 
 import logstore
+import system_health
 
 UTC = datetime.timezone.utc
 
@@ -512,6 +513,7 @@ async def run() -> None:
     await asyncio.to_thread(_iowait_pct)
     async with httpx.AsyncClient(timeout=PROBE_TIMEOUT, follow_redirects=False) as client:
         while True:
+            system_health.beat(INTERVAL)
             before = loop.time()
             await asyncio.sleep(INTERVAL)
             lag_ms = max(0.0, (loop.time() - before - INTERVAL) * 1000)
