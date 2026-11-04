@@ -7,6 +7,7 @@ import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy 
 import datetime
 import asyncio
 import logging
+import uuid
 from pathlib import Path
 import httpx
 from fastapi import FastAPI, File, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
@@ -55,6 +56,12 @@ GOOGLE_SHEETS_URL = os.getenv(
 # The key Apps Script expects (its SAGE_AUTH_KEY script property). Without it
 # the backup web app is open to anyone who finds its address.
 GAS_AUTH_KEY = os.getenv("SAGE_GAS_AUTH_KEY", "").strip()
+# A request slower than this many milliseconds is also logged as "slow" (see
+# record_requests and GET /api/logs/slow).
+try:
+    SLOW_MS = max(1, int(os.getenv("SAGE_SLOW_MS", "800")))
+except ValueError:
+    SLOW_MS = 800
 # How often queued changes are copied to Apps Script, in seconds.
 GAS_BACKUP_INTERVAL = int(os.getenv("SAGE_GAS_BACKUP_INTERVAL", "300"))
 GAS_BACKUP_PAGE = 50
@@ -227,6 +234,10 @@ async def record_requests(request, call_next):
     watched = path.startswith("/api/") or path.startswith("/mcp/")
     if not watched or request.method == "OPTIONS":
         return await call_next(request)
+    # A short id on every watched request: it is in the log line and in the
+    # X-Request-Id response header, so a slow page in the browser's Network tab
+    # can be matched to its line in the log.
+    rid = uuid.uuid4().hex[:8]
     diagnostics.request_begin()
     started = asyncio.get_event_loop().time()
     try:
@@ -234,17 +245,20 @@ async def record_requests(request, call_next):
     except Exception as e:
         ms = int((asyncio.get_event_loop().time() - started) * 1000)
         diagnostics.request_end(path, ms, 0)
-        logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r}")
+        logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r} [{rid}]")
         raise
     ms = int((asyncio.get_event_loop().time() - started) * 1000)
     status = response.status_code
     diagnostics.request_end(path, ms, status)
+    response.headers["X-Request-Id"] = rid
     # /api/health is a liveness ping (install scripts, monitors, and the
     # diagnostics self-probe) — counted above, but kept out of the log so it
     # doesn't bury the real requests.
     if path != "/api/health":
         level = "error" if status >= 500 else "warn" if status >= 400 else "info"
-        logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms)")
+        logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms) [{rid}]")
+        if ms >= SLOW_MS:
+            logstore.warn("slow", f"{request.method} {path} -> {status} took {ms}ms (limit {SLOW_MS}ms) [{rid}]")
     return response
 
 
@@ -1410,6 +1424,13 @@ def save_logs_settings(req: LogSettingsRequest):
 def read_logs(since: str = "", level: str = "", source: str = "", q: str = "", limit: int = 100):
     """The recent log, newest first, for the Settings screen and the connector."""
     return {"success": True, **logstore.read(since=since, level=level, source=source, q=q, limit=limit)}
+
+
+@app.get("/api/logs/slow")
+def read_slow_logs(since: str = "", limit: int = 50):
+    """Requests that took SAGE_SLOW_MS (default 800 ms) or longer, newest first.
+    Each line ends with the request id, which is also the X-Request-Id header."""
+    return {"success": True, "slowMs": SLOW_MS, **logstore.read(since=since, source="slow", limit=limit)}
 
 
 @app.post("/api/logs/clear")

@@ -1359,7 +1359,7 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "properties": {
              "since": {"type": "string", "description": "Only entries at or after this ISO-8601 time, e.g. 2026-10-29T00:00:00Z"},
              "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Only this level or louder"},
-             "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier"},
+             "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier, slow (requests that took 800 ms or more, each with its request id)"},
              "q": {"type": "string", "description": "Only entries whose message contains this text"},
              "limit": {"type": "integer", "description": "At most this many (default 100, max 1000)"}}}},
         {"name": "sage_diagnostics", "description": "Explain Sage blackouts (the public URL showing "
