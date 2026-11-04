@@ -18,6 +18,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import db_writer
 import claude_api
 import placement
 import logstore
@@ -699,6 +700,8 @@ async def startup_event():
     logging.getLogger().addHandler(handler)
     logging.getLogger("uvicorn.error").addHandler(handler)
     logstore.info("server", "Sage server started")
+    # The one thread that does database writes (see db_writer.py).
+    db_writer.connect(DB_PATH)
     if access_gate.enabled:
         print("Password gate is on: browsers must log in at /login.")
     if not API_SECRET:
@@ -723,6 +726,7 @@ async def startup_event():
 
 @app.on_event("shutdown")
 def shutdown_event():
+    db_writer.stop()
     # Marks this stop as on purpose, for the "Sage is back up" email.
     try:
         uptime.on_stop()
