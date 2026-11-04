@@ -39,6 +39,7 @@ export interface Post {
   postedAt: string | null;
   emailed: boolean;
   emailError: string;
+  hasCover?: boolean;           // list rows: a finished post has a cover thumbnail
 }
 
 export interface MakerStatus {
@@ -85,8 +86,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+// The last list the Pi sent, so Posts opens showing it at once and refreshes in the background.
+const lastLists = new Map<string, { status: MakerStatus; posts: Post[] }>();
+export const cachedPostList = (projectId = '') => lastLists.get(projectId) || null;
+
 export const postsApi = {
-  list: (projectId = '') => call<{ status: MakerStatus; posts: Post[] }>(`/api/posts${projectId ? `?projectId=${enc(projectId)}` : ''}`),
+  list: (projectId = '') => call<{ status: MakerStatus; posts: Post[] }>(`/api/posts${projectId ? `?projectId=${enc(projectId)}` : ''}`)
+    .then(d => { lastLists.set(projectId, d); return d; }),
   status: () => call<{ status: MakerStatus }>('/api/posts/status').then(d => d.status),
   check: (script: string) => call<{ check: ScriptCheck }>('/api/posts/check', { method: 'POST', body: JSON.stringify({ script }) }).then(d => d.check),
   create: (body: { script: string; title?: string; style?: string; format?: string; projectId?: string }) =>
@@ -107,12 +113,35 @@ export async function fetchBlob(path: string): Promise<Blob> {
   return res.blob();
 }
 
+// Pictures already fetched this visit, as object URLs. Opening a post or the list
+// again shows them at once instead of fetching them from the Pi again. Bounded,
+// oldest first, and an evicted picture's URL is released.
+const pictureUrls = new Map<string, string>();
+const PICTURE_LIMIT = 120;
+
+export async function pictureUrl(path: string): Promise<string> {
+  const have = pictureUrls.get(path);
+  if (have) { pictureUrls.delete(path); pictureUrls.set(path, have); return have; }
+  const url = URL.createObjectURL(await fetchBlob(path));
+  pictureUrls.set(path, url);
+  while (pictureUrls.size > PICTURE_LIMIT) {
+    const [oldest, oldUrl] = pictureUrls.entries().next().value as [string, string];
+    pictureUrls.delete(oldest);
+    URL.revokeObjectURL(oldUrl);
+  }
+  return url;
+}
+export const cachedPictureUrl = (path: string) => pictureUrls.get(path) || '';
+
 export const slidePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.png`;
 /** JPEG copy of a slide, for the share sheet (Instagram lists itself for JPEGs). */
 export const sharePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.jpg`;
 /** Small JPEG of a slide (540 px wide) for the post page; the full PNGs are far too heavy to show. */
 export const previewPath = (id: string, n: number, version = '') =>
   `/api/posts/${enc(id)}/preview/${n}.jpg${version ? `?v=${encodeURIComponent(version)}` : ''}`;
+/** Tiny cover (160 px) for the list; versioned so the browser can keep it for good. */
+export const thumbPath = (id: string, version = '') =>
+  `/api/posts/${enc(id)}/thumb.jpg${version ? `?v=${encodeURIComponent(version)}` : ''}`;
 export const zipPath = (id: string) => `/api/posts/${enc(id)}/zip`;
 export const qrPath = (id: string) => `/api/posts/${enc(id)}/qr.svg`;
 
