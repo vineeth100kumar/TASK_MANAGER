@@ -268,6 +268,7 @@ async def run() -> None:
     tries = 0
     next_try = started + SETTLE_SECONDS
     while True:
+        system_health.beat(BEAT_EVERY_SECONDS)
         await asyncio.sleep(min(BEAT_EVERY_SECONDS, max(1, next_try - time.monotonic())) if outage else BEAT_EVERY_SECONDS)
         try:
             await asyncio.to_thread(beat)

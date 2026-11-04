@@ -43,6 +43,7 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from fastapi import APIRouter
+import system_health
 
 ENABLED = os.getenv("SAGE_RADAR", "1").strip() != "0"
 
@@ -856,6 +857,7 @@ class Collector:
         self.broadcast = broadcast
         await asyncio.sleep(5)  # let the server finish starting first
         while True:
+            system_health.beat(30)
             try:
                 await self.tick(_utcnow())
             except Exception as e:

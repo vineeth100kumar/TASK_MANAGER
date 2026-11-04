@@ -3,6 +3,7 @@ workers, Radar's sources, the Markets board, backups, the phone link and the
 desk clock. Claude reads it through the `sage_health` tool and
 GET /api/claude/health; it carries no secrets (the clock's token stays out)."""
 
+import asyncio
 import datetime
 import os
 import sqlite3
@@ -15,6 +16,8 @@ STARTED = time.time()
 REPO = Path(__file__).resolve().parent.parent
 # Workers started with db_server._background(): name -> {"startedAt", "error"}.
 workers: Dict[str, Dict[str, Any]] = {}
+# Heartbeats: worker name -> {"at": epoch seconds, "expect": seconds until its next beat}.
+beats: Dict[str, Dict[str, float]] = {}
 
 
 def _git(*args: str) -> Optional[str]:
@@ -37,7 +40,47 @@ def worker_name(coro) -> str:
     return f"{module}.{name}" if module else name
 
 
+def beat(expect: float = 300, name: Optional[str] = None) -> None:
+    """A worker's "I'm still going". Call it once per turn of the loop, with
+    `expect` set to how long the loop sleeps; with no name it uses the running
+    task's (db_server._background names each task after its worker). A worker
+    that has not beaten for twice its `expect` plus a minute shows as stale.
+    Never raises: a heartbeat must not break the worker."""
+    try:
+        key = name
+        if key is None:
+            task = asyncio.current_task()
+            key = task.get_name() if task else None
+        if key:
+            beats[key] = {"at": time.time(), "expect": float(expect)}
+    except Exception:
+        pass
+
+
+def service_rows(now: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Every background worker with a status:
+    down (died with an error), stopped (finished or switched itself off),
+    stale (was beating, has stopped), ok (beating on time), or
+    running (alive, but this worker doesn't send heartbeats)."""
+    now = time.time() if now is None else now
+    rows = []
+    for name, info in sorted(workers.items()):
+        row: Dict[str, Any] = {"name": name, **info}
+        b = beats.get(name)
+        if info.get("stoppedAt"):
+            row["status"] = "down" if info.get("error") else "stopped"
+        elif b:
+            age = now - b["at"]
+            row.update(lastBeatAt=_iso(b["at"]), secondsSinceBeat=int(age), expectEverySeconds=int(b["expect"]))
+            row["status"] = "ok" if age <= b["expect"] * 2 + 60 else "stale"
+        else:
+            row["status"] = "running"
+        rows.append(row)
+    return rows
+
+
 def worker_started(name: str) -> None:
+    beats.pop(name, None)
     workers[name] = {"startedAt": _iso(time.time()), "error": None, "stoppedAt": None}
 
 
@@ -158,7 +201,7 @@ def report(
             "passwordGate": password_gate,
             "databaseMb": db_mb,
         },
-        "workers": [{"name": name, **info} for name, info in sorted(workers.items())],
+        "workers": service_rows(),
         "radar": safe(lambda: radar_part(db_path, radar_enabled)),
         "markets": safe(lambda: markets_part(db_path)) if radar_enabled else {"enabled": False},
         "backups": safe(backups),
@@ -213,6 +256,8 @@ def problems(data: dict) -> List[str]:
     for w in data["workers"]:
         if w.get("stoppedAt"):
             out.append(f"Worker {w['name']} stopped" + (f": {w['error']}" if w.get("error") else "."))
+        elif w.get("status") == "stale":
+            out.append(f"Worker {w['name']} has not reported for {w['secondsSinceBeat']} s (it should every {w['expectEverySeconds']} s); it may be stuck.")
     for s in data["radar"].get("sources", []):
         if not s["ok"]:
             out.append(f"Radar source {s['name']} is down: {s['error'] or 'no reason given'}.")

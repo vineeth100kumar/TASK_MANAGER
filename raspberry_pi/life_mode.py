@@ -29,6 +29,7 @@ import os
 import sqlite3
 import time
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
+import system_health
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 MODES = ("work", "chill")
@@ -280,6 +281,7 @@ async def run(broadcast: Broadcast, every: float = 3.0) -> None:
     last: Optional[dict] = None
     watch = ArrivalWatch()
     while True:
+        system_health.beat(max(every, 1))
         try:
             known, home = presence()
             if watch.update(known, home, time.time(), last_seen()):

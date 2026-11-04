@@ -17,6 +17,7 @@ import os
 import sqlite3
 from pathlib import Path
 from typing import List, Optional
+import system_health
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 BACKUP_DIR = Path(os.getenv("SAGE_BACKUP_DIR", str(Path(DB_PATH).resolve().parent / "backups")))
@@ -95,6 +96,7 @@ def due(now_local: datetime.datetime, last_utc: Optional[datetime.datetime]) -> 
 async def scheduler(local_now) -> None:
     """local_now() returns the current time in the user's time zone."""
     while True:
+        system_health.beat(CHECK_EVERY_SECONDS)
         try:
             backups = list_backups()
             last = datetime.datetime.fromtimestamp(backups[0].stat().st_mtime, datetime.timezone.utc) if backups else None
