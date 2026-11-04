@@ -648,8 +648,8 @@ async def google_sheets_backup_worker():
                         if refused:
                             print(f"Google Sheets backup: {len(refused)} change(s) in batch {row_id} were rejected: {refused[:3]}")
                             logstore.warn("backup", f"{len(refused)} change(s) in batch {row_id} were rejected by Google Sheets: {refused[:3]}")
-                        cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
-                        conn.commit()
+                        await db_writer.get(DB_PATH).write(
+                            lambda c, row_id=row_id: c.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,)))
             conn.close()
         except Exception as e:
             print(f"Backup worker error: {e}")
@@ -832,21 +832,25 @@ async def process_operations(request: Request):
 async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -> dict:
     """Apply a batch of sync operations, queue them for the backup and tell
     every client. The web app and Claude's API (claude_api.py) both write here."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     op_results = []
     applied_ops = []
     new_server_rev = None
 
-    def next_rev():
-        # Only a batch that changes something moves the revision, so a retried
-        # batch doesn't make every device pull again.
+    def apply_batch(conn):
+        # Runs on the database writer thread (db_writer.py), which commits when
+        # this returns and rolls back if it raises, so the batch is one
+        # transaction and the event loop is never held by the commit.
         nonlocal new_server_rev
-        if new_server_rev is None:
-            new_server_rev = increment_server_revision(cursor)
-        return new_server_rev
+        cursor = conn.cursor()
 
-    try:
+        def next_rev():
+            # Only a batch that changes something moves the revision, so a retried
+            # batch doesn't make every device pull again.
+            nonlocal new_server_rev
+            if new_server_rev is None:
+                new_server_rev = increment_server_revision(cursor)
+            return new_server_rev
+
         cursor.execute("BEGIN TRANSACTION")
 
         ids = [op.operationId for op in req.operations if op.operationId]
@@ -943,12 +947,11 @@ async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -
                     "operations": [op.model_dump() for op in applied_ops],
                 }),),
             )
-        conn.commit()
+
+    try:
+        await db_writer.get(DB_PATH).write(apply_batch)
     except Exception as e:
-        conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
 
     if applied_ops:
         await events.broadcast({
@@ -1213,7 +1216,7 @@ class ItemActionRequest(BaseModel):
 @app.post("/api/items/{item_id}/done")
 async def item_done(item_id: str, req: ItemActionRequest):
     """Mark an item done from a notification action button."""
-    saved = item_actions.mark_done(item_id, req.source)
+    saved = await item_actions.mark_done_async(item_id, req.source)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
@@ -1223,7 +1226,7 @@ async def item_done(item_id: str, req: ItemActionRequest):
 @app.post("/api/items/{item_id}/snooze")
 async def item_snooze(item_id: str, req: ItemActionRequest):
     """Snooze an item for 1 hour from a notification action button."""
-    saved = item_actions.snooze(item_id, req.source)
+    saved = await item_actions.snooze_async(item_id, req.source)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
@@ -1235,7 +1238,7 @@ async def item_tomorrow(item_id: str, req: ItemActionRequest):
     """Move an item to tomorrow from a notification action button."""
     import notifier as _notifier
     today = datetime.datetime.now(_notifier._tz(_notifier.get_prefs())).date()
-    saved = item_actions.move_to_tomorrow(item_id, req.source, today)
+    saved = await item_actions.move_to_tomorrow_async(item_id, req.source, today)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
