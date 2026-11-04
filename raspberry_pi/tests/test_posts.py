@@ -191,7 +191,13 @@ class DrawTests(unittest.IsolatedAsyncioTestCase):
             await asyncio.sleep(0.5)
             post = posts.get(post["id"])
             if post["status"] in ("done", "failed"):
-                return post
+                # "done" is saved before the JPEG copies and the email, so wait
+                # for the whole run to end; otherwise the next step races it.
+                for _ in range(200):
+                    if not posts._lock.locked():
+                        break
+                    await asyncio.sleep(0.1)
+                return posts.get(post["id"])
         self.fail("the post never finished")
 
     async def test_draws_emails_and_moves_the_task(self):

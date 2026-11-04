@@ -44,7 +44,9 @@ from pydantic import BaseModel
 
 import item_shape
 import logstore
+import lowprio
 import notifier
+import posts_copies
 
 DB_PATH = "sage_sync.db"
 ENGINE_DIR = Path(__file__).resolve().parent / "content_engine"
@@ -413,6 +415,18 @@ def status() -> dict:
         "maxScript": MAX_SCRIPT,
         "pictureSources": picture_sources(),
         "hotCache": _hot.stats(),
+        "engine": engine_limits(),
+    }
+
+
+def engine_limits() -> dict:
+    """How the slide engine is kept from slowing the app (for sage_health)."""
+    io = lowprio.io_priority_value()
+    return {
+        "nice": ENGINE_NICE,
+        "ioPriority": "off" if io is None else ("idle" if io >> 13 == 3 else f"best-effort {io & 7}"),
+        "ioScheduler": lowprio.io_scheduler(str(POSTS_DIR if POSTS_DIR.exists() else POSTS_DIR.parent)),
+        "maxMemoryMb": _max_engine_mb(),
     }
 
 
@@ -634,7 +648,7 @@ async def _run(post: dict) -> None:
         await save_async(post)
         await _announce(post)
         if post["status"] == "done":
-            await asyncio.to_thread(prepare_copies, post)
+            await _copies_in_child(post)
             await _after_done(post)
         else:
             logstore.warn("posts", f"Post {post['id']} failed: {post['error']}")
@@ -649,10 +663,25 @@ ENGINE_NICE = int(os.environ.get("SAGE_POSTS_NICE", "15"))
 
 
 def _lower_priority() -> None:
+    """In the child before it starts: low CPU priority, and low disk priority
+    too (see lowprio.py), since on a Pi with a slow disk the engine's files are
+    what stall the web app, more than its CPU."""
+    lowprio.lower(ENGINE_NICE)
+
+
+# The engine and its Chromium are watched while they draw. Above this much
+# memory (in MB, for the engine and everything it started) they are stopped
+# with a plain message, so one huge post can't push the Pi into swapping or
+# take the web app down with it. 0 turns the limit off.
+def _max_engine_mb() -> int:
     try:
-        os.nice(ENGINE_NICE)
-    except OSError:
-        pass
+        return max(0, int(float(os.environ.get("SAGE_POSTS_MAX_MB", "2000"))))
+    except ValueError:
+        return 2000
+
+
+MEMORY_CHECK_SECONDS = 2.0
+COPIES_TIMEOUT = 300  # seconds for one post's JPEG copies
 
 
 async def _draw(post: dict, folder: Path, script_file: Path) -> int:
@@ -662,6 +691,7 @@ async def _draw(post: dict, folder: Path, script_file: Path) -> int:
         *argv, cwd=str(ENGINE_DIR), env=_engine_env(),
         stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT,
         preexec_fn=_lower_priority if os.name == "posix" else None,
+        start_new_session=True,  # its own process group, so we can stop Chromium with it
     )
     errors: List[str] = []
     last_save = [0.0]
@@ -693,13 +723,38 @@ async def _draw(post: dict, folder: Path, script_file: Path) -> int:
                 await save_async(post)
                 await _announce(post)
 
+    limit_mb = _max_engine_mb()
+    peak = [0.0]
+    over = [0.0]
+
+    async def watch() -> None:
+        while proc.returncode is None:
+            await asyncio.sleep(MEMORY_CHECK_SECONDS)
+            used = await asyncio.to_thread(lowprio.group_rss_mb, proc.pid)
+            if used is None:
+                return  # no /proc here: nothing to watch
+            peak[0] = max(peak[0], used)
+            if limit_mb and used > limit_mb:
+                over[0] = used
+                lowprio.kill_group(proc.pid)
+                return
+
     started = datetime.datetime.now()
+    watcher = asyncio.create_task(watch())
     try:
         await asyncio.wait_for(asyncio.gather(read(), proc.wait()), timeout=RENDER_TIMEOUT)
     except asyncio.TimeoutError:
+        lowprio.kill_group(proc.pid)  # Chromium too, not just the engine
         proc.kill()
         raise
+    finally:
+        watcher.cancel()
     post["seconds"] = round((datetime.datetime.now() - started).total_seconds(), 1)
+    if peak[0]:
+        post["peakMb"] = round(peak[0])
+    if over[0]:
+        raise RuntimeError(f"Drawing used more than {limit_mb} MB of memory (it reached {round(over[0])} MB) and was stopped. "
+                           "Try a shorter script, or raise SAGE_POSTS_MAX_MB.")
     if proc.returncode not in (0, 2):
         post["error"] = _plain_error(errors)
     return proc.returncode or 0
@@ -1067,26 +1122,16 @@ def posts_slide(post_id: str, n: int):
     return _serve_file(post, path, "png", n, "image/png")
 
 
-PREVIEW_WIDTH = 540  # the post page shows slides about 330 px wide; 540 stays sharp on 2x screens
+PREVIEW_WIDTH = posts_copies.PREVIEW[0]
 
 
 def _jpeg_copy(post: dict, n: int, kind: str, width: int, quality: int, subsampling: int) -> Optional[Path]:
-    """A JPEG copy of slide n, made once and kept in out/<kind>/. Written to a
-    temp name and renamed, so two requests making it at once can't serve half a file."""
+    """A JPEG copy of slide n, made once and kept in out/<kind>/ (see posts_copies.py)."""
     src = slide_path(post, n)
     if not src:
         return None
     dest = POSTS_DIR / post["id"] / "out" / kind / f"{src.stem}.jpg"
-    if not dest.is_file() or dest.stat().st_mtime < src.stat().st_mtime:
-        from PIL import Image
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        tmp = dest.with_name(f".{dest.stem}.{os.getpid()}.{threading.get_ident()}.tmp")
-        with Image.open(src) as im:
-            im = im.convert("RGB")
-            if im.width > width:
-                im = im.resize((width, round(im.height * width / im.width)), Image.LANCZOS)
-            im.save(tmp, "JPEG", quality=quality, optimize=True, subsampling=subsampling)
-        os.replace(tmp, dest)
+    posts_copies.make_copy(src, dest, width, quality, subsampling)
     return dest
 
 
@@ -1094,14 +1139,41 @@ def share_jpeg(post: dict, n: int) -> Optional[Path]:
     """The slide as a JPEG for the phone's share sheet. Instagram lists itself
     for JPEG pictures, and several phones leave it out for large PNGs, so Share
     sends these. Made once, kept beside the PNGs, and the ZIP keeps the PNGs."""
-    return _jpeg_copy(post, n, "share", 10_000, 92, 0)
+    return _jpeg_copy(post, n, "share", *posts_copies.SHARE)
 
 
 def preview_jpeg(post: dict, n: int) -> Optional[Path]:
     """A small JPEG of the slide (540 px wide, a few dozen KB) for the post
     page. The full PNGs are a few MB together, so showing those made the page
     sit on grey boxes over a slow link."""
-    return _jpeg_copy(post, n, "preview", PREVIEW_WIDTH, 82, 2)
+    return _jpeg_copy(post, n, "preview", *posts_copies.PREVIEW)
+
+
+async def _copies_in_child(post: dict) -> None:
+    """Make the post's preview and share JPEGs in a small low-priority process
+    instead of on threads inside the web server (encoding two dozen images
+    competes with page requests for the CPU and the disk). If the child can't
+    run, fall back to making them here."""
+    out = POSTS_DIR / post["id"] / "out"
+    script = Path(__file__).resolve().parent / "posts_copies.py"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(script), str(out),
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            preexec_fn=_lower_priority if os.name == "posix" else None,
+            start_new_session=True,
+        )
+        try:
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=COPIES_TIMEOUT)
+        except asyncio.TimeoutError:
+            lowprio.kill_group(proc.pid)
+            proc.kill()
+            raise
+        if proc.returncode != 0:
+            raise RuntimeError((err or b"").decode("utf-8", errors="replace").strip()[-200:] or f"exit code {proc.returncode}")
+    except Exception as e:
+        logstore.warn("posts", f"Couldn't make the JPEG copies of post {post['id']} in a child process ({e or e.__class__.__name__}); making them here.")
+        await asyncio.to_thread(prepare_copies, post)
 
 
 def prepare_copies(post: dict) -> None:
