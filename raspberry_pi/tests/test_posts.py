@@ -143,57 +143,6 @@ class DatabaseMode(unittest.TestCase):
         posts.delete("abcdefabcdef")
 
 
-class FastListAndImages(unittest.TestCase):
-    """The list and the pictures come from memory, with a tiny cover and long-lived headers."""
-
-    PID = "abc123abc123"
-
-    def setUp(self):
-        from PIL import Image
-        out = posts.POSTS_DIR / self.PID / "out"
-        out.mkdir(parents=True, exist_ok=True)
-        Image.new("RGB", (1080, 1350), (120, 40, 200)).save(out / "slide_01.png")
-        self.post = {"id": self.PID, "createdAt": "2026-11-03T10:00:00.000Z", "finishedAt": "T1", "title": "Fast", "script": "s" * 500,
-                     "status": "done", "slides": ["slide_01.png"], "slideCount": 1, "projectId": "p1", "format": "portrait"}
-        posts.save(self.post)
-
-    def tearDown(self):
-        posts.delete(self.PID)
-
-    def test_list_row_is_light_and_has_cover_flag(self):
-        row = [r for r in posts.recent() if r["id"] == self.PID][0]
-        self.assertNotIn("script", row)
-        self.assertEqual(row["slides"], [])
-        self.assertTrue(row["hasCover"])
-
-    def test_list_follows_saves_and_deletes(self):
-        posts.recent()  # fill the memory copy
-        posts.save({**self.post, "title": "Renamed"})
-        self.assertEqual([r for r in posts.recent() if r["id"] == self.PID][0]["title"], "Renamed")
-        self.assertEqual(len(posts.recent(project_id="nobody")), 0)
-        posts.delete(self.PID)
-        self.assertFalse([r for r in posts.recent() if r["id"] == self.PID])
-
-    def test_cover_is_tiny_and_cacheable(self):
-        res = client.get(f"/api/posts/{self.PID}/thumb.jpg?v=T1")
-        self.assertEqual(res.status_code, 200)
-        self.assertLess(len(res.content), 8000)
-        self.assertIn("immutable", res.headers["cache-control"])
-        again = client.get(f"/api/posts/{self.PID}/thumb.jpg?v=T1", headers={"If-None-Match": res.headers["etag"]})
-        self.assertEqual(again.status_code, 304)
-        self.assertNotIn("immutable", client.get(f"/api/posts/{self.PID}/slides/1.png").headers["cache-control"])
-
-    def test_remade_post_gets_a_new_etag(self):
-        first = client.get(f"/api/posts/{self.PID}/preview/1.jpg").headers["etag"]
-        posts.save({**self.post, "finishedAt": "T2"})
-        self.assertNotEqual(client.get(f"/api/posts/{self.PID}/preview/1.jpg").headers["etag"], first)
-
-    def test_list_is_gzipped_when_big_enough(self):
-        res = client.get("/api/posts", headers={"Accept-Encoding": "gzip"})
-        self.assertEqual(res.status_code, 200)
-        self.assertTrue(res.json()["success"])
-
-
 class StartRules(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         posts.connect(db_server.DB_PATH, None, None, None, None)

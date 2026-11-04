@@ -10,7 +10,7 @@ import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, ImageDown, RefreshCw, Send, Share2, Smartphone, Trash2,
 } from 'lucide-react';
 import {
-  MakerStatus, POST_EVENT, Post, cachedPictureUrl, canShareFiles, copyText, fetchBlob, fileName, pictureUrl, postLink, postsApi, qrPath, previewPath, saveBlob, sharePath, zipPath,
+  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, previewPath, saveBlob, sharePath, zipPath,
 } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
 
@@ -72,13 +72,12 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     (async () => {
       try {
         // Small previews first, each shown the moment it lands, so the page fills in at once.
-        // Ones already seen this visit show at once; the rest land as they arrive. Object URLs belong
-        // to the shared picture cache, which releases them, so nothing is revoked here.
-        setUrls(post.slides.map((_, i) => cachedPictureUrl(previewPath(post.id, i + 1, post.finishedAt || ''))));
+        setUrls(old => { old.forEach(URL.revokeObjectURL); return []; });
         await Promise.all(post.slides.map(async (_, i) => {
-          const url = await pictureUrl(previewPath(post.id, i + 1, post.finishedAt || ''));
+          const blob = await fetchBlob(previewPath(post.id, i + 1, post.finishedAt || ''));
           if (!alive) return;
-          setUrls(old => { const next = [...old]; next[i] = url; return next; });
+          const url = URL.createObjectURL(blob);
+          setUrls(old => { const next = [...old]; if (next[i]) URL.revokeObjectURL(next[i]); next[i] = url; return next; });
         }));
         // Share sends JPEGs: Instagram shows up in the share sheet for them, where it can miss big PNGs.
         // These are full size, so they come after the previews and don't hold them up.
@@ -91,6 +90,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     })();
     return () => { alive = false; };
   }, [post, stamp]);
+  useEffect(() => () => { urls.forEach(URL.revokeObjectURL); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The QR code opens this post on a phone (PC only; it needs a public link).
   useEffect(() => {
@@ -228,7 +228,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             {post.slides.map((_, i) => (
               <div key={i} className="snap-start shrink-0 w-[62%] sm:w-[34%] md:w-[30%]">
                 {urls[i]
-                  ? <img src={urls[i]} alt={`Slide ${i + 1}`} decoding="async" loading={i < 2 ? 'eager' : 'lazy'} width={540} height={post.format === 'square' ? 540 : 675} className={`w-full rounded-2xl border border-black/10 dark:border-white/10 ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'} object-cover`} />
+                  ? <img src={urls[i]} alt={`Slide ${i + 1}`} className={`w-full rounded-2xl border border-black/10 dark:border-white/10 ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'} object-cover`} />
                   : <div className={`skeleton w-full rounded-2xl ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'}`} />}
                 <div className="flex items-center justify-center gap-2 mt-1 text-[11px] text-gray-400 tabular-nums">
                   {i + 1}
