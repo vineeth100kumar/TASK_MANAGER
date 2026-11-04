@@ -1,46 +1,21 @@
 // PostsView - Posts: slides made on the Pi from a pasted script.
 // The list, the New post screen and one post's page, with the project filter
 // when it is opened from a project that uses Auto Content.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { MakerStatus, POST_EVENT, Post, cachedPictureUrl, cachedPostList, pictureUrl, postsApi, postsAvailable, thumbPath } from '../../services/posts';
+import { MakerStatus, POST_EVENT, Post, postsApi, postsAvailable } from '../../services/posts';
 import { NewPostScreen } from '../posts/NewPostScreen';
 import { PostPage } from '../posts/PostPage';
 import { timeAgo } from '../../services/radar';
-
-/** The cover of a finished post: fetched only when the row scrolls near the screen, then kept. */
-function Cover({ post }: { post: Post }) {
-  const path = thumbPath(post.id, post.finishedAt || '');
-  const [url, setUrl] = useState(() => cachedPictureUrl(path));
-  const box = useRef<HTMLSpanElement>(null);
-  useEffect(() => {
-    if (url || !box.current) return;
-    let alive = true;
-    const fetchIt = () => pictureUrl(path).then(u => { if (alive) setUrl(u); }).catch(() => {});
-    if (typeof IntersectionObserver === 'undefined') { fetchIt(); return () => { alive = false; }; }
-    const watcher = new IntersectionObserver(entries => {
-      if (entries.some(e => e.isIntersecting)) { watcher.disconnect(); fetchIt(); }
-    }, { rootMargin: '300px' });
-    watcher.observe(box.current);
-    return () => { alive = false; watcher.disconnect(); };
-  }, [path, url]);
-  const tall = post.format !== 'square';
-  return (
-    <span ref={box} className={`w-10 shrink-0 rounded-lg overflow-hidden bg-gray-200 dark:bg-white/10 ${tall ? 'h-[50px]' : 'h-10'}`}>
-      {url && <img src={url} alt="" width={40} height={tall ? 50 : 40} decoding="async" className="w-full h-full object-cover" />}
-    </span>
-  );
-}
 
 type Screen = { name: 'list' } | { name: 'new' } | { name: 'post'; id: string } | { name: 'edit'; post: Post };
 
 export function PostsView({ projectId = '', focus }: { projectId?: string; focus?: { postId?: string; newPost?: boolean; nonce: number } | null }) {
   const [screen, setScreen] = useState<Screen>({ name: 'list' });
-  const first = cachedPostList(projectId);
-  const [posts, setPosts] = useState<Post[] | null>(first?.posts ?? null);
-  const [status, setStatus] = useState<MakerStatus | null>(first?.status ?? null);
+  const [posts, setPosts] = useState<Post[] | null>(null);
+  const [status, setStatus] = useState<MakerStatus | null>(null);
   const [error, setError] = useState('');
 
   const load = useCallback(async () => {
@@ -124,9 +99,9 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
         {(posts || []).map(p => (
           <li key={p.id}>
             <button onClick={() => setScreen({ name: 'post', id: p.id })} className="w-full text-left surface-item rounded-2xl p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform">
-              {p.status === 'done' && p.hasCover ? <Cover post={p} /> : <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${p.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' : p.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'}`}>
+              <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${p.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' : p.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'}`}>
                 {p.status === 'done' ? <CheckCircle2 size={18} /> : p.status === 'failed' ? <TriangleAlert size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
-              </span>}
+              </span>
               <span className="min-w-0 flex-1">
                 <span className="block text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{p.title}</span>
                 <span className="block text-[12px] text-gray-500 truncate">

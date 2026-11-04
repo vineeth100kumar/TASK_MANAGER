@@ -38,14 +38,13 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
 import item_shape
 import logstore
 import notifier
-import web_files
 
 DB_PATH = "sage_sync.db"
 ENGINE_DIR = Path(__file__).resolve().parent / "content_engine"
@@ -178,23 +177,12 @@ def _is_fresh(post: dict) -> bool:
     return age <= datetime.timedelta(days=days)
 
 
-def _serve_file(post: dict, path: Path, kind: str, n: int, media_type: str, request=None) -> Response:
+def _serve_file(post: dict, path: Path, kind: str, n: int, media_type: str) -> Response:
     """Serve an image from RAM when its post is in this week's window, reading
     the file (and caching it) only on the first miss. Older posts are streamed
-    straight off disk and never fill the cache, except the tiny cover
-    thumbnails, which always stay in RAM so the list never waits on the drive.
-
-    A picture never changes for a given post and finish time, so the app asks
-    for it with ?v=<finish time> and the browser keeps it for a year; a second
-    visit then doesn't touch the Pi at all. The ETag lets it re-check cheaply."""
-    versioned = bool(request is not None and request.query_params.get("v"))
-    cache = "private, max-age=31536000, immutable" if versioned else "private, max-age=86400"
-    etag = '"%s-%s-%s-%s"' % (post["id"], kind, n, post.get("finishedAt") or "")
-    headers = {"Cache-Control": cache, "ETag": etag}
-    if request is not None and etag in request.headers.get("if-none-match", ""):
-        return Response(status_code=304, headers=headers)
-    keep_hot = kind == "thumb" or _is_fresh(post)
-    if _hot.cap <= 0 or not keep_hot:
+    straight off disk and never fill the cache."""
+    headers = {"Cache-Control": "private, max-age=86400"}
+    if _hot.cap <= 0 or not _is_fresh(post):
         return FileResponse(path, media_type=media_type, headers=headers)
     key = _hot_key(post["id"], kind, n)
     data = _hot.get(key)
@@ -223,17 +211,6 @@ def warm_cache() -> None:
     except Exception as e:  # a cold cache is never worth crashing a thread over
         logstore.warn("posts", f"Couldn't list posts to warm the cache: {e}")
         return
-    # Every post's cover thumbnail (a few KB each) goes in, fresh or not, so the list is instant.
-    try:
-        for row in recent(limit=0):
-            if not row.get("hasCover"):
-                continue
-            full = get(row["id"])
-            path = thumb_jpeg(full, 1) if full else None
-            if path and Path(path).is_file():
-                _hot.put(_hot_key(row["id"], "thumb", 1), Path(path).read_bytes())
-    except Exception as e:
-        logstore.warn("posts", f"Couldn't warm the cover thumbnails: {e}")
     for summary_row in posts:
         post = get(summary_row["id"])
         if not post:
@@ -326,7 +303,6 @@ def _write(row: tuple) -> None:
         conn.commit()
     finally:
         conn.close()
-    _mem_clear()
 
 
 def get(post_id: str) -> Optional[dict]:
@@ -340,61 +316,21 @@ def get(post_id: str) -> Optional[dict]:
     return json.loads(row["payload"]) if row else None
 
 
-# Read-only copies kept in memory. A post page asks for a dozen images in a
-# row and every request used to read and parse the whole post (script, log and
-# all) off the database first; the list did the same for all 60 posts. Any
-# write drops everything here, so a reader never sees stale data. Callers get
-# the shared dict and must not change it -- code that edits a post uses get().
-_mem_lock = threading.Lock()
-_mem_posts: "OrderedDict[str, dict]" = OrderedDict()
-_mem_rows: Optional[List[dict]] = None   # every post's list row, newest first
-_MEM_POSTS_MAX = 64
-
-
-def _mem_clear() -> None:
-    global _mem_rows
-    with _mem_lock:
-        _mem_posts.clear()
-        _mem_rows = None
-
-
-def get_shared(post_id: str) -> Optional[dict]:
-    """get() for read-only use (serving images): answered from memory when it can."""
-    with _mem_lock:
-        post = _mem_posts.get(post_id)
-        if post is not None:
-            _mem_posts.move_to_end(post_id)
-            return post
-    post = get(post_id)
-    if post is not None:
-        with _mem_lock:
-            _mem_posts[post_id] = post
-            while len(_mem_posts) > _MEM_POSTS_MAX:
-                _mem_posts.popitem(last=False)
-    return post
-
-
-def _all_rows() -> List[dict]:
-    global _mem_rows
-    with _mem_lock:
-        if _mem_rows is not None:
-            return _mem_rows
+def recent(project_id: str = "", limit: int = 60) -> List[dict]:
     conn = _db()
     try:
         rows = conn.execute("SELECT payload FROM posts ORDER BY created_at DESC").fetchall()
     finally:
         conn.close()
-    built = [summary(json.loads(row["payload"])) for row in rows]
-    with _mem_lock:
-        _mem_rows = built
-    return built
-
-
-def recent(project_id: str = "", limit: int = 60) -> List[dict]:
-    """The list rows, newest first. Built once and kept in memory until a post
-    changes, so opening Posts doesn't re-read every post off the drive."""
-    out = [r for r in _all_rows() if not project_id or r.get("projectId") == project_id]
-    return out[:limit] if limit else list(out)
+    out = []
+    for row in rows:
+        post = json.loads(row["payload"])
+        if project_id and post.get("projectId") != project_id:
+            continue
+        out.append(summary(post))
+        if limit and len(out) >= limit:
+            break
+    return out
 
 
 # Fields the list row never needs: the heavy or per-slide parts. The app loads
@@ -409,7 +345,6 @@ def summary(post: dict) -> dict:
     keep = {k: v for k, v in post.items() if k not in _ROW_DROP}
     keep["captionStart"] = (post.get("caption") or "")[:140]
     keep["slides"] = []  # kept for the Post type; filled in by the open view
-    keep["hasCover"] = bool(post.get("status") == "done" and post.get("slides"))
     return keep
 
 
@@ -970,7 +905,6 @@ def delete(post_id: str) -> bool:
     finally:
         conn.close()
     _hot.invalidate(post_id)
-    _mem_clear()
     shutil.rmtree(POSTS_DIR / post_id, ignore_errors=True)
     return cur.rowcount > 0
 
@@ -1007,8 +941,8 @@ def _bad(message: str, code: int = 400) -> JSONResponse:
 
 
 @router.get("/api/posts")
-def posts_list(request: Request, projectId: str = "", limit: int = 60):
-    return web_files.json_maybe_gzip(request, {"success": True, "status": status(), "posts": recent(projectId, max(1, min(limit, 100)))})
+def posts_list(projectId: str = "", limit: int = 60):
+    return {"success": True, "status": status(), "posts": recent(projectId, max(1, min(limit, 100)))}
 
 
 @router.get("/api/posts/status")
@@ -1125,12 +1059,12 @@ def posts_delete(post_id: str):
 
 
 @router.get("/api/posts/{post_id}/slides/{n}.png")
-def posts_slide(post_id: str, n: int, request: Request):
-    post = get_shared(post_id)
+def posts_slide(post_id: str, n: int):
+    post = get(post_id)
     path = slide_path(post, n) if post else None
     if not path:
         return _missing()
-    return _serve_file(post, path, "png", n, "image/png", request)
+    return _serve_file(post, path, "png", n, "image/png")
 
 
 PREVIEW_WIDTH = 540  # the post page shows slides about 330 px wide; 540 stays sharp on 2x screens
@@ -1170,53 +1104,33 @@ def preview_jpeg(post: dict, n: int) -> Optional[Path]:
     return _jpeg_copy(post, n, "preview", PREVIEW_WIDTH, 82, 2)
 
 
-THUMB_WIDTH = 160  # the list shows a cover about 40 px wide; 160 stays sharp on 3x screens
-
-
-def thumb_jpeg(post: dict, n: int = 1) -> Optional[Path]:
-    """A tiny JPEG (about 160 px wide, a few KB) of a slide for the Posts list.
-    Made once: when a post finishes, or on first request for older posts."""
-    return _jpeg_copy(post, n, "thumb", THUMB_WIDTH, 72, 2)
-
-
 def prepare_copies(post: dict) -> None:
     """Make every preview and share JPEG ahead of time, so the first visit to
     the post page doesn't wait for the Pi to encode 2 x 12 images."""
     for n in range(1, len(post.get("slides") or []) + 1):
         try:
-            if n == 1:
-                thumb_jpeg(post, 1)  # first, so the list can show the cover soonest
             preview_jpeg(post, n)
             share_jpeg(post, n)
         except OSError as e:
             logstore.warn("posts", f"Couldn't make the JPEG copies of slide {n} of post {post['id']}: {e}")
 
 
-@router.get("/api/posts/{post_id}/thumb.jpg")
-def posts_thumb(post_id: str, request: Request):
-    post = get_shared(post_id)
-    path = thumb_jpeg(post, 1) if post else None
-    if not path:
-        return _missing()
-    return _serve_file(post, path, "thumb", 1, "image/jpeg", request)
-
-
 @router.get("/api/posts/{post_id}/preview/{n}.jpg")
-def posts_slide_preview(post_id: str, n: int, request: Request):
-    post = get_shared(post_id)
+def posts_slide_preview(post_id: str, n: int):
+    post = get(post_id)
     path = preview_jpeg(post, n) if post else None
     if not path:
         return _missing()
-    return _serve_file(post, path, "preview", n, "image/jpeg", request)
+    return _serve_file(post, path, "preview", n, "image/jpeg")
 
 
 @router.get("/api/posts/{post_id}/slides/{n}.jpg")
-def posts_slide_jpeg(post_id: str, n: int, request: Request):
-    post = get_shared(post_id)
+def posts_slide_jpeg(post_id: str, n: int):
+    post = get(post_id)
     path = share_jpeg(post, n) if post else None
     if not path:
         return _missing()
-    return _serve_file(post, path, "share", n, "image/jpeg", request)
+    return _serve_file(post, path, "share", n, "image/jpeg")
 
 
 @router.get("/api/posts/{post_id}/zip")
