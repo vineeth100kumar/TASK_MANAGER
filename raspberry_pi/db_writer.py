@@ -118,6 +118,19 @@ def connect(path: str) -> DbWriter:
     return writer
 
 
+def get(path: str) -> DbWriter:
+    """The writer for this database, made and started on first use.
+
+    Callers use this instead of connect() so a write works without waiting for
+    server startup (tests) and follows DB_PATH if it is changed."""
+    global writer
+    if writer is None or writer.path != path:
+        return connect(path)
+    if not writer.running:
+        writer.start()
+    return writer
+
+
 def submit(fn: Callable[[sqlite3.Connection], Any]) -> Future:
     if writer is None:
         raise RuntimeError("db_writer.connect(path) has not been called")
