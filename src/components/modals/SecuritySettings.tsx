@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, type ReactNode } from 'react';
-import { Fingerprint, ShieldCheck, Trash2, Plus, Lock, AlertTriangle, RefreshCw } from 'lucide-react';
+import { Fingerprint, ShieldCheck, Trash2, Plus, Lock, AlertTriangle, RefreshCw, LogOut } from 'lucide-react';
 import { useToast } from '../../context/ToastContext';
 import { piBackendUrl } from '../../services/piBackend';
 import {
@@ -81,6 +81,10 @@ export function SecuritySettings() {
     }
   };
 
+  // Sign this browser out: /logout clears the login cookie on the Pi and sends
+  // the browser to the password page, so the next open asks for the password.
+  const logOut = () => { window.location.href = `${piBackendUrl()}/logout`; };
+
   return (
     <div className="space-y-5">
       <header className="flex items-start gap-3">
@@ -152,6 +156,18 @@ export function SecuritySettings() {
           </ul>
           <p className="px-1 text-[12px] text-gray-400">
             Removing a device, or changing your password, makes it ask for the password again. These never leave the Pi.
+          </p>
+        </div>
+      )}
+
+      {!noPi && !loading && status?.gate !== false && (
+        <div className="pt-1">
+          <button onClick={logOut}
+            className="w-full h-11 rounded-2xl flex items-center justify-center gap-2 text-[14px] font-semibold text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-400/10 ring-1 ring-inset ring-red-600/10 dark:ring-red-400/15 hover:bg-red-100 dark:hover:bg-red-400/15 transition-colors active:scale-[0.98]">
+            <LogOut size={16} /> Log out of this device
+          </button>
+          <p className="mt-2 px-1 text-[12px] text-gray-400">
+            Signs this browser out. Sage will ask for your password next time it opens here. Other devices stay signed in.
           </p>
         </div>
       )}
