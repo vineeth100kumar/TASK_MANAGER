@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { MakerStatus, POST_EVENT, Post, postsApi, postsAvailable } from '../../services/posts';
+import { MakerStatus, POST_EVENT, Post, mediaUrl, postsApi, postsAvailable } from '../../services/posts';
 import { NewPostScreen } from '../posts/NewPostScreen';
 import { PostPage } from '../posts/PostPage';
 import { timeAgo } from '../../services/radar';
@@ -99,9 +99,15 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
         {(posts || []).map(p => (
           <li key={p.id}>
             <button onClick={() => setScreen({ name: 'post', id: p.id })} className="w-full text-left surface-item rounded-2xl p-3.5 flex items-center gap-3 active:scale-[0.99] transition-transform">
+              {p.status === 'done' && p.media ? (
+                // The cover as a tiny file (a few KB) the browser loads lazily and keeps for a year.
+                <img src={mediaUrl(p, 'thumb', 1)} alt="" loading="lazy" decoding="async" width={40} height={p.format === 'square' ? 40 : 50}
+                  className={`w-10 ${p.format === 'square' ? 'h-10' : 'h-[50px]'} rounded-lg object-cover shrink-0 bg-black/[0.06] dark:bg-white/10`} />
+              ) : (
               <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${p.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' : p.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'}`}>
                 {p.status === 'done' ? <CheckCircle2 size={18} /> : p.status === 'failed' ? <TriangleAlert size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
               </span>
+              )}
               <span className="min-w-0 flex-1">
                 <span className="block text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{p.title}</span>
                 <span className="block text-[12px] text-gray-500 truncate">

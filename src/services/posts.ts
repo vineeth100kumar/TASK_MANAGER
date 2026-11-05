@@ -1,9 +1,11 @@
 // posts.ts - Posts: paste a script, the Pi draws the Instagram carousel and
 // emails when it is done (raspberry_pi/posts.py, the Auto Content engine).
 //
-// Slide images are fetched with the app's key and kept as Blobs, so they work
-// the same with the password gate or the API key, and so Share can hand real
-// files to the phone's share sheet inside the tap that asked for it.
+// Finished slides are plain files on the Pi (/media/posts/..., see posts.py
+// "Media files"): the page points <img> and download links straight at them,
+// so the browser loads, caches (for a year) and resumes them itself. Only the
+// phone's Share button needs the pictures as Files, and it fetches the same
+// URLs, which the browser then answers from its cache.
 
 import { piBackendUrl, piHeaders } from './piBackend';
 
@@ -39,7 +41,12 @@ export interface Post {
   postedAt: string | null;
   emailed: boolean;
   emailError: string;
+  /** Where the finished files are; null until the post is done. */
+  media?: PostMedia | null;
 }
+
+export interface PostMedia { base: string; v: string; t: string }
+export type MediaKind = 'thumb' | 'preview' | 'full' | 'png';
 
 export interface MakerStatus {
   ready: boolean;
@@ -105,6 +112,27 @@ export async function fetchBlob(path: string): Promise<Blob> {
   const res = await fetch(`${piBackendUrl()}${path}`, { headers: piHeaders() });
   if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
   return res.blob();
+}
+
+const slideStem = (post: Post, n: number) =>
+  (post.slides?.[n - 1] || '').replace(/\.png$/, '') || `slide_${String(n).padStart(2, '0')}`;
+
+/** A finished file's address: thumb (240 px), preview (540 px), full (full-size JPEG) or png (original).
+ * Pass download to get it saved under that name instead of shown. '' while the post isn't done. */
+export function mediaUrl(post: Post, kind: MediaKind, n: number, download = ''): string {
+  const m = post.media;
+  if (!m) return '';
+  const ext = kind === 'png' ? 'png' : 'jpg';
+  const q = `v=${enc(m.v)}&t=${enc(m.t)}${download ? `&download=${enc(download)}` : ''}`;
+  return `${piBackendUrl()}${m.base}/${kind}/${slideStem(post, n)}.${ext}?${q}`;
+}
+
+/** The whole post as one ZIP (slides as PNGs, caption, script), made once when it was drawn. */
+export function zipUrl(post: Post): string {
+  const m = post.media;
+  if (!m) return '';
+  const name = post.title.replace(/[^A-Za-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 40) || 'post';
+  return `${piBackendUrl()}${m.base}/zip/post.zip?v=${enc(m.v)}&t=${enc(m.t)}&download=${enc(name)}`;
 }
 
 export const slidePath = (id: string, n: number) => `/api/posts/${enc(id)}/slides/${n}.png`;

@@ -5,12 +5,16 @@
 // copied first, because Instagram ignores a caption that comes with shared
 // pictures). PC: Send to my phone emails the link, a QR code opens it on the
 // phone, and the ZIP holds the slides and caption.
+//
+// The slides are plain files on the Pi (posts.ts mediaUrl): <img> shows the
+// 540 px previews straight from their URL, a tap opens the full picture, and
+// Download / ZIP are ordinary links, so nothing waits on JavaScript fetches.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, ImageDown, RefreshCw, Send, Share2, Smartphone, Trash2,
 } from 'lucide-react';
 import {
-  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, postLink, postsApi, qrPath, previewPath, saveBlob, sharePath, zipPath,
+  MakerStatus, POST_EVENT, Post, canShareFiles, copyText, fetchBlob, fileName, mediaUrl, postLink, postsApi, qrPath, zipUrl,
 } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
 
@@ -27,7 +31,6 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
   const [status, setStatus] = useState<MakerStatus | null>(null);
   const [error, setError] = useState('');
   const [files, setFiles] = useState<File[]>([]);
-  const [urls, setUrls] = useState<string[]>([]);
   const [qr, setQr] = useState('');
   const [busy, setBusy] = useState('');
   const loadedFor = useRef('');
@@ -63,34 +66,29 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     return () => clearInterval(timer);
   }, [running, load]);
 
-  // Slides arrive as files, ready before Share is tapped (the share sheet must be opened inside the tap).
-  const stamp = post ? `${post.id}:${post.finishedAt}:${post.slideCount}` : '';
+  // Phones only: Share hands the slides to the share sheet as Files, and the
+  // sheet must open inside the tap, so the full JPEGs are fetched ahead of it,
+  // quietly, after the previews. A PC never downloads them until asked.
+  const stamp = post?.media ? `${post.id}:${post.media.v}` : '';
   useEffect(() => {
-    if (!post || post.status !== 'done' || loadedFor.current === stamp) return;
+    if (!post?.media || post.status !== 'done' || loadedFor.current === stamp || !phoneCanShare()) return;
     loadedFor.current = stamp;
+    setFiles([]);
     let alive = true;
-    (async () => {
+    const timer = setTimeout(async () => {
       try {
-        // Small previews first, each shown the moment it lands, so the page fills in at once.
-        setUrls(old => { old.forEach(URL.revokeObjectURL); return []; });
-        await Promise.all(post.slides.map(async (_, i) => {
-          const blob = await fetchBlob(previewPath(post.id, i + 1, post.finishedAt || ''));
-          if (!alive) return;
-          const url = URL.createObjectURL(blob);
-          setUrls(old => { const next = [...old]; if (next[i]) URL.revokeObjectURL(next[i]); next[i] = url; return next; });
+        const jpegs = await Promise.all(post.slides.map(async (_, i) => {
+          const res = await fetch(mediaUrl(post, 'full', i + 1), { priority: 'low' } as RequestInit);
+          if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
+          return res.blob();
         }));
-        // Share sends JPEGs: Instagram shows up in the share sheet for them, where it can miss big PNGs.
-        // These are full size, so they come after the previews and don't hold them up.
-        const jpegs = await Promise.all(post.slides.map((_, i) => fetchBlob(sharePath(post.id, i + 1))));
-        if (!alive) return;
-        setFiles(jpegs.map((b, i) => new File([b], fileName(post, i + 1, 'jpg'), { type: 'image/jpeg' })));
-      } catch (e: any) {
-        if (alive) setError(e.message || "Couldn't load the slides");
+        if (alive) setFiles(jpegs.map((b, i) => new File([b], fileName(post, i + 1, 'jpg'), { type: 'image/jpeg' })));
+      } catch {
+        // Share falls back to the download links; nothing to show.
       }
-    })();
-    return () => { alive = false; };
+    }, 600);
+    return () => { alive = false; clearTimeout(timer); };
   }, [post, stamp]);
-  useEffect(() => () => { urls.forEach(URL.revokeObjectURL); }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The QR code opens this post on a phone (PC only; it needs a public link).
   useEffect(() => {
@@ -117,12 +115,13 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
   };
   // Save to the phone's gallery: the share sheet's "Save Image" on iOS, a plain download (which Android
   // files into the gallery) where file sharing isn't available. Full-size JPEGs, same ones Share sends.
-  const saveSlides = async (list: File[]) => {
-    if (!list.length) { showToast('Slides are still loading, try again in a moment', 'info'); return; }
+  // Anywhere else it is a plain download link per slide, straight from the Pi.
+  const saveSlides = async (list: File[], numbers: number[]) => {
+    if (!post) return;
     try {
-      if (canShareFiles(list)) { await navigator.share({ files: list }); return; }
-      list.forEach((f, i) => setTimeout(() => saveBlob(f, f.name), i * 400));
-      showToast(list.length > 1 ? `Saving ${list.length} images` : 'Saving image');
+      if (list.length && canShareFiles(list)) { await navigator.share({ files: list }); return; }
+      numbers.forEach((n, i) => setTimeout(() => clickDownload(mediaUrl(post, 'full', n, fileName(post, n, 'jpg'))), i * 300));
+      showToast(numbers.length > 1 ? `Saving ${numbers.length} images` : 'Saving image');
     } catch (e: any) {
       if (e?.name !== 'AbortError') showToast("Couldn't save. Press and hold a slide, or use the ZIP.", 'error');
     }
@@ -130,13 +129,6 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
   const copyCaption = async () => {
     if (!post?.caption) return;
     showToast((await copyText(post.caption)) ? 'Caption copied' : "Couldn't copy. Press and hold the text.", 'info');
-  };
-  const download = async () => {
-    if (!post) return;
-    setBusy('zip');
-    try { saveBlob(await fetchBlob(zipPath(post.id)), `${fileName(post, 0).replace(/-00\.png$/, '')}.zip`); }
-    catch (e: any) { showToast(e.message || "Couldn't download", 'error'); }
-    finally { setBusy(''); }
   };
   const sendToPhone = async () => {
     if (!post) return;
@@ -227,12 +219,16 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
           <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0 pb-2 snap-x" aria-label="Slides">
             {post.slides.map((_, i) => (
               <div key={i} className="snap-start shrink-0 w-[62%] sm:w-[34%] md:w-[30%]">
-                {urls[i]
-                  ? <img src={urls[i]} alt={`Slide ${i + 1}`} className={`w-full rounded-2xl border border-black/10 dark:border-white/10 ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'} object-cover`} />
-                  : <div className={`skeleton w-full rounded-2xl ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'}`} />}
+                <a href={mediaUrl(post, 'full', i + 1)} target="_blank" rel="noopener" aria-label={`Open slide ${i + 1} full size`}
+                  className={`block w-full rounded-2xl overflow-hidden border border-black/10 dark:border-white/10 skeleton ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'}`}>
+                  <img src={mediaUrl(post, 'preview', i + 1)} alt={`Slide ${i + 1}`} loading={i < 3 ? 'eager' : 'lazy'} decoding="async"
+                    width={540} height={post.format === 'square' ? 540 : 675} className="w-full h-full object-cover" />
+                </a>
                 <div className="flex items-center justify-center gap-2 mt-1 text-[11px] text-gray-400 tabular-nums">
                   {i + 1}
-                  <button onClick={() => saveSlides(files[i] ? [files[i]] : [])} aria-label={`Save slide ${i + 1} to photos`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><ImageDown size={13} /> Save</button>
+                  {files[i]
+                    ? <button onClick={() => saveSlides([files[i]], [i + 1])} aria-label={`Save slide ${i + 1} to photos`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><ImageDown size={13} /> Save</button>
+                    : <a href={mediaUrl(post, 'full', i + 1, fileName(post, i + 1, 'jpg'))} download={fileName(post, i + 1, 'jpg')} aria-label={`Download slide ${i + 1}`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><Download size={13} /> Download</a>}
                 </div>
               </div>
             ))}
@@ -254,9 +250,9 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
                   <Share2 size={18} /> Share {files.length} slides to Instagram
                 </button>
               ) : (
-                <button onClick={download} disabled={busy === 'zip'} className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
-                  {busy === 'zip' ? <LoaderCircle size={18} className="animate-spin" /> : <Download size={18} />} Download slides + caption (ZIP)
-                </button>
+                <a href={zipUrl(post)} download className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
+                  <Download size={18} /> Download all slides + caption (ZIP)
+                </a>
               )}
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={copyCaption} className="h-10 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center justify-center gap-1.5"><Copy size={14} /> Copy caption</button>
@@ -271,8 +267,8 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 space-y-3">
               <h3 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400">More ways to get it</h3>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => saveSlides(files)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ImageDown size={14} /> Save all to photos</button>
-                {shareable && <button onClick={download} disabled={busy === 'zip'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> ZIP</button>}
+                <button onClick={() => saveSlides(files, post.slides.map((_, i) => i + 1))} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ImageDown size={14} /> {files.length ? 'Save all to photos' : 'Download each slide'}</button>
+                {shareable && <a href={zipUrl(post)} download className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> ZIP</a>}
                 <button onClick={sendToPhone} disabled={busy === 'send'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5">
                   {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />} Send to my phone
                 </button>
@@ -296,6 +292,21 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
       )}
     </div>
   );
+}
+
+/** A phone whose browser can hand pictures to the share sheet. */
+function phoneCanShare(): boolean {
+  try {
+    return typeof navigator.canShare === 'function' && window.matchMedia('(pointer: coarse)').matches;
+  } catch { return false; }
+}
+
+/** Start a download from a URL the Pi serves with Content-Disposition: attachment. */
+function clickDownload(url: string): void {
+  if (!url) return;
+  const a = document.createElement('a');
+  a.href = url; a.download = '';
+  document.body.appendChild(a); a.click(); a.remove();
 }
 
 function Back({ onBack }: { onBack: () => void }) {

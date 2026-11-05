@@ -238,14 +238,19 @@ def make_pngs(out: Path, n=2):
 
 
 class Copies(unittest.TestCase):
-    def test_make_all_makes_both_kinds_once(self):
+    def test_make_all_makes_every_kind_and_the_zip_once(self):
         out = Path(tempfile.mkdtemp()) / "out"
         make_pngs(out)
-        self.assertEqual(posts_copies.make_all(out), 4)
+        self.assertEqual(posts_copies.make_all(out), 7)  # 2 slides x (thumb, preview, share) + the ZIP
         self.assertEqual(posts_copies.make_all(out), 0)  # nothing to redo
         from PIL import Image
+        with Image.open(out / "thumb" / "slide_01.jpg") as im:
+            self.assertEqual(im.width, 240)
         with Image.open(out / "preview" / "slide_01.jpg") as im:
             self.assertEqual(im.width, 540)
+        import zipfile
+        self.assertEqual(sorted(zipfile.ZipFile(out / "post.zip").namelist()),
+                         ["caption.txt", "script.md", "slide_01.png", "slide_02.png"])
         with Image.open(out / "share" / "slide_01.jpg") as im:
             self.assertEqual(im.width, 1080)  # never enlarged
 
@@ -255,7 +260,7 @@ class Copies(unittest.TestCase):
         posts_copies.make_all(out)
         later = time.time() + 5
         os.utime(out / "slide_01.png", (later, later))
-        self.assertEqual(posts_copies.make_all(out), 2)
+        self.assertEqual(posts_copies.make_all(out), 4)  # three copies and the ZIP
 
     def test_the_script_runs_on_its_own(self):
         import subprocess
@@ -263,7 +268,7 @@ class Copies(unittest.TestCase):
         make_pngs(out, 1)
         res = subprocess.run([sys.executable, str(Path(posts_copies.__file__)), str(out)], capture_output=True, text=True)
         self.assertEqual(res.returncode, 0, res.stderr)
-        self.assertEqual(res.stdout.strip(), "2")
+        self.assertEqual(res.stdout.strip(), "4")
 
     def test_the_old_helpers_still_give_the_same_files(self):
         post_id = "iso-copies"
