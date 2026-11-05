@@ -202,6 +202,10 @@ async def require_login(request, call_next):
         or path.startswith("/api/claude/")
         # Drop's share links (drop.py) are public by design, and sandboxed.
         or path.startswith(drop.PREFIX)
+        # Finished post images (posts.py) check the cookie, the key or their
+        # own signed token in the route, so a refused <img> gets a plain 401
+        # instead of a redirect to the login page.
+        or path.startswith(posts.MEDIA_PREFIX)
         or (API_SECRET and key_matches(request_key(request)))
         or claude_may(request)
     ):
@@ -2264,6 +2268,17 @@ app.include_router(industry.router)
 # Posts (posts.py): paste a script, the Pi draws the carousel slides and emails when done.
 posts.connect(DB_PATH, events.broadcast, claude_api.create_record, claude_api.update_record, claude_api._find)
 app.include_router(posts.router)
+
+
+def media_allowed(request) -> bool:
+    """Who may load /media/posts/ files without a token: the same people as
+    the rest of Sage (anyone, when neither a key nor a password is set)."""
+    if not API_SECRET and not access_gate.enabled:
+        return True
+    return logged_in(request) or bool(API_SECRET and key_matches(request_key(request)))
+
+
+posts.set_media_auth(media_allowed)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)

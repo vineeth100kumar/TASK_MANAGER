@@ -14,6 +14,10 @@ code-only audit checks the result.
   GET  /api/posts/{id}       one post: progress log, slides, caption, audit
   POST /api/posts/{id}/rerender, /posted, /send ; DELETE /api/posts/{id}
   GET  /api/posts/{id}/slides/{n}.png (or .jpg for sharing), /zip, /qr.svg
+  GET  /media/posts/{id}/{thumb|preview|full|png}/slide_NN.{jpg|png}, /media/posts/{id}/zip/post.zip
+       the finished files, served straight off disk like a media server (see
+       "Media files" below): made once when drawing ends, cached for a year,
+       resumable, and ?download=<name> saves instead of showing.
 
 Posts live in a Pi-only table; the PNGs live in sage_posts/<id>/ next to the
 database (so they are in the nightly backup, and never sync to other devices).
@@ -23,7 +27,10 @@ appears there as a normal task that moves Script > Ready > Posted.
 
 import asyncio
 import datetime
+import hashlib
+import hmac
 import io
+import secrets
 import json
 import os
 import re
@@ -38,7 +45,7 @@ from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -269,9 +276,11 @@ def connect(db_path: str, broadcast=None, create_record=None, update_record=None
             conn.execute("UPDATE posts SET status = ?, payload = ? WHERE id = ?", (post["status"], json.dumps(post), post_id))
     conn.commit()
     conn.close()
-    # Pull this week's slides into RAM after the server is up, off the main
-    # thread and at low priority so booting stays quick.
-    if _hot.cap > 0:
+    # No boot-time warming any more: the app now loads the finished files from
+    # /media/posts/ (plain files, which the OS keeps in its own page cache), so
+    # reading a week of full-size slides into RAM at boot only cost disk time.
+    # warm_cache() stays for anyone who wants it (SAGE_POSTS_WARM=1).
+    if _hot.cap > 0 and os.getenv("SAGE_POSTS_WARM", "0") == "1":
         threading.Thread(target=warm_cache, name="posts-warm-cache", daemon=True).start()
 
 
@@ -347,6 +356,7 @@ def summary(post: dict) -> dict:
     keep = {k: v for k, v in post.items() if k not in _ROW_DROP}
     keep["captionStart"] = (post.get("caption") or "")[:140]
     keep["slides"] = []  # kept for the Post type; filled in by the open view
+    keep["media"] = media_info(post)
     return keep
 
 
@@ -644,11 +654,20 @@ async def _run(post: dict) -> None:
         except Exception as e:
             post["status"], post["error"] = "failed", str(e)[:300] or e.__class__.__name__
         _finish(post, folder, code)
+        if post["status"] == "done":
+            # Make every file the app and the email use (thumbnails, previews,
+            # full JPEGs, the ZIP) BEFORE saying "done", so opening a finished
+            # post only ever reads files that already exist: nothing is encoded
+            # while someone waits, and nothing races the copies being made.
+            post["status"] = "running"
+            _note(post, "Getting the images ready")
+            await save_async(post)
+            await _copies_in_child(post)
+            post["status"] = "done"
         post["finishedAt"] = _utc()
         await save_async(post)
         await _announce(post)
         if post["status"] == "done":
-            await _copies_in_child(post)
             await _after_done(post)
         else:
             logstore.warn("posts", f"Post {post['id']} failed: {post['error']}")
@@ -1048,13 +1067,13 @@ async def posts_create(body: NewPost):
         return _bad(str(e))
     except Busy as e:
         return _bad(str(e), 429)
-    return {"success": True, "post": post}
+    return {"success": True, "post": with_media(post)}
 
 
 @router.get("/api/posts/{post_id}")
 def posts_get(post_id: str):
     post = get(post_id)
-    return {"success": True, "post": post, "status": status()} if post else _missing()
+    return {"success": True, "post": with_media(post), "status": status()} if post else _missing()
 
 
 @router.post("/api/posts/{post_id}/rerender")
@@ -1068,7 +1087,7 @@ async def posts_rerender(post_id: str, body: Again):
         return _bad(str(e), 409)
     except Busy as e:
         return _bad(str(e), 429)
-    return {"success": True, "post": post}
+    return {"success": True, "post": with_media(post)}
 
 
 @router.post("/api/posts/{post_id}/posted")
@@ -1085,7 +1104,7 @@ async def posts_posted(post_id: str, undo: bool = False):
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
-    return {"success": True, "post": post}
+    return {"success": True, "post": with_media(post)}
 
 
 @router.post("/api/posts/{post_id}/send")
@@ -1099,7 +1118,7 @@ async def posts_send(post_id: str):
     sent = await _email(post, force=True)
     if not sent:
         return _bad(post.get("emailError") or "The email couldn't be sent.", 502)
-    return {"success": True, "post": post}
+    return {"success": True, "post": with_media(post)}
 
 
 @router.delete("/api/posts/{post_id}")
@@ -1142,6 +1161,11 @@ def share_jpeg(post: dict, n: int) -> Optional[Path]:
     return _jpeg_copy(post, n, "share", *posts_copies.SHARE)
 
 
+def thumb_jpeg(post: dict, n: int) -> Optional[Path]:
+    """A tiny JPEG of the slide (240 px wide, a few KB) for the Posts list."""
+    return _jpeg_copy(post, n, "thumb", *posts_copies.THUMB)
+
+
 def preview_jpeg(post: dict, n: int) -> Optional[Path]:
     """A small JPEG of the slide (540 px wide, a few dozen KB) for the post
     page. The full PNGs are a few MB together, so showing those made the page
@@ -1177,14 +1201,19 @@ async def _copies_in_child(post: dict) -> None:
 
 
 def prepare_copies(post: dict) -> None:
-    """Make every preview and share JPEG ahead of time, so the first visit to
-    the post page doesn't wait for the Pi to encode 2 x 12 images."""
+    """Make every thumbnail, preview and share JPEG and the ZIP ahead of time,
+    so the first visit to the post page doesn't wait for the Pi to encode them."""
     for n in range(1, len(post.get("slides") or []) + 1):
         try:
+            thumb_jpeg(post, n)
             preview_jpeg(post, n)
             share_jpeg(post, n)
         except OSError as e:
             logstore.warn("posts", f"Couldn't make the JPEG copies of slide {n} of post {post['id']}: {e}")
+    try:
+        posts_copies.make_zip(POSTS_DIR / post["id"] / "out")
+    except OSError as e:
+        logstore.warn("posts", f"Couldn't make the ZIP of post {post['id']}: {e}")
 
 
 @router.get("/api/posts/{post_id}/preview/{n}.jpg")
@@ -1211,6 +1240,9 @@ def posts_zip(post_id: str):
     if not post or not post["slides"]:
         return _missing()
     name = re.sub(r"[^A-Za-z0-9]+", "-", post["title"]).strip("-")[:40] or "post"
+    path = _media_file(post_id, "zip", posts_copies.ZIP_NAME)
+    if path:
+        return FileResponse(path, media_type="application/zip", filename=f"{name}.zip")
     return Response(zip_bytes(post), media_type="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
 
@@ -1225,3 +1257,151 @@ def posts_qr(post_id: str):
         return Response(qr_svg(link), media_type="image/svg+xml")
     except ImportError:
         return _missing()
+
+
+# --- Media files ---
+#
+# A finished post is a folder of plain files: the slide PNGs plus the JPEG
+# copies and the ZIP that posts_copies.py makes once, when drawing ends. The
+# app loads them the way a media server or Drop serves files: <img src> and
+# <a href download> straight at /media/posts/..., so the browser does the
+# work it is good at (parallel loads, lazy loading, progressive display,
+# resuming, caching) and the Pi only hands over bytes:
+#
+#   * no database read, no JSON, no image encoding and no ZIP building per
+#     request (old posts made before this get their missing copy made once);
+#   * each URL carries ?v=<when it was drawn>, so it is cached for a year as
+#     immutable: opening a post again costs no requests at all, and redrawing
+#     a post changes v, so nothing stale is shown;
+#   * ETag / Last-Modified (304s) and Range requests (resumable downloads),
+#     from Starlette's FileResponse;
+#   * ?download=<name> sends Content-Disposition: attachment.
+#
+# Still behind the sign-in: a request needs the login cookie or the API key,
+# like the rest of Sage, or the post's own signed token (?t=), which the app
+# only gets from an authenticated /api/posts call. The token lets an <img>
+# work where the app talks to the Pi with the API key rather than a cookie.
+
+MEDIA_PREFIX = "/media/posts/"
+_MEDIA_DIRS = {"thumb": "thumb", "preview": "preview", "full": "share"}
+_MEDIA_NAME = re.compile(r"slide_\d{2,3}\.(jpg|png)")
+_media_auth: Optional[Callable[[Any], bool]] = None
+_media_key: Optional[bytes] = None
+_media_key_lock = threading.Lock()
+MEDIA_CACHE = "private, max-age=31536000, immutable"
+
+
+def set_media_auth(check: Callable[[Any], bool]) -> None:
+    """db_server hands over its own check (login cookie or API key)."""
+    global _media_auth
+    _media_auth = check
+
+
+def _key() -> bytes:
+    """The secret that signs media tokens, made once and kept beside the data.
+    Delete media.key to make every old media link stop working."""
+    global _media_key
+    with _media_key_lock:
+        if _media_key is None:
+            path = notifier.DATA_DIR / "media.key"
+            try:
+                key = path.read_bytes().strip()
+            except OSError:
+                key = b""
+            if len(key) < 32:
+                key = secrets.token_hex(32).encode()
+                try:
+                    path.parent.mkdir(parents=True, exist_ok=True)
+                    path.write_bytes(key)
+                    os.chmod(path, 0o600)
+                except OSError:
+                    pass  # links then last until the next restart
+            _media_key = key
+        return _media_key
+
+
+def media_token(post_id: str) -> str:
+    return hmac.new(_key(), f"post-media:{post_id}".encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def media_version(post: dict) -> str:
+    return re.sub(r"[^0-9]", "", str(post.get("finishedAt") or "")) or "0"
+
+
+def media_info(post: dict) -> Optional[dict]:
+    """Where the app loads this post's files from; None until it is done."""
+    if post.get("status") != "done" or not post.get("slideCount"):
+        return None
+    return {"base": f"{MEDIA_PREFIX}{post['id']}", "v": media_version(post), "t": media_token(post["id"])}
+
+
+def with_media(post: dict) -> dict:
+    return {**post, "media": media_info(post)}
+
+
+def _media_file(post_id: str, kind: str, name: str) -> Optional[Path]:
+    """The file on disk, or None. A copy that is missing (a post made before
+    copies were made at drawing time) is made once, here, and kept."""
+    out = POSTS_DIR / post_id / "out"
+    if kind == "zip":
+        if name != posts_copies.ZIP_NAME:
+            return None
+        path = out / name
+        if not path.is_file():
+            try:
+                posts_copies.make_zip(out)
+            except OSError:
+                return None
+        return path if path.is_file() else None
+    if not _MEDIA_NAME.fullmatch(name):
+        return None
+    stem, ext = name.rsplit(".", 1)
+    if kind == "png":
+        path = out / name
+        return path if ext == "png" and path.is_file() else None
+    folder = _MEDIA_DIRS.get(kind)
+    if not folder or ext != "jpg":
+        return None
+    path = out / folder / name
+    if not path.is_file():
+        src = out / f"{stem}.png"
+        if not src.is_file():
+            return None
+        try:
+            posts_copies.make_copy(src, path, *posts_copies.KINDS[folder])
+        except OSError:
+            return None
+    return path
+
+
+def _download_name(raw: str, ext: str) -> str:
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", raw).strip("-.")[:60] or "post"
+    return base if base.lower().endswith(f".{ext}") else f"{base}.{ext}"
+
+
+@router.get(MEDIA_PREFIX + "{post_id}/{kind}/{name}", include_in_schema=False)
+def posts_media(post_id: str, kind: str, name: str, request: Request, v: str = "", t: str = "", download: str = ""):
+    if not re.fullmatch(r"[0-9a-f]{12}", post_id):
+        return _missing()
+    allowed = (_media_auth is None or _media_auth(request)
+               or (t and hmac.compare_digest(t, media_token(post_id))))
+    if not allowed:
+        return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
+    path = _media_file(post_id, kind, name)
+    if not path:
+        return _missing()
+    ext = path.suffix.lstrip(".")
+    media_type = {"jpg": "image/jpeg", "png": "image/png", "zip": "application/zip"}[ext]
+    headers = {"Cache-Control": MEDIA_CACHE if v else "private, no-cache", "X-Content-Type-Options": "nosniff"}
+    try:
+        stat = path.stat()
+    except OSError:
+        return _missing()
+    name_kw = {"filename": _download_name(download, ext)} if download else {}
+    response = FileResponse(path, media_type=media_type, headers=headers, stat_result=stat, **name_kw)
+    # A browser that already has this exact file gets an empty "not modified".
+    etag = response.headers.get("etag", "")
+    sent = request.headers.get("if-none-match", "")
+    if etag and sent and etag in [tag.strip().removeprefix("W/") for tag in sent.split(",")]:
+        return Response(status_code=304, headers={"ETag": etag, "Cache-Control": headers["Cache-Control"]})
+    return response
