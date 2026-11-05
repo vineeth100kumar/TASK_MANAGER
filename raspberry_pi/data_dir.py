@@ -88,5 +88,12 @@ def status() -> Dict[str, Any]:
         opts = _mount_options(MOUNT).split(",")
         out["readOnly"] = "ro" in opts
         out["writable"] = os.access(MOUNT, os.W_OK) and not out["readOnly"]
+        # deploy/move_system_to_card.sh bind-mounts the checkout (code, venv,
+        # web app) from the card; same device id = it runs from the card.
+        try:
+            repo = Path(__file__).resolve().parent.parent
+            out["codeOnCard"] = os.stat(repo).st_dev == os.stat(MOUNT).st_dev
+        except OSError:
+            out["codeOnCard"] = None
     return out
 
