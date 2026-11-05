@@ -82,14 +82,21 @@ def session_valid(token: Optional[str]) -> bool:
     return hmac.compare_digest(signature, expected) and expiry.isdigit() and int(expiry) > time.time()
 
 
-# --- One page load per password ---
-# The login cookie above keeps the open app's data calls working, but opening
-# or reloading the app itself needs the password again. A good password also
-# sets a short-lived ticket cookie, and loading a page spends it, so the next
-# visit (a new tab, a reload, reopening the home-screen app) goes to /login.
+# --- One page load per password (strict mode) ---
+# By default a signed-in device opens the app straight from its login cookie
+# (SESSION_DAYS, 30 days), with no detour through /login: the password is asked
+# once per device, not on every open. That detour was a full page redirect over
+# the tunnel on each open, which is what made opening slow and sometimes blank.
+#
+# Turning ASK_EVERY_OPEN on restores the stricter behaviour: a good password
+# also sets a short-lived ticket cookie, and each page load spends it, so the
+# next visit (a new tab, a reload, reopening the home-screen app) goes back to
+# /login. Use it where a shared device must ask for the password every time;
+# expect a slower open on a slow link, since every open is a login round trip.
 OPEN_COOKIE = "sage_open"
 OPEN_SECONDS = 120
 _spent_tickets: Dict[str, float] = {}
+ASK_EVERY_OPEN = os.getenv("SAGE_ASK_EVERY_OPEN", "").strip().lower() in ("1", "true", "yes", "on")
 
 
 def new_open_ticket() -> str:
