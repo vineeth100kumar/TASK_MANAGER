@@ -135,12 +135,18 @@ class PinLimitTests(unittest.TestCase):
         self.assertGreater(access_gate.locked_for("8.8.8.8", "mine"), 0)
 
 
-class PasswordEveryVisitTests(unittest.TestCase):
+class PasswordGateTests(unittest.TestCase):
+    """Default gate: the password is asked once per device, then a signed-in
+    device opens the app straight from its session, with no login round trip."""
+
+    ASK_EVERY_OPEN = False
+
     def setUp(self):
         access_gate._failures.clear()
         access_gate._all_failures.clear()
         stored = access_gate.hash_password("1234", iterations=1000)
-        for name, value in (("enabled", True), ("PASSWORD_HASH", stored)):
+        for name, value in (("enabled", True), ("PASSWORD_HASH", stored),
+                            ("ASK_EVERY_OPEN", self.ASK_EVERY_OPEN)):
             patcher = mock.patch.object(access_gate, name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
@@ -151,14 +157,18 @@ class PasswordEveryVisitTests(unittest.TestCase):
         self.assertEqual(resp.status_code, 303)
         return resp
 
-    def test_each_page_load_needs_the_password(self):
-        self.assertEqual(self.browser.get("/").status_code, 303)
+    def test_a_fresh_device_needs_the_password(self):
+        page = self.browser.get("/")
+        self.assertEqual(page.status_code, 303)
+        self.assertTrue(page.headers["location"].startswith("/login"))
+
+    def test_a_signed_in_device_reopens_without_a_login_round_trip(self):
         self.log_in()
+        # The first open, a reload, and a second tab all open the app directly.
         self.assertNotEqual(self.browser.get("/").status_code, 303)
-        # A reload, or a second tab, goes back to the login page.
-        reload = self.browser.get("/")
-        self.assertEqual(reload.status_code, 303)
-        self.assertTrue(reload.headers["location"].startswith("/login"))
+        self.assertNotEqual(self.browser.get("/").status_code, 303)
+        self.assertNotEqual(
+            self.browser.get("/notes", headers={"Sec-Fetch-Dest": "document"}).status_code, 303)
 
     def test_open_app_keeps_working_after_the_page_loaded(self):
         self.log_in()
@@ -166,17 +176,9 @@ class PasswordEveryVisitTests(unittest.TestCase):
         self.assertEqual(self.browser.get("/api/sync/all").status_code, 200)
         # Scripts and images of the open page are not page loads.
         self.assertNotEqual(self.browser.get("/assets/app.js", headers={"Sec-Fetch-Dest": "script"}).status_code, 303)
-        self.assertEqual(self.browser.get("/notes", headers={"Sec-Fetch-Dest": "document"}).status_code, 303)
 
-    @unittest.skipUnless((db_server.DIST_DIR / "index.html").is_file(), "needs the built web app")
-    def test_a_page_load_after_the_password_is_never_an_empty_304(self):
-        # A browser holding an old copy asks "changed since?"; answering 304
-        # spent the ticket on an empty page (the white screen after login).
-        self.log_in()
-        page = self.browser.get("/", headers={"Sec-Fetch-Dest": "document",
-                                              "If-Modified-Since": "Fri, 01 Jan 2100 00:00:00 GMT"})
-        self.assertEqual(page.status_code, 200)
-        self.assertIn('id="root"', page.text)
+    def test_without_a_session_the_data_stays_shut(self):
+        self.assertEqual(TestClient(db_server.app).get("/api/sync/all").status_code, 401)
 
     def test_a_ticket_works_once_even_if_copied(self):
         ticket = self.log_in().cookies[access_gate.OPEN_COOKIE]
@@ -189,6 +191,30 @@ class PasswordEveryVisitTests(unittest.TestCase):
         self.assertEqual(self.browser.post("/api/unlock", json={"password": "0000"}).status_code, 401)
         self.assertEqual(self.browser.post("/api/unlock", json={"password": "1234"}).status_code, 200)
         self.assertEqual(TestClient(db_server.app).post("/api/unlock", json={"password": "1234"}).status_code, 401)
+
+
+class PasswordAskEveryOpenTests(PasswordGateTests):
+    """Strict mode (SAGE_ASK_EVERY_OPEN): every open asks for the password."""
+
+    ASK_EVERY_OPEN = True
+
+    def test_a_signed_in_device_reopens_without_a_login_round_trip(self):
+        self.log_in()
+        self.assertNotEqual(self.browser.get("/").status_code, 303)
+        # A reload, or a second tab, goes back to the login page.
+        reload = self.browser.get("/")
+        self.assertEqual(reload.status_code, 303)
+        self.assertTrue(reload.headers["location"].startswith("/login"))
+
+    @unittest.skipUnless((db_server.DIST_DIR / "index.html").is_file(), "needs the built web app")
+    def test_a_page_load_after_the_password_is_never_an_empty_304(self):
+        # A browser holding an old copy asks "changed since?"; answering 304
+        # spent the ticket on an empty page (the white screen after login).
+        self.log_in()
+        page = self.browser.get("/", headers={"Sec-Fetch-Dest": "document",
+                                              "If-Modified-Since": "Fri, 01 Jan 2100 00:00:00 GMT"})
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('id="root"', page.text)
 
 
 class TimeZoneTests(unittest.TestCase):

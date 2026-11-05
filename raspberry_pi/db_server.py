@@ -206,20 +206,27 @@ async def require_login(request, call_next):
         or claude_may(request)
     ):
         return await call_next(request)
-    if logged_in(request) and not access_gate.is_page_load(request):
-        return await call_next(request)
-    if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
-        # Each opening of the app takes the password, so this page must not
-        # be kept for the back button or reused from the browser's cache.
-        # It must also come back whole: a "304 Not Modified" here spends the
-        # ticket on an empty answer, and with no-store the browser has no copy
-        # to fall back on, so it shows a blank white page.
-        request.scope["headers"] = [(k, v) for k, v in request.scope["headers"]
-                                    if k not in (b"if-none-match", b"if-modified-since")]
-        response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.delete_cookie(access_gate.OPEN_COOKIE)
-        return response
+    if logged_in(request):
+        # A signed-in device opens the app straight from its session cookie,
+        # with no detour through /login. That detour — a full page redirect
+        # over the tunnel on every open — was what made opening slow and
+        # sometimes blank. Data calls and assets pass the same way.
+        if not access_gate.is_page_load(request) or not access_gate.ASK_EVERY_OPEN:
+            return await call_next(request)
+        # Strict mode (SAGE_ASK_EVERY_OPEN): each open spends a one-time ticket,
+        # so a reload or a new tab asks for the password again.
+        if access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
+            # The page must not be kept for the back button or reused from the
+            # browser's cache, and must come back whole: a "304 Not Modified"
+            # here would spend the ticket on an empty answer, and with no-store
+            # the browser would have no copy to fall back on, showing a blank
+            # white page.
+            request.scope["headers"] = [(k, v) for k, v in request.scope["headers"]
+                                        if k not in (b"if-none-match", b"if-modified-since")]
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            response.delete_cookie(access_gate.OPEN_COOKIE)
+            return response
     if path.startswith("/api/"):
         return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
     target = path + (f"?{request.url.query}" if request.url.query else "")
