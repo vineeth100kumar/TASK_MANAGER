@@ -411,7 +411,6 @@ class ComposeTests(unittest.TestCase):
         self.assertTrue((tl.frame(2.5)[1580, 540] == 255).all())
 
 
-@unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")
 class CrowdedSlideTests(unittest.TestCase):
     """A script can arrive with far more on a slide than a phone screen holds — an AI wrote it, or
     the author pasted a paragraph. The check says so, and the renderer makes it fit anyway."""
@@ -497,6 +496,7 @@ say: The financial crisis hit sales and profits, and the listing helped repay de
         self.assertLessEqual(bottom, floor + 1, "the slide's content must stop above the caption band")
 
 
+@unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")
 class EndToEndTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
