@@ -138,7 +138,6 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     themes: Dict[int, str] = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(**browser_launch_options())
-        # drawn a little larger than the video, so the compositor can drift a frame across it
         page = browser.new_page(viewport={"width": compose.W, "height": compose.H},
                                 device_scale_factor=layers_mod.OVERSAMPLE)
         for i, slide in enumerate(slides):
@@ -166,9 +165,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             for k, ly in enumerate(sl.layers):
                 if ly.follow:
                     at[k] = at[k - 1]
-            base = Image.open(sl.base).convert("RGB")
-            clip = compose.SceneClip(t0=t0, t1=t1, base=base, motion=sc.motion,
-                                     pan=compose.pan_for(i, base.size))
+            clip = compose.SceneClip(t0=t0, t1=t1, base=Image.open(sl.base).convert("RGB"), motion=sc.motion)
             for k, ly in enumerate(sl.layers):
                 # Unless the script asked for one motion for the whole slide, each piece arrives in
                 # the way that suits what it is: a headline is wiped on, a number punches in, a
@@ -177,7 +174,8 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                 picture = "image-frame" in ly.classes
                 clip.pieces.append(compose.Piece(
                     image=Image.open(ly.path).convert("RGBA"), box=ly.box, at=at[k], follow=ly.follow,
-                    motion=own, side=side, drift=0 if (ly.follow or picture) else (1 if k % 2 else -1),
+                    motion=own, side=side, words=ly.words, accents=ly.accents, accent_rgb=ly.accent_rgb,
+                    count=([] if sc.motion_given else [Image.open(c).convert("RGBA") for c in ly.count]),
                     zoom=picture and (sc.motion == "kenburns" or not sc.motion_given)))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])

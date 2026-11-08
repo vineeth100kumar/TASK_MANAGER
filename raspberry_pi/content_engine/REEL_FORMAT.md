@@ -88,16 +88,17 @@ slide reads as an infographic being built rather than a picture being shown:
 
 | The piece | How it arrives |
 | --- | --- |
-| A headline | Wiped on from the left, as if being written |
-| A big number | Punches in: small, past its size, then settles |
+| A headline, a quote, a statement | Written word by word, each word rising into place |
+| A highlighted word (`**like this**`) | Lands harder, in the brand colour, and draws a line under itself |
+| A big number | Counts up to its real value, then holds |
 | A pill (`pill:`, a CTA) | Pressed on along its own slant |
 | A list item, a bullet, a compare column | In from its own side, with a little overshoot |
 | A picture | Uncovered upwards, then a slow push-in for as long as the slide is up |
 | A table or chart | Builds downwards |
 | Body text, a caption, a source line | A short fade |
 
-Underneath that, the camera creeps slowly across each slide (a different direction each time) so
-the picture is never frozen, and one slide wipes into the next instead of cutting.
+Nothing pans or drifts: text lands where it is designed to sit and stays there. One slide wipes
+into the next (a different direction each time) instead of cutting.
 
 Writing `motion:` overrides all of it and puts one motion on every piece of that slide:
 **rise** (slides up and fades in), **pop** (grows in with a small overshoot), **stagger** (like

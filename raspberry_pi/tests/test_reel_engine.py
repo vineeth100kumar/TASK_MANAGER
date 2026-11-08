@@ -24,7 +24,7 @@ ENGINE_SRC = Path(__file__).resolve().parent.parent / "content_engine" / "src"
 sys.path.insert(0, str(ENGINE_SRC))
 
 from autocontent.reel import parse_reel, is_reel_text  # noqa: E402
-from autocontent.reel import align, captions, compose, timing, voice  # noqa: E402
+from autocontent.reel import align, captions, compose, layers, timing, voice  # noqa: E402
 from autocontent.reel.align import Timed  # noqa: E402
 
 CHROMIUM = os.environ.get("AUTOCONTENT_CHROMIUM") or ("/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else "")
@@ -292,7 +292,7 @@ class ComposeTests(unittest.TestCase):
     def test_each_kind_of_thing_arrives_its_own_way(self):
         """The point of the reel: a headline is not animated like a number or a picture."""
         self.assertEqual(compose.piece_motion("stat-number")[0], "punch")
-        self.assertEqual(compose.piece_motion("cover-headline")[0], "sweep")
+        self.assertEqual(compose.piece_motion("cover-headline")[0], "words")   # text writes itself
         self.assertEqual(compose.piece_motion("image-frame")[0], "reveal")
         self.assertEqual(compose.piece_motion("data-table")[0], "grow")
         self.assertEqual(compose.piece_motion("list-item"), ("slide", -1))
@@ -310,18 +310,57 @@ class ComposeTests(unittest.TestCase):
         self.assertGreater(over.shape[1], 400)      # ...overshoots its size...
         self.assertEqual(done.shape[1], 400)        # ...and settles, never sliding down the screen
 
-    def test_the_camera_drifts_across_a_bigger_base(self):
-        from PIL import Image
-        base = Image.new("RGB", (1145, 2035), (255, 255, 255))
-        clip = compose.SceneClip(0.0, 4.0, base, [], "rise", pan=compose.pan_for(0, base.size))
-        self.assertNotEqual(clip.view(0.1), clip.view(3.9))
-        self.assertEqual(compose.pan_for(0, (compose.W, compose.H)), (0, 0, 0, 0))   # no room: no move
-        for n in range(4):
-            x0, y0, x1, y1 = compose.pan_for(n, base.size)
-            for v, room in ((x0, 1145 - compose.W), (x1, 1145 - compose.W), (y0, 2035 - compose.H), (y1, 2035 - compose.H)):
-                self.assertTrue(0 <= v <= room, (n, v, room))
+    def test_nothing_pans_across_the_screen(self):
+        """The slide is drawn at the video's own size: the text sits still, it is never panned."""
+        self.assertEqual(layers.OVERSAMPLE, 1.0)
+        self.assertFalse(hasattr(compose, "pan_for"))
+        clip = self.clip()
         tl = compose.Timeline([clip], [], 4.0)
-        self.assertEqual(tl.frame(2.0).shape, (compose.H, compose.W, 3))
+        a, b = tl.frame(2.0), tl.frame(2.4)        # settled: not one pixel moves
+        self.assertTrue((a == b).all())
+
+    def test_text_lands_one_word_at_a_time(self):
+        from PIL import Image
+        piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
+                              at=1.0, motion="words",
+                              words=[(0, 0, 130, 60), (130, 0, 130, 60), (260, 0, 140, 60)])
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        showing = lambda t: len(compose._word_states(piece, t, clip))
+        self.assertEqual(showing(0.9), 0)
+        self.assertEqual(showing(1.01), 1)                       # the first word only
+        self.assertEqual(showing(1.0 + compose.WORD_STEP * 2.1), 3)
+        self.assertGreater(piece.takes("rise"), compose.WORD_IN)  # it is not over in one go
+
+    def test_a_highlighted_word_lands_harder_and_is_underlined(self):
+        from PIL import Image
+        piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
+                              at=1.0, motion="words", words=[(0, 0, 100, 60), (110, 0, 100, 60)],
+                              accents=[1], accent_rgb=(238, 68, 37))
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        late = compose._word_states(piece, 1.0 + compose.WORD_STEP + compose.WORD_IN * 0.8, clip)
+        bars = [a for a, x, y, op in late if a.shape[0] == compose.MARK_H]
+        self.assertEqual(len(bars), 1, "the highlighted word should be drawing a line under itself")
+        self.assertEqual(tuple(bars[0][0, 0, :3]), (238, 68, 37))
+
+    def test_a_big_number_counts_up_to_itself(self):
+        from PIL import Image
+        steps = layers.count_steps("65%")
+        self.assertEqual(steps[-1], "65%")
+        self.assertTrue(all(s.endswith("%") for s in steps))
+        values = [float(s[:-1]) for s in steps]
+        self.assertEqual(values, sorted(values))
+        self.assertLess(values[0], 30)
+        self.assertEqual(layers.count_steps("Hello"), [])      # nothing to count
+        self.assertEqual(layers.count_steps("3x"), [])         # too small to be worth it
+        self.assertEqual(layers.count_steps("1,250")[-1], "1,250")
+        frames = [Image.new("RGBA", (300, 200), (i * 8, 0, 0, 255)) for i in range(10)]
+        piece = compose.Piece(image=frames[-1], box=(100, 700, 300, 200), at=1.0, count=frames)
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        self.assertEqual(piece.how("rise"), "count")
+        early = compose._piece_state(piece, 1.05, "rise", clip)[0][0, 0, 0]
+        late = compose._piece_state(piece, 1.0 + compose.MOTIONS["count"][0] * 0.9, "rise", clip)[0][0, 0, 0]
+        self.assertLess(early, late, "the number should still be counting up")
+        self.assertEqual(compose._piece_state(piece, 2.9, "rise", clip)[0][0, 0, 0], frames[-1].getpixel((0, 0))[0])
 
     def test_one_slide_wipes_into_the_next(self):
         from PIL import Image

@@ -30,6 +30,8 @@ MOTIONS = {
     "reveal":   (0.58, 0),     # a picture: uncovered upwards, then keeps pushing in
     "grow":     (0.54, 8),     # a table or chart: builds downwards, row by row
     "fade":     (0.36, 10),    # body text, a caption, a source line
+    "words":    (0.24, 20),    # text: one word at a time, the way the captions run
+    "count":    (1.10, 0),     # a big number running up to its real value
     # the author's own names
     "rise":     (0.55, 64),
     "stagger":  (0.50, 48),
@@ -40,10 +42,13 @@ MOTIONS = {
 ENTER = {k: v[0] for k, v in MOTIONS.items()}        # kept for older callers and the tests
 EXIT = 0.30            # seconds a slide takes to leave (its pieces fade up and away)
 EXIT_PX = 44           # and how far up they go
-SETTLE = 1.3           # after it has arrived, a piece drifts this long...
-SETTLE_PX = 3          # ...by this much, so the picture is never quite still
 SOFT = 90              # how soft a wiping edge is, in pixels
-PAN = 30               # px the camera drifts across a slide (see SceneClip.view)
+WORD_STEP = 0.065      # seconds between one word landing and the next
+WORD_IN = 0.26         # how long a single word takes to land
+WORD_PX = 20           # how far it rises on its way in
+MARK_IN = 0.26         # how long the line under a highlighted word takes to draw
+MARK_H = 9             # how thick it is
+MARK_GAP = 4           # and how far under the word it sits
 
 # What a piece is, from the classes the renderer gave it, and so how it should arrive.
 # The first match wins, so the more particular classes come first.
@@ -58,9 +63,10 @@ KINDS = (
     ("compare-col right", "slide", 1),
     ("list-item", "slide", -1),
     ("bullet-row", "slide", -1),
-    ("headline", "sweep", 0),
-    ("quote-body", "sweep", 0),
-    ("statement-body", "sweep", 0),
+    ("headline", "words", 0),
+    ("quote-body", "words", 0),
+    ("statement-body", "words", 0),
+    ("point-body", "words", 0),
     ("author-wrapper", "fade", 0),
 )
 
@@ -71,18 +77,6 @@ def piece_motion(classes: str, fallback: str = "fade") -> Tuple[str, int]:
         if all(word in classes for word in mark.split()):
             return motion, side
     return fallback, 0
-
-
-def pan_for(n: int, base_size: Tuple[int, int]) -> Tuple[int, int, int, int]:
-    """Where slide n's camera starts and ends inside its (larger) base picture: down, right, up,
-    left, slide by slide, so no two in a row drift the same way."""
-    room_x, room_y = max(0, base_size[0] - W), max(0, base_size[1] - H)
-    mid_x, mid_y = room_x // 2, room_y // 2
-    if not room_x and not room_y:
-        return (0, 0, 0, 0)
-    dx, dy = ((0, 1), (1, 0), (0, -1), (-1, 0))[n % 4]
-    half_x, half_y = min(PAN, room_x) // 2, min(PAN, room_y) // 2
-    return (mid_x - dx * half_x, mid_y - dy * half_y, mid_x + dx * half_x, mid_y + dy * half_y)
 
 
 def ease_out_cubic(x: float) -> float:
@@ -136,14 +130,48 @@ class Piece:
     zoom: bool = False                   # a slow push-in for as long as the slide is up (pictures)
     motion: str = ""                     # its own motion; empty means the slide's
     side: int = 0                        # -1 in from the left, 1 from the right
-    drift: int = 0                       # which way it drifts once it has arrived
+    words: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    """Word boxes inside this piece's picture, in reading order. A piece that has them and whose
+    motion is `words` lands one word at a time, the way the captions do, instead of as a block."""
+    accents: List[int] = field(default_factory=list)   # which of those words the design points at
+    accent_rgb: Tuple[int, int, int] = (248, 96, 54)
+    count: List[Image.Image] = field(default_factory=list)
+    """The same big number photographed on its way up to itself: it runs like a counter."""
     _rgba: Optional[np.ndarray] = None
+    _count: Optional[List[np.ndarray]] = None
+    _parts: Optional[List[Tuple[np.ndarray, int, int]]] = None
 
     def how(self, slide_motion: str) -> str:
+        if self.count:
+            return "count"
+        if self.words and (self.motion in ("words", "sweep") or (not self.motion and slide_motion == "sweep")):
+            return "words"
         return self.motion or slide_motion
 
     def takes(self, slide_motion: str) -> float:
+        if self.how(slide_motion) == "words":
+            return WORD_IN + MARK_IN + WORD_STEP * max(0, len(self.words) - 1)
         return MOTIONS.get(self.how(slide_motion), MOTIONS["fade"])[0]
+
+    @property
+    def parts(self) -> List[Tuple[np.ndarray, int, int]]:
+        """The picture cut up for a word-by-word landing: everything that is not a word (rules,
+        bullets, a marker behind the text) first, then one piece per word, in reading order."""
+        if self._parts is None:
+            x, y, _, _ = self.box
+            rest = self.array.copy()
+            tiles = []
+            for wx, wy, ww, wh in self.words:
+                tiles.append((self.array[wy:wy + wh, wx:wx + ww].copy(), x + wx, y + wy))
+                rest[wy:wy + wh, wx:wx + ww, 3] = 0
+            self._parts = ([(rest, x, y)] if rest[..., 3].any() else []) + tiles
+        return self._parts
+
+    @property
+    def counting(self) -> List[np.ndarray]:
+        if self._count is None:
+            self._count = [np.asarray(im, dtype=np.uint8) for im in self.count]
+        return self._count
 
     @property
     def array(self) -> np.ndarray:
@@ -154,26 +182,12 @@ class Piece:
 
 @dataclass
 class SceneClip:
-    """One slide's time on screen. The base picture is drawn a little larger than the video, and
-    the frame is cut out of it at a point that creeps across the slide: a slow camera move that
-    keeps the picture alive between the pieces arriving, and costs nothing but a different crop.
-    A base that is exactly the video's size simply doesn't move."""
     t0: float
     t1: float
     base: Image.Image
     pieces: List[Piece] = field(default_factory=list)
     motion: str = "rise"
-    pan: Tuple[int, int, int, int] = (0, 0, 0, 0)    # the crop's top-left, from the start to the end
     _base_arr: Optional[np.ndarray] = None
-
-    def view(self, t: float) -> Tuple[int, int]:
-        """Where the frame is cut out of the base picture at time t."""
-        bh, bw = self.base_array.shape[:2]
-        x0, y0, x1, y1 = self.pan
-        u = ease_in_out((t - self.t0) / max(self.t1 - self.t0, 0.1))
-        x = int(round(x0 + (x1 - x0) * u))
-        y = int(round(y0 + (y1 - y0) * u))
-        return max(0, min(x, bw - W)), max(0, min(y, bh - H))
 
     @property
     def base_array(self) -> np.ndarray:
@@ -184,7 +198,7 @@ class SceneClip:
     @property
     def settles_at(self) -> float:
         """From this moment until the exit begins, the picture doesn't change (unless a piece zooms)."""
-        done = [p.at + p.takes(self.motion) + (SETTLE if p.drift else 0) for p in self.pieces]
+        done = [p.at + p.takes(self.motion) for p in self.pieces]
         return max(done or [self.t0]) + 0.05
 
     @property
@@ -234,7 +248,13 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
     opacity, dx, dy = 1.0, 0.0, 0.0
     if u < 1.0:
         e = ease_out_cubic(u)
-        if m in ("punch", "pop"):
+        if m == "count" and p.counting:
+            # the number runs up to its real value, then lands with a small push
+            k = min(len(p.counting) - 1, int(u * len(p.counting)))
+            arr = p.counting[k]
+            x, y = p.box[0], p.box[1] + (h - arr.shape[0]) // 2
+            opacity = min(1.0, u * 5.0)
+        elif m in ("punch", "pop"):
             small = 0.74 if m == "punch" else 0.86
             arr, x, y = _scaled(p.image, p.box, small + (1 - small) * ease_out_back(u))
             opacity = min(1.0, u * 4.0)
@@ -259,9 +279,6 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
         else:                                   # fade, rise, kenburns
             dy = (1 - e) * travel
             opacity = e
-    elif p.drift:
-        # it has arrived: a slow few pixels, so the picture is never quite still
-        dy = p.drift * SETTLE_PX * ease_in_out(min(1.0, (t - p.at - dur) / SETTLE))
     # leaving: the last EXIT seconds of the slide
     leave = (t - (clip.t1 - EXIT)) / EXIT
     if leave > 0:
@@ -276,6 +293,47 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
             im = im.resize((nw, nh), Image.BICUBIC).crop(((nw - w) // 2, (nh - h) // 2, (nw - w) // 2 + w, (nh - h) // 2 + h))
             arr = np.asarray(im, dtype=np.uint8)
     return arr, int(x + dx), int(y + dy), opacity
+
+
+def _word_states(p: Piece, t: float, clip: SceneClip) -> List[Tuple[np.ndarray, int, int, float]]:
+    """Every visible part of a word-by-word piece at time t: each word rises into place a moment
+    after the one before it, so a headline is written across the screen rather than switched on.
+    A word the design points at lands harder and draws a line under itself."""
+    out: List[Tuple[np.ndarray, int, int, float]] = []
+    parts = p.parts
+    extra = len(parts) - len(p.words)          # the leading not-a-word part, if there is one
+    leave = (t - (clip.t1 - EXIT)) / EXIT
+    gone = ease_in_out(leave) if leave > 0 else 0.0
+    for k, (arr, x, y) in enumerate(parts):
+        w = k - extra
+        start = p.at + max(0, w) * WORD_STEP
+        u = (t - start) / WORD_IN
+        if u <= 0:
+            continue
+        accent = w >= 0 and w in p.accents
+        if u < 1.0:
+            e = ease_out_cubic(u)
+            opacity, dy = min(1.0, u * 2.2), (1 - e) * WORD_PX
+            if accent:
+                arr, x, y = _scaled(Image.fromarray(arr), (x, y, arr.shape[1], arr.shape[0]),
+                                    0.82 + 0.18 * ease_out_back(u))
+        else:
+            opacity, dy = 1.0, 0.0
+        if accent and u > 0.55:
+            mark = (t - (start + WORD_IN * 0.55)) / MARK_IN
+            width = int(round(p.words[w][2] * ease_out_cubic(mark)))
+            if width > 2:
+                bar = np.zeros((MARK_H, width, 4), dtype=np.uint8)
+                bar[..., :3] = p.accent_rgb
+                bar[..., 3] = 255
+                bx, by = p.box[0] + p.words[w][0], p.box[1] + p.words[w][1] + p.words[w][3] + MARK_GAP
+                out.append((bar, bx, int(by + dy), max(0.0, 1.0 - gone)))
+        if gone:
+            opacity *= max(0.0, 1.0 - gone)
+            dy -= gone * EXIT_PX
+        if opacity > 0.004:
+            out.append((arr, int(x), int(y + dy), opacity))
+    return out
 
 
 def _rows(done: float, up: bool) -> np.ndarray:
@@ -302,27 +360,28 @@ class Timeline:
     def frame(self, t: float) -> np.ndarray:
         i, clip = self._clip_at(t)
         cap = next((c for c in self.captions if c.t0 <= t < c.t1), None)
-        ox, oy = clip.view(t)
         settled = (not clip.moving and clip.settles_at <= t < clip.t1 - EXIT)
         # while the camera sits on the same pixel and nothing is arriving, the frame is the one before
-        key = (i, ox, oy, cap.t0 if cap else None, cap.first and t < (cap.t0 + 0.12) if cap else None) if settled else None
+        key = (i, cap.t0 if cap else None, cap.first and t < (cap.t0 + 0.12) if cap else None) if settled else None
         if key is not None and key == self._last_key and self._last_frame is not None:
             return self._last_frame
-        frame = clip.base_array[oy:oy + H, ox:ox + W].copy()
+        frame = clip.base_array.copy()
         for p in clip.pieces:
+            if p.how(clip.motion) == "words":
+                for arr, x, y, op in _word_states(p, t, clip):
+                    _blend(frame, arr, x, y, op)
+                continue
             state = _piece_state(p, t, clip.motion, clip)
             if state:
                 arr, x, y, op = state
-                _blend(frame, arr, x - ox, y - oy, op)
+                _blend(frame, arr, x, y, op)
         # the slide change: the next slide's backdrop is wiped over this one as it leaves,
         # alternating direction, so one slide becomes the next instead of simply cutting
         if i + 1 < len(self.clips) and t > clip.t1 - EXIT:
             a = ease_in_out((t - (clip.t1 - EXIT)) / EXIT)
             if a > 0.001:
-                after = self.clips[i + 1]
-                nx, ny = after.view(after.t0)
                 ramp = _rows(a, up=bool(i % 2))
-                nxt = after.base_array[ny:ny + H, nx:nx + W].astype(np.float32)
+                nxt = self.clips[i + 1].base_array.astype(np.float32)
                 frame = (frame.astype(np.float32) * (1 - ramp) + nxt * ramp).astype(np.uint8)
         if cap:
             arr = cap.array
