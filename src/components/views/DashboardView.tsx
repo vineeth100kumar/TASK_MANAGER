@@ -23,6 +23,7 @@ import { TaskRow } from '../common/TaskRow';
 import { ReminderPrompt } from '../common/ReminderPrompt';
 import { RadarBriefCard } from '../radar/RadarBriefCard';
 import { HiddenWorkLine } from '../common/HiddenWorkLine';
+import { holidayMap, nextHoliday, holidayLabel, useHolidayPref } from '../../utils/holidays';
 
 interface DashboardViewProps {
   workspaceId: string;
@@ -46,6 +47,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
   const [time, setTime] = useState(new Date());
   const [showSnoozed, setShowSnoozed] = useState(false);
   const { showToast } = useToast();
+  const holidayPref = useHolidayPref();
 
   const load = useCallback(async () => {
     try {
@@ -147,6 +149,23 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
+            {/* India holidays: today's, or the next one within two weeks. A note, not a task. */}
+            {(() => {
+              const todays = holidayMap(holidayPref).get(todayIso) || [];
+              const next = todays.length ? null : nextHoliday(todayIso, holidayPref, 14);
+              if (!todays.length && !next) return null;
+              const days = next ? Math.round((new Date(`${next.date}T00:00`).getTime() - new Date(`${todayIso}T00:00`).getTime()) / 86_400_000) : 0;
+              return (
+                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-rose-600 dark:text-rose-300" data-testid="holiday-line">
+                  <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  {todays.length ? (
+                    <><span className="font-semibold">{todays.map(h => h.name).join(' · ')}</span><span className="text-rose-500/80 dark:text-rose-300/70">today, {holidayLabel(todays[0]).toLowerCase()}{todays[0].moonSighting ? ' (subject to moon sighting)' : ''}</span></>
+                  ) : next && (
+                    <><span className="text-rose-500/80 dark:text-rose-300/70">Next holiday:</span><span className="font-semibold">{next.name}</span><span className="text-rose-500/80 dark:text-rose-300/70">{days === 1 ? 'tomorrow' : `${new Date(`${next.date}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, in ${days} days`}{next.type === 'restricted' ? ' (restricted)' : ''}</span></>
+                  )}
+                </p>
+              );
+            })()}
             {/* Weekend: the weekly review is one tap away. */}
             {(time.getDay() === 0 || time.getDay() === 6) && (
               <button onClick={() => window.dispatchEvent(new CustomEvent('sage:ritual', { detail: 'weekly' }))}

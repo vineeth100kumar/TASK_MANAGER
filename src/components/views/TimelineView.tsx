@@ -3,6 +3,8 @@ import { PRIORITIES } from '../../services/constants';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
 import { formatClock } from '../../utils/reminders';
 import { dayOf } from '../../services/items';
+import { holidayMap, useHolidayPref } from '../../utils/holidays';
+import { HolidayTag } from '../common/HolidayTag';
 
 interface TimelineViewProps {
   tasks: any[];
@@ -33,6 +35,8 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
   });
 
   const sortedDates = Array.from(dateMap.keys()).sort();
+  // India holidays label the days that already have items (read-only, utils/holidays.ts).
+  const holidays = holidayMap(useHolidayPref());
 
   const formatDateHeader = (dStr: string) => {
     const d = parseDateString(dStr) || new Date();
@@ -98,13 +102,14 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
                 {/* Date Node */}
                 <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#0a0a0b] flex items-center justify-center ${isToday ? 'bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
 
-                <div className="flex items-baseline gap-3 mb-3">
+                <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
                   <span className={`text-[15px] font-bold ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-white'}`}>
                     {dayName}
                   </span>
                   <span className="text-[13px] font-semibold text-gray-400">
                     {fullDate}
                   </span>
+                  {(holidays.get(dateStr) || []).map(h => <HolidayTag key={h.name} holiday={h} size="xs" className="self-center" />)}
                   {isToday && (
                     <span className="bg-blue-600 text-white text-[10px] font-semibold px-2 py-0.5 rounded-full uppercase tracking-wider">
                       Today

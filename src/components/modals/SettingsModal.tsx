@@ -9,12 +9,14 @@ import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
 import { PostPictureKeys } from './PostPictureKeys';
 import { ModeSettings } from './ModeSettings';
+import { HolidaySettings } from './HolidaySettings';
 import { SecuritySettings } from './SecuritySettings';
 import { downloadICSFile } from '../../utils/calendarExport';
 
 const SETTINGS_TABS = [
   { id: 'attention', label: 'Notifications' },
   { id: 'modes', label: 'Modes' },
+  { id: 'holidays', label: 'Holidays' },
   { id: 'capture', label: 'Shortcuts' },
   { id: 'security', label: 'Sign-in' },
   { id: 'bluetooth', label: 'Bluetooth' },
@@ -26,7 +28,7 @@ const SETTINGS_TABS = [
 
 // Four groups, so the first look is four choices instead of eight.
 const SETTINGS_GROUPS = [
-  { label: 'Daily', tabs: ['attention', 'modes'] },
+  { label: 'Daily', tabs: ['attention', 'modes', 'holidays'] },
   { label: 'Capture', tabs: ['capture'] },
   { label: 'Devices', tabs: ['security', 'clock', 'bluetooth'] },
   { label: 'Advanced', tabs: ['radar', 'data', 'system'] },
@@ -44,7 +46,7 @@ interface SettingsModalProps {
   initialTab?: string;
 }
 
-type SettingsTabId = 'attention' | 'modes' | 'capture' | 'security' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system';
+type SettingsTabId = 'attention' | 'modes' | 'holidays' | 'capture' | 'security' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system';
 
 function fmtBytes(bytes: number): string {
   if (!bytes) return '0 B';
@@ -353,6 +355,9 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab 
 
         {/* Work and Chill: what shows, and switching by home and away */}
         {activeTab === 'modes' && <ModeSettings />}
+
+        {/* India holidays on Calendar, Timeline and Today */}
+        {activeTab === 'holidays' && <HolidaySettings />}
 
         {/* Sign-in: trusted devices (Face ID / Touch ID / Windows Hello) */}
         {activeTab === 'security' && <SecuritySettings />}
