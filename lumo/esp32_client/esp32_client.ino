@@ -181,13 +181,11 @@ void setup() {
   delay(200);
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
-  pinMode(TEST_PIN, OUTPUT);
-  digitalWrite(TEST_PIN, HIGH);   // GPIO20 steady 3.3 V (wiring test)
-
   storeLoad(lumoState);
   storeLoadFit(screenFit);
   hapticInit(lumoState.haptic_strength);
   initNeoPixels();
+  backlightInit(0);               // GPIO20 backlight off until the first screen is up
   displayInit();
   otaTrialBegin();   // a new version's first start: its trial begins (and may end here)
 
@@ -196,6 +194,7 @@ void setup() {
   tft.setTextColor(0xFFFF);
   tft.setCursor(20, 100);
   tft.print("Connecting to Wi-Fi...");
+  backlightWake(lumoState.backlight);   // a gentle glow up to the set brightness
 
   WiFi.mode(WIFI_STA);
   storeNetLoad();
@@ -240,6 +239,7 @@ void loop() {
   wsMark("update");
   if (otaPoll()) displayDrawScreen(currentScreen, lumoState, true);   // the update failed: back to the screen
   wsMark("screen");
+  backlightTick();
   hapticUpdate();
   // Type "buzz" in the serial monitor to test the motor with no shaping.
   if (Serial.available()) {

@@ -74,7 +74,7 @@ DEFAULTS: Dict[str, Any] = {
     # side (firmware 2.15+; the Fit test shows them), and the Even Frame: the
     # clock faces on a square card inside a black frame, with an island on its
     # right edge for the alarm, music and timers.
-    "screen": {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True},
+    "screen": {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True, "brightness": 100},
     # When the phone comes home after at least `awayMinutes` out, the clock
     # shows `message` with what's on today.
     "welcome": {"enabled": True, "message": "Welcome back to your room", "awayMinutes": 15},
@@ -243,6 +243,9 @@ def merge(current: dict, update: dict) -> dict:
         for name in ("frame", "island"):
             if name in screen:
                 out["screen"][name] = _bool(screen[name], f"screen.{name}")
+        if "brightness" in screen:
+            # 10..100: the screen can't be dimmed to black and lost.
+            out["screen"]["brightness"] = _int(screen["brightness"], "screen.brightness", 10, 100)
 
     if "welcome" in update:
         welcome = _section(update["welcome"], "welcome")

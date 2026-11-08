@@ -612,6 +612,13 @@ class Desk:
         await self.link.send({"cmd": "HAPTICS", "strength": haptics["strength"],
                               "buttons": haptics["buttons"], "notify": haptics["notifications"]})
 
+    async def send_brightness(self) -> bool:
+        """The screen brightness, 10-100 (firmware 2.23+, kept in flash). Older
+        firmware has a backlight fixed at full and ignores this."""
+        if not self.link.connected or not self.firmware_at_least((2, 23)):
+            return False
+        return await self.link.send({"cmd": "BRIGHTNESS", "level": self.settings["screen"]["brightness"]})
+
     async def send_fit(self) -> bool:
         """The case window and the Even Frame / island switches (firmware 2.15+,
         kept in flash), with the Fit test on or off. Older firmware has none."""
@@ -679,6 +686,7 @@ class Desk:
         await self.controller.send_lights()
         await self.send_haptics()
         await self.send_fit()
+        await self.send_brightness()
         await self.controller.send_clock()
         await self.send_alarms()
         await self.send_tool_settings(force=True)
@@ -697,6 +705,7 @@ class Desk:
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
         await self.send_haptics()
         await self.send_fit()
+        await self.send_brightness()
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
@@ -851,6 +860,7 @@ class Desk:
             "lightsOff": self.lights_off,
             "fitTest": self.fit_test,
             "screenFitSupported": self.firmware_at_least((2, 15)),
+            "brightnessSupported": self.firmware_at_least((2, 23)),
             "toolsSupported": self.has_tools,
             "ringing": {"id": ringing.id, "label": ringing.title, "since": int(self.ringing_since * 1000)} if ringing else None,
             "timer": self.timer.describe(),

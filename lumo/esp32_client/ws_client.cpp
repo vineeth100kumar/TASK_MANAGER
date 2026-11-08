@@ -475,11 +475,22 @@ static void handleTextMessage(const char* payload, size_t len) {
     // Never while an alarm rings; Sage doesn't ask then either.
     if (!s.alarm_ringing && !s.local_ringing) otaRequest(doc["url"] | "", doc["version"] | "");
   }
+  else if (strcmp(cmd, "BRIGHTNESS") == 0) {
+    // Screen brightness 0-100 (2.23), eased and kept in flash.
+    int level = constrain(doc["level"] | (int)s.backlight, 0, 100);
+    if ((uint8_t)level != s.backlight) {
+      s.backlight = level;
+      storeSaveBacklight(s);
+    }
+    backlightSet(level);
+    Serial.printf("[WS] Brightness %d%%\n", level);
+  }
   else if (strcmp(cmd, "BACKLIGHT") == 0) {
-    // Wiring test (2.22): GPIO20 high or low, to see whether it is the display's
-    // LED pin. Back to high at every start.
-    digitalWrite(TEST_PIN, (doc["on"] | true) ? HIGH : LOW);
-    Serial.printf("[WS] GPIO%d %s\n", TEST_PIN, (doc["on"] | true) ? "HIGH" : "LOW");
+    // The on/off test (2.22): off dims the screen to black, on restores the
+    // set brightness. Both ease through the backlight engine (2.23).
+    bool on = doc["on"] | true;
+    backlightSet(on ? s.backlight : 0);
+    Serial.printf("[WS] Backlight %s\n", on ? "on" : "off");
   }
   else if (strcmp(cmd, "DISPLAY_RESET") == 0) {
     // A loose connection can leave the screen controller blank white. Done

@@ -61,6 +61,66 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
+// ---------------------------------------------------------------------
+//  Backlight (GPIO20). PWM at BL_FREQ, duty on a gamma curve so a change
+//  of a few percent at the dim end is as visible as at the bright end.
+//  Fades run in brightness-percent space, which is what the eye follows,
+//  so a jump from 20 to 80 eases evenly rather than rushing the bright part.
+// ---------------------------------------------------------------------
+static float   blCur    = -1;     // brightness now, 0..100 (-1 = not set up yet)
+static float   blTarget = 0;      // where it is easing to
+static uint32_t blLastTick = 0;
+static int32_t blLastDuty = -1;
+
+static void blWriteDuty(float pct) {
+  if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
+  const int32_t maxDuty = (1 << BL_RES) - 1;
+  int32_t duty = (int32_t)(powf(pct / 100.0f, BL_GAMMA) * maxDuty + 0.5f);
+  if (pct >= 100) duty = maxDuty;             // dead-on full, no PWM ripple
+  if (duty == blLastDuty) return;
+  blLastDuty = duty;
+  ledcWrite(BL_PIN, duty);
+}
+
+void backlightInit(uint8_t level) {
+  ledcAttach(BL_PIN, BL_FREQ, BL_RES);
+  blCur = blTarget = level;
+  blLastDuty = -1;
+  blWriteDuty(blCur);
+  blLastTick = millis();
+}
+
+void backlightSet(uint8_t level, bool immediate) {
+  if (blCur < 0) { backlightInit(level); return; }
+  blTarget = level;
+  if (immediate) { blCur = level; blWriteDuty(blCur); }
+}
+
+void backlightTick() {
+  if (blCur < 0 || blCur == blTarget) return;
+  uint32_t now = millis();
+  float dt = now - blLastTick;
+  blLastTick = now;
+  if (dt <= 0) return;
+  float step = 100.0f * dt / BL_FADE_MS;      // percent per tick
+  if (blCur < blTarget) { blCur += step; if (blCur > blTarget) blCur = blTarget; }
+  else                  { blCur -= step; if (blCur < blTarget) blCur = blTarget; }
+  blWriteDuty(blCur);
+}
+
+// A one-time gentle glow up from black at power-on.
+void backlightWake(uint8_t level) {
+  if (blCur < 0) backlightInit(0);
+  blTarget = level;
+  blLastTick = millis();
+  uint32_t start = millis();
+  while (blCur != blTarget && millis() - start < BL_WAKE_MS + 80) {
+    backlightTick();
+    delay(6);
+  }
+  blCur = level; blWriteDuty(blCur);
+}
+
 // The cover's two main colours, for the LED row while music plays (2.19).
 // Pixels are sorted into 24 hue bins, each counting by how vivid it is
 // (greys don't count at all), so a grey sleeve with one red stripe still

@@ -52,6 +52,7 @@ void storeLoad(LumoState& s) {
   s.utc_off = p.getShort("utcoff", GMT_OFFSET_SEC / 60);
   s.snooze_minutes = constrain(p.getUChar("snooze", 5), 1, 60);
   s.haptic_strength = min((int)p.getUChar("hapt", HAPTIC_STRENGTH), 100);
+  s.backlight = constrain((int)p.getUChar("bl", BL_DEFAULT), BL_MIN_PCT, 100);
   // "alarms3": 2.11 keeps the days each alarm repeats on too. Older lists
   // are left alone and Sage sends the alarms again as soon as the clock connects.
   uint8_t n = p.getUChar("acount3", 0);
@@ -109,5 +110,12 @@ void storeSaveHaptics(const LumoState& s) {
   Preferences p;
   if (!p.begin(NS, false)) return;
   p.putUChar("hapt", s.haptic_strength);
+  p.end();
+}
+
+void storeSaveBacklight(const LumoState& s) {
+  Preferences p;
+  if (!p.begin(NS, false)) return;
+  p.putUChar("bl", s.backlight);
   p.end();
 }

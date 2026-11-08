@@ -65,7 +65,7 @@ class Merge(unittest.TestCase):
 
     def test_screen_fit_defaults_and_limits(self):
         s = settings.defaults()["screen"]
-        self.assertEqual(s, {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True})
+        self.assertEqual(s, {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True, "brightness": 100})
         s = settings.merge(settings.defaults(), {"screen": {"left": 9, "frame": True}})["screen"]
         self.assertEqual((s["left"], s["right"], s["frame"], s["island"]), (9, 0, True, True))
         for bad, why in (({"left": 41}, "0 to 40"), ({"top": -1}, "0 to 40"), ({"bottom": True}, "whole number"),

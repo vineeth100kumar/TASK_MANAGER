@@ -3,7 +3,7 @@
 // clock faces on a square card inside a black frame, with an island on the
 // right edge for the alarm, music and timers). Firmware 2.15 and later.
 import { useState } from 'react';
-import { Frame, ScanLine } from 'lucide-react';
+import { Frame, ScanLine, Sun } from 'lucide-react';
 import { LumoSettings, LumoSettingsUpdate, lumoApi } from '../../services/lumo';
 import { useToast } from '../../context/ToastContext';
 import { Panel, Row, Slider, Toggle, btnPrimary, btnQuiet } from './parts';
@@ -20,8 +20,8 @@ const SIDES: { id: 'left' | 'right' | 'top' | 'bottom'; name: string }[] = [
   { id: 'bottom', name: 'Bottom' },
 ];
 
-export function ScreenFitPanel({ settings, save, supported, testing, connected }: {
-  settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; supported: boolean; testing: boolean; connected: boolean;
+export function ScreenFitPanel({ settings, save, supported, brightnessSupported, testing, connected }: {
+  settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; supported: boolean; brightnessSupported: boolean; testing: boolean; connected: boolean;
 }) {
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
@@ -40,6 +40,20 @@ export function ScreenFitPanel({ settings, save, supported, testing, connected }
   };
 
   return (
+   <div className="space-y-4">
+    <Panel icon={<Sun size={16} className="text-amber-400" />} title="Brightness" note={brightnessSupported ? 'The screen\'s backlight' : 'Needs firmware 2.23'}>
+      <div className="flex items-center gap-3">
+        <Sun size={14} className="text-gray-300 dark:text-gray-600 shrink-0" />
+        <Slider label="Screen brightness" value={settings.screen.brightness ?? 100} min={10} max={100} format={v => `${v}%`}
+          onCommit={v => save({ screen: { brightness: v } })} />
+        <Sun size={19} className="text-amber-400 shrink-0" />
+      </div>
+      <p className="text-[12px] text-gray-400 pt-1">
+        {brightnessSupported
+          ? 'Full is the brightest the panel goes. Changes fade in smoothly, and the level is kept on the clock.'
+          : 'Update LUMO to v2.23 (see Device) to control the screen brightness.'}
+      </p>
+    </Panel>
     <Panel icon={<Frame size={16} className="text-amber-500" />} title="Screen fit" note={supported ? 'Matches the clock to its case' : 'Needs firmware 2.15'}
       right={
         <button onClick={() => test(!testing)} disabled={busy || !connected || !supported} className={testing ? btnPrimary : btnQuiet}>
@@ -73,6 +87,7 @@ export function ScreenFitPanel({ settings, save, supported, testing, connected }
         The frame is for the clock faces; menus and the other screens stay full-bleed. Stacked and Dial grow the island for music and timers; Monolith shows a dot, and Nightstand stays dark.
       </p>
     </Panel>
+   </div>
   );
 }
 

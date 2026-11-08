@@ -105,6 +105,11 @@ extern bool newArtReady;
 extern uint16_t artSerial;    // counts covers received, so a face can tell when it changed
 
 void displayInit();
+// The LCD backlight on GPIO20 (2.23): PWM-dimmed with a gamma curve, eased.
+void backlightInit(uint8_t level);          // attach PWM, start at `level` (no fade)
+void backlightSet(uint8_t level, bool immediate = false);  // new target brightness
+void backlightTick();                       // ease toward the target; call each loop
+void backlightWake(uint8_t level);          // a short blocking fade-in at boot
 void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw);
 void displayClockTick(const LumoState& s);
 void displayAlarmTick(const LumoState& s);
