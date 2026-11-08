@@ -154,6 +154,65 @@ FIT_PROBE_JS = """
 
 
 
+_UNIT_GLUE = re.compile(r"\S*\d\S*(?:\s+(?:lakh|lakhs|crore|crores|cr|million|billion|trillion|thousand|mn|bn|per\s+cent|percent|years?|months?|days?|hours?|x))+\b", re.I)
+
+# Small words that join the last word in an automatic cover pill
+_PILL_LEADERS = {"a", "an", "the", "of", "to", "in", "on", "per", "for", "by", "at", "my", "your", "our", "its"}
+
+
+def cover_fill_js(width: int, square: bool) -> str:
+    """grid_pill cover: the kicker, headline and pill are one block that fills the slide.
+
+    The headline and its pill grow together (up to a poster size) until the block fills most of the
+    room between the header and the footer, so a short title ("Rent or buy?") is set big instead of
+    sitting at the top over an empty half page. Lines are balanced so no line is left with one short
+    word. The pill keeps the headline's size, or shrinks to stay on one line inside the column.
+    The block then sits a little above the middle of the room (the optical centre)."""
+    top, bottom = (175, 905) if square else (225, 1160)
+    max_px = 210 if square else 250
+    return f"""
+    () => {{
+        const box = document.querySelector('.headline-container');
+        const h1 = document.querySelector('.cover-headline');
+        const pill = document.querySelector('.accent-pill');
+        if (!box || !h1) return {{ success: false, reason: 'No cover headline' }};
+        const W = {width}, RIGHT = 110 + W, TOP = {top}, ROOM = {bottom - top};
+        const FILL = ROOM * 0.9;
+        h1.style.overflowWrap = 'normal';
+        h1.style.wordBreak = 'normal';
+        h1.style.hyphens = 'none';
+        h1.style.textWrap = 'balance';
+        box.style.top = TOP + 'px';
+        const setSize = (px) => {{
+            h1.style.fontSize = px + 'px';
+            if (!pill) return;
+            pill.style.whiteSpace = 'nowrap';
+            let p = px;
+            pill.style.fontSize = p + 'px';
+            while (pill.getBoundingClientRect().right > RIGHT && p > 48) {{ p -= 2; pill.style.fontSize = p + 'px'; }}
+        }};
+        const fits = () => h1.scrollWidth <= W + 1
+            && box.getBoundingClientRect().height <= FILL
+            && (!pill || pill.getBoundingClientRect().right <= RIGHT + 1);
+        setSize(72);
+        if (!fits()) {{
+            return {{ success: false, overflow: true, fontSize: 72,
+                      reason: 'The cover headline does not fit even at 72px; shorten it' }};
+        }}
+        let lo = 72, hi = {max_px}, best = 72;
+        while (lo <= hi) {{
+            const mid = Math.floor((lo + hi) / 2);
+            setSize(mid);
+            if (fits()) {{ best = mid; lo = mid + 1; }} else {{ hi = mid - 1; }}
+        }}
+        setSize(best);
+        const h = box.getBoundingClientRect().height;
+        box.style.top = Math.round(TOP + Math.max(0, ROOM - h) * 0.42) + 'px';
+        return {{ success: true, fontSize: best }};
+    }}
+    """
+
+
 def _pill_split(headline: str, pill: str):
     """Split a cover headline into (words before, pill phrase) for a spec's `pill:`.
 
@@ -277,11 +336,19 @@ class SlideRenderer:
                     pill_word = trailing_num.group(1)
                     main_words = headline_text[:trailing_num.start(1)].strip()
                 elif len(words) >= 2:
-                    main_words = " ".join(words[:-1])
-                    pill_word = words[-1]
+                    # The last word goes in the pill, with a small word in front of it ("a year",
+                    # "the rich") so the headline does not end on a dangling "A" or "THE"
+                    cut = len(words) - 1
+                    while cut > 1 and words[cut - 1].lower().strip("'\"") in _PILL_LEADERS:
+                        cut -= 1
+                    main_words = " ".join(words[:cut])
+                    pill_word = " ".join(words[cut:])
                 else:
                     main_words = headline_text
                     pill_word = ""
+                # A number keeps its unit on the same line ("₹4 lakh crore", "40 per cent")
+                main_words = _UNIT_GLUE.sub(lambda m: m.group(0).replace(" ", "\u00a0"), main_words)
+                pill_word = _UNIT_GLUE.sub(lambda m: m.group(0).replace(" ", "\u00a0"), pill_word)
             elif slide_type == "cta":
                 loop_svg = grid_dashed_loop(
                     color=self.style_config.colors.accent,
@@ -469,8 +536,8 @@ class SlideRenderer:
                 from .halftone import halftone_png
                 png = halftone_png(p, halftone.get("dot"), halftone.get("angle"))
                 return "data:image/png;base64," + base64.b64encode(png).decode("ascii")
-            except Exception:
-                pass                                   # not a readable picture: show it as it is
+            except Exception as e:                     # not a readable picture: show it as it is
+                report(f"Could not make the dotted version of {p.name} ({e}); showing the original picture")
         mime = {".png": "image/png", ".gif": "image/gif", ".webp": "image/webp"}.get(p.suffix.lower(), "image/jpeg")
         return _file_to_data_url(p, mime)
 
@@ -495,39 +562,14 @@ class SlideRenderer:
 
         content_w = self.style_config.layout.content_width
         cover_w = max(content_w, 860)
-        c_w_minus = 110 + cover_w  # the pill ends inside the headline column
         steps: List[Tuple[str, Optional[str]]] = []
 
         if slide_type == "cover":
-            steps.append((f"fitText('.cover-headline', {cover_w}, {max_headline_h}, 72, 168)", "cover headline"))
-            target_cap_top_y = 210 if is_sq else 295
-
             if self.style_name == "grid_pill":
+                steps.append((cover_fill_js(cover_w, is_sq), "cover headline"))
                 steps.append((f"""
                     () => {{
-                        // A number pill ("₹52.66 crore") stays on one line within the content width
-                        // The pill reads as the headline's last words: same size as the headline, never wider than the slide
-                        const pillEl = document.querySelector('.accent-pill');
-                        const headEl = document.querySelector('.cover-headline');
-                        if (pillEl) {{
-                            pillEl.style.whiteSpace = 'nowrap';
-                            let fs = Math.min(parseFloat(window.getComputedStyle(pillEl).fontSize),
-                                              headEl ? parseFloat(window.getComputedStyle(headEl).fontSize) : 168);
-                            pillEl.style.fontSize = fs + 'px';
-                            while (pillEl.getBoundingClientRect().right > {c_w_minus} && fs > 48) {{
-                                fs -= 2;
-                                pillEl.style.fontSize = fs + 'px';
-                            }}
-                        }}
-                        const container = document.querySelector('.headline-container');
                         const h1 = document.querySelector('.cover-headline');
-                        if (container && h1) {{
-                            const rect = h1.getBoundingClientRect();
-                            const diff = {target_cap_top_y} - rect.top;
-                            const currentTop = parseFloat(window.getComputedStyle(container).top) || {target_cap_top_y};
-                            container.style.top = (currentTop + diff) + 'px';
-                        }}
-
                         const pill = document.querySelector('.accent-pill');
                         const loopPath = document.querySelector('.grid-dashed-loop path');
                         if (loopPath) {{
@@ -556,6 +598,7 @@ class SlideRenderer:
                     }}
                 """, None))
             else:
+                steps.append((f"fitText('.cover-headline', {cover_w}, {max_headline_h}, 72, 168)", "cover headline"))
                 steps.append((f"""
                     () => {{
                         const anchor = document.getElementById('baseline-anchor');
