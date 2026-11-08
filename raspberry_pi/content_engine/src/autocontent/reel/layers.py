@@ -104,7 +104,21 @@ WORDS_JS = r"""
   }
   // reading order: line by line, then left to right
   out.sort((a, b) => (Math.abs(a[1] - b[1]) > 12 ? a[1] - b[1] : a[0] - b[0]));
-  return out;
+  // Headlines are set tight (line-height below 1), so a line's boxes reach down over the tops of
+  // the letters on the line below. Left alone, those few rows of pixels travel with the word above
+  // and show up early, as dark crescents floating over nothing. Each box therefore stops where the
+  // next line's letters begin: the overlap belongs to the line it is part of.
+  const lines = [];
+  for (const b of out) {
+    const line = lines.find((l) => Math.abs(l.top - b[1]) <= 12);
+    if (line) { line.top = Math.min(line.top, b[1]); line.boxes.push(b); }
+    else lines.push({ top: b[1], boxes: [b] });
+  }
+  for (let i = 0; i < lines.length - 1; i++) {
+    const nextTop = lines[i + 1].top;
+    for (const b of lines[i].boxes) b[3] = Math.min(b[3], nextTop);
+  }
+  return out.filter((b) => b[3] - b[1] > 1);
 }
 """
 
