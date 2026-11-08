@@ -475,6 +475,12 @@ static void handleTextMessage(const char* payload, size_t len) {
     // Never while an alarm rings; Sage doesn't ask then either.
     if (!s.alarm_ringing && !s.local_ringing) otaRequest(doc["url"] | "", doc["version"] | "");
   }
+  else if (strcmp(cmd, "BACKLIGHT") == 0) {
+    // Wiring test (2.22): GPIO20 high or low, to see whether it is the display's
+    // LED pin. Back to high at every start.
+    digitalWrite(TEST_PIN, (doc["on"] | true) ? HIGH : LOW);
+    Serial.printf("[WS] GPIO%d %s\n", TEST_PIN, (doc["on"] | true) ? "HIGH" : "LOW");
+  }
   else if (strcmp(cmd, "DISPLAY_RESET") == 0) {
     // A loose connection can leave the screen controller blank white. Done
     // from loop(): the controller is started over and the screen redrawn.

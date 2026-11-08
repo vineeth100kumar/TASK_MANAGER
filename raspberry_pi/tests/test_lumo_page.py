@@ -308,6 +308,16 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.desk.device_do("explode")
 
+    async def test_backlight_test(self):
+        self.link.fw = "2.21.0"
+        with self.assertRaises(ValueError):
+            await self.desk.device_do("backlight_off")
+        self.link.fw = "2.22.0"
+        self.assertTrue(await self.desk.device_do("backlight_off"))
+        self.assertEqual(self.link.last("BACKLIGHT"), {"cmd": "BACKLIGHT", "on": False})
+        self.assertTrue(await self.desk.device_do("backlight_on"))
+        self.assertEqual(self.link.last("BACKLIGHT"), {"cmd": "BACKLIGHT", "on": True})
+
     async def test_display_reset(self):
         self.link.fw = "2.20.1"
         with self.assertRaises(ValueError):

@@ -815,6 +815,11 @@ class Desk:
             return await self.link.send({"cmd": "IDENTIFY"})
         if action == "restart":
             return await self.link.send({"cmd": "REBOOT"})
+        if action in ("backlight_on", "backlight_off"):
+            # GPIO20 high or low (firmware 2.22): a wiring test for the display's LED pin.
+            if not self.firmware_at_least((2, 22)):
+                raise ValueError("The backlight test needs firmware 2.22 or later.")
+            return await self.link.send({"cmd": "BACKLIGHT", "on": action == "backlight_on"})
         if action == "display_reset":
             # Start the screen controller over, no reboot (firmware 2.21).
             if not self.firmware_at_least((2, 21)):

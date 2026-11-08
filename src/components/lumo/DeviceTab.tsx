@@ -222,6 +222,12 @@ export function DeviceTab({ status, updates, settings, save, onChange }: {
           <button onClick={() => act(() => lumoApi.device('display_reset'), 'Display reinitialised')} disabled={!connected} className={btnQuiet} title="Starts the screen controller over, for a blank white screen after a loose wire. No restart.">
             <RefreshCw size={15} /> Reinitialize display
           </button>
+          <button onClick={() => act(() => lumoApi.device('backlight_off'), 'GPIO 20 is low')} disabled={!connected} className={btnQuiet} title="Wiring test: drives GPIO 20 low. If it is the display's LED pin, the screen goes dark.">
+            Backlight off
+          </button>
+          <button onClick={() => act(() => lumoApi.device('backlight_on'), 'GPIO 20 is high')} disabled={!connected} className={btnQuiet} title="Drives GPIO 20 high (the start-up state).">
+            Backlight on
+          </button>
         </div>
       </Panel>
 
