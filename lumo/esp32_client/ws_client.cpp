@@ -475,6 +475,11 @@ static void handleTextMessage(const char* payload, size_t len) {
     // Never while an alarm rings; Sage doesn't ask then either.
     if (!s.alarm_ringing && !s.local_ringing) otaRequest(doc["url"] | "", doc["version"] | "");
   }
+  else if (strcmp(cmd, "DISPLAY_RESET") == 0) {
+    // A loose connection can leave the screen controller blank white. Done
+    // from loop(): the controller is started over and the screen redrawn.
+    s.flag_display_reset = true;
+  }
   else if (strcmp(cmd, "REBOOT") == 0) {
     Serial.println("[WS] Restarting, as Sage asked");
     client.close(1001);

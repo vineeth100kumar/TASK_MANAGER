@@ -308,6 +308,14 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.desk.device_do("explode")
 
+    async def test_display_reset(self):
+        self.link.fw = "2.20.1"
+        with self.assertRaises(ValueError):
+            await self.desk.device_do("display_reset")
+        self.link.fw = "2.21.0"
+        self.assertTrue(await self.desk.device_do("display_reset"))
+        self.assertEqual(self.link.last("DISPLAY_RESET"), {"cmd": "DISPLAY_RESET"})
+
 
 class Status(unittest.TestCase):
     def test_latest_firmware_comes_from_the_checkout(self):
