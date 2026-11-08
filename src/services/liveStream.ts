@@ -8,6 +8,7 @@
 import { getPiApiKey } from './piBackend';
 import { RADAR_EVENT } from './radar';
 import { POST_EVENT } from './posts';
+import { REEL_EVENT } from './reels';
 import { LUMO_EVENT } from './lumo';
 import { applyLifeModeEvent, loadLifeMode } from './lifeMode';
 
@@ -79,6 +80,9 @@ export class LiveStream {
       } else if (event?.type === 'POST_PROGRESS') {
         // A post is being drawn, or finished (see PostPage).
         window.dispatchEvent(new CustomEvent(POST_EVENT, { detail: event }));
+      } else if (event?.type === 'REEL_PROGRESS') {
+        // A reel is being made, or finished (see ReelPage).
+        window.dispatchEvent(new CustomEvent(REEL_EVENT, { detail: event }));
       } else if (event?.type === 'DESK_STATE') {
         // The desk clock's timer, stopwatch or ringing alarm changed (see LumoView).
         window.dispatchEvent(new CustomEvent(LUMO_EVENT, { detail: event }));

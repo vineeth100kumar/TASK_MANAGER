@@ -431,7 +431,8 @@ class ClaudeApiTests(unittest.TestCase):
 
         names = {t["name"] for t in client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).json()["result"]["tools"]}
         self.assertTrue({"sage_post_format", "sage_post_check", "sage_post_create", "sage_post_get",
-                         "sage_post_list", "sage_post_redo"} <= names)
+                         "sage_post_list", "sage_post_redo", "sage_reel_format", "sage_reel_check",
+                         "sage_reel_create", "sage_reel_get", "sage_reel_list", "sage_reel_redo"} <= names)
 
         # The format is the engine's own prompt, plus an example that passes the check.
         err, fmt = call("sage_post_format", {})

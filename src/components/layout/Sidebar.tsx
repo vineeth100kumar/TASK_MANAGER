@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, Clapperboard } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -12,6 +12,7 @@ import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
 import { DatePicker } from '../common/DatePicker';
 import { openPosts } from '../../services/posts';
+import { openReels } from '../../services/reels';
 import { ProjectTypePicker } from '../common/ProjectTypePicker';
 import { groupProjectsByType, projectTypeId } from '../../services/projectTypes';
 
@@ -380,6 +381,8 @@ export function Sidebar({
                 { id: 'drop', name: 'Drop', icon: UploadCloud, color: 'text-sky-500' },
                 // Instagram carousels the Pi draws from a pasted script (Auto Content).
                 ...(lifeContext === 'personal' ? [] : [{ id: 'posts', name: 'Posts', icon: GalleryHorizontal, color: 'text-pink-500' }]),
+                // Vertical videos with a voice-over the Pi makes from a pasted script.
+                ...(lifeContext === 'personal' ? [] : [{ id: 'reels', name: 'Reels', icon: Clapperboard, color: 'text-rose-500' }]),
                 // Private tasks no other list shows, behind the password.
                 { id: 'hidden', name: 'Hidden', icon: EyeOff },
                 // Radar is work, so it stays out of the Personal space.
@@ -402,6 +405,7 @@ export function Sidebar({
                   item.id === 'lumo' ? activeView === 'lumo' : 
                   item.id === 'drop' ? activeView === 'drop' : 
                   item.id === 'posts' ? activeView === 'posts' : 
+                  item.id === 'reels' ? activeView === 'reels' : 
                   item.id === 'hidden' ? activeView === 'hidden' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
                   item.id === 'focus' ? activeView === 'focus' :
@@ -423,6 +427,8 @@ export function Sidebar({
                       setActiveView('drop');
                     } else if (item.id === 'posts') {
                       openPosts();
+                    } else if (item.id === 'reels') {
+                      openReels();
                     } else if (item.id === 'hidden') {
                       setActiveView('hidden');
                     } else if (item.id === 'inbox') {
@@ -651,7 +657,7 @@ export function Sidebar({
                     <input type="checkbox" checked={newProjAuto} onChange={e => setNewProjAuto(e.target.checked)} className="mt-1 w-4 h-4 accent-purple-600" />
                     <span className="text-[13px] leading-snug">
                       <b className="text-gray-900 dark:text-white">Use Auto Content</b>
-                      <span className="block text-gray-500">Adds a Posts tab to this project: paste a script and the Pi draws the Instagram slides. Each post becomes a task here.</span>
+                      <span className="block text-gray-500">Adds Posts and Reels to this project: paste a script and the Pi draws the Instagram slides, or makes a vertical video with a voice-over. Each one becomes a task here.</span>
                     </span>
                   </label>
                 )}

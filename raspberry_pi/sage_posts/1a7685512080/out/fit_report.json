@@ -1,0 +1,23 @@
+{
+  "slide_count": 3,
+  "slides": [
+    {
+      "n": 1,
+      "type": "cover",
+      "ok": true,
+      "problems": []
+    },
+    {
+      "n": 2,
+      "type": "point",
+      "ok": true,
+      "problems": []
+    },
+    {
+      "n": 3,
+      "type": "cta",
+      "ok": true,
+      "problems": []
+    }
+  ]
+}

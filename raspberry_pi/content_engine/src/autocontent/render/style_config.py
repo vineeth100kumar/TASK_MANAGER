@@ -63,6 +63,34 @@ CANVAS_FORMATS = {
         "max_quote_h": 600,
         "max_cta_h": 450,
     },
+    # Instagram Reels / Stories: 9:16. Instagram covers the top ~220 px (profile bar) and the bottom
+    # ~420 px (caption, buttons) of a reel, so everything that matters sits between y=240 and y=1480;
+    # the lower band is left for the reel's spoken captions.
+    "reel": {
+        "width": 1080,
+        "height": 1920,
+        "header_y": {"beige_grain": 250, "grid_pill": 240},
+        "footer_y": {"beige_grain": 1480, "grid_pill": 1474},
+        "content_top": {"beige_grain": 380, "grid_pill": 360},
+        "cover_top": {"beige_grain": 520, "grid_pill": 440},
+        "cover_anchor_y": {"beige_grain": 1260, "grid_pill": 1330},
+        "cta_anchor_y": {"beige_grain": 1000, "grid_pill": 1000},
+        "cta_handle_y": {"beige_grain": 1120, "grid_pill": 1120},
+        "type_scale": 1.2,
+        "table_fs": 54,
+        "compare_fs": 50,
+        # a full-screen video reads best with the block in the middle of the safe area, not hung from the top
+        "default_align": {k: "center" for k in ("point", "list", "stat", "quote", "table", "chart", "image", "statement", "compare")},
+        "cover_fill": (300, 1420, 290),
+        "statement_h": (800, 1060),
+        "statement_body_h": 300,
+        "max_headline_h": 900,
+        "max_point_h": 760,
+        "max_list_bottom_y": 1380,
+        "max_stat_h": 560,
+        "max_quote_h": 820,
+        "max_cta_h": 640,
+    },
     "square": {
         "width": 1080,
         "height": 1080,
