@@ -129,7 +129,14 @@ html.__iso [data-reel-group="__K__"], html.__iso [data-reel-group="__K__"] * { v
 html.__hide [data-reel-group], html.__hide [data-reel-group] * { visibility: hidden !important; }
 """
 
-NO_VIDEO_CSS = ", ".join(HIDDEN) + " { display: none !important; }"
+# A reel is watched full screen, so the brand furniture is set larger than a feed slide's as well
+# as being moved to the frame's own edges (see CANVAS_FORMATS["reel"]).
+CHROME_CSS = """
+.header-left, .footer-left { font-size: 34px !important; }
+.topic-pill { font-size: 26px !important; padding: 14px 30px !important; }
+"""
+
+NO_VIDEO_CSS = ", ".join(HIDDEN) + " { display: none !important; }" + CHROME_CSS
 
 
 COUNT_FRAMES = 15      # how many in-between values a counting number is photographed at

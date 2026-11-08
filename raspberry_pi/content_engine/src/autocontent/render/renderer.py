@@ -847,7 +847,8 @@ class SlideRenderer:
                     const src = [...document.querySelectorAll('.slide-source, .chart-source, .table-source')]
                         .find((e) => !box.contains(e));
                     const limit = Math.min(foot ? foot.getBoundingClientRect().top - 50 : window.innerHeight,
-                                           src ? src.getBoundingClientRect().top - 40 : 1e9);
+                                           src ? src.getBoundingClientRect().top - 40 : 1e9,
+                                           {preset.get('content_bottom', 1e9)});
                     const kids = [...box.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().height > 0);
                     if (!kids.length) return;
                     const bottom = Math.max(...kids.map((e) => e.getBoundingClientRect().bottom));

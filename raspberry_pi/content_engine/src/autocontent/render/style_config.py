@@ -69,9 +69,14 @@ CANVAS_FORMATS = {
     "reel": {
         "width": 1080,
         "height": 1920,
-        "header_y": {"beige_grain": 250, "grid_pill": 240},
-        "footer_y": {"beige_grain": 1480, "grid_pill": 1474},
+        # the brand row and the handle belong at the edges of a 9:16 frame, not at the feed's
+        # positions: hung from the top, and below the caption band rather than halfway up the screen
+        "header_y": {"beige_grain": 160, "grid_pill": 150},
+        "footer_y": {"beige_grain": 1766, "grid_pill": 1760},
         "content_top": {"beige_grain": 380, "grid_pill": 360},
+        # the handle sits at the very bottom of a reel, so the centring can't measure down to it:
+        # the slide's own content stops above the band the spoken captions run in
+        "content_bottom": 1430,
         "cover_top": {"beige_grain": 520, "grid_pill": 440},
         "cover_anchor_y": {"beige_grain": 1260, "grid_pill": 1330},
         "cta_anchor_y": {"beige_grain": 1000, "grid_pill": 1000},
