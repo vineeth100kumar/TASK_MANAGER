@@ -187,7 +187,7 @@ export const lumoApi = {
   ringing: (action: 'snooze' | 'stop') => post<LumoStatus>('/api/desk/ringing', { action }),
   timer: (action: string, seconds = 0, label = '') => post<LumoStatus>('/api/desk/timer', { action, seconds, label }),
   stopwatch: (action: string) => post<LumoStatus>('/api/desk/stopwatch', { action }),
-  device: (action: 'identify' | 'restart' | 'display_reset' | 'tone' | 'fit_test' | 'fit_test_off', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
+  device: (action: 'identify' | 'restart' | 'display_reset' | 'backlight_on' | 'backlight_off' | 'tone' | 'fit_test' | 'fit_test_off', tone = '', volume = 0) => post<LumoStatus>('/api/desk/device', { action, tone, volume }),
   press: (button: string) => post<LumoStatus>('/api/desk/press', { button }),
   firmware: (action: 'check' | 'install' | 'update' | 'hold' | 'release', build?: { version: string; sha?: string }) =>
     post<LumoStatus>('/api/desk/firmware', { action, ...(build || {}) }),
