@@ -1,0 +1,537 @@
+{
+ "$comment": "India holidays shown in Sage as a read-only layer. Refresh yearly: append the new year from the DoPT Office Memorandum, keep old years. type gazetted = closed holiday; restricted = optional (employees pick two). moonSighting = date may move a day after moon sighting.",
+ "country": "IN",
+ "scope": "Central Government offices, Delhi / New Delhi (DoPT list)",
+ "sources": [
+  {
+   "year": 2026,
+   "ref": "DoPT O.M. F.No.12/2/2023-JCA dated 03.07.2025",
+   "url": "https://dopt.gov.in/"
+  },
+  {
+   "year": 2027,
+   "ref": "DoPT O.M. F.No.12/2/2023-JCA dated 16.07.2026",
+   "url": "https://dopt.gov.in/"
+  }
+ ],
+ "years": [
+  2026,
+  2027
+ ],
+ "holidays": [
+  {
+   "date": "2026-01-01",
+   "name": "New Year's Day",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-01-03",
+   "name": "Hazarat Ali's Birthday",
+   "type": "restricted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-01-14",
+   "name": "Makar Sankranti",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-01-14",
+   "name": "Magha Bihu / Pongal",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-01-23",
+   "name": "Basant Panchami / Sri Panchami",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-01-26",
+   "name": "Republic Day",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2026-02-01",
+   "name": "Guru Ravidas's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-02-12",
+   "name": "Swami Dayananda Saraswati's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-02-15",
+   "name": "Maha Shivratri",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-02-19",
+   "name": "Shivaji Jayanti",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-03-03",
+   "name": "Holika Dahan / Dolyatra",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-03-04",
+   "name": "Holi",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-03-19",
+   "name": "Chaitra Sukladi / Gudi Padwa / Ugadi / Cheti Chand",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-03-20",
+   "name": "Jamat-ul-Vida",
+   "type": "restricted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-03-21",
+   "name": "Id-ul-Fitr",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-03-26",
+   "name": "Ram Navami",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-03-31",
+   "name": "Mahavir Jayanti",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-04-03",
+   "name": "Good Friday",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-04-05",
+   "name": "Easter Sunday",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-04-14",
+   "name": "Vaisakhi / Vishu / Meshadi (Tamil New Year)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-04-15",
+   "name": "Vaisakhadi (Bengal) / Bahag Bihu (Assam)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-05-01",
+   "name": "Buddha Purnima",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-05-09",
+   "name": "Rabindranath Tagore's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-05-27",
+   "name": "Id-ul-Zuha (Bakrid)",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-06-26",
+   "name": "Muharram",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-07-16",
+   "name": "Rath Yatra",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-08-15",
+   "name": "Independence Day",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2026-08-15",
+   "name": "Parsi New Year (Navroz)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-08-26",
+   "name": "Milad-un-Nabi (Prophet Mohammad's Birthday)",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-08-26",
+   "name": "Onam",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-08-28",
+   "name": "Raksha Bandhan",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-09-04",
+   "name": "Janmashtami",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-09-14",
+   "name": "Ganesh Chaturthi",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-10-02",
+   "name": "Mahatma Gandhi's Birthday",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2026-10-18",
+   "name": "Dussehra (Saptami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-10-19",
+   "name": "Dussehra (Mahashtami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-10-20",
+   "name": "Dussehra",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-10-20",
+   "name": "Dussehra (Mahanavami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-10-26",
+   "name": "Maharishi Valmiki's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-10-29",
+   "name": "Karwa Chauth",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-11-08",
+   "name": "Diwali (Deepavali)",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-11-08",
+   "name": "Naraka Chaturdashi",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-11-09",
+   "name": "Govardhan Puja",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-11-11",
+   "name": "Bhai Dooj",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-11-15",
+   "name": "Chhath Puja",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-11-24",
+   "name": "Guru Nanak's Birthday",
+   "type": "gazetted"
+  },
+  {
+   "date": "2026-11-24",
+   "name": "Guru Teg Bahadur's Martyrdom Day",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-12-23",
+   "name": "Hazarat Ali's Birthday",
+   "type": "restricted",
+   "moonSighting": true
+  },
+  {
+   "date": "2026-12-24",
+   "name": "Christmas Eve",
+   "type": "restricted"
+  },
+  {
+   "date": "2026-12-25",
+   "name": "Christmas Day",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-01-01",
+   "name": "New Year's Day",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-01-14",
+   "name": "Makar Sankranti / Magha Bihu",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-01-15",
+   "name": "Pongal / Guru Gobind Singh's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-01-26",
+   "name": "Republic Day",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2027-02-11",
+   "name": "Basant Panchami / Sri Panchami",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-02-19",
+   "name": "Shivaji Jayanti",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-02-20",
+   "name": "Guru Ravidas's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-03-02",
+   "name": "Swami Dayananda Saraswati's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-03-05",
+   "name": "Jamat-ul-Vida",
+   "type": "restricted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-03-06",
+   "name": "Maha Shivratri",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-03-10",
+   "name": "Id-ul-Fitr",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-03-22",
+   "name": "Holika Dahan / Dolyatra",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-03-23",
+   "name": "Holi",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-03-26",
+   "name": "Good Friday",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-03-28",
+   "name": "Easter Sunday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-04-07",
+   "name": "Chaitra Sukladi / Gudi Padwa / Ugadi / Cheti Chand",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-04-14",
+   "name": "Vaisakhi / Vishu / Meshadi (Tamil New Year)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-04-15",
+   "name": "Ram Navami",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-04-15",
+   "name": "Vaisakhadi (Bengal) / Bahag Bihu (Assam)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-04-19",
+   "name": "Mahavir Jayanti",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-05-09",
+   "name": "Rabindranath Tagore's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-05-17",
+   "name": "Id-ul-Zuha (Bakrid)",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-05-20",
+   "name": "Buddha Purnima",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-06-16",
+   "name": "Muharram",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-07-05",
+   "name": "Rath Yatra",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-08-15",
+   "name": "Independence Day",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2027-08-15",
+   "name": "Milad-un-Nabi (Prophet Mohammad's Birthday)",
+   "type": "gazetted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-08-15",
+   "name": "Parsi New Year (Navroz)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-08-17",
+   "name": "Raksha Bandhan",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-08-25",
+   "name": "Janmashtami",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-09-04",
+   "name": "Ganesh Chaturthi",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-09-12",
+   "name": "Onam",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-02",
+   "name": "Mahatma Gandhi's Birthday",
+   "type": "gazetted",
+   "national": true
+  },
+  {
+   "date": "2027-10-06",
+   "name": "Dussehra (Saptami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-07",
+   "name": "Dussehra (Mahashtami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-08",
+   "name": "Dussehra (Mahanavami)",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-09",
+   "name": "Dussehra (Vijaya Dashami)",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-10-15",
+   "name": "Maharishi Valmiki's Birthday",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-18",
+   "name": "Karwa Chauth",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-28",
+   "name": "Naraka Chaturdashi",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-29",
+   "name": "Diwali (Deepavali)",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-10-30",
+   "name": "Govardhan Puja",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-10-31",
+   "name": "Bhai Dooj",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-11-04",
+   "name": "Chhath Puja",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-11-14",
+   "name": "Guru Nanak's Birthday",
+   "type": "gazetted"
+  },
+  {
+   "date": "2027-11-24",
+   "name": "Guru Teg Bahadur's Martyrdom Day",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-12-12",
+   "name": "Hazarat Ali's Birthday",
+   "type": "restricted",
+   "moonSighting": true
+  },
+  {
+   "date": "2027-12-24",
+   "name": "Christmas Eve",
+   "type": "restricted"
+  },
+  {
+   "date": "2027-12-25",
+   "name": "Christmas Day",
+   "type": "gazetted"
+  }
+ ]
+}

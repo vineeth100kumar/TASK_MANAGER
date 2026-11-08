@@ -3,6 +3,8 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
 import { formatTime } from '../../utils/reminders';
 import { dayOf } from '../../services/items';
+import { holidayMap, holidayLabel, useHolidayPref } from '../../utils/holidays';
+import { HolidayTag } from '../common/HolidayTag';
 
 interface CalendarViewProps {
   tasks: any[];
@@ -48,6 +50,8 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
   };
 
   const dates = getDates();
+  // India holidays: a read-only layer, never tasks (utils/holidays.ts).
+  const holidays = holidayMap(useHolidayPref());
   const today = getTodayString();
   const [selectedDay, setSelectedDay] = useState(today);
 
@@ -91,23 +95,28 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
           <div className="grid grid-cols-7 md:auto-rows-fr md:h-full md:min-h-[500px]">
             {cells.map((cell, i) => {
               const items = dates.get(cell.dateStr) || [];
+              const hols = holidays.get(cell.dateStr) || [];
+              const offDay = hols.some(h => h.type === 'gazetted');
               const isToday = cell.dateStr === today;
               const isSel = cell.dateStr === selectedDay;
               return (
                 <div key={cell.dateStr} onClick={() => setSelectedDay(cell.dateStr)}
                   className={`relative min-h-[3.25rem] md:min-h-[104px] p-1 md:p-2 border-b border-r border-gray-100 dark:border-white/5 ${(i + 1) % 7 === 0 ? 'border-r-0' : ''} ${i >= cells.length - 7 ? 'border-b-0' : ''}
-                    ${cell.weekend ? 'bg-gray-50/60 dark:bg-white/[0.015]' : ''} ${isSel ? 'max-md:bg-blue-50/70 dark:max-md:bg-blue-500/10' : ''}`}>
+                    ${offDay ? 'bg-rose-50/50 dark:bg-rose-500/[0.04]' : cell.weekend ? 'bg-gray-50/60 dark:bg-white/[0.015]' : ''} ${isSel ? 'max-md:bg-blue-50/70 dark:max-md:bg-blue-500/10' : ''}`}>
                   <div className={`text-[12px] font-semibold mb-1 w-6 h-6 mx-auto md:mx-0 flex items-center justify-center rounded-full tabular-nums
                     ${isToday ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30' : cell.isCurrentMonth ? 'text-gray-700 dark:text-gray-300' : 'text-gray-300 dark:text-gray-600'}`}>
                     {cell.day}
                   </div>
                   {/* Phones get dots and an agenda below; wider screens list the items. */}
-                  {items.length > 0 && (
+                  {(items.length > 0 || hols.length > 0) && (
                     <div className="md:hidden flex justify-center gap-0.5" aria-hidden>
-                      {items.slice(0, 3).map(t => <span key={t.id} className={`w-1.5 h-1.5 rounded-full ${dotColor(t)}`} />)}
+                      {hols.slice(0, 1).map(h => <span key={h.name} className={`w-1.5 h-1.5 rounded-full ${h.type === 'gazetted' ? 'bg-rose-500' : 'ring-1 ring-inset ring-rose-400'}`} />)}
+                      {items.slice(0, hols.length ? 2 : 3).map(t => <span key={t.id} className={`w-1.5 h-1.5 rounded-full ${dotColor(t)}`} />)}
                     </div>
                   )}
                   <div className={`hidden md:block space-y-1 ${cell.isCurrentMonth ? '' : 'opacity-60'}`}>
+                    {hols.slice(0, 2).map(h => <HolidayTag key={h.name} holiday={h} size="xs" className="w-full" />)}
+                    {hols.length > 2 && <p className="px-1.5 text-[11px] font-semibold text-rose-500/80" title={hols.slice(2).map(h => h.name).join(', ')}>+{hols.length - 2} holiday{hols.length > 3 ? 's' : ''}</p>}
                     {items.slice(0, MAX_CHIPS).map(task => (
                       <button key={task.id} type="button" onClick={e => { e.stopPropagation(); onSelect(task.id); }} title={task.title}
                         className={`w-full flex items-center gap-1 text-left text-[11.5px] font-semibold px-1.5 py-[3px] rounded-md truncate transition-[filter,transform] hover:brightness-95 dark:hover:brightness-125 active:scale-[0.98] ${chipColor(task)}`}>
@@ -127,10 +136,25 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
         </div>
       </div>
 
+      {cells.some(c => c.isCurrentMonth && holidays.has(c.dateStr)) && (
+        <p className="mt-2 px-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-gray-400">
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-rose-500" />India gazetted holiday</span>
+          <span className="inline-flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full ring-1 ring-inset ring-rose-400" />Restricted (optional)</span>
+          {cells.some(c => c.isCurrentMonth && holidays.get(c.dateStr)?.some(h => h.moonSighting)) && <span>* may move a day with moon sighting</span>}
+        </p>
+      )}
+
       <div className="md:hidden mt-4 space-y-2">
         <p className="eyebrow text-gray-400 px-1">{parseDateString(selectedDay)?.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</p>
+        {(holidays.get(selectedDay) || []).map(h => (
+          <div key={h.name} className="w-full rounded-2xl px-4 py-3 flex items-center gap-3 bg-rose-50 dark:bg-rose-500/10 ring-1 ring-inset ring-rose-200/70 dark:ring-rose-400/20">
+            <span className={`w-2 h-2 rounded-full shrink-0 ${h.type === 'gazetted' ? 'bg-rose-500' : 'ring-1 ring-inset ring-rose-400'}`} />
+            <span className="flex-1 min-w-0 truncate text-[14px] font-semibold text-rose-800 dark:text-rose-200">{h.name}</span>
+            <span className="text-[12px] font-medium text-rose-500/90 dark:text-rose-300/80 shrink-0">{holidayLabel(h).replace(' holiday', '')}{h.moonSighting ? '*' : ''}</span>
+          </div>
+        ))}
         {agenda.length === 0 ? (
-          <p className="px-1 py-6 text-center text-[13px] text-gray-400">Nothing on this day.</p>
+          (holidays.get(selectedDay)?.length ? null : <p className="px-1 py-6 text-center text-[13px] text-gray-400">Nothing on this day.</p>)
         ) : agenda.map(task => (
           <button key={task.id} type="button" onClick={() => onSelect(task.id)}
             className="w-full surface-item is-interactive rounded-2xl px-4 py-3 flex items-center gap-3 text-left">
