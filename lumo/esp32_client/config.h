@@ -8,6 +8,7 @@
 #define BUZZER_PIN    9    // Active LOW (BC557): buzzer + vibration motor in parallel, see HAPTICS
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
+#define TEST_PIN      20   // GPIO20 (RX pad): driven HIGH (3.3 V) at boot, a wiring test (2.20.1)
 
 // ===================== WIFI + PI SERVER =====================
 // The Wi-Fi name, password and the Pi's address live in secrets.h, which is
@@ -141,7 +142,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.20.0"
+#define FW_VERSION "2.20.1"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...
