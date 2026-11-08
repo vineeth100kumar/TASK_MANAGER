@@ -50,9 +50,8 @@ WORD_PX = 20           # how far it rises on its way in
 DIM = 0.42             # how far a step fades back once the voice has moved on to the next one
 DIM_IN = 0.45          # how long it takes to fade back
 BAR_H = 8              # the progress bar across the top of the reel
-MARK_IN = 0.26         # how long the line under a highlighted word takes to draw
-MARK_H = 9             # how thick it is
-MARK_GAP = 4           # and how far under the word it sits
+MARK_IN = 0.0          # a highlighted word is not underlined: the slide designs draw their own
+                       # rule under a headline, and a second one under the word reads as a mistake
 
 # What a piece is, from the classes the renderer gave it, and so how it should arrive.
 # The first match wins, so the more particular classes come first.
@@ -318,15 +317,6 @@ def _word_states(p: Piece, t: float, clip: SceneClip) -> List[Tuple[np.ndarray, 
                                     0.82 + 0.18 * ease_out_back(u))
         else:
             opacity, dy = 1.0, 0.0
-        if accent and u > 0.55:
-            mark = (t - (start + WORD_IN * 0.55)) / MARK_IN
-            width = int(round(p.words[w][2] * ease_out_cubic(mark)))
-            if width > 2:
-                bar = np.zeros((MARK_H, width, 4), dtype=np.uint8)
-                bar[..., :3] = p.accent_rgb
-                bar[..., 3] = 255
-                bx, by = p.box[0] + p.words[w][0], p.box[1] + p.words[w][1] + p.words[w][3] + MARK_GAP
-                out.append((bar, bx, int(by + dy), 1.0))
         if opacity > 0.004:
             out.append((arr, int(x), int(y + dy), opacity))
     return out

@@ -237,8 +237,10 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
         for wx0, wy0, wx1, wy1, colour in page.evaluate(WORDS_JS, k):
             a, b = round(wx0 * scale) - round(x * scale), round(wy0 * scale) - round(y * scale)
             c, d = round(wx1 * scale) - round(x * scale), round(wy1 * scale) - round(y * scale)
-            a, b = max(0, a - 2), max(0, b - 2)
-            c, d = min(pw, c + 2), min(ph, d + 2)
+            # only sideways room: padding up and down takes a sliver of the line above or below
+            # with the word, and that sliver then lands early, as a smudge over empty space
+            a, c = max(0, a - 2), min(pw, c + 2)
+            b, d = max(0, b), min(ph, d)
             if c - a > 1 and d - b > 1:
                 words.append((a, b, c - a, d - b))
                 colours.append(str(colour))

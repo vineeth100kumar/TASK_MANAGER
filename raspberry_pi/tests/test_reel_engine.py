@@ -332,16 +332,18 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(showing(1.0 + compose.WORD_STEP * 2.1), 3)
         self.assertGreater(piece.takes("rise"), compose.WORD_IN)  # it is not over in one go
 
-    def test_a_highlighted_word_lands_harder_and_is_underlined(self):
+    def test_a_highlighted_word_lands_harder(self):
+        """The word the design points at pops past its size on the way in. It is not underlined:
+        the slide's own design draws the rule, and a second one reads as a mistake."""
         from PIL import Image
         piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
-                              at=1.0, motion="words", words=[(0, 0, 100, 60), (110, 0, 100, 60)],
+                              at=1.0, motion="words", words=[(0, 0, 200, 60), (200, 0, 200, 60)],
                               accents=[1], accent_rgb=(238, 68, 37))
         clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
-        late = compose._word_states(piece, 1.0 + compose.WORD_STEP + compose.WORD_IN * 0.8, clip)
-        bars = [a for a, x, y, op in late if a.shape[0] == compose.MARK_H]
-        self.assertEqual(len(bars), 1, "the highlighted word should be drawing a line under itself")
-        self.assertEqual(tuple(bars[0][0, 0, :3]), (238, 68, 37))
+        at = lambda u: compose._word_states(piece, 1.0 + compose.WORD_STEP + compose.WORD_IN * u, clip)
+        self.assertTrue(all(a.shape[0] == 60 for a, *_ in at(1.5)), "it should settle at its own size")
+        over = max(a.shape[1] for a, *_ in at(0.8))
+        self.assertGreater(over, 200, "the highlighted word should overshoot on its way in")
 
     def test_a_big_number_counts_up_to_itself(self):
         from PIL import Image
