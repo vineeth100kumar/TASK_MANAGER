@@ -10,6 +10,8 @@ import { downloadTaskImage } from '../../utils/imageExport';
 
 import { toInputDateValue, toInputDateTimeValue } from '../../utils/dateUtils';
 import { RepeatSelect } from '../common/RepeatSelect';
+import { DoseTimesPicker } from '../common/DoseTimesPicker';
+import { hasDoses } from '../../utils/doses';
 import { Select } from '../common/Select';
 import { DatePicker } from '../common/DatePicker';
 import { stageOf, statusesFor } from '../../services/projectTypes';
@@ -339,6 +341,11 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       {(moreFields || !!task.location) && <PropertyRow icon={FileText} label="Location">
                         <input type="text" className="prop-input w-full"
                           value={task.location || ''} onChange={async (e) => { await onUpdateDetails(task, { location: e.target.value }); loadData(); }} placeholder="Optional" />
+                      </PropertyRow>
+
+                      }
+                      {(moreFields || hasDoses(task)) && <PropertyRow icon={Activity} label="Times per day">
+                        <DoseTimesPicker value={task.doseTimes} onChange={async (times) => { await onUpdateDetails(task, { doseTimes: times }); loadData(); }} />
                       </PropertyRow>
 
                       }

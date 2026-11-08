@@ -3,6 +3,8 @@ import { api } from '../services/api';
 import { WorkItem } from '../services/types';
 import { useToast } from '../context/ToastContext';
 import { countDoneToday, doneMessage, haptic } from '../utils/progress';
+import { doseProgress } from '../utils/doses';
+import { formatTime } from '../utils/reminders';
 
 // A short spin, then the tick fills; the save waits for both so the row doesn't
 // vanish (the list refreshes as soon as the item saves) before the tick lands.
@@ -27,6 +29,24 @@ export function useCompletion(onChanged?: () => void) {
 
   const complete = useCallback(async (item: WorkItem) => {
     if (completing.has(item.id)) return;
+    // Several doses a day: the tick takes the next dose, and the last one finishes the task.
+    const doses = doseProgress(item.doseTimes, item.dosesDone);
+    if (doses.total > 1 && doses.next && doses.done < doses.total - 1) {
+      haptic(12);
+      const time = doses.next;
+      try {
+        await api.workItems.toggleDose(item.id, time);
+        showToast(`${item.title || 'Task'}: ${formatTime(time)} done · ${doses.done + 1}/${doses.total}`, 'success', {
+          label: 'Undo',
+          group: 'done',
+          onAction: async () => { await api.workItems.toggleDose(item.id, time); onChanged?.(); },
+        });
+        onChanged?.();
+      } catch (e: any) {
+        showToast(e?.message || 'Could not tick that dose', 'error');
+      }
+      return;
+    }
     haptic(12);
     setCompleting(prev => new Set(prev).add(item.id));
     setSaving(prev => new Set(prev).add(item.id));

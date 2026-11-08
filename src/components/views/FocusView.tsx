@@ -11,6 +11,8 @@ import { useCachedState } from '../../hooks/useCachedState';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange } from '../../utils/dateUtils';
 import { countDoneToday } from '../../utils/progress';
+import { normalizeDoses } from '../../utils/doses';
+import { DoseChips } from '../common/DoseChips';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { Celebrate } from '../common/Celebrate';
@@ -153,6 +155,10 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                     {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
                     {item.project && <span>· {item.project.name}</span>}
                   </div>
+                  {normalizeDoses(item.doseTimes).length > 1 && (
+                    <DoseChips className="mt-1.5" times={normalizeDoses(item.doseTimes)} ticked={item.dosesDone} label={item.title}
+                      onToggle={async t => { await api.workItems.toggleDose(item.id, t); loadFocus(); }} />
+                  )}
                 </div>
               </div>
 

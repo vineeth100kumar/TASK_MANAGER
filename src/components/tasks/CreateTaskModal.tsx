@@ -11,6 +11,8 @@ import { Project, Area, LifeContext } from '../../services/types';
 import { parseQuickAdd, QuickAddResult, flipGuessedTime, formatShortDate } from '../../utils/quickAddParser';
 import { formatTime } from '../../utils/reminders';
 import { RepeatSelect } from '../common/RepeatSelect';
+import { DoseTimesPicker } from '../common/DoseTimesPicker';
+import { toDateKey } from '../../utils/recurrence';
 import { Select } from '../common/Select';
 import { DatePicker, formatPickedDate } from '../common/DatePicker';
 import { getTodayString } from '../../utils/dateUtils';
@@ -433,7 +435,7 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
     description: '', type: 'task', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || '', startDate: '', dueDate: '', dueTime: '', estimated: '',
-    location: '', repeatRule: '', isFocus: !!defaultFocus
+    location: '', repeatRule: '', isFocus: !!defaultFocus, doseTimes: [] as string[]
   });
   const [tags, setTags] = useState<string[]>([]);
   // A task with a time reminds you at that time unless you choose otherwise.
@@ -513,6 +515,8 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
       startDate,
       dueDate,
       dueTime: dueDate && payload.dueTime ? payload.dueTime : null,
+      // Several doses a day need a day: with none chosen it is today.
+      ...(payload.doseTimes.length > 1 && !dueDate ? { dueDate: toDateKey(new Date()), isInbox: false } : {}),
       reminderLeadMinutes: reminderLead === '' || !dueDate ? null : reminderLead
     });
   };
@@ -522,7 +526,7 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
   const personal = lifeContext === 'personal';
   const moreSummary = [
     personal ? areas.find((a: any) => a.id === payload.areaId)?.name : projects.find((p: any) => p.id === payload.projectId)?.name,
-    payload.estimated, payload.repeatRule && 'repeats', reminderLead !== '' && 'reminder', tags.length > 0 && `${tags.length} tag${tags.length === 1 ? '' : 's'}`,
+    payload.estimated, payload.repeatRule && 'repeats', payload.doseTimes.length > 0 && `${payload.doseTimes.length}x a day`, reminderLead !== '' && 'reminder', tags.length > 0 && `${tags.length} tag${tags.length === 1 ? '' : 's'}`,
   ].filter(Boolean).join(' · ');
 
   return (
@@ -620,6 +624,11 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
           <RepeatSelect className="field" value={payload.repeatRule} onChange={v => set('repeatRule', v)} disabled={isSubmitting} />
+        </div>
+
+        <div className="space-y-1 col-span-2">
+          <label className="field-label">Times per day</label>
+          <DoseTimesPicker value={payload.doseTimes} onChange={v => set('doseTimes', v as any)} disabled={isSubmitting} />
         </div>
 
         <SharedReminderLead value={reminderLead} setValue={setReminderLead} />

@@ -190,6 +190,42 @@ class SchedulerTests(unittest.TestCase):
         self.assertEqual(self.pushed, [])
         self.assertEqual(send.call_args[0][1], "Habit: Meditate")
 
+    def test_habit_with_doses_reminds_each_unticked_time(self):
+        put_items()
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        put_habits({"id": "d", "name": "Cream", "doseTimes": ["20:00", "08:00"], "doseLog": {"2026-10-01": ["08:00"]}})
+        # 08:00 is already ticked, so only the evening dose reminds.
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 30)), ["habit:d:2026-10-01:20:00"])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 35)), [])  # not twice
+        self.assertIn("8:00 pm dose", self.pushed[0]["body"])
+        self.assertIn("1 of 2 done", self.pushed[0]["body"])
+
+    def test_habit_with_all_doses_ticked_sends_nothing(self):
+        put_items()
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        put_habits({"id": "d", "name": "Cream", "doseTimes": ["08:00", "20:00"], "doseLog": {"2026-10-01": ["08:00", "20:00"]}, "history": ["2026-10-01"]})
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 30)), [])
+
+    def test_task_with_doses_reminds_at_each_unticked_time(self):
+        put_items({"id": "m", "title": "Medicine", "dueDate": "2026-10-01", "doseTimes": ["08:00", "14:00", "20:00"], "dosesDone": ["08:00"],
+                   "dueTime": "08:00", "remindAt": "2026-10-01T08:00"})
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])  # 08:00 ticked; the old single reminder is off
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 8, 30)), ["dose:m:2026-10-01:14:00"])
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 14, 30)), ["dose:m:2026-10-01:20:00"])
+        self.assertEqual(self.pushed[0]["body"], "2:00 pm dose · 1 of 3 done today")
+
+    def test_task_doses_ignore_other_days_and_finished_tasks(self):
+        put_items(
+            {"id": "a", "title": "Tomorrow", "dueDate": "2026-10-02", "doseTimes": ["08:00", "20:00"]},
+            {"id": "b", "title": "Done", "dueDate": "2026-10-01", "doseTimes": ["08:00", "20:00"], "status": "done"},
+            {"id": "c", "title": "One time", "dueDate": "2026-10-01", "doseTimes": ["08:00"]},
+        )
+        notifier.save_prefs({"morningPlan": False, "eveningCheckIn": False})
+        self.assertEqual(notifier.run_once(utc(2026, 10, 1, 2, 30)), [])
+
     def test_snoozed_items_are_not_reminded(self):
         put_items({"id": "s", "title": "Later please", "remindAt": "2026-10-01T09:00", "snoozedUntil": "2026-10-01T05:00:00Z"})
         notifier.save_prefs({"morningPlan": False})
