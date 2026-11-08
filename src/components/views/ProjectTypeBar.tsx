@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { GalleryHorizontal, Pencil, Plus } from 'lucide-react';
+import { Clapperboard, GalleryHorizontal, Pencil, Plus } from 'lucide-react';
 import { openPosts } from '../../services/posts';
+import { openReels } from '../../services/reels';
 import { api } from '../../services/api';
 import type { LifeContext, Project } from '../../services/types';
 import { selectItems } from '../../services/items';
@@ -63,6 +64,11 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { pro
             <button type="button" onClick={() => openPosts({ projectId: project.id, newPost: true })}
               className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors">
               <Plus size={12} /> New post
+            </button>
+            <button type="button" onClick={() => openReels({ projectId: project.id })}
+              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300 hover:opacity-80 transition-opacity"
+              title="Reels made with Auto Content">
+              <Clapperboard size={12} /> Reels
             </button>
           </>
         )}

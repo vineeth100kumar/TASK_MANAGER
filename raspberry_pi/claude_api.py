@@ -57,14 +57,17 @@ _logs: Optional[Callable[..., dict]] = None
 _drop: Any = None
 # posts.py, the Auto Content slide maker (Posts).
 _posts: Any = None
+# reels.py, the reel maker (Reels).
+_reels: Any = None
 # diagnostics.py, the blackout probe (summary + raw recent samples).
 _diagnostics: Any = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None, diagnostics=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts, _diagnostics
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None, diagnostics=None, reels=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts, _diagnostics, _reels
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
     _logs, _drop, _posts, _diagnostics = logs, drops, posts, diagnostics
+    _reels = reels
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -1030,6 +1033,188 @@ async def redo_post(args: Any) -> dict:
     return _post_answer(post)
 
 
+# --- Instagram reels made on the Pi (reels.py) ---
+
+def _need_reels() -> Any:
+    if _reels is None:
+        raise ApiError(503, "Reels isn't connected")
+    return _reels
+
+
+def reel_format() -> dict:
+    """The reel script format, cut from the engine's own REEL_FORMAT.md, plus a full example."""
+    reels = _need_reels()
+    guide = (reels.ENGINE_DIR / "REEL_FORMAT.md").read_text(encoding="utf-8")
+    m = re.search(r"<!-- PROMPT START -->(.*?)<!-- PROMPT END -->", guide, re.S)
+    rules = (m.group(1) if m else guide).strip()
+    example = (reels.ENGINE_DIR / "example_reel.md").read_text(encoding="utf-8")
+    return {"format": rules, "example": example, "styles": list(reels.STYLES), "voices": reels._voices()}
+
+
+def _reel_view(reel: dict, full: bool = True) -> dict:
+    reels = _need_reels()
+    keys = ("id", "title", "status", "error", "style", "voice", "needsRecording", "projectId", "taskId", "scenes", "seconds",
+            "estimate", "madeIn", "size", "wordTiming", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
+    out = {k: reel.get(k) for k in keys}
+    out["progress"] = reel.get("progress") or {}
+    out["link"] = reels.reel_link(reel) or None
+    if full:
+        out["caption"] = reel.get("caption") or ""
+        out["hashtags"] = reel.get("hashtags") or []
+        out["warnings"] = reel.get("warnings") or []
+        out["log"] = [line.get("text") for line in (reel.get("log") or [])[-8:]]
+    else:
+        out["captionStart"] = reel.get("captionStart") if "captionStart" in reel else (reel.get("caption") or "")[:140]
+    return out
+
+
+def _reel_note(reel: dict) -> Optional[str]:
+    status = reel.get("status")
+    if status == "waiting":
+        return ("This reel uses `voice: mine`, so it is waiting for Vineeth's recording. Tell him to open the link, "
+                "press Record or Upload, and the Pi will make it. (Or redo it with a Kokoro voice such as af_heart.)")
+    if status in _UNFINISHED:
+        return ("The Pi is making the video (a few minutes; it shows progress). Call sage_reel_get with this id and "
+                "wait to get the finished link and caption.")
+    if status == "failed":
+        return "It failed; read the error, fix the script and call sage_reel_redo with the id."
+    if status == "done":
+        bits = []
+        if reel.get("emailed"):
+            bits.append("The reel-ready email has been sent.")
+        elif reel.get("emailError"):
+            bits.append(f"The email didn't go: {reel['emailError']}")
+        if not _need_reels().reel_link(reel):
+            bits.append("Sage has no public address right now, so open it from Sage > Reels on the home network.")
+        if reel.get("warnings"):
+            bits.append("Warnings: " + " | ".join(str(w) for w in reel["warnings"][:3]))
+        return " ".join(bits) or None
+    return None
+
+
+async def _wait_for_reel(reel_id: str, seconds: Any) -> dict:
+    reels = _need_reels()
+    try:
+        limit = max(0.0, min(float(seconds or 0), POST_WAIT_MAX))
+    except (TypeError, ValueError):
+        limit = 0.0
+    loop = asyncio.get_running_loop()
+    end = loop.time() + limit
+    reel = await asyncio.to_thread(reels.get, reel_id)
+    while reel and reel.get("status") in _UNFINISHED and loop.time() < end:
+        await asyncio.sleep(1)
+        reel = await asyncio.to_thread(reels.get, reel_id)
+    if not reel:
+        raise ApiError(404, "No reel has that id")
+    return reel
+
+
+def _reel_answer(reel: dict, **extra) -> dict:
+    out = {**extra, "reel": _reel_view(reel)}
+    note = _reel_note(reel)
+    if note:
+        out["note"] = note
+    return out
+
+
+def check_reel(args: Any) -> dict:
+    reels = _need_reels()
+    script = str((args or {}).get("script") or "") if isinstance(args, dict) else ""
+    if not script.strip():
+        raise ApiError(400, "Send the script")
+    if len(script) > reels.MAX_SCRIPT:
+        raise ApiError(400, f"That script is {len(script):,} characters; the limit is {reels.MAX_SCRIPT:,}.")
+    try:
+        return {"check": reels.check(reels._clean_script(script))}
+    except Exception as e:
+        raise ApiError(400, f"Couldn't read that script: {str(e)[:200]}")
+
+
+async def create_reel(args: Any) -> dict:
+    """Queues a script on the Pi's reel maker, the same as pressing Make in Reels: it speaks the
+    narration (Kokoro), draws and animates the slides, captions them and encodes the mp4, then emails
+    when done. With `voice: mine` it waits for Vineeth's recording instead."""
+    reels = _need_reels()
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {script}")
+    project = _post_project(args.get("project"))
+    state = await asyncio.to_thread(reels.status)
+    if not state["ready"]:
+        raise ApiError(503, "The reel maker isn't ready on the Pi: " + " ".join(state["problems"]))
+    try:
+        reel = reels.start(str(args.get("script") or ""), str(args.get("title") or ""), str(args.get("style") or ""),
+                           project["id"] if project else "")
+    except reels.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(400, f"{e} Run sage_reel_check for every issue with its line.")
+    if reel["status"] == "queued" and not state["voiceReady"]:
+        reel.update(status="failed", error=state["voiceProblem"])
+        await asyncio.to_thread(reels.save, reel)
+    elif args.get("wait") and reel["status"] != "waiting":
+        reel = await _wait_for_reel(reel["id"], args["wait"])
+    extra = {"project": project.get("name") if project else None}
+    if not state["emailReady"]:
+        extra["emailSetUp"] = False
+    return _reel_answer(reel, **extra)
+
+
+async def get_reel(args: Any) -> dict:
+    reel_id = str((args or {}).get("id") or "").strip() if isinstance(args, dict) else ""
+    if not reel_id:
+        raise ApiError(400, "Send the reel's id")
+    return _reel_answer(await _wait_for_reel(reel_id, args.get("wait")))
+
+
+async def list_reels(args: Any) -> dict:
+    reels = _need_reels()
+    args = args if isinstance(args, dict) else {}
+    project_id = ""
+    if args.get("project"):
+        ref = str(args["project"]).strip()
+        found = next((p for p in _rows("projects") if p.get("id") == ref or
+                      str(p.get("name") or "").strip().lower() == ref.lower()), None)
+        if not found:
+            raise ApiError(404, f"No project called {ref}")
+        project_id = found["id"]
+    try:
+        limit = max(1, min(int(args.get("limit") or 20), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    rows = await asyncio.to_thread(reels.recent, project_id)
+    state = await asyncio.to_thread(reels.status)
+    ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
+    return {
+        "reels": [_reel_view(r, full=False) for r in rows[:limit]],
+        "reelMaker": {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"],
+                      "voiceReady": state["voiceReady"], "voiceProblem": state["voiceProblem"],
+                      "emailReady": state["emailReady"], "emailOn": state["emailOn"]},
+        "projectsWithAutoContent": ready,
+    }
+
+
+async def redo_reel(args: Any) -> dict:
+    """Makes a reel again, with an edited script or style if sent (a kept recording is reused)."""
+    reels = _need_reels()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, "Send the reel's id")
+    reel = await asyncio.to_thread(reels.get, str(args["id"]))
+    if not reel:
+        raise ApiError(404, "No reel has that id")
+    style = str(args.get("style") or "")
+    if style and style not in reels.STYLES:
+        raise ApiError(400, f"Style must be one of {', '.join(reels.STYLES)}.")
+    try:
+        reel = reels.restart(reel, str(args.get("script") or ""), style)
+    except reels.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(409 if "still being made" in str(e) else 400, str(e))
+    if args.get("wait") and reel["status"] != "waiting":
+        reel = await _wait_for_reel(reel["id"], args["wait"])
+    return _reel_answer(reel)
+
+
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
 
 router = APIRouter(prefix="/api/claude")
@@ -1155,6 +1340,39 @@ async def http_get_post(post_id: str, wait: float = 0):
 async def http_redo_post(post_id: str, request: Request):
     body = await _body(request)
     return await _answer(lambda: redo_post({**(body if isinstance(body, dict) else {}), "id": post_id}))
+
+
+@router.get("/reels/format")
+async def http_reel_format():
+    return await _answer(reel_format)
+
+
+@router.post("/reels/check")
+async def http_reel_check(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: check_reel(body))
+
+
+@router.get("/reels")
+async def http_reels(project: str = "", limit: int = 20):
+    return await _answer(lambda: list_reels({"project": project, "limit": limit}))
+
+
+@router.post("/reels")
+async def http_create_reel(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: create_reel(body))
+
+
+@router.get("/reels/{reel_id}")
+async def http_get_reel(reel_id: str, wait: float = 0):
+    return await _answer(lambda: get_reel({"id": reel_id, "wait": wait}))
+
+
+@router.post("/reels/{reel_id}/redo")
+async def http_redo_reel(reel_id: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: redo_reel({**(body if isinstance(body, dict) else {}), "id": reel_id}))
 
 
 @router.get("/{table}")
@@ -1351,6 +1569,44 @@ def _tools() -> List[dict]:
              "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
              "size": {"type": "string", "enum": ["portrait", "square"]},
              "wait": {"type": "number", "description": f"Seconds to wait for the slides (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_reel_format", "description": "How to write a script for an Instagram reel (a 1080x1920 video "
+         "with a voice-over): the post script format plus a `say:` line per slide for the narration, optional `show:` "
+         "cues, `motion:`, and the header lines voice, captions and fps; with a full example and the list of voices. "
+         "Read it before writing a script for sage_reel_create.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_reel_check", "description": "Check a reel script without making it: every error and warning "
+         "with its line and slide, the scenes with their narration, about how long the video will run and which voice it asks for.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
+        {"name": "sage_reel_create", "description": "Send a script to Sage to be made into an Instagram reel. The Pi speaks "
+         "the narration with a free voice (Kokoro; no cost), draws the slides like a post's, makes each piece appear in time "
+         "with the voice, adds word-by-word captions and encodes an mp4 (a few minutes), then emails Vineeth and the reel "
+         "appears in Sage > Reels. Music is not added; he adds trending audio in Instagram. With `voice: mine` in the "
+         "script it waits for his own recording instead. With a project it becomes a task there (a content project with "
+         "Use Auto Content on). Returns the reel's id, status, link and caption; send wait (seconds) to wait for it.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {
+             "script": {"type": "string", "description": "The whole script in the sage_reel_format format"},
+             "title": {"type": "string", "description": "Name in Sage; default the script's title"},
+             "project": {"type": "string", "description": "Content project id or name (needs Use Auto Content on)"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"], "description": "Default: the script's style, else grid_pill"},
+             "wait": {"type": "number", "description": f"Seconds to wait (0 to {POST_WAIT_MAX}); default 0 returns at once, since a reel takes minutes"}}}},
+        {"name": "sage_reel_get", "description": "One reel: status (waiting for a recording, queued, running, done, failed), "
+         "progress, the error if it failed, the link that opens it in Sage (with the Share button), caption, hashtags, "
+         "length and whether the email went. Send wait to wait while it is being made.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "wait": {"type": "number", "description": f"Seconds to wait while it is being made (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_reel_list", "description": "Recent reels, newest first, with status, link and the start of the "
+         "caption; whether the reel maker, its voice and email are ready; and which projects have Use Auto Content on.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "Only this project's reels (id or name)"},
+             "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
+        {"name": "sage_reel_redo", "description": "Make a reel again, keeping its id and link: send an edited script to "
+         "fix it, or a new style. A recording Vineeth already gave is reused. Emails again when done.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "script": {"type": "string", "description": "The fixed script; leave out to make the same one"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
+             "wait": {"type": "number", "description": f"Seconds to wait (max {POST_WAIT_MAX})"}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
         {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
@@ -1420,6 +1676,18 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await list_posts(args)
     if name == "sage_post_redo":
         return await redo_post(args)
+    if name == "sage_reel_format":
+        return reel_format()
+    if name == "sage_reel_check":
+        return check_reel(args)
+    if name == "sage_reel_create":
+        return await create_reel(args)
+    if name == "sage_reel_get":
+        return await get_reel(args)
+    if name == "sage_reel_list":
+        return await list_reels(args)
+    if name == "sage_reel_redo":
+        return await redo_reel(args)
     if name == "sage_history":
         return history(args.get("limit", 50))
     if name == "sage_logs":

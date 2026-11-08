@@ -206,6 +206,7 @@ async def require_login(request, call_next):
         # own signed token in the route, so a refused <img> gets a plain 401
         # instead of a redirect to the login page.
         or path.startswith(posts.MEDIA_PREFIX)
+        or path.startswith(reels.MEDIA_PREFIX)
         or (API_SECRET and key_matches(request_key(request)))
         or claude_may(request)
     ):
@@ -1511,6 +1512,7 @@ def public_url():
 import notifier
 import uptime
 import posts
+import reels
 notifier.init_tables()
 
 
@@ -2216,6 +2218,13 @@ def _slide_maker_status() -> dict:
     return {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"], "emailReady": state["emailReady"]}
 
 
+def _reel_maker_status() -> dict:
+    state = reels.status()
+    return {"ready": state["ready"], "problems": state["problems"], "voiceReady": state["voiceReady"],
+            "voiceProblem": state["voiceProblem"], "timing": state["timing"], "waiting": state["queued"],
+            "emailReady": state["emailReady"]}
+
+
 def _claude_health() -> dict:
     return system_health.report(
         DB_PATH,
@@ -2228,13 +2237,14 @@ def _claude_health() -> dict:
         clock=_clock_status,
         depth_face=_depth_status,
         slide_maker=_slide_maker_status,
+        reel_maker=_reel_maker_status,
         diagnostics=diagnostics.health_summary,
         storage=data_dir.status,
     )
 
 
 claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health,
-                   logs=logstore.read, drops=drop, posts=posts, diagnostics=diagnostics)
+                   logs=logstore.read, drops=drop, posts=posts, diagnostics=diagnostics, reels=reels)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 
@@ -2279,6 +2289,10 @@ def media_allowed(request) -> bool:
 
 
 posts.set_media_auth(media_allowed)
+
+# Reels (reels.py): a script (and your voice-over) in, a 1080x1920 reel out, on the same engine as Posts.
+reels.connect(DB_PATH)
+app.include_router(reels.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)

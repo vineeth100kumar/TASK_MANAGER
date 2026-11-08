@@ -1,0 +1,43 @@
+{
+  "post_id": "tiny_post_20261108_092042",
+  "title": "Tiny post",
+  "brand": {
+    "page_name": "MIND DEEDS",
+    "handle": "@minddeeds",
+    "tag": "#business",
+    "cta_pill": "JOIN US",
+    "cta_pill_subtext": "FOR DAILY BREAKDOWNS"
+  },
+  "style": "beige_grain",
+  "canvas_format": "portrait",
+  "seed": 20261108,
+  "mode_used": "spec",
+  "spec_version": 1,
+  "source_file": "script.md",
+  "claims": [],
+  "slides": [
+    {
+      "type": "cover",
+      "headline": "Four things that matter Swipe to see them.",
+      "n": 1,
+      "source_status": "user_spec",
+      "claim_ids": []
+    },
+    {
+      "type": "point",
+      "headline": "One",
+      "body": "The first thing.",
+      "n": 2,
+      "source_status": "user_spec",
+      "claim_ids": []
+    },
+    {
+      "type": "cta",
+      "headline": "Save this",
+      "n": 3,
+      "source_status": "user_spec",
+      "claim_ids": []
+    }
+  ],
+  "caption": "A short caption for the tiny post.\n\n#tiny #post\n"
+}

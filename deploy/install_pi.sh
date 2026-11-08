@@ -65,7 +65,7 @@ echo "Installing Sage from $REPO for user $RUN_AS"
 part_packages() {
   step "System packages"
   apt-get update -qq
-  apt-get install -y -qq python3-venv python3-pip sqlite3 git >/dev/null
+  apt-get install -y -qq python3-venv python3-pip sqlite3 git ffmpeg >/dev/null
 }
 
 part_settings() {
@@ -102,6 +102,12 @@ part_server() {
   as_user "$REPO/raspberry_pi/venv/bin/playwright" install chromium \
     || { echo "Playwright's Chromium didn't install; trying the system one."; apt-get install -y -qq chromium >/dev/null 2>&1 || apt-get install -y -qq chromium-browser >/dev/null 2>&1 \
          || echo "No Chromium installed, so Posts can't draw slides. Run: playwright install chromium"; }
+  # Reels (vertical videos): ffmpeg encodes them, and Kokoro + Whisper give them a voice and word
+  # timing. Best effort: without them Reels still work from your own recording.
+  step "Reel maker (ffmpeg, voice models)"
+  apt-get install -y -qq ffmpeg >/dev/null 2>&1 || echo "ffmpeg didn't install, so Reels can't encode video. Run: sudo apt-get install ffmpeg"
+  as_user "$REPO/deploy/install_reels.sh" "$REPO" \
+    || echo "The reel voice didn't fully install; Reels work from your own recording. Re-run: sudo deploy/install_pi.sh --only server"
   echo "AI (voice, chat capture, canvas, radar) uses Groq. Add a key in Settings > Server & Reset, or set GROQ_API_KEY in $ENV_FILE."
 }
 

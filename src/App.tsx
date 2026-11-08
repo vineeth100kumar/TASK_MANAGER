@@ -27,7 +27,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, HiddenView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, ReelsView, HiddenView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -55,6 +55,9 @@ function MainApp() {
   // Posts page: a project to show posts of, and a post or New post to open (nonce makes a repeat tap count).
   const [postsProject, setPostsProject] = useState('');
   const [postsFocus, setPostsFocus] = useState<{ postId?: string; newPost?: boolean; nonce: number } | null>(null);
+  // Reels page, the same way.
+  const [reelsProject, setReelsProject] = useState('');
+  const [reelsFocus, setReelsFocus] = useState<{ reelId?: string; newReel?: boolean; nonce: number } | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
@@ -161,13 +164,15 @@ function MainApp() {
     const actionParam = params.get('action');
     const viewParam = params.get('view');
     const postParam = params.get('post');
+    const reelParam = params.get('reel');
     const ritualParam = params.get('ritual');
-    if (openId || actionParam || viewParam || ritualParam || postParam) {
+    if (openId || actionParam || viewParam || ritualParam || postParam || reelParam) {
       params.delete('open');
       params.delete('action');
       params.delete('view');
       params.delete('ritual');
       params.delete('post');
+      params.delete('reel');
       const rest = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
@@ -180,6 +185,15 @@ function MainApp() {
       setActiveView('posts');
     };
     window.addEventListener('sage:open-posts', onOpenPosts);
+    // A "your reel is ready" email opens the reel.
+    if (reelParam) { setActiveView('reels'); setReelsFocus({ reelId: reelParam, nonce: Date.now() }); }
+    const onOpenReels = (e: Event) => {
+      const d = (e as CustomEvent<{ reelId?: string; projectId?: string; newReel?: boolean }>).detail || {};
+      setReelsProject(d.projectId || '');
+      setReelsFocus({ reelId: d.reelId, newReel: d.newReel, nonce: Date.now() });
+      setActiveView('reels');
+    };
+    window.addEventListener('sage:open-reels', onOpenReels);
     if (actionParam === 'new-task') setIsCreateModalOpen(true);
     if (ritualParam === 'morning') setIsMorningOpen(true);
     if (ritualParam === 'evening') setIsEveningOpen(true);
@@ -231,6 +245,7 @@ function MainApp() {
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
       window.removeEventListener('sage:ritual', onRitual);
       window.removeEventListener('sage:open-posts', onOpenPosts);
+      window.removeEventListener('sage:open-reels', onOpenReels);
     };
   }, []);
 
@@ -519,6 +534,8 @@ function MainApp() {
               <DropView />
             ) : activeView === 'posts' ? (
               <PostsView projectId={postsProject} focus={postsFocus} />
+            ) : activeView === 'reels' ? (
+              <ReelsView projectId={reelsProject} focus={reelsFocus} />
             ) : activeView === 'hidden' ? (
               <NotesLock title="Hidden tasks are locked" hint="Enter your password to see them.">
                 <HiddenView onSelectTask={setSelectedItemId} />
