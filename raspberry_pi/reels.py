@@ -202,7 +202,6 @@ async def _announce(reel: dict) -> None:
 
 def status() -> dict:
     """What the New reel screen needs to know before it offers Make."""
-    import importlib.util
     base = posts.status()
     problems = [p for p in base["problems"] if "slide" in p.lower() or "Python module" in p or "Chromium" in p]
     if not (ENGINE_DIR / "src" / "autocontent" / "reel").is_dir():
@@ -278,8 +277,9 @@ def check(script: str) -> dict:
     meta = reel.meta
     own = reel.uses_own_voice
     voice_name = str(meta.get("voice") or "")
-    if not own and voice_name and check_voice(voice_name):
-        issues.append({"severity": "ERROR", "code": "VOICE_UNKNOWN", "message": check_voice(voice_name), "line": None,
+    voice_problem = check_voice(voice_name) if voice_name and not own else ""
+    if voice_problem:
+        issues.append({"severity": "ERROR", "code": "VOICE_UNKNOWN", "message": voice_problem, "line": None,
                        "slide": None, "hint": ""})
     scenes = []
     for sc in reel.scenes:
@@ -367,8 +367,10 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
         "emailed": False,
         "emailError": "",
     }
-    if reel["status"] == "queued" and _voice_problem():
-        reel.update(status="failed", error=_voice_problem(), finishedAt=_utc())
+    # The built-in voice can't speak here: say so now, rather than after a minute of drawing.
+    voice_problem = _voice_problem() if reel["status"] == "queued" else ""
+    if voice_problem:
+        reel.update(status="failed", error=voice_problem, finishedAt=_utc())
     save(reel)
     if reel["status"] == "queued":
         _spawn(_run(reel))
@@ -399,8 +401,9 @@ def restart(reel: dict, script: str = "", style: str = "") -> dict:
     reel.update(status="queued", error="", log=[], seconds=None, madeIn=None, size=0, timeline=[], warnings=[],
                 finishedAt=None, emailed=False, emailError="", posted=False, postedAt=None,
                 progress={"percent": 0, "stage": ""})
-    if not reel["needsRecording"] and _voice_problem():
-        reel.update(status="failed", error=_voice_problem())
+    voice_problem = "" if reel["needsRecording"] else _voice_problem()
+    if voice_problem:
+        reel.update(status="failed", error=voice_problem, finishedAt=_utc())
         save(reel)
         return reel
     save(reel)
@@ -525,7 +528,7 @@ def _engine_env() -> Dict[str, str]:
 async def _draw(reel: dict, folder: Path, script_file: Path) -> int:
     argv = [sys.executable, "-m", "autocontent", "reel", str(script_file), "-o", str(folder / "out"),
             "--style", reel["style"], "--preset", os.environ.get("REEL_PRESET", "veryfast")]
-    voice_file = _voice_path(reel)
+    voice_file = _voice_path(reel) if reel.get("needsRecording") else None
     if voice_file:
         argv += ["--voice-file", str(voice_file)]
     proc = await asyncio.create_subprocess_exec(
@@ -749,6 +752,8 @@ async def _email(reel: dict, *, force: bool = False) -> bool:
 
 
 def delete(reel_id: str) -> bool:
+    if not _ids.fullmatch(reel_id or ""):
+        return False
     conn = _db()
     try:
         cur = conn.execute("DELETE FROM reels WHERE id = ?", (reel_id,))
@@ -853,10 +858,6 @@ async def reels_create(body: NewReel):
         return _bad(str(e))
     except Busy as e:
         return _bad(str(e), 429)
-    if reel["status"] == "queued" and not state["voiceReady"] and not reel["needsRecording"]:
-        # Kokoro isn't set up: say so now rather than after a minute of drawing
-        reel.update(status="failed", error=state["voiceProblem"] + " Or record your own and use `voice: mine`.")
-        await save_async(reel)
     return {"success": True, "reel": with_media(reel)}
 
 

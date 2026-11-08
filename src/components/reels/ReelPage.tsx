@@ -204,7 +204,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
           )}
 
           <div className="flex justify-center">
-            <video
+            {reel.media ? <video
               key={stamp}
               src={videoUrl(reel)}
               poster={posterUrl(reel)}
@@ -212,7 +212,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
               playsInline
               preload="metadata"
               className="w-full max-w-[340px] aspect-[9/16] rounded-3xl bg-black border border-black/10 dark:border-white/10"
-            />
+            /> : <p className="text-[13px] text-gray-500">The video file is missing on the Pi. Press Make again.</p>}
           </div>
 
           <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 mt-4">

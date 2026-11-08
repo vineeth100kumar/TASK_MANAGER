@@ -187,6 +187,55 @@ class StartRules(unittest.IsolatedAsyncioTestCase):
         reels.delete(reel["id"])
 
 
+class RecordingReuseRules(unittest.IsolatedAsyncioTestCase):
+    """A kept recording belongs to a script that asks for one. Editing the script to use the
+    built-in voice must not read the author's old recording instead."""
+
+    async def asyncSetUp(self):
+        reels.connect(db_server.DB_PATH)
+        # restart() queues the making; these tests only want the command it would run.
+        held = mock.patch.object(reels, "_spawn", lambda coro: coro.close())
+        held.start()
+        self.addCleanup(held.stop)
+        self.reel = reels.start(SMALL)
+        folder = reels.REELS_DIR / self.reel["id"]
+        folder.mkdir(parents=True, exist_ok=True)
+        (folder / "voice_upload.wav").write_bytes(b"RIFF....")
+        self.reel.update(voiceFile="voice_upload.wav", voiceSeconds=12.0, status="done", finishedAt=reels._utc())
+        reels.save(self.reel)
+
+    async def asyncTearDown(self):
+        reels.delete(self.reel["id"])
+
+    async def test_own_voice_passes_the_recording_to_the_engine(self):
+        argv = await self.argv_of(reels.restart(self.reel))
+        self.assertIn("--voice-file", argv)
+
+    async def test_switching_to_the_built_in_voice_drops_it(self):
+        with mock.patch.object(reels, "_voice_problem", return_value=""):
+            reel = reels.restart(self.reel, KOKORO)
+        self.assertFalse(reel["needsRecording"])
+        self.assertNotIn("--voice-file", await self.argv_of(reel))
+
+    async def test_the_built_in_voice_being_missing_fails_the_remake_at_once(self):
+        with mock.patch.object(reels, "_voice_problem", return_value="No voice files."):
+            reel = reels.restart(self.reel, KOKORO)
+        self.assertEqual((reel["status"], reel["error"]), ("failed", "No voice files."))
+
+    async def argv_of(self, reel):
+        """What reels.py would run for this reel, without running it."""
+        seen = {}
+
+        async def fake_exec(*argv, **kw):
+            seen["argv"] = list(argv)
+            raise RuntimeError("not run")
+
+        with mock.patch.object(asyncio, "create_subprocess_exec", side_effect=fake_exec):
+            with self.assertRaises(RuntimeError):
+                await reels._draw(reel, reels.REELS_DIR / reel["id"], reels.REELS_DIR / reel["id"] / "script.md")
+        return seen["argv"]
+
+
 class VoiceUploadRules(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         reels.connect(db_server.DB_PATH)
