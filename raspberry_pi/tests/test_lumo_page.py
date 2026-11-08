@@ -308,6 +308,18 @@ class DeskPage(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.desk.device_do("explode")
 
+    async def test_brightness(self):
+        self.link.fw = "2.22.0"
+        # Older firmware: no BRIGHTNESS sent.
+        self.link.sent.clear()
+        self.assertFalse(await self.desk.send_brightness())
+        self.link.fw = "2.23.0"
+        await self.desk.apply_settings(settings.merge(settings.defaults(), {"screen": {"brightness": 45}}))
+        self.assertEqual(self.link.last("BRIGHTNESS"), {"cmd": "BRIGHTNESS", "level": 45})
+        # Floor at 10%.
+        with self.assertRaises(ValueError):
+            settings.merge(settings.defaults(), {"screen": {"brightness": 5}})
+
     async def test_backlight_test(self):
         self.link.fw = "2.21.0"
         with self.assertRaises(ValueError):

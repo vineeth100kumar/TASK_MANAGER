@@ -151,7 +151,7 @@ export interface LumoSettings {
   night: { enabled: boolean; start: string; end: string; face: string; lightsMode: string; brightness: number };
   haptics: { strength: number; buttons: boolean; notifications: boolean };
   // What the case window hides on each side (px, firmware 2.15+), the Even Frame and its island.
-  screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean };
+  screen: { left: number; right: number; top: number; bottom: number; frame: boolean; island: boolean; brightness: number };
   welcome: { enabled: boolean; message: string; awayMinutes: number };
   // mode: 'away' shows it while your phone is out, 'always' makes LUMO a photo frame.
   gallery: { enabled: boolean; mode: GalleryMode; intervalSeconds: number; sources: string[] };

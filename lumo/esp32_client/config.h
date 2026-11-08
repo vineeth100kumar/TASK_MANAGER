@@ -8,7 +8,22 @@
 #define BUZZER_PIN    9    // Active LOW (BC557): buzzer + vibration motor in parallel, see HAPTICS
 #define NEOPIXEL_PIN  10
 #define NUMPIXELS     6
-#define TEST_PIN      20   // GPIO20 (RX pad): driven HIGH (3.3 V) at boot, a wiring test (2.20.1)
+#define BL_PIN        20   // GPIO20 (RX pad): the LCD backlight (LED) pin, PWM-dimmed (2.23)
+#define TEST_PIN      BL_PIN  // old name kept for the wiring-test commands
+
+// ===================== BACKLIGHT =====================
+// GPIO20 drives the panel's LED pin through LEDC PWM. A high carrier is silent
+// and shows no flicker; a wide duty range plus a gamma curve makes the low end
+// controllable. 100% holds the pin steady high, which is the brightest the
+// panel can go (a pin can't drive it past its own 3.3 V). The slider never
+// goes below BL_MIN_PCT, so the screen can't be dimmed to black and lost.
+#define BL_FREQ       20000  // PWM carrier: 20 kHz, above hearing and flicker
+#define BL_RES        12     // duty bits: 0..4095, for smooth fades
+#define BL_GAMMA      2.2f   // perceptual curve: the slider feels even
+#define BL_DEFAULT    100    // % at boot: full brightness
+#define BL_MIN_PCT    10     // the slider's floor (0 only from the off test)
+#define BL_FADE_MS    380    // a brightness change eases over this
+#define BL_WAKE_MS    420    // the gentle fade-in at power-on
 
 // ===================== WIFI + PI SERVER =====================
 // The Wi-Fi name, password and the Pi's address live in secrets.h, which is
@@ -142,7 +157,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.22.0"
+#define FW_VERSION "2.23.0"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...
@@ -245,6 +260,7 @@ struct LumoState {
   uint8_t    local_alarm_count = 0;
   uint8_t    snooze_minutes    = 5;
   uint8_t    haptic_strength   = HAPTIC_STRENGTH;   // 0-100, set in Sage
+  uint8_t    backlight         = BL_DEFAULT;        // screen brightness 0-100, set in Sage
   bool       local_ringing     = false;
 
   // How to show the time (from CLOCK).

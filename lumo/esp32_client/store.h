@@ -11,6 +11,7 @@ void storeLoadFit(ScreenFit& f);
 void storeSaveFit(const ScreenFit& f);
 void storeSaveAlarms(const LumoState& s);
 void storeSaveHaptics(const LumoState& s);
+void storeSaveBacklight(const LumoState& s);
 
 // The Wi-Fi name and password, the Pi's address and the pairing code. A build
 // with secrets.h uses its values and saves them; a build without (an update

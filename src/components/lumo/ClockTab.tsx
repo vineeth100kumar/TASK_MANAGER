@@ -43,7 +43,7 @@ function zoneNow(zone: string, hour24: boolean) {
   }
 }
 
-export function ClockTab({ settings, save, toolsSupported, depthSupported, fitSupported, fitTest, connected }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean; depthSupported: boolean; fitSupported: boolean; fitTest: boolean; connected: boolean }) {
+export function ClockTab({ settings, save, toolsSupported, depthSupported, fitSupported, brightnessSupported, fitTest, connected }: { settings: LumoSettings; save: (u: LumoSettingsUpdate) => void; toolsSupported: boolean; depthSupported: boolean; fitSupported: boolean; brightnessSupported: boolean; fitTest: boolean; connected: boolean }) {
   const zones = useMemo<string[]>(() => {
     try { return (Intl as any).supportedValuesOf('timeZone'); } catch { return COMMON_ZONES; }
   }, []);
@@ -153,7 +153,7 @@ export function ClockTab({ settings, save, toolsSupported, depthSupported, fitSu
         </Panel>
       </div>
 
-      <ScreenFitPanel settings={settings} save={save} supported={fitSupported} testing={fitTest} connected={connected} />
+      <ScreenFitPanel settings={settings} save={save} supported={fitSupported} brightnessSupported={brightnessSupported} testing={fitTest} connected={connected} />
 
       <DepthFacePanel settings={settings} save={save} supported={depthSupported} />
     </div>
