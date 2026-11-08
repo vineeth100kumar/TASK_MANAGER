@@ -1194,7 +1194,7 @@ PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
 workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
-dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, isHidden, description).
+dueDate YYYY-MM-DD, dueTime HH:mm, doseTimes ["08:00","20:00"] (done several times a day, each ticked on its own; also on habits), projectId, areaId, labels, isInbox, isFocus, isHidden, description).
 A hidden work item (isHidden true) is private: the app keeps it out of every list and shows it only on its
 password-locked Hidden page. sage_list leaves hidden items out unless hidden is "include" or "only"; hide or
 unhide one with sage_update {isHidden: true|false}, and don't repeat a hidden item's title unless asked.

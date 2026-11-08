@@ -1,4 +1,7 @@
 import { Star } from 'lucide-react';
+import { api } from '../../services/api';
+import { normalizeDoses } from '../../utils/doses';
+import { DoseChips } from './DoseChips';
 import { WorkItem } from '../../services/types';
 import { formatDateRange } from '../../utils/dateUtils';
 import { withTime, formatClock } from '../../utils/reminders';
@@ -54,6 +57,7 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
   const home = hideHome ? null : (item.project?.name || item.area?.name || null);
   const mins = item.estimatedMinutes ? formatMinutes(item.estimatedMinutes) : null;
   const snoozed = isSnoozedNow(item);
+  const doses = normalizeDoses(item.doseTimes);
 
   return (
     <div className={`relative has-[[aria-expanded=true]]:z-30 pl-4 pr-3 py-3 rounded-2xl surface-item is-interactive flex items-center gap-3 group ${completing ? 'is-completing' : ''} ${snoozed ? 'opacity-70' : ''}`}>
@@ -73,6 +77,10 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
           {snoozed && item.snoozedUntil && <span className="text-amber-600 dark:text-amber-400 font-semibold">· {snoozeLabel(item.snoozedUntil)}</span>}
           <ContextTag item={item} combined={combined} />
         </div>
+        {doses.length > 1 && (
+          <DoseChips className="mt-1.5" times={doses} ticked={item.dosesDone} label={item.title || 'Task'}
+            onToggle={async t => { await api.workItems.toggleDose(item.id, t); onSnoozed(); }} />
+        )}
       </div>
       {extra}
       <button

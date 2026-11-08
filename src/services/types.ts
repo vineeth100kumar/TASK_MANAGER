@@ -83,6 +83,10 @@ export interface WorkItem {
   remindAt?: string | null;  // ISO Datetime
   reminderLeadMinutes?: number | null; // minutes before startAt/dueDate that remindAt was set for; null = no lead-based reminder
   repeatRule?: string | null;
+  /** Several times in a day ("08:00", "20:00"); each is ticked on its own and the task is done when all are. */
+  doseTimes?: string[] | null;
+  /** The doseTimes ticked so far for the current due date. */
+  dosesDone?: string[] | null;
   // The next copy a repeating item made when it was done, and the item a copy came from,
   // so undoing the completion can take the copy back.
   spawnedNextId?: string | null;
@@ -157,6 +161,10 @@ export interface Habit {
   // sent by the Pi (raspberry_pi/notifier.py). Unset means no reminder.
   // New habits start at DEFAULT_HABIT_REMIND_TIME.
   remindTime?: string | null;
+  /** Several times in a day; each is ticked on its own and the day counts only when all are. */
+  doseTimes?: string[] | null;
+  /** Doses ticked per date; history gets the date once every dose is ticked. */
+  doseLog?: Record<string, string[]> | null;
   remindPush?: boolean;   // to the website / home-screen app (default on)
   remindEmail?: boolean;  // to the notification email (default off)
   createdAt: string;

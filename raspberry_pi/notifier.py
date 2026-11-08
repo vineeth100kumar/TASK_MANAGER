@@ -582,7 +582,7 @@ def habit_due(habit: dict, now: datetime.datetime) -> bool:
     return this_week < target
 
 
-def habit_message(habit: dict, now: datetime.datetime, playful: bool = False) -> dict:
+def habit_message(habit: dict, now: datetime.datetime, playful: bool = False, dose: Optional[str] = None) -> dict:
     name = habit.get("name") or "Habit"
     history = {d for d in (habit.get("history") or []) if isinstance(d, str)}
     streak, day = 0, now.date() - datetime.timedelta(days=1)
@@ -594,13 +594,88 @@ def habit_message(habit: dict, now: datetime.datetime, playful: bool = False) ->
         name = f"🔥 {name}"
         body = f"{streak}-day streak! Don't break the chain 🔗" if streak > 1 else _pick(
             ["Not ticked yet today. A tiny start counts 🌱", "Today's tick is waiting ✅", "Start the streak today 🔥"], f"{habit.get('id')}{now.date()}")
+    if dose:
+        times = dose_times(habit)
+        log = habit.get("doseLog") if isinstance(habit.get("doseLog"), dict) else {}
+        done = len([t for t in times if t in (log.get(now.date().isoformat()) or [])])
+        body = f"{_clock12(dose)} dose · {done} of {len(times)} done today. Tick it in Sage."
     return {
         "title": name,
         "body": body,
-        "tag": f"habit-{habit.get('id')}",
+        "tag": f"habit-{habit.get('id')}" + (f"-{dose}" if dose else ""),
         "url": "/?view=today",
         "ttl": 3600,
     }
+
+
+def _habit_nudges(all_habits: List[dict], now: datetime.datetime) -> List[tuple]:
+    """(habit, "HH:MM", is_dose) for each reminder a habit may send today.
+    A habit done several times a day sends one per dose not ticked yet; any
+    other habit sends its single remindTime. Days already complete send none."""
+    out: List[tuple] = []
+    today = now.date().isoformat()
+    for habit in all_habits:
+        if not habit_due(habit, now):
+            continue
+        doses = dose_times(habit)
+        if doses:
+            log = habit.get("doseLog") if isinstance(habit.get("doseLog"), dict) else {}
+            ticked = set(log.get(today) or [])
+            out.extend((habit, t, True) for t in doses if t not in ticked)
+        elif _valid_time(habit.get("remindTime")):
+            out.append((habit, str(habit["remindTime"]), False))
+    return out
+
+
+def _dose_task_reminders(conn, prefs: dict, items: List[dict], tz: ZoneInfo, now: datetime.datetime, chill: bool, mode: dict) -> List[str]:
+    """A task due today with several times (cream morning and evening): one
+    reminder at each time that isn't ticked yet."""
+    sent: List[str] = []
+    today = now.date().isoformat()
+    for item in items:
+        doses = dose_times(item)
+        if not doses or item.get("dueDate") != today or item.get("status") == "done" or _is_snoozed(item, now, tz):
+            continue
+        ticked = set(item.get("dosesDone") or [])
+        for hhmm in doses:
+            when = _today_at(now, hhmm)
+            if hhmm in ticked or not (when <= now < when + REMINDER_GRACE):
+                continue
+            key = f"dose:{item.get('id')}:{today}:{hhmm}"
+            if _already_sent(conn, key):
+                continue
+            if chill and life_mode.hidden_in_chill(item) and not (
+                mode["urgentThrough"] and life_mode.lets_through(item, today)
+            ):
+                life_mode.hold(item)
+                _mark_sent(conn, key)
+                continue
+            done = len([t for t in doses if t in ticked])
+            message = {
+                "title": _title(item),
+                "body": f"{_clock12(hhmm)} dose · {done} of {len(doses)} done today",
+                "tag": f"item-{item.get('id')}-{hhmm}",
+                "url": f"/?open={item.get('id')}",
+                "itemId": item.get("id"),
+                "urgency": "high",
+                "ttl": 3600,
+            }
+            if _taken_by_clock(item, message):
+                _mark_sent(conn, key)
+                sent.append(key)
+                continue
+            email = None
+            if prefs["email"]["reminders"]:
+                link = _item_link(item) or _app_link()
+                email = (
+                    f"{message['title']} · {message['body']}",
+                    email_text(message["title"], message["body"], [], link, "Open task"),
+                    email_html(message["title"], message["body"], [], link, "Open task"),
+                )
+            if _deliver(prefs, message, email):
+                _mark_sent(conn, key)
+                sent.append(key)
+    return sent
 
 
 def _is_snoozed(item: dict, now: datetime.datetime, tz: ZoneInfo) -> bool:
@@ -896,6 +971,21 @@ def insert_captured_items(items: List[dict]) -> int:
         conn.close()
 
 
+def dose_times(record: dict) -> List[str]:
+    """The times of day a task or habit is done ("08:00", "20:00"): two or more
+    valid, unique, sorted times, otherwise none (a once-a-day item)."""
+    raw = record.get("doseTimes")
+    if not isinstance(raw, list):
+        return []
+    times = sorted({t for t in raw if isinstance(t, str) and _valid_time(t)})
+    return times[:6] if len(times) >= 2 else []
+
+
+def _clock12(hhmm: str) -> str:
+    hour, minute = (int(x) for x in hhmm.split(":"))
+    return f"{hour % 12 or 12}:{minute:02d} {'pm' if hour >= 12 else 'am'}"
+
+
 # --- The scheduler ---
 
 def _today_at(now: datetime.datetime, hhmm: str) -> datetime.datetime:
@@ -978,6 +1068,9 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
         today_iso = now.date().isoformat()
         if prefs["reminders"]:
             for item in items:
+                # A task done several times a day reminds at each of its times instead (below).
+                if dose_times(item):
+                    continue
                 when = parse_when(item.get("remindAt"), tz)
                 if not when or not (when <= now < when + REMINDER_GRACE) or _is_snoozed(item, now, tz):
                     continue
@@ -1012,23 +1105,23 @@ def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:
                     _mark_sent(conn, key)
                     sent.append(key)
 
+            if prefs["reminders"]:
+                sent.extend(_dose_task_reminders(conn, prefs, items, tz, now, chill, mode))
+
             if not chill:
                 key = _send_held(conn, prefs, items)
                 if key:
                     sent.append(key)
             # Habits are personal, so Chill mode doesn't hold them back.
-            for habit in habits():
-                hhmm = str(habit.get("remindTime") or "")
-                if not _valid_time(hhmm):
-                    continue
+            for habit, hhmm, dose in _habit_nudges(habits(), now):
                 push, mail = habit.get("remindPush", True) is not False, bool(habit.get("remindEmail"))
                 when = _today_at(now, hhmm)
-                if not (push or mail) or not (when <= now < when + REMINDER_GRACE) or not habit_due(habit, now):
+                if not (push or mail) or not (when <= now < when + REMINDER_GRACE):
                     continue
                 key = f"habit:{habit.get('id')}:{today_iso}:{hhmm}"
                 if _already_sent(conn, key):
                     continue
-                message = habit_message(habit, now, prefs["playful"])
+                message = habit_message(habit, now, prefs["playful"], dose=hhmm if dose else None)
                 delivered = push and any(r.get("ok") for r in send_push(message, prefs=prefs))
                 if mail and email_ready(prefs):
                     link = _view_link("view=today")

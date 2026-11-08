@@ -14,6 +14,7 @@ import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDate
 import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/recurrence';
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
+import { normalizeDoses, doneDoses, toggleDose, trimLog } from '../utils/doses';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
 import { needsPlace, suggestPlace, INBOX_PROJECT_ID, INBOX_PROJECT_NAME } from './placement';
@@ -266,6 +267,7 @@ async function createNextOccurrence(item: WorkItem): Promise<WorkItem | null> {
     waitingFor: null,
     blockedReason: null,
     spawnedNextId: null,
+    dosesDone: [],
     spawnedFromId: item.id
   });
 }
@@ -469,6 +471,7 @@ export const api = {
         remindAt: toInputDateTimeValue(payload.remindAt) || null,
         reminderLeadMinutes: payload.reminderLeadMinutes ?? null,
         repeatRule: payload.repeatRule || null,
+        ...(normalizeDoses(payload.doseTimes).length ? { doseTimes: normalizeDoses(payload.doseTimes), dosesDone: [] } : {}),
         spawnedFromId: payload.spawnedFromId || null,
         location: payload.location || null,
         labels: payload.labels || [],
@@ -505,6 +508,12 @@ export const api = {
       // Keep the number the Today view sorts by in step with the typed estimate.
       if (updates.estimated !== undefined && updates.estimatedMinutes === undefined) {
         updates = { ...updates, estimatedMinutes: parseEstimateMinutes(updates.estimated) };
+      }
+
+      // Doses start fresh when the times change.
+      if (updates.doseTimes !== undefined) {
+        const doses = normalizeDoses(updates.doseTimes);
+        updates = { ...updates, doseTimes: doses.length ? doses : null, dosesDone: doneDoses(doses, existing.dosesDone) };
       }
 
       const updated: WorkItem = {
@@ -554,6 +563,10 @@ export const api = {
           sinceDate: now.split('T')[0]
         } : existing.waitingFor,
         completedAt: toStatus === 'done' ? now : null,
+        // Finishing an item with doses ticks them all; reopening starts them over.
+        ...(normalizeDoses(existing.doseTimes).length
+          ? { dosesDone: toStatus === 'done' ? normalizeDoses(existing.doseTimes) : (existing.status === 'done' ? [] : existing.dosesDone || []) }
+          : {}),
         version: nextVersion,
         updatedAt: now,
         lastTouchedAt: now
@@ -577,6 +590,31 @@ export const api = {
       await persist('workItems', updated, nextVersion);
 
       return hydrateWorkItem(updated);
+    },
+
+    /**
+     * Ticks (or unticks) one dose of a task with several times a day. The task
+     * is finished by ticking the last one, and reopens if one is unticked.
+     */
+    toggleDose: async (id: string, time: string): Promise<{ item: WorkItem; done: number; total: number }> => {
+      await initializeStore();
+      const existing = state.workItems.find(i => i && i.id === id);
+      if (!existing) throw new Error('Item not found');
+      const times = normalizeDoses(existing.doseTimes);
+      if (!times.includes(time)) throw new Error('That time is not one of this task\'s doses');
+      const ticked = toggleDose(doneDoses(times, existing.dosesDone), time);
+      const allDone = ticked.length === times.length;
+      let item: WorkItem;
+      if (allDone && existing.status !== 'done') {
+        await api.workItems.updateDetails(id, { dosesDone: ticked });
+        item = await api.workItems.transitionStatus(id, 'done');
+      } else if (!allDone && existing.status === 'done') {
+        item = await api.workItems.transitionStatus(id, 'todo');
+        item = await api.workItems.updateDetails(id, { dosesDone: ticked });
+      } else {
+        item = await api.workItems.updateDetails(id, { dosesDone: ticked });
+      }
+      return { item, done: ticked.length, total: times.length };
     },
 
     duplicate: async (id: string): Promise<WorkItem> => {
@@ -818,6 +856,7 @@ export const api = {
           : /^\d{2}:\d{2}$/.test(payload.remindTime || '') ? payload.remindTime : DEFAULT_HABIT_REMIND_TIME,
         remindPush: payload.remindPush !== false,
         remindEmail: !!payload.remindEmail,
+        ...(normalizeDoses(payload.doseTimes).length ? { doseTimes: normalizeDoses(payload.doseTimes), doseLog: {} } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -833,12 +872,35 @@ export const api = {
       const history = dateEntries(h.history);
       const has = history.includes(day);
       h.history = has ? history.filter(d => d !== day) : [...history, day];
+      // A habit with doses: ticking a whole day ticks every dose, unticking clears them.
+      if (normalizeDoses(h.doseTimes).length) {
+        h.doseLog = trimLog({ ...(h.doseLog || {}), [day]: has ? [] : normalizeDoses(h.doseTimes) });
+      }
       h.streak = streakOf(h.history, localDateString());
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
       return h;
     },
-    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount' | 'remindTime' | 'remindPush' | 'remindEmail'>): Promise<Habit> => {
+    /**
+     * Ticks one dose of a habit with several times a day. The day goes into the
+     * history (so streaks count it) only when every dose is ticked.
+     */
+    toggleDose: async (id: string, day: string, time: string): Promise<Habit> => {
+      await initializeStore();
+      const h = state.habits.find(h => h && h.id === id);
+      if (!h) throw new Error('Habit not found');
+      const times = normalizeDoses(h.doseTimes);
+      if (!times.includes(time)) throw new Error('That time is not one of this habit\'s doses');
+      const ticked = toggleDose(doneDoses(times, h.doseLog?.[day]), time);
+      h.doseLog = trimLog({ ...(h.doseLog || {}), [day]: ticked });
+      const history = dateEntries(h.history).filter(d => d !== day);
+      h.history = ticked.length === times.length ? [...history, day] : history;
+      h.streak = streakOf(h.history, localDateString());
+      h.updatedAt = new Date().toISOString();
+      await persist('habits', h);
+      return h;
+    },
+    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount' | 'remindTime' | 'remindPush' | 'remindEmail' | 'doseTimes'>): Promise<Habit> => {
       await initializeStore();
       const h = state.habits.find(h => h && h.id === id);
       if (!h) throw new Error('Habit not found');
@@ -846,6 +908,18 @@ export const api = {
       if (updates.remindTime !== undefined) h.remindTime = /^\d{2}:\d{2}$/.test(updates.remindTime || '') ? updates.remindTime : null;
       if (updates.remindPush !== undefined) h.remindPush = !!updates.remindPush;
       if (updates.remindEmail !== undefined) h.remindEmail = !!updates.remindEmail;
+      if (updates.doseTimes !== undefined) {
+        const doses = normalizeDoses(updates.doseTimes);
+        h.doseTimes = doses.length ? doses : null;
+        if (!doses.length) h.doseLog = null;
+        else {
+          // Changing the times: a day already in the history stays fully done; today's partial ticks are kept where the time still exists.
+          const today = localDateString();
+          h.doseLog = trimLog(Object.fromEntries(Object.entries(h.doseLog || {}).map(([d, t]) => [d, d === today ? doneDoses(doses, t) : t])));
+          const full = dateEntries(h.history).includes(today);
+          if (full) h.doseLog[today] = doses;
+        }
+      }
       h.targetCount = updates.targetCount !== undefined ? Math.min(7, Math.max(1, Math.round(updates.targetCount))) : (h.targetCount || 7);
       h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();

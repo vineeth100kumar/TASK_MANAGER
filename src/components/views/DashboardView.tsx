@@ -90,6 +90,15 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
     }
   };
 
+  const handleToggleDose = async (habitId: string, day: string, time: string) => {
+    try {
+      await api.habits.toggleDose(habitId, day, time);
+      load();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
   if (!data) {
     return (
       <div className="max-w-6xl mx-auto space-y-4 md:space-y-6" aria-busy="true" aria-label="Loading Today">
@@ -179,7 +188,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
       {upNext && (
         <UpNextCard
           item={upNext} completing={isCompleting(upNext.id)} saving={isSaving(upNext.id)}
-          onComplete={() => handleComplete(upNext)} onOpen={() => onSelectTask(upNext.id)}
+          onComplete={() => handleComplete(upNext)} onOpen={() => onSelectTask(upNext.id)} onChanged={load}
         />
       )}
 
@@ -258,7 +267,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
 
       {/* Habits: a fresh entry each day, so a missed day shows as missed instead of carrying over. */}
       {lifeContext !== 'work' && data.habits?.length > 0 && (
-        <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} />
+        <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} onToggleDose={handleToggleDose} />
       )}
 
       {/* Radar brief: opt-in in Settings > Radar, and work only. */}
