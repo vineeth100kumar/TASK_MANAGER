@@ -9,6 +9,8 @@ over the base picture, which keeps the header, footer and grid.
 
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from PIL import Image
 from typing import Any, Dict, List, Optional, Tuple
 
 # What appears, in order, for each slide type. A group is a list of CSS selectors; every element
@@ -96,6 +98,10 @@ class SceneLayers:
 
 
 MARGIN = 28   # px kept around a group so soft edges and shadows aren't clipped
+# The slide is drawn a little larger than the video so the compositor can pan a frame-sized
+# window across it (compose.SceneClip.view). It is drawn at that size, not scaled up afterwards,
+# so the text stays as sharp as a post's.
+OVERSAMPLE = 1.06
 
 
 def _clip(box, width: int, height: int) -> Tuple[int, int, int, int]:
@@ -107,7 +113,7 @@ def _clip(box, width: int, height: int) -> Tuple[int, int, int, int]:
 
 
 def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], total: int, seed: int,
-                  out_dir: Path) -> SceneLayers:
+                  out_dir: Path, scale: float = 1.0) -> SceneLayers:
     """Draw one slide and write its base picture and layer pictures into out_dir.
     Returns the layers in the order they are listed for the slide type."""
     n = int(slide.get("n", 1))
@@ -137,5 +143,10 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
                       " html.__iso [data-reel-group=\"${k}\"], html.__iso [data-reel-group=\"${k}\"] * { visibility: visible !important; }`; }", k)
         page.screenshot(path=str(path), clip={"x": x, "y": y, "width": w, "height": h}, omit_background=True, full_page=False)
         page.evaluate("document.documentElement.classList.remove('__iso'); document.getElementById('__reel_iso').textContent = ''")
-        scene.layers.append(Layer(path=path, box=(x, y, w, h), follow=bool(box[4]), classes=str(box[5])))
+        # the clip is in page pixels; the picture comes out `scale` times bigger, so the box the
+        # compositor works in is the picture's own size at the scaled-up position
+        with Image.open(path) as im:
+            pw, ph = im.size
+        scene.layers.append(Layer(path=path, box=(round(x * scale), round(y * scale), pw, ph),
+                                  follow=bool(box[4]), classes=str(box[5])))
     return scene

@@ -11,7 +11,6 @@ tag: "#smallbusiness"
 kicker: THE QUIET TRUTH
 headline: 9 in 10 shops still sell **offline**
 pill: offline
-motion: rise
 say: Nine in ten corner shops still sell offline only.
 
 ## stat
@@ -19,7 +18,6 @@ headline: Repeat customers bring in
 number: 65%
 body: of a typical shop's sales. Start with the people who already know you.
 source: Retail survey 2024
-motion: pop
 say: Your regulars are already two thirds of your sales, so start with them.
 show: your regulars | two thirds
 
@@ -28,7 +26,6 @@ headline: Go online this **weekend**
 1. Photograph your 20 best-sellers
 2. Build a WhatsApp catalogue
 3. Put a QR code on the counter
-motion: stagger
 say: Here is the whole weekend plan, in three steps. First, photograph your twenty best sellers. Second, build a WhatsApp catalogue. Third, put a QR code on the counter.
 show: first | second | third
 
@@ -40,7 +37,6 @@ left: Myth
 right: Reality
 - A WhatsApp catalogue is enough
 - One afternoon to go live
-motion: wipe
 say: It is not about a fancy app. It is about starting this week.
 
 ## cta
@@ -48,7 +44,6 @@ headline: Which step comes **first?**
 subtext: COMMENT 1, 2 OR 3
 pill: SAVE THIS
 theme: dark
-motion: pop
 say: Tell me which step you will do first.
 
 ## caption

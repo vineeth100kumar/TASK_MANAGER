@@ -12,6 +12,7 @@ from ..progress import report
 from . import align as aligner
 from . import captions as caps
 from . import compose, timing, voice
+from . import layers as layers_mod
 from .layers import extract_scene
 from .script import ReelScript, parse_reel
 
@@ -137,10 +138,13 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     themes: Dict[int, str] = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(**browser_launch_options())
-        page = browser.new_page(viewport={"width": compose.W, "height": compose.H}, device_scale_factor=1)
+        # drawn a little larger than the video, so the compositor can drift a frame across it
+        page = browser.new_page(viewport={"width": compose.W, "height": compose.H},
+                                device_scale_factor=layers_mod.OVERSAMPLE)
         for i, slide in enumerate(slides):
             progress(f"Cutting slide {i + 1} of {len(slides)} into pieces ({slide.get('type')})...")
-            sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers")
+            sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers",
+                               scale=layers_mod.OVERSAMPLE)
             scenes_layers.append(sl)
             themes[i + 1] = sl.theme
         bad = [r for r in renderer.fit_report if not r["ok"]]
@@ -162,11 +166,19 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             for k, ly in enumerate(sl.layers):
                 if ly.follow:
                     at[k] = at[k - 1]
-            clip = compose.SceneClip(t0=t0, t1=t1, base=Image.open(sl.base).convert("RGB"), motion=sc.motion)
+            base = Image.open(sl.base).convert("RGB")
+            clip = compose.SceneClip(t0=t0, t1=t1, base=base, motion=sc.motion,
+                                     pan=compose.pan_for(i, base.size))
             for k, ly in enumerate(sl.layers):
+                # Unless the script asked for one motion for the whole slide, each piece arrives in
+                # the way that suits what it is: a headline is wiped on, a number punches in, a
+                # picture is uncovered and keeps pushing in, bullets come in from the side.
+                own, side = ("", 0) if sc.motion_given else compose.piece_motion(ly.classes, sc.motion)
+                picture = "image-frame" in ly.classes
                 clip.pieces.append(compose.Piece(
                     image=Image.open(ly.path).convert("RGBA"), box=ly.box, at=at[k], follow=ly.follow,
-                    zoom=(sc.motion == "kenburns" and "image-frame" in ly.classes)))
+                    motion=own, side=side, drift=0 if (ly.follow or picture) else (1 if k % 2 else -1),
+                    zoom=picture and (sc.motion == "kenburns" or not sc.motion_given)))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 

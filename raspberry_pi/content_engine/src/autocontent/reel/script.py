@@ -51,6 +51,7 @@ class Scene:
     say: str = ""
     show: List[str] = field(default_factory=list)   # cue phrases, one per thing that appears, in order
     motion: str = "rise"
+    motion_given: bool = False      # the author named it, so every piece of the slide uses it
     duration: Optional[float] = None    # seconds to hold a scene that has no narration
     pause: float = 0.0                  # extra silence after the narration, seconds
 
@@ -239,6 +240,7 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             reel.issues.append(SpecIssue("WARN", "MOTION_UNKNOWN", f"Unknown motion '{raw_motion}'; using the slide's usual one.",
                                          slide=i + 1, line=sec["motion"][1], hint=f"Use one of: {', '.join(MOTIONS)}."))
         scene.motion = motion or DEFAULT_MOTION.get(slide.get("type", "point"), "rise")
+        scene.motion_given = bool(motion)
         if "duration" in sec:
             scene.duration = _number(sec["duration"][0], 1.0, 30.0, "duration", sec["duration"][1], reel.issues, None)
         if "pause" in sec:

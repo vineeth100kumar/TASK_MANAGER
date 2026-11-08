@@ -43,3 +43,7 @@ raspberry_pi/firmware/
 dummy-non-existing-folder/
 raspberry_pi/drops/
 raspberry_pi/media.key
+
+# Posts and reels the tests make on this machine
+raspberry_pi/sage_posts/
+raspberry_pi/sage_reels/

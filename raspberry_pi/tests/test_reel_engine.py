@@ -289,6 +289,50 @@ class ComposeTests(unittest.TestCase):
             gone = tl.frame(3.95)[700, 300]
             self.assertTrue((gone > after).all(), motion + " should be leaving by the end")
 
+    def test_each_kind_of_thing_arrives_its_own_way(self):
+        """The point of the reel: a headline is not animated like a number or a picture."""
+        self.assertEqual(compose.piece_motion("stat-number")[0], "punch")
+        self.assertEqual(compose.piece_motion("cover-headline")[0], "sweep")
+        self.assertEqual(compose.piece_motion("image-frame")[0], "reveal")
+        self.assertEqual(compose.piece_motion("data-table")[0], "grow")
+        self.assertEqual(compose.piece_motion("list-item"), ("slide", -1))
+        self.assertEqual(compose.piece_motion("compare-col right"), ("slide", 1))
+        self.assertEqual(compose.piece_motion("stat-body", "rise"), ("rise", 0))   # unknown: the slide's own
+
+    def test_a_piece_uses_its_own_motion_over_the_slides(self):
+        clip = self.clip("rise")
+        clip.pieces[0].motion = "punch"
+        dur = compose.MOTIONS["punch"][0]
+        small = compose._piece_state(clip.pieces[0], 1.0 + dur * 0.15, clip.motion, clip)[0]
+        over = compose._piece_state(clip.pieces[0], 1.0 + dur * 0.55, clip.motion, clip)[0]
+        done = compose._piece_state(clip.pieces[0], 1.0 + dur, clip.motion, clip)[0]
+        self.assertLess(small.shape[1], 400)        # it starts small...
+        self.assertGreater(over.shape[1], 400)      # ...overshoots its size...
+        self.assertEqual(done.shape[1], 400)        # ...and settles, never sliding down the screen
+
+    def test_the_camera_drifts_across_a_bigger_base(self):
+        from PIL import Image
+        base = Image.new("RGB", (1145, 2035), (255, 255, 255))
+        clip = compose.SceneClip(0.0, 4.0, base, [], "rise", pan=compose.pan_for(0, base.size))
+        self.assertNotEqual(clip.view(0.1), clip.view(3.9))
+        self.assertEqual(compose.pan_for(0, (compose.W, compose.H)), (0, 0, 0, 0))   # no room: no move
+        for n in range(4):
+            x0, y0, x1, y1 = compose.pan_for(n, base.size)
+            for v, room in ((x0, 1145 - compose.W), (x1, 1145 - compose.W), (y0, 2035 - compose.H), (y1, 2035 - compose.H)):
+                self.assertTrue(0 <= v <= room, (n, v, room))
+        tl = compose.Timeline([clip], [], 4.0)
+        self.assertEqual(tl.frame(2.0).shape, (compose.H, compose.W, 3))
+
+    def test_one_slide_wipes_into_the_next(self):
+        from PIL import Image
+        light = self.clip(t0=0.0, t1=4.0)
+        dark = self.clip(t0=4.0, t1=8.0)
+        dark.base = Image.new("RGB", (compose.W, compose.H), (0, 0, 0))
+        tl = compose.Timeline([light, dark], [], 8.0)
+        top = tl.frame(4.0 - compose.EXIT / 2)[20, 540]
+        self.assertTrue((top < 200).all(), "the next slide should be wiping in over this one")
+        self.assertTrue((tl.frame(3.5)[20, 540] == 255).all(), "and not before it leaves")
+
     def test_settled_frames_are_reused(self):
         tl = compose.Timeline([self.clip()], [], 4.0)
         a = tl.frame(2.0)
