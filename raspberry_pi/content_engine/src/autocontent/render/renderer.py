@@ -201,7 +201,7 @@ const centerPillInk = (pill) => {
 """
 
 
-def cover_fill_js(width: int, square: bool) -> str:
+def cover_fill_js(width: int, square: bool, fill: Optional[Tuple[int, int, int]] = None) -> str:
     """grid_pill cover: the kicker, headline and pill are one block that fills the slide.
 
     The headline and its pill grow together (up to a poster size) until the block fills most of the
@@ -211,6 +211,8 @@ def cover_fill_js(width: int, square: bool) -> str:
     The block then sits a little above the middle of the room (the optical centre)."""
     top, bottom = (175, 905) if square else (225, 1160)
     max_px = 210 if square else 250
+    if fill:  # a canvas preset's own room: (top, bottom, biggest headline)
+        top, bottom, max_px = fill
     return f"""
     () => {{
         {CENTER_PILL_INK_JS}
@@ -254,6 +256,24 @@ def cover_fill_js(width: int, square: bool) -> str:
         return {{ success: true, fontSize: best }};
     }}
     """
+
+
+_FIT_CALL = re.compile(r"^(fitText\('[^']+', \d+, )(\d+)(, )(\d+)(, )(\d+)\)$")
+_FIT_LIST = re.compile(r"^(fitListItems\('[^']+', \d+, )(\d+)(, )(\d+)\)$")
+
+
+def _scale_fit_text(js: str, k: float) -> str:
+    """A reel is watched full screen on a phone, so its type runs bigger than a feed slide's:
+    scale a fitText(sel, width, maxHeight, minPx, maxPx) call's room and sizes by k."""
+    m = _FIT_LIST.match(js)
+    if m:
+        a, hi, b, lo = m.groups()
+        return f"{a}{round(int(hi) * k)}{b}{round(int(lo) * k)})"
+    m = _FIT_CALL.match(js)
+    if not m:
+        return js
+    a, h, b, lo, c, hi = m.groups()
+    return f"{a}{round(int(h) * k * 1.1)}{b}{round(int(lo) * k)}{c}{round(int(hi) * k)})"
 
 
 def _pill_split(headline: str, pill: str):
@@ -609,7 +629,7 @@ class SlideRenderer:
 
         if slide_type == "cover":
             if self.style_name == "grid_pill":
-                steps.append((cover_fill_js(cover_w, is_sq), "cover headline"))
+                steps.append((cover_fill_js(cover_w, is_sq, preset.get("cover_fill")), "cover headline"))
                 steps.append((f"""
                     () => {{
                         const h1 = document.querySelector('.cover-headline');
@@ -622,6 +642,11 @@ class SlideRenderer:
                                 `M ${{pr}} 824 C ${{pr + 60}} 828, 860 828, 930 804 C 985 784, 1025 736, 1020 664 C 1015 592, 970 552, 920 555 C 865 560, 830 608, 835 672 C 840 728, 875 748, 915 752 C 960 756, 1000 772, 1080 776` :
                                 `M ${{pr}} 1020 C ${{pr + 60}} 1025, 860 1025, 930 995 C 995 970, 1040 910, 1030 830 C 1020 750, 975 710, 920 720 C 865 730, 825 790, 830 860 C 835 920, 875 945, 920 950 C 965 955, 1010 970, 1080 975`;
                             loopPath.setAttribute('d', d);
+                            // a taller canvas puts the pill lower; the loop leaves the pill's right end wherever it is
+                            if ({'true' if 'cover_fill' in preset else 'false'} && pill) {{
+                                const pr2 = pill.getBoundingClientRect();
+                                loopPath.setAttribute('transform', `translate(0, ${{Math.round(pr2.top + pr2.height / 2 - 1020)}})`);
+                            }}
                             // The doodle only goes where it touches no text
                             const lr = loopPath.getBoundingClientRect();
                             const boxes = [];
@@ -693,7 +718,7 @@ class SlideRenderer:
                     if (!t) return {{ success: true }};
                     const src = document.querySelector('.table-source');
                     const limit = (src ? src.getBoundingClientRect().top - 24 : {max_list_bottom_y});
-                    for (let fs = 40; fs >= 20; fs--) {{
+                    for (let fs = {preset.get('table_fs', 40)}; fs >= 20; fs--) {{
                         t.style.fontSize = fs + 'px';
                         if (t.getBoundingClientRect().bottom <= limit && t.scrollWidth <= {content_w} + 1) {{
                             return {{ success: true, fontSize: fs }};
@@ -741,9 +766,11 @@ class SlideRenderer:
         elif slide_type == "statement":
             has_body = bool(slide.get("body"))
             head_h = (460 if is_sq else 600) if has_body else (640 if is_sq else 820)
+            if "statement_h" in preset:
+                head_h = preset["statement_h"][0 if has_body else 1]
             steps.append((f"fitText('.statement-headline', {content_w}, {head_h}, 56, 150)", "statement"))
             if has_body:
-                steps.append((f"fitText('.statement-body', {content_w}, {200 if is_sq else 260}, 26, 46)", "statement text"))
+                steps.append((f"fitText('.statement-body', {content_w}, {preset.get('statement_body_h', 200 if is_sq else 260)}, 26, 46)", "statement text"))
         elif slide_type == "compare":
             if slide.get("headline"):
                 steps.append((f"fitText('.compare-headline', {content_w}, 260, 44, 84)", "compare headline"))
@@ -757,7 +784,7 @@ class SlideRenderer:
                                            foot ? foot.getBoundingClientRect().top - 40 : 1e9);
                     const wide = () => [...grid.querySelectorAll('.compare-item span:last-child, .compare-label')]
                         .some((e) => e.scrollWidth > e.clientWidth + 2);
-                    for (let fs = 40; fs >= 22; fs--) {{
+                    for (let fs = {preset.get('compare_fs', 40)}; fs >= 22; fs--) {{
                         grid.style.fontSize = fs + 'px';
                         if (grid.getBoundingClientRect().bottom <= limit && !wide()) return {{ success: true, fontSize: fs }};
                     }}
@@ -801,7 +828,7 @@ class SlideRenderer:
                 }}
             """, "text above the source line"))
 
-        align = slide.get("align") or DEFAULT_ALIGN.get(slide_type, "top")
+        align = slide.get("align") or preset.get("default_align", {}).get(slide_type) or DEFAULT_ALIGN.get(slide_type, "top")
         if slide_type in BALANCED_TYPES and align in ("center", "bottom"):
             # Move the whole block down into the free space between the header and the source line / footer
             steps.append((f"""
@@ -822,6 +849,9 @@ class SlideRenderer:
                     box.style.top = (parseFloat(getComputedStyle(box).top) + shift) + 'px';
                 }}
             """, None))
+
+        if "type_scale" in preset:
+            steps = [(_scale_fit_text(js, preset["type_scale"]), label) for js, label in steps]
 
         ov_call = overrides_call(slide)
         if ov_call:
@@ -848,6 +878,28 @@ class SlideRenderer:
         )
         return html.replace("</body>", script + "</body>") if "</body>" in html else html + script
 
+    def lay_out(self, page, slide: Dict[str, Any], html_content: str) -> None:
+        """Load the slide's HTML into the page and run auto-fit, the layout steps and the editor's
+        overrides, so the page shows the finished slide. Used for the PNG render and for reels."""
+        slide_n = slide.get("n", 1)
+        page.set_content(html_content, wait_until="networkidle")
+        page.evaluate("document.fonts.ready")
+
+        # Run auto-fit, then the editor's overrides (last step, when the slide has any)
+        page.evaluate(FIT_TEXT_JS)
+        page.evaluate(APPLY_OVERRIDES_JS)
+        problems: List[str] = []
+        for js, label in self.layout_steps(slide):
+            res = page.evaluate(js)
+            if label and res and not res.get("success"):
+                msg = f"The {label} does not fit: {res.get('reason')}"
+                if not self.collect_fit:
+                    raise RuntimeError(f"Slide {slide_n} {label} failed to fit: {res.get('reason')}")
+                problems.append(msg)
+        if self.collect_fit:
+            problems += [p for p in (page.evaluate(FIT_PROBE_JS) or []) if p not in problems]
+            self.fit_report.append({"n": slide_n, "type": slide.get("type"), "ok": not problems, "problems": problems})
+
     def render_slide(
         self,
         slide: Dict[str, Any],
@@ -873,23 +925,7 @@ class SlideRenderer:
             close_browser = True
 
         try:
-            page.set_content(html_content, wait_until="networkidle")
-            page.evaluate("document.fonts.ready")
-
-            # Run auto-fit, then the editor's overrides (last step, when the slide has any)
-            page.evaluate(FIT_TEXT_JS)
-            page.evaluate(APPLY_OVERRIDES_JS)
-            problems: List[str] = []
-            for js, label in self.layout_steps(slide):
-                res = page.evaluate(js)
-                if label and res and not res.get("success"):
-                    msg = f"The {label} does not fit: {res.get('reason')}"
-                    if not self.collect_fit:
-                        raise RuntimeError(f"Slide {slide_n} {label} failed to fit: {res.get('reason')}")
-                    problems.append(msg)
-            if self.collect_fit:
-                problems += [p for p in (page.evaluate(FIT_PROBE_JS) or []) if p not in problems]
-                self.fit_report.append({"n": slide_n, "type": slide.get("type"), "ok": not problems, "problems": problems})
+            self.lay_out(page, slide, html_content)
 
             out_path.parent.mkdir(parents=True, exist_ok=True)
             page.screenshot(path=str(out_path), full_page=False)

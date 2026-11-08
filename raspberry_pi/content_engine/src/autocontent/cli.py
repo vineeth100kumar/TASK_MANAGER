@@ -154,7 +154,7 @@ def run(
     provider: Optional[str] = typer.Option(None, "--provider", "-p", help="LLM provider: groq | ollama | gemini"),
     allow_fail: bool = typer.Option(False, "--allow-fail", help="Force image rendering even if validation fails"),
     style: Optional[str] = typer.Option(None, "--style", help="Visual style pack: beige_grain (default) | grid_pill"),
-    format: Optional[str] = typer.Option(None, "--format", "-f", help="Canvas format preset: portrait (1080x1350, default) | square (1080x1080)"),
+    format: Optional[str] = typer.Option(None, "--format", "-f", help="Canvas format preset: portrait (1080x1350, default) | square (1080x1080) | reel (1080x1920)"),
     out: Optional[Path] = typer.Option(None, "--out", "-o", help="Custom output directory"),
     open_folder: bool = typer.Option(False, "--open", help="Open the output folder when done"),
     as_spec: bool = typer.Option(False, "--spec", help="Treat the file as a post spec even if it has no 'autocontent: post' header")
@@ -326,7 +326,7 @@ def spec_check(
     typer.echo(f"{file_path.name}: {len(spec.slides)} slides, {issues_summary(spec.issues)}")
     for n, s in enumerate(spec.slides, start=1):
         title = (s.get("headline") or s.get("number") or s.get("body") or s.get("image") or "")[:60]
-        typer.echo(f"  {n:2d}. {s['type']:<6} {title.encode('ascii', errors='replace').decode('ascii')}")
+        typer.echo(f"  {n:2d}. {s['type']:<6} {title.replace('==', '').replace('**', '').encode('ascii', errors='replace').decode('ascii')}")
     _print_spec_issues(spec.issues)
     if spec.ok:
         typer.secho("Spec OK: ready to render with `python -m autocontent run`.", fg=typer.colors.GREEN)
@@ -459,6 +459,59 @@ def eval_benchmark(
         typer.secho(f"Evaluation benchmark failed with error: {e}", fg=typer.colors.RED)
         raise typer.Exit(code=1)
 
+
+
+@app.command("reel-check")
+def reel_check(file_path: Path = typer.Argument(..., help="Path to a reel script (.md)")):
+    """Check a reel script without making it: every error and warning, and about how long it will run."""
+    from .reel import parse_reel
+    if not file_path.exists():
+        _fail(f"File not found: {file_path}")
+    reel = parse_reel(file_path.read_text(encoding="utf-8-sig", errors="replace"), base_dir=file_path.resolve().parent)
+    typer.echo(f"{file_path.name}: {len(reel.scenes)} slides, about {reel.estimate_seconds():.0f} seconds, "
+               f"voice {'your recording' if reel.uses_own_voice else reel.meta.get('voice', '?')}")
+    for sc in reel.scenes:
+        title = (sc.slide.get("headline") or sc.slide.get("number") or sc.slide.get("quote") or sc.slide.get("body") or "")[:48]
+        typer.echo(f"  {sc.n:2d}. {sc.slide.get('type', '?'):<9} {sc.motion:<8} {len(sc.words):3d} words  "
+                   f"{title.replace('==', '').replace('**', '').encode('ascii', errors='replace').decode('ascii')}")
+    _print_spec_issues(reel.issues)
+    if reel.ok:
+        typer.secho("Reel script OK: make it with `python -m autocontent reel`.", fg=typer.colors.GREEN)
+    else:
+        raise typer.Exit(code=1)
+
+
+@app.command("reel")
+def reel_cmd(
+    file_path: Path = typer.Argument(..., help="Path to a reel script (.md, `autocontent: reel`)"),
+    voice_file: Optional[Path] = typer.Option(None, "--voice-file", "-v", help="Your own recording (any audio or video file); without it Kokoro speaks the `say:` lines"),
+    out: Optional[Path] = typer.Option(None, "--out", "-o", help="Output folder (default: output/<title>)"),
+    style: Optional[str] = typer.Option(None, "--style", "-s", help="Style pack: grid_pill | beige_grain"),
+    tag: Optional[str] = typer.Option(None, "--tag", help="Topic pill, such as #business"),
+    aligner: str = typer.Option("auto", "--aligner", help="Word timing: auto | whisper | spread"),
+    preset: str = typer.Option("veryfast", "--preset", help="x264 speed preset (slower = smaller file)"),
+    no_fetch: bool = typer.Option(False, "--no-fetch", help="Don't download stock pictures"),
+):
+    """Make a 1080x1920 reel (H.264 + AAC mp4) from a reel script: slides appear in time with the voice-over."""
+    from .reel import make_reel
+    from .reel.pipeline import ReelError
+    if not file_path.exists():
+        _fail(f"File not found: {file_path}")
+    if voice_file is not None and not voice_file.exists():
+        _fail(f"Voice file not found: {voice_file}")
+    text = file_path.read_text(encoding="utf-8-sig", errors="replace")
+    if out is None:
+        from .spec.build import _slug
+        out = OUTPUT_DIR / f"reel_{_slug(file_path.stem)}"
+    try:
+        summary = make_reel(text, out, base_dir=file_path.resolve().parent, voice_file=voice_file, style=style, tag=tag,
+                            backend=aligner, fetch_images=not no_fetch, preset=preset)
+    except ReelError as e:
+        typer.secho(f"\n{e}", fg=typer.colors.RED, err=True)
+        _print_spec_issues(e.issues)
+        _fail("Fix the script and run again.", "`python -m autocontent reel-check <file>` checks it without making the video.")
+    typer.secho(f"\nDone: {out / 'reel.mp4'} ({summary['seconds']} seconds, {summary['size'] / 1e6:.1f} MB)", fg=typer.colors.GREEN)
+    typer.echo(f"Caption: {out / 'caption.txt'}")
 
 
 if __name__ == "__main__":

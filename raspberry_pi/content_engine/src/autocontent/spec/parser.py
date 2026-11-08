@@ -184,7 +184,8 @@ STYLE_ALIASES = {"grid_pill": "grid_pill", "grid": "grid_pill", "grid_and_pill":
                  "warm": "beige_grain", "cream": "beige_grain"}
 FORMAT_ALIASES = {"portrait": "portrait", "4:5": "portrait", "4x5": "portrait", "1080x1350": "portrait",
                   "feed": "portrait", "vertical": "portrait", "tall": "portrait",
-                  "square": "square", "1:1": "square", "1x1": "square", "1080x1080": "square"}
+                  "square": "square", "1:1": "square", "1x1": "square", "1080x1080": "square",
+                  "reel": "reel", "reels": "reel", "9:16": "reel", "9x16": "reel", "1080x1920": "reel", "story": "reel"}
 NAMED_COLORS = {"red": "#E53935", "orange": "#F86036", "blue": "#1E6FE8", "green": "#1E9E5A", "purple": "#7B3FE4",
                 "pink": "#E8479B", "teal": "#0FA3A3", "yellow": "#F2B600", "black": "#111111", "navy": "#12264F"}
 
@@ -504,7 +505,7 @@ def _check_meta(meta: Dict[str, Any], issues: List[SpecIssue]) -> None:
         if fmt is None:
             issues.append(SpecIssue("WARN", "FORMAT_UNKNOWN", f"Unknown format '{meta['format']}'; using portrait.",
                                     line=lines.get("format"),
-                                    hint="Use format: portrait (1080x1350) or format: square (1080x1080)."))
+                                    hint="Use format: portrait (1080x1350), format: square (1080x1080) or format: reel (1080x1920)."))
         elif guessed:
             issues.append(SpecIssue("WARN", "FORMAT_GUESSED", f"Format '{meta['format']}' was read as {fmt}.",
                                     line=lines.get("format")))
