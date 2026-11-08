@@ -142,7 +142,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.20.1"
+#define FW_VERSION "2.21.0"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...
@@ -320,6 +320,7 @@ struct LumoState {
   bool       flag_system_changed  = false;
   bool       flag_card_changed    = false;
   bool       flag_clock_changed   = false;
+  bool       flag_display_reset   = false;   // Sage: start the screen controller over (loose wire, white screen)
   bool       flag_screen_switch   = false;
   bool       flag_voice_changed   = false;
   bool       flag_memory_changed  = false;

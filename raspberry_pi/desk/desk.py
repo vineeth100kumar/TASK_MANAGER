@@ -807,7 +807,7 @@ class Desk:
         return True
 
     async def device_do(self, action: str, tone: str = "", volume: int = 0) -> bool:
-        """identify (flash and knock), restart, or tone (play one cycle of an
+        """identify (flash and knock), restart, display_reset, or tone (play one cycle of an
         alarm sound). False when no clock is there to do it."""
         if not self.link.connected:
             return False
@@ -815,6 +815,11 @@ class Desk:
             return await self.link.send({"cmd": "IDENTIFY"})
         if action == "restart":
             return await self.link.send({"cmd": "REBOOT"})
+        if action == "display_reset":
+            # Start the screen controller over, no reboot (firmware 2.21).
+            if not self.firmware_at_least((2, 21)):
+                raise ValueError("Reinitialize display needs firmware 2.21 or later.")
+            return await self.link.send({"cmd": "DISPLAY_RESET"})
         if action == "tone":
             # One cycle of the sound, then quiet (firmware 2.11). Older
             # firmware ignores cycles and plays for seconds instead.

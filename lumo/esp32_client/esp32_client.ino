@@ -314,6 +314,15 @@ void loop() {
   }
   if (currentScreen != SCREEN_TIMER) timerTookScreen = false;
 
+  // Sage's "Reinitialize display": the controller starts over (what a restart
+  // does at boot) and the screen on show is drawn again, with no reboot.
+  if (lumoState.flag_display_reset) {
+    lumoState.flag_display_reset = false;
+    Serial.println("[DISPLAY] reinitialising the screen controller");
+    displayInit();
+    displayDrawScreen(currentScreen, lumoState, true);
+  }
+
   // Sage asked for a screen. Under a card or an alarm, it's where they return to.
   if (lumoState.flag_screen_switch) {
     lumoState.flag_screen_switch = false;

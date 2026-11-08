@@ -219,6 +219,9 @@ export function DeviceTab({ status, updates, settings, save, onChange }: {
           }} disabled={!connected} className={btnQuiet}>
             <Power size={15} /> {confirmRestart ? 'Tap again to restart' : 'Restart'}
           </button>
+          <button onClick={() => act(() => lumoApi.device('display_reset'), 'Display reinitialised')} disabled={!connected} className={btnQuiet} title="Starts the screen controller over, for a blank white screen after a loose wire. No restart.">
+            <RefreshCw size={15} /> Reinitialize display
+          </button>
         </div>
       </Panel>
 
