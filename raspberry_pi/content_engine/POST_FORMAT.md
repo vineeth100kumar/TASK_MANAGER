@@ -45,7 +45,8 @@ tag: "#topic"
 Then each slide starts with `## <type>` and has `field: value` lines, `- ` bullets or `1. ` numbered items.
 
 SLIDE TYPES
-## cover       headline (the hook). Optional pill: the last 1-3 words of the headline to put in the coloured pill (pill: none for no pill)
+## cover       headline (the hook). Optional pill: the last 1-3 words of the headline to put in the coloured pill (pill: none for no pill).
+              The headline grows to fill the slide, so a short title ("Rent or buy?") is set big, not left at the top. Add a `kicker:` for the small red line above it.
 ## statement   headline (one bold sentence, up to 16 words), optional body (one supporting line)
 ## point       headline + 2-4 bullets, or headline + body (one or two sentences)
 ## list        headline + 2-6 numbered items (steps, tips, reasons, rankings)
@@ -189,7 +190,8 @@ that does not fit): headlines 6 to 10 words, bullets and list items under 12 wor
 - Pictures are black-and-white halftone dots by default (brand.json `image_defaults`). Per slide or in
   the header: `filter:` (`none`, `grayscale`, `sepia`, `warm`, `cool`, `vivid`, `moody`, `high contrast`,
   `halftone`...), `dot_size`, `duotone: accent`, `tint: blue 30%`, `focus: top`, `fit: contain`,
-  `rounded: large`, `border: thick accent`, `text_position: above | below`.
+  `rounded: large`, `border: thick accent`, `text_position: above | below`. Pictures have no border unless
+  a slide asks for one; `filter: none` keeps a picture's original colours.
 
 ### Caption and hashtags
 
