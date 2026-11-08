@@ -25,6 +25,8 @@ HOW A GOOD REEL WORKS
 - The first slide's narration is the hook and must land in the first 2 seconds: a surprising number, a bold claim or a question. Max 12 words.
 - 20 to 45 seconds is the sweet spot (5 to 8 slides); never more than 90. Speech runs about 2.5 words a second: a 30-second reel is about 75 words in all.
 - One idea per slide. 12 to 30 spoken words per slide. A slide that needs more is two slides.
+- HOW MUCH GOES ON THE SLIDE ITSELF (this is a hard limit, not a style note — a reel sets type far larger than a feed slide): about 26 words of slide text in all, counting the headline, the bullets, the body and the kicker. Over 40 words, or more than four bullets, and the script is refused. Three short bullets is the comfortable shape. The voice carries the detail; the slide carries the point.
+- A headline is under 9 words. A kicker is a label under 28 characters, not a sentence. A stat's number is a number, not a sentence.
 - Write the narration the way people talk: short sentences, plain words, contractions. Read it aloud. Spell out how numbers are said ("two thirds", "five lakh rupees"), or write 65% / ₹5 lakh and the voice will say them properly.
 - The narration and the slide say the same thing in different ways: the slide shows the number or the three steps, the voice explains why it matters. Do not read the slide word for word.
 - Build curiosity slide to slide; save the best insight for the middle; end with a reason to save or comment.
@@ -60,6 +62,7 @@ Headlines, quotes and statements are typed out left to right with a caret. Big n
 
 LAYOUT RULES (a reel is 9:16; Instagram covers the top and bottom, so the slide keeps to the middle and the captions sit below it)
 - Keep headlines under 9 words and points/bullets under 12 words: they are set large for a phone screen.
+- Anything that still doesn't fit is made to fit: the slide is set smaller, then its kicker goes, then its source line. Write to the limits above and none of that has to happen.
 - cta: the subtext sits beside the pill, so keep it to 3 or 4 short words (SAVE THIS + COMMENT 1, 2 OR 3).
 - Do not write `music:`; music is added in Instagram.
 
@@ -135,6 +138,11 @@ With your own recording every slide needs a `say:` line.
 
 ## What the checks say
 
+Nothing is ever drawn over the captions: after every slide is laid out, the renderer measures it
+and, if the content reaches too far down, sets it smaller step by step, then drops the kicker, then
+the source line. A slide only fails when even that isn't enough, and then it says how much has to
+go. So an over-long script from an AI gives you a smaller slide, not a broken video.
+
 `reel-check` and the Reels screen list everything with its line and slide number. Errors stop the
 reel; warnings don't.
 
@@ -148,6 +156,9 @@ reel; warnings don't.
 | Warning — link or handle in the narration | A voice reads a URL letter by letter. |
 | Warning — symbols in the narration | `#`, `*`, backticks and brackets are read aloud or skipped. |
 | Warning — cue not found | A `show:` phrase isn't in that slide's `say:`; the pieces are spread evenly instead. |
+| **Error** — slide too full | Over 40 words of slide text, or more than four bullets. Split the slide. |
+| Warning — slide full | Over about 26 words of slide text; it is set smaller to fit. |
+| Warning — headline or kicker long | Over 9 words, or a kicker over 28 characters. |
 | Warning — too long / too short | Over 90 seconds, or under 8. |
 | Warning — ignored line | `music:`, `aspect:`, `format:`, or an unknown `motion:` or voice. |
 

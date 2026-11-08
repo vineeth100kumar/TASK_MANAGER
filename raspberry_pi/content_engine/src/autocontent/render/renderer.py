@@ -133,7 +133,10 @@ FIT_PROBE_JS = """
     const footer = document.querySelector('.footer-row');
     const footTop = footer ? footer.getBoundingClientRect().top : H;
     const src = document.querySelector('.chart-source, .table-source, .slide-source');
-    const limit = Math.min(footTop, src ? src.getBoundingClientRect().top : footTop) - 2;
+    // a reel's handle sits at the very bottom of the frame, so the footer is not the floor:
+    // __contentBottom is where the slide's own content must stop (above the spoken captions)
+    const floor = window.__contentBottom || H;
+    const limit = Math.min(footTop, floor, src ? src.getBoundingClientRect().top : footTop) - 2;
     document.querySelectorAll('.content-container, .headline-container').forEach((box) => {
         let bottom = 0, right = 0;
         box.querySelectorAll('*').forEach((el) => {
@@ -858,6 +861,49 @@ class SlideRenderer:
                     box.style.top = (parseFloat(getComputedStyle(box).top) + shift) + 'px';
                 }}
             """, None))
+
+        floor_y = preset.get("content_bottom")
+        if floor_y:
+            # THE FAIL-SAFE. Every fitter above sizes one part of the slide; this looks at the
+            # finished slide and makes the whole thing fit the room a reel actually has, whatever
+            # the script threw at it: shrink everything a step at a time, then give up the kicker,
+            # then the source line. Only if it still doesn't fit does the slide fail, and the
+            # reason says what to cut.
+            steps.append((f"""
+                () => {{
+                    window.__contentBottom = {floor_y};
+                    const boxes = [...document.querySelectorAll('.content-container, .headline-container')];
+                    if (!boxes.length) return {{ success: true }};
+                    const texts = boxes.flatMap((b) => [...b.querySelectorAll('*')])
+                        .filter((e) => e.children.length === 0 && (e.innerText || '').trim());
+                    const sizes = new Map(texts.map((e) => [e, parseFloat(getComputedStyle(e).fontSize) || 0]));
+                    const over = () => Math.max(0, ...boxes.flatMap((b) => [...b.querySelectorAll('*')])
+                        .map((e) => e.getBoundingClientRect().bottom)) - {floor_y};
+                    const recentre = () => {{
+                        boxes.forEach((b) => {{
+                            const top = parseFloat(getComputedStyle(b).top) || 0;
+                            if (b.dataset.reelTop === undefined) b.dataset.reelTop = String(top);
+                        }});
+                    }};
+                    recentre();
+                    if (over() <= 0) return {{ success: true }};
+                    for (let k = 0.96; k >= 0.55; k -= 0.04) {{      // 1: set it smaller, in small steps
+                        texts.forEach((e) => {{ e.style.fontSize = Math.round(sizes.get(e) * k) + 'px'; }});
+                        if (over() <= 0) return {{ success: true, shrunk: k }};
+                    }}
+                    const kicker = document.querySelector('.kicker');
+                    if (kicker) {{                                    // 2: the kicker is the least of it
+                        kicker.style.display = 'none';
+                        if (over() <= 0) return {{ success: true, dropped: 'kicker' }};
+                    }}
+                    const src = document.querySelector('.slide-source');
+                    if (src) {{                                       // 3: then the source line
+                        src.style.display = 'none';
+                        if (over() <= 0) return {{ success: true, dropped: 'source' }};
+                    }}
+                    return {{ success: false, reason: `there is {{OVER}}px more text than the screen has room for, even at the smallest size; cut a bullet or shorten the headline`.replace('{{OVER}}', Math.round(over())) }};
+                }}
+            """, "slide content"))
 
         if "type_scale" in preset:
             steps = [(_scale_fit_text(js, preset["type_scale"]), label) for js, label in steps]
