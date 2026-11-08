@@ -88,8 +88,8 @@ slide reads as an infographic being built rather than a picture being shown:
 
 | The piece | How it arrives |
 | --- | --- |
-| A headline, a quote, a statement | Written word by word, each word rising into place |
-| A highlighted word (`**like this**`) | Lands harder, in the brand colour, and draws a line under itself |
+| A headline, a quote, a statement | Typed out, word by word, with a caret at the point it has reached |
+| A highlighted word (`**like this**`) | Types in the brand colour, like the rest of the line |
 | A big number | Counts up to its real value, then holds |
 | A pill (`pill:`, a CTA) | Pressed on along its own slant |
 | A list item, a bullet, a compare column | In from its own side, with a little overshoot |

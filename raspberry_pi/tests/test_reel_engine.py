@@ -320,30 +320,38 @@ class ComposeTests(unittest.TestCase):
         a, b = tl.frame(2.0), tl.frame(2.4)        # settled: not one pixel moves (below the progress bar)
         self.assertTrue((a[compose.BAR_H:] == b[compose.BAR_H:]).all())
 
-    def test_text_lands_one_word_at_a_time(self):
+    def test_text_is_typed_out_word_by_word(self):
         from PIL import Image
         piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
                               at=1.0, motion="words",
                               words=[(0, 0, 130, 60), (130, 0, 130, 60), (260, 0, 140, 60)])
+        plan = piece.typing
+        self.assertEqual(len(plan), 3)
+        for (a0, d0), (a1, _) in zip(plan, plan[1:]):
+            self.assertGreater(a1, a0 + d0 - 1e-6)        # one word, then the next
         clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
-        showing = lambda t: len(compose._word_states(piece, t, clip))
-        self.assertEqual(showing(0.9), 0)
-        self.assertEqual(showing(1.01), 1)                       # the first word only
-        self.assertEqual(showing(1.0 + compose.WORD_STEP * 2.1), 3)
-        self.assertGreater(piece.takes("rise"), compose.WORD_IN)  # it is not over in one go
+        at = lambda t: compose._word_states(piece, t, clip)
+        self.assertEqual(at(0.9), [])
+        half = at(1.0 + plan[0][1] / 2)
+        self.assertEqual(len(half), 2)                     # half of the first word, and the caret
+        self.assertLess(half[0][0].shape[1], 130)
+        self.assertEqual(len(at(1.0 + plan[1][0] + plan[1][1] / 2)), 3)
+        done = at(1.0 + plan[-1][0] + plan[-1][1] + 0.01)
+        self.assertEqual(len(done), 3, "the caret goes once the line is typed")
+        self.assertEqual([a.shape[1] for a, *_ in done], [130, 130, 140])
 
-    def test_a_highlighted_word_lands_harder(self):
-        """The word the design points at pops past its size on the way in. It is not underlined:
-        the slide's own design draws the rule, and a second one reads as a mistake."""
+    def test_the_caret_stands_where_the_typing_has_reached(self):
         from PIL import Image
         piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
                               at=1.0, motion="words", words=[(0, 0, 200, 60), (200, 0, 200, 60)],
                               accents=[1], accent_rgb=(238, 68, 37))
         clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
-        at = lambda u: compose._word_states(piece, 1.0 + compose.WORD_STEP + compose.WORD_IN * u, clip)
-        self.assertTrue(all(a.shape[0] == 60 for a, *_ in at(1.5)), "it should settle at its own size")
-        over = max(a.shape[1] for a, *_ in at(0.8))
-        self.assertGreater(over, 200, "the highlighted word should overshoot on its way in")
+        a0, d0 = piece.typing[0]
+        early = compose._word_states(piece, 1.0 + d0 * 0.25, clip)
+        late = compose._word_states(piece, 1.0 + d0 * 0.75, clip)
+        caret = lambda states: next(s for s in states if s[0].shape[1] == compose.CARET_W)
+        self.assertEqual(tuple(caret(early)[0][0, 0, :3]), (238, 68, 37))
+        self.assertLess(caret(early)[1], caret(late)[1], "the caret moves along as the text is typed")
 
     def test_a_big_number_counts_up_to_itself(self):
         from PIL import Image

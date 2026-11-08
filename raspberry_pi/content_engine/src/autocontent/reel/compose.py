@@ -44,9 +44,13 @@ EXIT = 0.30            # seconds the next slide takes to wipe over this one. The
                        # where they are: the wipe carries them away, so there is never a bare frame
                        # between two slides.
 SOFT = 90              # how soft a wiping edge is, in pixels
-WORD_STEP = 0.065      # seconds between one word landing and the next
-WORD_IN = 0.26         # how long a single word takes to land
-WORD_PX = 20           # how far it rises on its way in
+WORD_STEP = 0.065      # seconds between one word and the next being typed
+WORD_IN = 0.26         # how long the shortest word takes to type
+WORD_PX = 20           # kept for older callers
+TYPE_SPEED = 2600.0    # how fast the text is typed, in pixels of line a second
+TYPE_MAX = 1.7         # no line takes longer than this to type, however long it is
+CARET_W = 7            # the typing caret: its width, and how much taller than the text it stands
+CARET_PAD = 6
 DIM = 0.42             # how far a step fades back once the voice has moved on to the next one
 DIM_IN = 0.45          # how long it takes to fade back
 BAR_H = 8              # the progress bar across the top of the reel
@@ -145,6 +149,7 @@ class Piece:
     """The same big number photographed on its way up to itself: it runs like a counter."""
     _rgba: Optional[np.ndarray] = None
     _count: Optional[List[np.ndarray]] = None
+    _typing: Optional[List[Tuple[float, float]]] = None
     _parts: Optional[List[Tuple[np.ndarray, int, int]]] = None
 
     def how(self, slide_motion: str) -> str:
@@ -156,8 +161,26 @@ class Piece:
 
     def takes(self, slide_motion: str) -> float:
         if self.how(slide_motion) == "words":
-            return WORD_IN + MARK_IN + WORD_STEP * max(0, len(self.words) - 1)
+            return self.typing[-1][0] + self.typing[-1][1] if self.typing else WORD_IN
         return MOTIONS.get(self.how(slide_motion), MOTIONS["fade"])[0]
+
+    @property
+    def typing(self) -> List[Tuple[float, float]]:
+        """When each word starts being typed and how long it takes, from the start of the piece.
+        A word takes as long as it is wide, so the text appears at a steady, readable rate the way
+        a typewriter puts it down, and a whole line is never slower than TYPE_MAX."""
+        if self._typing is None:
+            plan, at = [], 0.0
+            for (_, _, w, _) in self.words:
+                dur = max(0.05, w / TYPE_SPEED)
+                plan.append((at, dur))
+                at += dur + WORD_STEP
+            total = at - WORD_STEP if plan else 0.0
+            if total > TYPE_MAX:               # a long line types faster rather than running over
+                k = TYPE_MAX / total
+                plan = [(a * k, d * k) for a, d in plan]
+            self._typing = plan
+        return self._typing
 
     @property
     def parts(self) -> List[Tuple[np.ndarray, int, int]]:
@@ -296,29 +319,37 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
 
 
 def _word_states(p: Piece, t: float, clip: SceneClip) -> List[Tuple[np.ndarray, int, int, float]]:
-    """Every visible part of a word-by-word piece at time t: each word rises into place a moment
-    after the one before it, so a headline is written across the screen rather than switched on.
-    A word the design points at lands harder and draws a line under itself."""
+    """Every visible part of a typed piece at time t. The text is typed out left to right with a
+    hard edge, one word after another, with a caret standing at the point it has reached, so a
+    headline is written on the screen rather than switched on."""
     out: List[Tuple[np.ndarray, int, int, float]] = []
     parts = p.parts
+    plan = p.typing
     extra = len(parts) - len(p.words)          # the leading not-a-word part, if there is one
+    caret = None
     for k, (arr, x, y) in enumerate(parts):
         w = k - extra
-        start = p.at + max(0, w) * WORD_STEP
-        u = (t - start) / WORD_IN
+        if w < 0:                              # rules, bullets, a marker behind the text
+            if t >= p.at:
+                out.append((arr, int(x), int(y), 1.0))
+            continue
+        start, dur = plan[w]
+        u = (t - (p.at + start)) / dur
         if u <= 0:
             continue
-        accent = w >= 0 and w in p.accents
         if u < 1.0:
-            e = ease_out_cubic(u)
-            opacity, dy = min(1.0, u * 2.2), (1 - e) * WORD_PX
-            if accent:
-                arr, x, y = _scaled(Image.fromarray(arr), (x, y, arr.shape[1], arr.shape[0]),
-                                    0.82 + 0.18 * ease_out_back(u))
-        else:
-            opacity, dy = 1.0, 0.0
-        if opacity > 0.004:
-            out.append((arr, int(x), int(y + dy), opacity))
+            cut = max(1, int(round(arr.shape[1] * u)))
+            arr = arr[:, :cut]
+            caret = (x + cut, y, arr.shape[0])
+        elif w + 1 < len(plan) and t < p.at + plan[w + 1][0]:
+            caret = (x + arr.shape[1], y, arr.shape[0])   # waiting between two words
+        out.append((arr, int(x), int(y), 1.0))
+    if caret is not None:
+        cx, cy, ch = caret
+        bar = np.zeros((ch + CARET_PAD * 2, CARET_W, 4), dtype=np.uint8)
+        bar[..., :3] = p.accent_rgb
+        bar[..., 3] = 255
+        out.append((bar, int(cx) + 4, int(cy) - CARET_PAD, 1.0))
     return out
 
 
