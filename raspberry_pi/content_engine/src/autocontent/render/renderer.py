@@ -160,6 +160,47 @@ _UNIT_GLUE = re.compile(r"\S*\d\S*(?:\s+(?:lakh|lakhs|crore|crores|cr|million|bi
 _PILL_LEADERS = {"a", "an", "the", "of", "to", "in", "on", "per", "for", "by", "at", "my", "your", "our", "its"}
 
 
+# The pill's padding is set from the letters' real ink box, so the words sit in the middle of the
+# red pill. The font's line box has more room below the capitals than above them, which left the
+# text sitting high (about 20px above, 50-60px below); this measures the capitals with a canvas and
+# moves padding from one side to the other (the pill keeps its size and its left edge).
+CENTER_PILL_INK_JS = """
+const centerPillInk = (pill) => {
+    const span = pill.querySelector('span') || pill;
+    const text = (span.textContent || '').trim().toUpperCase();
+    if (!text) return;
+    const cs = window.getComputedStyle(span);
+    const ctx = document.createElement('canvas').getContext('2d');
+    ctx.font = `${cs.fontStyle} ${cs.fontWeight} ${cs.fontSize} ${cs.fontFamily}`;
+    if ('letterSpacing' in ctx) ctx.letterSpacing = cs.letterSpacing;
+    const m = ctx.measureText(text);
+    const probe = document.createElement('i');
+    probe.style.cssText = 'display:inline-block;width:0;height:0;vertical-align:baseline;';
+    span.appendChild(probe);
+    pill.style.position = 'relative';
+    const pr = pill.getBoundingClientRect();
+    const baseline = probe.getBoundingClientRect().top - pr.top;
+    probe.remove();
+    const inkTop = baseline - m.actualBoundingBoxAscent;
+    const inkBottom = baseline + m.actualBoundingBoxDescent;
+    const pcs = window.getComputedStyle(pill);
+    const pt = parseFloat(pcs.paddingTop), pb = parseFloat(pcs.paddingBottom);
+    const dy = ((pr.height - inkBottom) - inkTop) / 2;
+    const ndy = Math.max(-pt, Math.min(pb, dy));
+    pill.style.paddingTop = (pt + ndy) + 'px';
+    pill.style.paddingBottom = (pb - ndy) + 'px';
+    const textLeft = span.offsetLeft;
+    const inkLeft = textLeft - m.actualBoundingBoxLeft;
+    const inkRight = textLeft + m.actualBoundingBoxRight;
+    const pl = parseFloat(pcs.paddingLeft), prr = parseFloat(pcs.paddingRight);
+    const dx = ((pr.width - inkRight) - inkLeft) / 2;
+    const ndx = Math.max(-pl + 8, Math.min(prr - 8, dx));
+    pill.style.paddingLeft = (pl + ndx) + 'px';
+    pill.style.paddingRight = (prr - ndx) + 'px';
+};
+"""
+
+
 def cover_fill_js(width: int, square: bool) -> str:
     """grid_pill cover: the kicker, headline and pill are one block that fills the slide.
 
@@ -172,6 +213,7 @@ def cover_fill_js(width: int, square: bool) -> str:
     max_px = 210 if square else 250
     return f"""
     () => {{
+        {CENTER_PILL_INK_JS}
         const box = document.querySelector('.headline-container');
         const h1 = document.querySelector('.cover-headline');
         const pill = document.querySelector('.accent-pill');
@@ -206,6 +248,7 @@ def cover_fill_js(width: int, square: bool) -> str:
             if (fits()) {{ best = mid; lo = mid + 1; }} else {{ hi = mid - 1; }}
         }}
         setSize(best);
+        if (pill) centerPillInk(pill);
         const h = box.getBoundingClientRect().height;
         box.style.top = Math.round(TOP + Math.max(0, ROOM - h) * 0.42) + 'px';
         return {{ success: true, fontSize: best }};
@@ -723,6 +766,8 @@ class SlideRenderer:
             """, "comparison"))
         elif slide_type == "cta":
             steps.append((f"fitText('.cta-headline', {cover_w}, {max_cta_h}, 56, 120)", "CTA headline"))
+            if self.style_name == "grid_pill":
+                steps.append(("() => {" + CENTER_PILL_INK_JS + " document.querySelectorAll('.cta-pill').forEach(centerPillInk); }", None))
             steps.append((f"""
                 () => {{
                     const anchor = document.getElementById('cta-baseline-anchor') || document.getElementById('baseline-anchor');
