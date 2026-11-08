@@ -45,7 +45,7 @@ tag: "#topic"
 Then each slide starts with `## <type>` exactly as in a post script (cover, statement, point, list, stat, compare, quote, chart, table, image, cta), with its own fields, and these extra lines:
 say: <what the voice says over this slide>            (REQUIRED on every slide; plain sentences, no symbols or links)
 show: <cue> | <cue> | <cue>                            (optional: the words in `say:` at which each piece of the slide should appear, in order; copy them exactly from `say:`)
-motion: rise | pop | stagger | wipe | kenburns | fade  (optional: how the pieces arrive; sensible defaults per slide type: cover rise, list and point stagger, stat and cta pop, compare and table and chart wipe, image kenburns)
+motion: rise | pop | stagger | wipe | kenburns | fade  (optional, and usually best left out: each piece already arrives in the way that suits it. Naming one here puts that single motion on every piece of the slide.)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
 
@@ -77,13 +77,38 @@ EXAMPLE
 | `end_hold:` | header | Seconds the last slide stays after the last word (default 1.2). |
 | `say:` | each slide | The narration. A continuation line may be indented under it. |
 | `show:` | each slide | Cue phrases from `say:`, separated by `\|`. One per piece. If there is one fewer than there are pieces, the first piece simply opens the slide and the cues start at the second. |
-| `motion:` | each slide | How the pieces arrive (see below). |
+| `motion:` | each slide | Forces one motion on the whole slide (see below). Leave it out and each piece gets its own. |
 | `duration:` | each slide | Hold a slide that has no narration (1 to 30 s). |
 | `pause:` | each slide | Extra silence after the narration (0 to 5 s). |
 
-Motions: **rise** (slides up and fades in), **pop** (grows in with a small overshoot), **stagger**
-(like rise, a little tighter, for one-by-one lists), **wipe** (uncovers left to right), **kenburns**
-(rise, then a slow push-in on a picture for as long as the slide is up), **fade**.
+### How things move
+
+You don't have to ask for any of this. Each piece arrives in the way that suits what it is, so a
+slide reads as an infographic being built rather than a picture being shown:
+
+| The piece | How it arrives |
+| --- | --- |
+| A headline, a quote, a statement | Typed out, word by word, with a caret at the point it has reached |
+| A highlighted word (`**like this**`) | Types in the brand colour, like the rest of the line |
+| A big number | Counts up to its real value, then holds |
+| A pill (`pill:`, a CTA) | Pressed on along its own slant |
+| A list item, a bullet, a compare column | In from its own side, with a little overshoot |
+| A picture | Uncovered upwards, then a slow push-in for as long as the slide is up |
+| A table or chart | Builds downwards |
+| Body text, a caption, a source line | A short fade |
+
+| A step in a list or a column | Comes in from its side, and fades back once the voice moves on |
+
+Nothing pans or drifts: text lands where it is designed to sit and stays there. The step being
+spoken about is the bright one, so a long list never sits still. A thin bar across the very top
+shows how far through the reel you are. One slide wipes into the next (a different direction each
+time), carrying the old slide away while the new one's first line is already arriving, so the
+change never shows an empty screen. Type is set larger than a feed slide's, to fill a phone.
+
+Writing `motion:` overrides all of it and puts one motion on every piece of that slide:
+**rise** (slides up and fades in), **pop** (grows in with a small overshoot), **stagger** (like
+rise, tighter, for one-by-one lists), **wipe** (uncovers left to right), **kenburns** (rise, then
+a slow push-in on a picture), **fade**.
 
 ## Your own voice
 

@@ -265,15 +265,17 @@ _FIT_LIST = re.compile(r"^(fitListItems\('[^']+', \d+, )(\d+)(, )(\d+)\)$")
 def _scale_fit_text(js: str, k: float) -> str:
     """A reel is watched full screen on a phone, so its type runs bigger than a feed slide's:
     scale a fitText(sel, width, maxHeight, minPx, maxPx) call's room and sizes by k."""
+    floor = min(k, 1.15)      # the smallest size the fitter may fall back to grows far less than
+                              # the biggest one, so long text still fits instead of failing to render
     m = _FIT_LIST.match(js)
     if m:
         a, hi, b, lo = m.groups()
-        return f"{a}{round(int(hi) * k)}{b}{round(int(lo) * k)})"
+        return f"{a}{round(int(hi) * k)}{b}{round(int(lo) * floor)}, true)"
     m = _FIT_CALL.match(js)
     if not m:
         return js
     a, h, b, lo, c, hi = m.groups()
-    return f"{a}{round(int(h) * k * 1.1)}{b}{round(int(lo) * k)}{c}{round(int(hi) * k)})"
+    return f"{a}{round(int(h) * k * 1.1)}{b}{round(int(lo) * floor)}{c}{round(int(hi) * k)})"
 
 
 def _pill_split(headline: str, pill: str):
@@ -782,8 +784,14 @@ class SlideRenderer:
                     const foot = document.querySelector('.footer-row');
                     const limit = Math.min(src ? src.getBoundingClientRect().top - 30 : 1e9,
                                            foot ? foot.getBoundingClientRect().top - 40 : 1e9);
-                    const wide = () => [...grid.querySelectorAll('.compare-item span:last-child, .compare-label')]
-                        .some((e) => e.scrollWidth > e.clientWidth + 2);
+                    // The MYTH / REALITY labels are pinned on a tall canvas: left to grow with the
+                    // column text they overflow first and drag the whole comparison down to feed size.
+                    const labelPx = {preset.get('compare_label_fs', 0)};
+                    const labels = [...grid.querySelectorAll('.compare-label')];
+                    if (labelPx) labels.forEach((e) => {{ e.style.fontSize = labelPx + 'px'; }});
+                    const watch = [...grid.querySelectorAll('.compare-item span:last-child')]
+                        .concat(labelPx ? [] : labels);
+                    const wide = () => watch.some((e) => e.scrollWidth > e.clientWidth + 2);
                     for (let fs = {preset.get('compare_fs', 40)}; fs >= 22; fs--) {{
                         grid.style.fontSize = fs + 'px';
                         if (grid.getBoundingClientRect().bottom <= limit && !wide()) return {{ success: true, fontSize: fs }};
@@ -839,7 +847,8 @@ class SlideRenderer:
                     const src = [...document.querySelectorAll('.slide-source, .chart-source, .table-source')]
                         .find((e) => !box.contains(e));
                     const limit = Math.min(foot ? foot.getBoundingClientRect().top - 50 : window.innerHeight,
-                                           src ? src.getBoundingClientRect().top - 40 : 1e9);
+                                           src ? src.getBoundingClientRect().top - 40 : 1e9,
+                                           {preset.get('content_bottom', 1e9)});
                     const kids = [...box.querySelectorAll('*')].filter((e) => e.getBoundingClientRect().height > 0);
                     if (!kids.length) return;
                     const bottom = Math.max(...kids.map((e) => e.getBoundingClientRect().bottom));

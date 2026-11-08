@@ -24,7 +24,7 @@ ENGINE_SRC = Path(__file__).resolve().parent.parent / "content_engine" / "src"
 sys.path.insert(0, str(ENGINE_SRC))
 
 from autocontent.reel import parse_reel, is_reel_text  # noqa: E402
-from autocontent.reel import align, captions, compose, timing, voice  # noqa: E402
+from autocontent.reel import align, captions, compose, layers, timing, voice  # noqa: E402
 from autocontent.reel.align import Timed  # noqa: E402
 
 CHROMIUM = os.environ.get("AUTOCONTENT_CHROMIUM") or ("/opt/pw-browsers/chromium" if Path("/opt/pw-browsers/chromium").exists() else "")
@@ -286,14 +286,110 @@ class ComposeTests(unittest.TestCase):
             self.assertTrue((before == 255).all(), motion)
             self.assertTrue((after < 60).all(), motion)
             self.assertTrue(during.shape == (3,))
-            gone = tl.frame(3.95)[700, 300]
-            self.assertTrue((gone > after).all(), motion + " should be leaving by the end")
+            # a piece is not faded out at the end: the next slide's wipe carries it away, which is
+            # what keeps the change from showing a bare backdrop (see test_one_slide_wipes_into_the_next)
+            self.assertTrue((tl.frame(3.95)[700, 300] == after).all(), motion)
+
+    def test_each_kind_of_thing_arrives_its_own_way(self):
+        """The point of the reel: a headline is not animated like a number or a picture."""
+        self.assertEqual(compose.piece_motion("stat-number")[0], "punch")
+        self.assertEqual(compose.piece_motion("cover-headline")[0], "words")   # text writes itself
+        self.assertEqual(compose.piece_motion("image-frame")[0], "reveal")
+        self.assertEqual(compose.piece_motion("data-table")[0], "grow")
+        self.assertEqual(compose.piece_motion("list-item"), ("slide", -1))
+        self.assertEqual(compose.piece_motion("compare-col right"), ("slide", 1))
+        self.assertEqual(compose.piece_motion("stat-body", "rise"), ("rise", 0))   # unknown: the slide's own
+
+    def test_a_piece_uses_its_own_motion_over_the_slides(self):
+        clip = self.clip("rise")
+        clip.pieces[0].motion = "punch"
+        dur = compose.MOTIONS["punch"][0]
+        small = compose._piece_state(clip.pieces[0], 1.0 + dur * 0.15, clip.motion, clip)[0]
+        over = compose._piece_state(clip.pieces[0], 1.0 + dur * 0.55, clip.motion, clip)[0]
+        done = compose._piece_state(clip.pieces[0], 1.0 + dur, clip.motion, clip)[0]
+        self.assertLess(small.shape[1], 400)        # it starts small...
+        self.assertGreater(over.shape[1], 400)      # ...overshoots its size...
+        self.assertEqual(done.shape[1], 400)        # ...and settles, never sliding down the screen
+
+    def test_nothing_pans_across_the_screen(self):
+        """The slide is drawn at the video's own size: the text sits still, it is never panned."""
+        self.assertEqual(layers.OVERSAMPLE, 1.0)
+        self.assertFalse(hasattr(compose, "pan_for"))
+        clip = self.clip()
+        tl = compose.Timeline([clip], [], 4.0)
+        a, b = tl.frame(2.0), tl.frame(2.4)        # settled: not one pixel moves (below the progress bar)
+        self.assertTrue((a[compose.BAR_H:] == b[compose.BAR_H:]).all())
+
+    def test_text_is_typed_out_word_by_word(self):
+        from PIL import Image
+        piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
+                              at=1.0, motion="words",
+                              words=[(0, 0, 130, 60), (130, 0, 130, 60), (260, 0, 140, 60)])
+        plan = piece.typing
+        self.assertEqual(len(plan), 3)
+        for (a0, d0), (a1, _) in zip(plan, plan[1:]):
+            self.assertGreater(a1, a0 + d0 - 1e-6)        # one word, then the next
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        at = lambda t: compose._word_states(piece, t, clip)
+        self.assertEqual(at(0.9), [])
+        half = at(1.0 + plan[0][1] / 2)
+        self.assertEqual(len(half), 2)                     # half of the first word, and the caret
+        self.assertLess(half[0][0].shape[1], 130)
+        self.assertEqual(len(at(1.0 + plan[1][0] + plan[1][1] / 2)), 3)
+        done = at(1.0 + plan[-1][0] + plan[-1][1] + 0.01)
+        self.assertEqual(len(done), 3, "the caret goes once the line is typed")
+        self.assertEqual([a.shape[1] for a, *_ in done], [130, 130, 140])
+
+    def test_the_caret_stands_where_the_typing_has_reached(self):
+        from PIL import Image
+        piece = compose.Piece(image=Image.new("RGBA", (400, 60), (0, 0, 0, 255)), box=(100, 700, 400, 60),
+                              at=1.0, motion="words", words=[(0, 0, 200, 60), (200, 0, 200, 60)],
+                              accents=[1], accent_rgb=(238, 68, 37))
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        a0, d0 = piece.typing[0]
+        early = compose._word_states(piece, 1.0 + d0 * 0.25, clip)
+        late = compose._word_states(piece, 1.0 + d0 * 0.75, clip)
+        caret = lambda states: next(s for s in states if s[0].shape[1] == compose.CARET_W)
+        self.assertEqual(tuple(caret(early)[0][0, 0, :3]), (238, 68, 37))
+        self.assertLess(caret(early)[1], caret(late)[1], "the caret moves along as the text is typed")
+
+    def test_a_big_number_counts_up_to_itself(self):
+        from PIL import Image
+        steps = layers.count_steps("65%")
+        self.assertEqual(steps[-1], "65%")
+        self.assertTrue(all(s.endswith("%") for s in steps))
+        values = [float(s[:-1]) for s in steps]
+        self.assertEqual(values, sorted(values))
+        self.assertLess(values[0], 30)
+        self.assertEqual(layers.count_steps("Hello"), [])      # nothing to count
+        self.assertEqual(layers.count_steps("3x"), [])         # too small to be worth it
+        self.assertEqual(layers.count_steps("1,250")[-1], "1,250")
+        frames = [Image.new("RGBA", (300, 200), (i * 8, 0, 0, 255)) for i in range(10)]
+        piece = compose.Piece(image=frames[-1], box=(100, 700, 300, 200), at=1.0, count=frames)
+        clip = compose.SceneClip(0.0, 4.0, Image.new("RGB", (compose.W, compose.H), (255, 255, 255)), [piece])
+        self.assertEqual(piece.how("rise"), "count")
+        early = compose._piece_state(piece, 1.05, "rise", clip)[0][0, 0, 0]
+        late = compose._piece_state(piece, 1.0 + compose.MOTIONS["count"][0] * 0.9, "rise", clip)[0][0, 0, 0]
+        self.assertLess(early, late, "the number should still be counting up")
+        self.assertEqual(compose._piece_state(piece, 2.9, "rise", clip)[0][0, 0, 0], frames[-1].getpixel((0, 0))[0])
+
+    def test_one_slide_wipes_into_the_next(self):
+        from PIL import Image
+        light = self.clip(t0=0.0, t1=4.0)
+        dark = self.clip(t0=4.0, t1=8.0)
+        dark.base = Image.new("RGB", (compose.W, compose.H), (0, 0, 0))
+        tl = compose.Timeline([light, dark], [], 8.0)
+        top = tl.frame(4.0 - compose.EXIT / 2)[20, 540]
+        self.assertTrue((top < 200).all(), "the next slide should be wiping in over this one")
+        self.assertTrue((tl.frame(3.5)[20, 540] == 255).all(), "and not before it leaves")
 
     def test_settled_frames_are_reused(self):
         tl = compose.Timeline([self.clip()], [], 4.0)
-        a = tl.frame(2.0)
-        b = tl.frame(2.1)
-        self.assertIs(a, b)
+        tl.frame(2.0)
+        inner = tl._last_frame                      # the picture itself is drawn once and kept...
+        tl.frame(2.1)
+        self.assertIs(tl._last_frame, inner)
+        self.assertFalse((tl.frame(2.0)[0] == tl.frame(3.0)[0]).all())   # ...only the bar moves on
 
     def test_caption_shows_only_in_its_window(self):
         from PIL import Image
@@ -354,7 +450,8 @@ class EndToEndTests(unittest.TestCase):
             self.assertAlmostEqual(a["end"], b["start"], places=2)
         for t in tl:
             self.assertEqual(t["reveals"], sorted(t["reveals"]))
-            self.assertTrue(all(t["start"] <= r < t["end"] for r in t["reveals"]))
+            # the first thing on a slide may start while the one before is still wiping away
+            self.assertTrue(all(t["start"] - compose.EXIT <= r < t["end"] for r in t["reveals"]))
         self.assertTrue(any("Music" in w for w in self.summary["warnings"]))
         self.assertTrue(self.summary["captions"])
 

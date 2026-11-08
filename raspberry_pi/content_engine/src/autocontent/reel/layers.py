@@ -7,8 +7,12 @@ transparent background, cropped to their box. The compositor (compose.py) animat
 over the base picture, which keeps the header, footer and grid.
 """
 
+import re
+from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from PIL import Image
 from typing import Any, Dict, List, Optional, Tuple
 
 # What appears, in order, for each slide type. A group is a list of CSS selectors; every element
@@ -69,6 +73,55 @@ FIND_JS = """
 }
 """
 
+# Runs in the page: every word of a group's text, as a box, in reading order
+WORDS_JS = r"""
+(k) => {
+  const root = [...document.querySelectorAll(`[data-reel-group="${k}"]`)];
+  if (!root.length) return [];
+  const out = [];
+  for (const el of root) {
+    const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walk.nextNode())) {
+      const text = node.nodeValue;
+      if (!text || !text.trim()) continue;
+      const style = window.getComputedStyle(node.parentElement);
+      if (style.visibility === 'hidden' || style.display === 'none') continue;
+      const re = /\S+/g;
+      let m;
+      while ((m = re.exec(text))) {
+        const range = document.createRange();
+        range.setStart(node, m.index);
+        range.setEnd(node, m.index + m[0].length);
+        const rects = [...range.getClientRects()].filter((r) => r.width > 0.5 && r.height > 0.5);
+        if (!rects.length) continue;
+        const colour = window.getComputedStyle(node.parentElement).color;
+        const x0 = Math.min(...rects.map((r) => r.left)), y0 = Math.min(...rects.map((r) => r.top));
+        const x1 = Math.max(...rects.map((r) => r.right)), y1 = Math.max(...rects.map((r) => r.bottom));
+        out.push([x0, y0, x1, y1, colour]);
+      }
+    }
+  }
+  // reading order: line by line, then left to right
+  out.sort((a, b) => (Math.abs(a[1] - b[1]) > 12 ? a[1] - b[1] : a[0] - b[0]));
+  // Headlines are set tight (line-height below 1), so a line's boxes reach down over the tops of
+  // the letters on the line below. Left alone, those few rows of pixels travel with the word above
+  // and show up early, as dark crescents floating over nothing. Each box therefore stops where the
+  // next line's letters begin: the overlap belongs to the line it is part of.
+  const lines = [];
+  for (const b of out) {
+    const line = lines.find((l) => Math.abs(l.top - b[1]) <= 12);
+    if (line) { line.top = Math.min(line.top, b[1]); line.boxes.push(b); }
+    else lines.push({ top: b[1], boxes: [b] });
+  }
+  for (let i = 0; i < lines.length - 1; i++) {
+    const nextTop = lines[i + 1].top;
+    for (const b of lines[i].boxes) b[3] = Math.min(b[3], nextTop);
+  }
+  return out.filter((b) => b[3] - b[1] > 1);
+}
+"""
+
 ISOLATE_CSS = """
 html.__iso, html.__iso body { background: transparent !important; }
 html.__iso * { visibility: hidden !important; }
@@ -76,7 +129,42 @@ html.__iso [data-reel-group="__K__"], html.__iso [data-reel-group="__K__"] * { v
 html.__hide [data-reel-group], html.__hide [data-reel-group] * { visibility: hidden !important; }
 """
 
-NO_VIDEO_CSS = ", ".join(HIDDEN) + " { display: none !important; }"
+# A reel is watched full screen, so the brand furniture is set larger than a feed slide's as well
+# as being moved to the frame's own edges (see CANVAS_FORMATS["reel"]).
+CHROME_CSS = """
+.header-left, .footer-left { font-size: 34px !important; }
+.topic-pill { font-size: 26px !important; padding: 14px 30px !important; }
+"""
+
+NO_VIDEO_CSS = ", ".join(HIDDEN) + " { display: none !important; }" + CHROME_CSS
+
+
+COUNT_FRAMES = 15      # how many in-between values a counting number is photographed at
+
+
+def count_steps(text: str) -> List[str]:
+    """A big number counting up to itself: "65%" -> "0%", "9%", ... "65%".
+    Returns [] when there is no number to count, or it is too small to be worth it."""
+    m = re.search(r"\d[\d,]*(?:\.\d+)?", text or "")
+    if not m:
+        return []
+    raw = m.group(0)
+    try:
+        value = float(raw.replace(",", ""))
+    except ValueError:
+        return []
+    if value < 4:
+        return []
+    decimals = len(raw.split(".")[1]) if "." in raw else 0
+    grouped = "," in raw
+    out = []
+    for i in range(COUNT_FRAMES):
+        u = (i + 1) / COUNT_FRAMES
+        v = value * (1 - (1 - u) ** 3)          # fast, then easing into the real number
+        shown = f"{v:,.{decimals}f}" if grouped else f"{v:.{decimals}f}"
+        out.append(text[:m.start()] + shown + text[m.end():])
+    out[-1] = text
+    return out
 
 
 @dataclass
@@ -85,6 +173,15 @@ class Layer:
     box: Tuple[int, int, int, int]      # x, y, width, height on the canvas
     follow: bool = False                # arrives together with the layer before it (the source line)
     classes: str = ""                   # the CSS classes of what's in it (to tell a picture from text)
+    words: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    """Each word of this layer's text, as a box inside the layer's own picture, in reading order,
+    so the compositor can land the words one after another instead of the block in one go."""
+    accents: List[int] = field(default_factory=list)
+    """Which of those words are in the brand colour rather than the text colour: the ones the
+    design is pointing at, so they land harder and get a line drawn under them."""
+    accent_rgb: Tuple[int, int, int] = (248, 96, 54)
+    count: List[Path] = field(default_factory=list)
+    """A big number photographed counting up to itself, if this layer is one."""
 
 
 @dataclass
@@ -96,6 +193,7 @@ class SceneLayers:
 
 
 MARGIN = 28   # px kept around a group so soft edges and shadows aren't clipped
+OVERSAMPLE = 1.0   # the slide is drawn at the video's own size: nothing pans, nothing is scaled
 
 
 def _clip(box, width: int, height: int) -> Tuple[int, int, int, int]:
@@ -106,8 +204,22 @@ def _clip(box, width: int, height: int) -> Tuple[int, int, int, int]:
     return x0, y0, max(2, x1 - x0), max(2, y1 - y0)
 
 
+def _accent_words(colours: List[str]) -> Tuple[List[int], Tuple[int, int, int]]:
+    """Which words are not in the colour most of the text uses, and what that other colour is.
+    That is how a highlighted word (==like this==) is found without knowing the style pack."""
+    if len(colours) < 2:
+        return [], (248, 96, 54)
+    common = Counter(colours).most_common(1)[0][0]
+    odd = [i for i, c in enumerate(colours) if c != common]
+    if not odd or len(odd) > len(colours) // 2:
+        return [], (248, 96, 54)
+    found = re.findall(r"\d+", colours[odd[0]])
+    rgb = tuple(int(v) for v in found[:3]) if len(found) >= 3 else (248, 96, 54)
+    return odd, rgb  # type: ignore[return-value]
+
+
 def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], total: int, seed: int,
-                  out_dir: Path) -> SceneLayers:
+                  out_dir: Path, scale: float = 1.0) -> SceneLayers:
     """Draw one slide and write its base picture and layer pictures into out_dir.
     Returns the layers in the order they are listed for the slide type."""
     n = int(slide.get("n", 1))
@@ -137,5 +249,63 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
                       " html.__iso [data-reel-group=\"${k}\"], html.__iso [data-reel-group=\"${k}\"] * { visibility: visible !important; }`; }", k)
         page.screenshot(path=str(path), clip={"x": x, "y": y, "width": w, "height": h}, omit_background=True, full_page=False)
         page.evaluate("document.documentElement.classList.remove('__iso'); document.getElementById('__reel_iso').textContent = ''")
-        scene.layers.append(Layer(path=path, box=(x, y, w, h), follow=bool(box[4]), classes=str(box[5])))
+        # the clip is in page pixels; the picture comes out `scale` times bigger, so the box the
+        # compositor works in is the picture's own size at the scaled-up position
+        with Image.open(path) as im:
+            pw, ph = im.size
+        # where each word sits inside this picture, so text can land word by word
+        words, colours = [], []
+        for wx0, wy0, wx1, wy1, colour in page.evaluate(WORDS_JS, k):
+            a, b = round(wx0 * scale) - round(x * scale), round(wy0 * scale) - round(y * scale)
+            c, d = round(wx1 * scale) - round(x * scale), round(wy1 * scale) - round(y * scale)
+            # only sideways room: padding up and down takes a sliver of the line above or below
+            # with the word, and that sliver then lands early, as a smudge over empty space
+            a, c = max(0, a - 2), min(pw, c + 2)
+            b, d = max(0, b), min(ph, d)
+            if c - a > 1 and d - b > 1:
+                words.append((a, b, c - a, d - b))
+                colours.append(str(colour))
+        accents, accent_rgb = _accent_words(colours)
+        count = _count_frames(page, k, str(box[5]), out_dir, n, k, (x, y, w, h))
+        scene.layers.append(Layer(path=path, box=(round(x * scale), round(y * scale), pw, ph),
+                                  follow=bool(box[4]), classes=str(box[5]), words=words,
+                                  accents=accents, accent_rgb=accent_rgb, count=count))
     return scene
+
+
+SET_TEXT_JS = """
+(a) => {
+  const el = document.querySelector(`[data-reel-group="${a.k}"]`);
+  if (!el) return '';
+  if (el.__reelText === undefined) el.__reelText = el.textContent;
+  el.textContent = a.text === null ? el.__reelText : a.text;
+  return el.__reelText;
+}
+"""
+
+
+def _count_frames(page, k: int, classes: str, out_dir: Path, n: int, gi: int,
+                  clip: Tuple[int, int, int, int]) -> List[Path]:
+    """Photograph a big number at each value on its way up to the real one, in the same spot,
+    so the compositor can run it like a counter instead of switching it on."""
+    if "stat-number" not in classes:
+        return []
+    text = page.evaluate(SET_TEXT_JS, {"k": k, "text": None})
+    steps = count_steps(str(text or ""))
+    if not steps:
+        return []
+    x, y, w, h = clip
+    out: List[Path] = []
+    for i, value in enumerate(steps[:-1]):
+        page.evaluate(SET_TEXT_JS, {"k": k, "text": value})
+        shot = out_dir / f"s{n:02d}_g{gi + 1:02d}_c{i:02d}.png"
+        page.evaluate("(k) => { const s = document.getElementById('__reel_iso') || document.head.appendChild(Object.assign(document.createElement('style'), {id: '__reel_iso'}));"
+                      " document.documentElement.classList.add('__iso');"
+                      " s.textContent = `html.__iso, html.__iso body { background: transparent !important; }"
+                      " html.__iso * { visibility: hidden !important; }"
+                      " html.__iso [data-reel-group=\"${k}\"], html.__iso [data-reel-group=\"${k}\"] * { visibility: visible !important; }`; }", k)
+        page.screenshot(path=str(shot), clip={"x": x, "y": y, "width": w, "height": h}, omit_background=True, full_page=False)
+        page.evaluate("document.documentElement.classList.remove('__iso'); document.getElementById('__reel_iso').textContent = ''")
+        out.append(shot)
+    page.evaluate(SET_TEXT_JS, {"k": k, "text": None})
+    return out

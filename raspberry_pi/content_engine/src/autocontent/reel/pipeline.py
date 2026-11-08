@@ -12,6 +12,7 @@ from ..progress import report
 from . import align as aligner
 from . import captions as caps
 from . import compose, timing, voice
+from . import layers as layers_mod
 from .layers import extract_scene
 from .script import ReelScript, parse_reel
 
@@ -137,15 +138,16 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     themes: Dict[int, str] = {}
     with sync_playwright() as p:
         browser = p.chromium.launch(**browser_launch_options())
-        page = browser.new_page(viewport={"width": compose.W, "height": compose.H}, device_scale_factor=1)
+        page = browser.new_page(viewport={"width": compose.W, "height": compose.H},
+                                device_scale_factor=layers_mod.OVERSAMPLE)
         for i, slide in enumerate(slides):
             progress(f"Cutting slide {i + 1} of {len(slides)} into pieces ({slide.get('type')})...")
-            sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers")
+            sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers",
+                               scale=layers_mod.OVERSAMPLE)
             scenes_layers.append(sl)
             themes[i + 1] = sl.theme
         bad = [r for r in renderer.fit_report if not r["ok"]]
         if bad:
-            browser.close()
             raise ReelError("Some slides don't fit the screen: " + " ".join(
                 f"Slide {r['n']} ({r['type']}): {'; '.join(r['problems'])}" for r in bad)
                 + " Shorten that text and try again.")
@@ -159,14 +161,27 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             at: Dict[int, float] = {}
             for k, t in zip(primary, ts):
                 at[k] = t
+            # the first thing on a slide starts arriving while the slide before it is still wiping
+            # away, so the viewer never sees an empty backdrop between two slides
+            if i and primary:
+                at[primary[0]] = min(at[primary[0]], t0 - compose.EXIT * 0.55)
             for k, ly in enumerate(sl.layers):
                 if ly.follow:
                     at[k] = at[k - 1]
             clip = compose.SceneClip(t0=t0, t1=t1, base=Image.open(sl.base).convert("RGB"), motion=sc.motion)
             for k, ly in enumerate(sl.layers):
+                # Unless the script asked for one motion for the whole slide, each piece arrives in
+                # the way that suits what it is: a headline is wiped on, a number punches in, a
+                # picture is uncovered and keeps pushing in, bullets come in from the side.
+                own, side = ("", 0) if sc.motion_given else compose.piece_motion(ly.classes, sc.motion)
+                picture = "image-frame" in ly.classes
+                step = any(c in ly.classes for c in ("list-item", "bullet-row", "compare-col"))
                 clip.pieces.append(compose.Piece(
                     image=Image.open(ly.path).convert("RGBA"), box=ly.box, at=at[k], follow=ly.follow,
-                    zoom=(sc.motion == "kenburns" and "image-frame" in ly.classes)))
+                    motion=own, side=side, words=ly.words, accents=ly.accents, accent_rgb=ly.accent_rgb,
+                    count=([] if sc.motion_given else [Image.open(c).convert("RGBA") for c in ly.count]),
+                    seq=step,
+                    zoom=picture and (sc.motion == "kenburns" or not sc.motion_given)))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 
@@ -184,10 +199,16 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     caption_clips.append(compose.CaptionClip(
                         t0=start, t1=max(end, start + 0.05), image=Image.open(ph.pictures[k]).convert("RGBA"),
                         box=ph.box, first=(k == 0)))
+            # a caption shouldn't blink out between phrases: the last word of one holds until the
+            # next phrase starts (up to a second and a half), so the band is never empty mid-slide
+            for a, b in zip(caption_clips, caption_clips[1:]):
+                if b.t0 > a.t1:
+                    a.t1 = min(b.t0, a.t1 + 1.5)
         browser.close()
 
     # --- the video ---
-    timeline = compose.Timeline(clips, caption_clips, total)
+    accent = next((p.accent_rgb for c in clips for p in c.pieces if p.accents), (238, 68, 37))
+    timeline = compose.Timeline(clips, caption_clips, total, accent=accent)
     progress(f"Encoding the video ({total:.0f} seconds at {fps} frames a second)...")
     mp4 = out_dir / "reel.mp4"
     last = [-1]
