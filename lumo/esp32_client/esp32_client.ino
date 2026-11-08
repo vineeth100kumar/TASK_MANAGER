@@ -181,6 +181,9 @@ void setup() {
   delay(200);
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
+  pinMode(TEST_PIN, OUTPUT);
+  digitalWrite(TEST_PIN, HIGH);   // GPIO20 steady 3.3 V (wiring test)
+
   storeLoad(lumoState);
   storeLoadFit(screenFit);
   hapticInit(lumoState.haptic_strength);
