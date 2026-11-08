@@ -50,7 +50,7 @@ window.fitText = function(selector, maxWidth, maxHeight, minPx, maxPx) {
     };
 };
 
-window.fitListItems = function(itemsSelector, maxBottomY, startPx, minPx) {
+window.fitListItems = function(itemsSelector, maxBottomY, startPx, minPx, grow) {
     const container = document.querySelector(itemsSelector);
     if (!container) return { success: true };
     let textEls = container.querySelectorAll('.list-text');
@@ -58,7 +58,15 @@ window.fitListItems = function(itemsSelector, maxBottomY, startPx, minPx) {
         // grid_pill lists use .item-text: start from its own size so lists that fit look the same
         textEls = container.querySelectorAll('.item-text');
         if (!textEls.length) return { success: true };
-        startPx = Math.min(startPx, Math.round(parseFloat(window.getComputedStyle(textEls[0]).fontSize)));
+        // normally a list that fits keeps the size the style gives it; `grow` (a reel, watched
+        // full screen) lets it run up to startPx instead of staying feed-sized
+        if (!grow) startPx = Math.min(startPx, Math.round(parseFloat(window.getComputedStyle(textEls[0]).fontSize)));
+        if (grow) textEls.forEach(el => {
+            el.style.overflowWrap = 'normal';     // big type must not break "best-sellers" mid-word
+            el.style.wordBreak = 'normal';
+            el.style.hyphens = 'none';
+            el.style.textWrap = 'balance';
+        });
     }
 
     let currentPx = startPx;

@@ -76,9 +76,10 @@ CANVAS_FORMATS = {
         "cover_anchor_y": {"beige_grain": 1260, "grid_pill": 1330},
         "cta_anchor_y": {"beige_grain": 1000, "grid_pill": 1000},
         "cta_handle_y": {"beige_grain": 1120, "grid_pill": 1120},
-        "type_scale": 1.2,
+        "type_scale": 1.55,
         "table_fs": 54,
-        "compare_fs": 50,
+        "compare_fs": 46,
+        "compare_label_fs": 30,
         # a full-screen video reads best with the block in the middle of the safe area, not hung from the top
         "default_align": {k: "center" for k in ("point", "list", "stat", "quote", "table", "chart", "image", "statement", "compare")},
         "cover_fill": (300, 1420, 290),

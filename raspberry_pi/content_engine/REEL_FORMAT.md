@@ -97,8 +97,13 @@ slide reads as an infographic being built rather than a picture being shown:
 | A table or chart | Builds downwards |
 | Body text, a caption, a source line | A short fade |
 
-Nothing pans or drifts: text lands where it is designed to sit and stays there. One slide wipes
-into the next (a different direction each time) instead of cutting.
+| A step in a list or a column | Comes in from its side, and fades back once the voice moves on |
+
+Nothing pans or drifts: text lands where it is designed to sit and stays there. The step being
+spoken about is the bright one, so a long list never sits still. A thin bar across the very top
+shows how far through the reel you are. One slide wipes into the next (a different direction each
+time), carrying the old slide away while the new one's first line is already arriving, so the
+change never shows an empty screen. Type is set larger than a feed slide's, to fill a phone.
 
 Writing `motion:` overrides all of it and puts one motion on every piece of that slide:
 **rise** (slides up and fades in), **pop** (grows in with a small overshoot), **stagger** (like

@@ -286,8 +286,9 @@ class ComposeTests(unittest.TestCase):
             self.assertTrue((before == 255).all(), motion)
             self.assertTrue((after < 60).all(), motion)
             self.assertTrue(during.shape == (3,))
-            gone = tl.frame(3.95)[700, 300]
-            self.assertTrue((gone > after).all(), motion + " should be leaving by the end")
+            # a piece is not faded out at the end: the next slide's wipe carries it away, which is
+            # what keeps the change from showing a bare backdrop (see test_one_slide_wipes_into_the_next)
+            self.assertTrue((tl.frame(3.95)[700, 300] == after).all(), motion)
 
     def test_each_kind_of_thing_arrives_its_own_way(self):
         """The point of the reel: a headline is not animated like a number or a picture."""
@@ -316,8 +317,8 @@ class ComposeTests(unittest.TestCase):
         self.assertFalse(hasattr(compose, "pan_for"))
         clip = self.clip()
         tl = compose.Timeline([clip], [], 4.0)
-        a, b = tl.frame(2.0), tl.frame(2.4)        # settled: not one pixel moves
-        self.assertTrue((a == b).all())
+        a, b = tl.frame(2.0), tl.frame(2.4)        # settled: not one pixel moves (below the progress bar)
+        self.assertTrue((a[compose.BAR_H:] == b[compose.BAR_H:]).all())
 
     def test_text_lands_one_word_at_a_time(self):
         from PIL import Image
@@ -374,9 +375,11 @@ class ComposeTests(unittest.TestCase):
 
     def test_settled_frames_are_reused(self):
         tl = compose.Timeline([self.clip()], [], 4.0)
-        a = tl.frame(2.0)
-        b = tl.frame(2.1)
-        self.assertIs(a, b)
+        tl.frame(2.0)
+        inner = tl._last_frame                      # the picture itself is drawn once and kept...
+        tl.frame(2.1)
+        self.assertIs(tl._last_frame, inner)
+        self.assertFalse((tl.frame(2.0)[0] == tl.frame(3.0)[0]).all())   # ...only the bar moves on
 
     def test_caption_shows_only_in_its_window(self):
         from PIL import Image
@@ -437,7 +440,8 @@ class EndToEndTests(unittest.TestCase):
             self.assertAlmostEqual(a["end"], b["start"], places=2)
         for t in tl:
             self.assertEqual(t["reveals"], sorted(t["reveals"]))
-            self.assertTrue(all(t["start"] <= r < t["end"] for r in t["reveals"]))
+            # the first thing on a slide may start while the one before is still wiping away
+            self.assertTrue(all(t["start"] - compose.EXIT <= r < t["end"] for r in t["reveals"]))
         self.assertTrue(any("Music" in w for w in self.summary["warnings"]))
         self.assertTrue(self.summary["captions"])
 
