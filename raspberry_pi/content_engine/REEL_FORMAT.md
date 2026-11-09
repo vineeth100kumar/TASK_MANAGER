@@ -48,7 +48,7 @@ tag: "#topic"
 Then each slide starts with `## <type>` exactly as in a post script (cover, statement, point, list, stat, compare, quote, chart, table, image, cta), with its own fields, and these extra lines:
 say: <what the voice says over this slide>            (REQUIRED on every slide; plain sentences, no symbols or links)
 show: <cue> | <cue> | <cue>                            (optional: the words in `say:` at which each piece of the slide should appear, in order; copy them exactly from `say:`)
-motion: rise | pop | stagger | wipe | kenburns | fade  (optional, and usually best left out: each piece already arrives in the way that suits it. Naming one here puts that single motion on every piece of the slide.)
+motion: rise | pop | stagger | wipe | kenburns | fade  (optional, best left out: each piece always arrives in the way that suits it. This is only used for a piece the reel doesn't recognise.)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
 
@@ -91,7 +91,7 @@ These are the reel's own lines.
 | `aspect:` / `format:` | header | **Ignored, with a warning.** A reel is always 9:16, 1080x1920. | `ratio:`, `size:` |
 | `say:` | each slide | The narration. A continuation line may be indented under it. Single capitals in a row ("N X P") are spoken as letters and shown joined up on the caption. | `vo:`, `voiceover:`, `narration:`, `speak:` |
 | `show:` | each slide | Cue phrases copied from `say:`, separated by `\|` (`;`, `->` and `→` also work). One per piece. With one fewer than there are pieces, the first piece opens the slide and the cues start at the second. | `cue:`, `cues:` |
-| `motion:` | each slide | Forces one motion on the whole slide (see below). Leave it out and each piece gets its own. | `animation:`, `animate:` |
+| `motion:` | each slide | Only for a piece the reel doesn't recognise (see below); every known piece always gets its own. | `animation:`, `animate:` |
 | `duration:` | each slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |
 | `pause:` | each slide | Extra silence after this slide's narration; 0 to 5 seconds. | |
 
@@ -105,28 +105,36 @@ slide reads as an infographic being built rather than a picture being shown:
 
 | The piece | How it arrives |
 | --- | --- |
-| A headline, a quote, a statement | Typed out, word by word, with a caret at the point it has reached |
-| A highlighted word (`**like this**`) | Types in the brand colour, like the rest of the line |
+| A kicker (the small label over a headline) | Rises into place out of a slot, just ahead of its headline |
+| A headline, a quote, a statement, body text | Typed out, word by word, with a caret at the point it has reached |
+| A highlighted word (`**like this**` or `==like this==`) | Types in the brand colour, like the rest of the line |
+| The rule or brush underline under a headline | Drawn along its length once the headline is typed |
 | A big number | Counts up to its real value, then holds |
-| A pill (`pill:`, a CTA) | Pressed on along its own slant |
+| A pill (`pill:`, a CTA) | Laid down from its left end with a little overshoot, then its word is typed onto it |
+| A bullet dot, a list number, a tick or cross | Pops on just before its own line is typed |
+| A compare column | Its card is laid down, then its label and points are typed in |
 | A picture | Uncovered upwards, then a slow push-in for as long as the slide is up |
 | A table or chart | Builds downwards |
-| A list item, a bullet, a compare column | In from its own side, and fades back once the voice moves on to the next |
-| Body text, a caption, a source line | A short fade |
+| A source line | A short fade, with the last piece |
 
-Nothing pans or drifts: text lands where it is designed to sit and stays there. The step being
-spoken about is the bright one, so a long list never sits still. A thin bar across the very top
-shows how far through the reel you are. One slide wipes into the next (a different direction each
-time), carrying the old slide away while the new one's first line is already arriving, so the
-change never shows an empty screen. Type is set larger than a feed slide's, to fill a phone.
+Every list item, bullet and compare column also fades back once the voice moves on to the next,
+so the step being spoken about is the bright one.
 
-Writing `motion:` overrides all of it and puts one motion on every piece of that slide:
-**rise** (slides up and fades in), **pop** (grows in with a small overshoot), **stagger** (like
-rise, tighter, for one-by-one lists), **wipe** (uncovers left to right), **kenburns** (rise, then
-a slow push-in on a picture), **fade**. Everyday words are understood too: `slide`/`up` mean rise,
-`zoom`/`bounce` mean pop, `cascade`/`one-by-one` mean stagger, `reveal` means wipe, `pan`/`drift`
-mean kenburns, `none`/`plain` mean fade. Anything else is a warning and the slide keeps its own
-motions.
+A post's dashed doodle line is left out of a reel.
+
+Nothing pans or drifts: text lands where it is designed to sit and stays there. A thin bar across
+the very top shows how far through the reel you are. One slide wipes into the next (a different
+direction each time), carrying the old slide away while the new one's first line is already
+arriving, so the change never shows an empty screen. Type is set larger than a feed slide's, to
+fill a phone.
+
+`motion:` no longer changes any of the above: every piece always arrives the way its kind does,
+so one slide never looks different from the next. It is only used for a piece the reel doesn't
+recognise: **rise** (slides up and fades in), **pop** (grows in with a small overshoot),
+**stagger** (like rise, tighter), **wipe** (uncovers left to right), **kenburns** (rise, then a
+slow push-in), **fade**. Everyday words are understood too: `slide`/`up` mean rise, `zoom`/`bounce`
+mean pop, `cascade`/`one-by-one` mean stagger, `reveal` means wipe, `pan`/`drift` mean kenburns,
+`none`/`plain` mean fade. Anything else is a warning. Best left out.
 
 ## Your own voice
 

@@ -156,7 +156,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
         reveals = []
         for i, (sl, (t0, t1)) in enumerate(zip(scenes_layers, windows)):
             sc = reel.scenes[i]
-            primary = [k for k, ly in enumerate(sl.layers) if not ly.follow]
+            primary = [k for k, ly in enumerate(sl.layers) if not ly.follow and not ly.lead]
             ts = timing.plan_reveals(len(primary), sc.show, per_scene[i], t0, t1, compose.EXIT)
             at: Dict[int, float] = {}
             for k, t in zip(primary, ts):
@@ -165,23 +165,36 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             # away, so the viewer never sees an empty backdrop between two slides
             if i and primary:
                 at[primary[0]] = min(at[primary[0]], t0 - compose.EXIT * 0.55)
+            elif primary:
+                at[primary[0]] = t0             # the reel's very first frame already has something moving
             for k, ly in enumerate(sl.layers):
                 if ly.follow:
                     at[k] = at[k - 1]
+            # a label (the kicker) rises in just ahead of the headline it sits over, and the
+            # headline waits a moment for it, so the two read as one arrival, in order
+            for k, ly in enumerate(sl.layers):
+                if ly.lead:
+                    nxt = next((j for j in range(k + 1, len(sl.layers)) if j in at), None)
+                    at[k] = at[nxt] if nxt is not None else t0 + 0.1
+                    if nxt is not None:
+                        at[nxt] = at[nxt] + compose.MOTIONS["label"][0] * 0.55
             clip = compose.SceneClip(t0=t0, t1=t1, base=Image.open(sl.base).convert("RGB"), motion=sc.motion)
             for k, ly in enumerate(sl.layers):
-                # Unless the script asked for one motion for the whole slide, each piece arrives in
-                # the way that suits what it is: a headline is wiped on, a number punches in, a
-                # picture is uncovered and keeps pushing in, bullets come in from the side.
-                own, side = ("", 0) if sc.motion_given else compose.piece_motion(ly.classes, sc.motion)
+                # Each piece arrives the way that suits what it is, whatever `motion:` the script
+                # gave: a label rises out of a slot, text is typed (its pill laid down first, its
+                # dot or badge popping on, the rule under it drawn after), a number counts up, a
+                # picture is uncovered and keeps pushing in, a table builds. The script's motion
+                # is used only for a piece that is none of these.
+                own, side = compose.piece_motion(ly.classes, sc.motion)
                 picture = "image-frame" in ly.classes
                 step = any(c in ly.classes for c in ("list-item", "bullet-row", "compare-col"))
                 clip.pieces.append(compose.Piece(
                     image=Image.open(ly.path).convert("RGBA"), box=ly.box, at=at[k], follow=ly.follow,
                     motion=own, side=side, words=ly.words, accents=ly.accents, accent_rgb=ly.accent_rgb,
-                    count=([] if sc.motion_given else [Image.open(c).convert("RGBA") for c in ly.count]),
-                    seq=step,
-                    zoom=picture and (sc.motion == "kenburns" or not sc.motion_given)))
+                    count=[Image.open(c).convert("RGBA") for c in ly.count],
+                    seq=step, decos=ly.decos, word_rgb=ly.word_rgb,
+                    backing=Image.open(ly.backing).convert("RGBA") if ly.backing else None,
+                    zoom=picture))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 
