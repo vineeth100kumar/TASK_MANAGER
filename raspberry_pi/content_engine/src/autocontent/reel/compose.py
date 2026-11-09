@@ -62,9 +62,7 @@ POP_IN = 0.34          # a dot or a numbered/ticked badge: grows from small, a t
 LINE_IN = 0.36         # a rule: drawn along its length, left to right
 BACK_IN = 0.40         # a pill or a card behind text: laid down from its left end, then the text is typed on
 FADE_IN = 0.22         # anything else that is not a word
-DOODLE_SPEED = 620.0   # px a second a background line is drawn at
-DOODLE_DRAW = (0.9, 2.2)   # however long the line, drawing it takes between these many seconds
-DOODLE_FLOW = 22.0     # px a second its dashes then run along it
+
 
 # What a piece is, from the classes the renderer gave it, and so how it should arrive.
 # The first match wins, so the more particular classes come first.
@@ -303,48 +301,12 @@ class Piece:
 
 
 @dataclass
-class DoodleClip:
-    """A background line: drawn on from `at`, then its dashes keep running along it."""
-    draw: List[Image.Image]
-    flow: List[Image.Image]
-    box: Tuple[int, int, int, int]
-    at: float
-    length: float = 600.0
-    period: float = 32.0
-    opacity: float = 1.0
-    _draw: Optional[List[np.ndarray]] = None
-    _flow: Optional[List[np.ndarray]] = None
-
-    @property
-    def draw_takes(self) -> float:
-        lo, hi = DOODLE_DRAW
-        return min(hi, max(lo, self.length / DOODLE_SPEED))
-
-    def state(self, t: float) -> Optional[Tuple[np.ndarray, int, int, float]]:
-        if t < self.at or not self.draw:
-            return None
-        if self._draw is None:
-            self._draw = [np.asarray(im, dtype=np.uint8) for im in self.draw]
-            self._flow = [np.asarray(im, dtype=np.uint8) for im in self.flow]
-        u = (t - self.at) / self.draw_takes
-        if u < 1.0:
-            k = min(len(self._draw) - 1, int(ease_in_out(u) * len(self._draw)))
-            return self._draw[k], self.box[0], self.box[1], self.opacity
-        if not self._flow:
-            return self._draw[-1], self.box[0], self.box[1], self.opacity
-        run = (t - self.at - self.draw_takes) * DOODLE_FLOW / max(self.period, 1.0)
-        k = int(run * len(self._flow)) % len(self._flow)
-        return self._flow[k], self.box[0], self.box[1], self.opacity
-
-
-@dataclass
 class SceneClip:
     t0: float
     t1: float
     base: Image.Image
     pieces: List[Piece] = field(default_factory=list)
     motion: str = "rise"
-    doodles: List[DoodleClip] = field(default_factory=list)
     _base_arr: Optional[np.ndarray] = None
 
     @property
@@ -601,8 +563,8 @@ class Timeline:
         return self._with_bar(frame, t)
 
     def _scene(self, i: int, t: float) -> np.ndarray:
-        """Slide i at time t, as a fresh array: its backdrop and pieces (kept once nothing on it
-        moves any more), then its background lines, which keep running until it leaves."""
+        """Slide i at time t, as a fresh array: its backdrop and pieces, kept once nothing on it
+        moves any more."""
         clip = self.clips[i]
         fading = any(p.seq and t < p.at + DIM_IN + 0.02 for p in clip.pieces)
         settled = not clip.moving and not fading and t >= clip.settles_at
@@ -614,11 +576,6 @@ class Timeline:
             if settled:
                 self._cache = {k: v for k, v in self._cache.items() if k >= i - 1}
                 self._cache[i] = frame.copy()
-        for d in clip.doodles:
-            state = d.state(t)
-            if state:
-                arr, x, y, op = state
-                _blend(frame, arr, x, y, op)
         return frame
 
     @staticmethod

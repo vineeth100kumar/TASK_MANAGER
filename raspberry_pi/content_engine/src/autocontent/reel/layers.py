@@ -40,8 +40,7 @@ LEAD = [".kicker"]
 TRAILING = [".slide-source", ".chart-source", ".table-source"]
 # Not wanted in a video: page numbers and the "swipe" arrow
 HIDDEN = [".slide-counter", ".footer-right"]
-# A post's dashed doodles are fixed drawings; a reel draws its own (see doodles.py), placed where
-# they don't touch the text, drawn on and then kept flowing
+# A post's dashed doodle lines are left out of a reel
 REDRAWN = [".grid-dashed-loop", ".doodle-loop"]
 
 # Runs in the page: mark each group's elements with data-reel-group="<k>" and return their boxes
@@ -272,7 +271,6 @@ class SceneLayers:
     base: Path
     layers: List[Layer] = field(default_factory=list)
     theme: str = "light"
-    doodles: list = field(default_factory=list)      # doodles.Doodle: the background lines
 
 
 MARGIN = 28   # px kept around a group so soft edges and shadows aren't clipped
@@ -377,10 +375,6 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
                                   accents=accents, accent_rgb=accent_rgb, count=count,
                                   lead=bool(box[6]) if len(box) > 6 else False,
                                   word_rgb=[_rgb(c) for c in colours], decos=decos, backing=backing))
-
-    # the background lines, placed where they touch nothing, photographed being drawn and flowing
-    from . import doodles
-    scene.doodles = doodles.make(page, slide, scene.theme, out_dir, n, width, height)
     return scene
 
 

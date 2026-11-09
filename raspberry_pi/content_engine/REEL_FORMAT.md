@@ -116,15 +116,11 @@ slide reads as an infographic being built rather than a picture being shown:
 | A picture | Uncovered upwards, then a slow push-in for as long as the slide is up |
 | A table or chart | Builds downwards |
 | A source line | A short fade, with the last piece |
-| Background lines | Dashed brand-colour lines drawn on in the free space, then their dashes keep running along them |
 
 Every list item, bullet and compare column also fades back once the voice moves on to the next,
 so the step being spoken about is the bright one.
 
-The background lines are placed by the reel itself: a curl, a wave, a corner sweep or a margin
-squiggle is tried at many sizes and spots, and only one that keeps clear of every word, rule,
-picture, the brand row and the caption band is used (the curl goes beside a cover or closing
-pill). A busy slide with no free room simply gets none. You don't write anything for them.
+A post's dashed doodle line is left out of a reel.
 
 Nothing pans or drifts: text lands where it is designed to sit and stays there. A thin bar across
 the very top shows how far through the reel you are. One slide wipes into the next (a different

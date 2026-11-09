@@ -595,70 +595,11 @@ class MotionTests(unittest.TestCase):
         self.assertEqual(caret.shape[1], compose.CARET_W)
         self.assertEqual(tuple(caret[0, 0, :3]), (255, 255, 255))
 
-    def test_a_background_line_is_drawn_on_then_keeps_flowing(self):
-        from PIL import Image
-        draw = [Image.new("RGBA", (40, 40), (i, 0, 0, 255)) for i in range(1, 11)]
-        flow = [Image.new("RGBA", (40, 40), (0, i, 0, 255)) for i in range(1, 9)]
-        d = compose.DoodleClip(draw, flow, (10, 300, 40, 40), at=1.0, length=600)
-        self.assertIsNone(d.state(0.9))
-        first = d.state(1.0 + 0.05)[0][0, 0, 0]
-        later = d.state(1.0 + d.draw_takes * 0.8)[0][0, 0, 0]
-        self.assertLess(first, later)                                          # the pen moves along it
-        seen = {int(d.state(1.0 + d.draw_takes + 0.05 + k * 0.1)[0][0, 0, 1]) for k in range(40)}
-        self.assertGreater(len(seen), 4)                                       # then the dashes run, looping
-        clip = compose.SceneClip(0, 8, self.base(), [], doodles=[d])
-        tl = compose.Timeline([clip], [], 8.0, bar=False)
-        self.assertFalse((tl.frame(5.0)[310, 20] == tl.frame(5.2)[310, 20]).all())   # still moving when all else is still
-
-    def test_background_lines_are_placed_clear_of_everything(self):
-        from autocontent.reel import doodles
-        shapes, _ = doodles._candidates(1080, 1920)
-        # a fit that only exists far from the text in the corner
-        idx = next(i for i, s in enumerate(shapes) if s["name"] == "wave" and s["scale"] == 1.0)
-        found = [[idx, 300, 1200, 600.0]]
-        picks = doodles.choose(found, shapes, 1, None, 1080, 1920)
-        self.assertEqual(len(picks), 1)
-        self.assertEqual(picks[0][0]["name"], "wave")
-        self.assertEqual(doodles.choose([], shapes, 1, None, 1080, 1920), [])     # no room, no line
-        d, w, h = doodles.transform("M 0 0 C 10 0, 20 10, 30 30", 2.0, True)
-        self.assertEqual((w, h), (60.0, 60.0))
-        self.assertTrue(d.startswith("M 60.0 0.0"))                            # mirrored: starts at the right
-
-    @unittest.skipUnless(CHROMIUM, "needs Chromium")
-    def test_lines_never_touch_the_words_on_a_real_slide(self):
-        os.environ["AUTOCONTENT_CHROMIUM"] = CHROMIUM
-        os.environ["AUTOCONTENT_NO_SANDBOX"] = "1"
-        import tempfile
-        from autocontent.render.renderer import SlideRenderer, browser_launch_options
-        from autocontent.reel import doodles
-        from playwright.sync_api import sync_playwright
-        slide = {"n": 2, "type": "point", "kicker": "2006: A NEW COMPANY",
-                 "headline": "Philips sold control of **its chip business.**",
-                 "bullets": ["Investors bought an 80.1% stake.", "The business became NXP Semiconductors."]}
-        renderer = SlideRenderer("grid_pill", canvas_format="reel")
-        with sync_playwright() as pw, tempfile.TemporaryDirectory() as tmp:
-            browser = pw.chromium.launch(**browser_launch_options())
-            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
-            renderer.lay_out(page, slide, renderer.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@mind.deeds"}, 3, 1))
-            words = page.evaluate("""() => { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-                let n; while ((n = w.nextNode())) { if (!n.nodeValue.trim()) continue; const r = document.createRange();
-                r.selectNodeContents(n); for (const b of r.getClientRects()) if (b.width > 1) out.push([b.left, b.top, b.right, b.bottom]); }
-                return out; }""")
-            lines = doodles.make(page, slide, "light", Path(tmp), 2, 1080, 1920)
-            self.assertTrue(lines, "a slide with free room gets a line")
-            for ln in lines:
-                self.assertEqual(len(ln.draw), doodles.DRAW_FRAMES)
-                self.assertEqual(len(ln.flow), doodles.FLOW_FRAMES)
-                x, y, w, h = ln.box
-                from PIL import Image
-                ink = np.asarray(Image.open(ln.flow[0]))[..., 3] > 20
-                ys, xs = np.nonzero(ink)
-                for wx0, wy0, wx1, wy1 in words:
-                    hit = ((xs + x >= wx0 - 8) & (xs + x <= wx1 + 8) & (ys + y >= wy0 - 8) & (ys + y <= wy1 + 8)).any()
-                    self.assertFalse(hit, f"a line runs into text at {wx0:.0f},{wy0:.0f}")
-                self.assertGreaterEqual(y, doodles.TOP_BAND - 10)
-                self.assertLessEqual(y + h, doodles.CAPTION_BAND[0] + 10)
-            browser.close()
+    def test_a_reel_has_no_dashed_lines(self):
+        """The post's dashed doodle is left out of a reel, and the reel adds none of its own."""
+        self.assertIn(".grid-dashed-loop", layers.NO_VIDEO_CSS)
+        self.assertIn(".doodle-loop", layers.NO_VIDEO_CSS)
+        self.assertFalse(hasattr(compose, "DoodleClip"))
 
     @unittest.skipUnless(CHROMIUM, "needs Chromium")
     def test_a_big_statement_with_a_highlight_still_fits(self):

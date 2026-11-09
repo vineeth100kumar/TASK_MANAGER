@@ -195,16 +195,6 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     seq=step, decos=ly.decos, word_rgb=ly.word_rgb,
                     backing=Image.open(ly.backing).convert("RGBA") if ly.backing else None,
                     zoom=picture))
-            # the background lines: the one beside a pill once the pill is down, the quiet ones
-            # once the slide's first words have started
-            first = min((at[k] for k in at), default=t0)
-            pill_at = next((at[k] for k, ly in enumerate(sl.layers) if any(c in ly.classes for c in ("accent-pill", "cta-pill"))), None)
-            for j, d in enumerate(sl.doodles):
-                start = (pill_at + 0.45) if (d.featured and pill_at is not None) else max(first, t0) + 0.5 + 0.35 * j
-                clip.doodles.append(compose.DoodleClip(
-                    draw=[Image.open(f).convert("RGBA") for f in d.draw],
-                    flow=[Image.open(f).convert("RGBA") for f in d.flow],
-                    box=d.box, at=start, length=d.length, period=d.period, opacity=d.opacity))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 
