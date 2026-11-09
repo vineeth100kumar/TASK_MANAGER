@@ -212,8 +212,8 @@ static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
 // Even Frame a hairline keeps the card's shape (see faceTickInner).
 static const uint16_t STACK_BG = 0x0000;
 static const uint16_t STACK_EDGE = 0x31A7;   // (48,52,56): the card's hairline
-// The day-phase dimming is gentler here: the face is never below 80%.
-static float stackedK(float k) { return 0.8f + 0.2f * (k - 0.5f) / 0.5f; }
+// No night dimming on Stacked (2.24.1): it stays at full brightness all day.
+static float stackedK(float) { return 1.0f; }
 
 // The minute turns over by rolling: the old number slides up and out as the
 // new one rises in behind it (the hour too, when it changes).
