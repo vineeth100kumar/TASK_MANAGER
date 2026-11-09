@@ -327,7 +327,7 @@ def get(post_id: str) -> Optional[dict]:
     return json.loads(row["payload"]) if row else None
 
 
-def recent(project_id: str = "", limit: int = 60) -> List[dict]:
+def recent(project_id: str = "", limit: int = 60, archived: bool = False) -> List[dict]:
     conn = _db()
     try:
         rows = conn.execute("SELECT payload FROM posts ORDER BY created_at DESC").fetchall()
@@ -337,6 +337,10 @@ def recent(project_id: str = "", limit: int = 60) -> List[dict]:
     for row in rows:
         post = json.loads(row["payload"])
         if project_id and post.get("projectId") != project_id:
+            continue
+        # Rejected posts are kept in the archive (script stays, slides gone); the main list shows
+        # live posts only, and ?archived=true shows the archive instead.
+        if bool(post.get("archived")) != bool(archived):
             continue
         out.append(summary(post))
         if limit and len(out) >= limit:
@@ -357,6 +361,8 @@ def summary(post: dict) -> dict:
     keep["captionStart"] = (post.get("caption") or "")[:140]
     keep["slides"] = []  # kept for the Post type; filled in by the open view
     keep["media"] = media_info(post)
+    keep.setdefault("review", "pending")
+    keep.setdefault("archived", False)
     return keep
 
 
@@ -535,6 +541,9 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "auditNote": "",
         "seconds": None,
         "finishedAt": None,
+        "review": "pending",   # pending | approved | rejected
+        "archived": False,     # a rejected post is archived: the script is kept, the slides removed
+        "archivedAt": None,
         "posted": False,
         "postedAt": None,
         "emailed": False,
@@ -983,6 +992,15 @@ def delete(post_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def _strip_media(post: dict) -> None:
+    """Remove a post's rendered slides (and their copies/ZIP), keeping its script so it can be
+    redrawn from the archive later."""
+    _hot.invalidate(post["id"])
+    shutil.rmtree(POSTS_DIR / post["id"] / "out", ignore_errors=True)
+    post["slides"] = []
+    post["slideCount"] = 0
+
+
 # --- Routes ---
 
 router = APIRouter()
@@ -1015,8 +1033,9 @@ def _bad(message: str, code: int = 400) -> JSONResponse:
 
 
 @router.get("/api/posts")
-def posts_list(projectId: str = "", limit: int = 60):
-    return {"success": True, "status": status(), "posts": recent(projectId, max(1, min(limit, 100)))}
+def posts_list(projectId: str = "", limit: int = 60, archived: bool = False):
+    return {"success": True, "status": status(),
+            "posts": recent(projectId, max(1, min(limit, 100)), archived)}
 
 
 @router.get("/api/posts/status")
@@ -1104,6 +1123,51 @@ async def posts_posted(post_id: str, undo: bool = False):
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+    return {"success": True, "post": with_media(post)}
+
+
+class ReviewBody(BaseModel):
+    action: str = ""   # approve | reject | reset
+
+
+@router.post("/api/posts/{post_id}/review")
+async def posts_review(post_id: str, body: ReviewBody):
+    """Approve a post (mark it ready to post), reject it (send it to the archive, keeping the
+    script but removing the slides), or reset it back to pending."""
+    post = get(post_id)
+    if not post:
+        return _missing()
+    if post["status"] in ("queued", "running"):
+        return _bad("Wait for it to finish, then approve or reject it.", 409)
+    action = (body.action or "").strip().lower()
+    if action == "approve":
+        post.update(review="approved", archived=False, archivedAt=None)
+    elif action == "reject":
+        post.update(review="rejected", archived=True, archivedAt=_utc(), posted=False, postedAt=None)
+        _strip_media(post)
+        await _move_task(post, "scripting", "todo")
+    elif action == "reset":
+        post.update(review="pending", archived=False, archivedAt=None)
+    else:
+        return _bad("Unknown review action.")
+    await save_async(post)
+    return {"success": True, "post": with_media(post)}
+
+
+@router.post("/api/posts/{post_id}/restore")
+async def posts_restore(post_id: str):
+    """Bring a rejected post back from the archive and redraw its slides from the kept script."""
+    post = get(post_id)
+    if not post:
+        return _missing()
+    post.update(archived=False, archivedAt=None, review="pending")
+    try:
+        post = restart(post)
+    except ValueError:
+        await save_async(post)
+    except Busy as e:
+        await save_async(post)
+        return _bad(str(e), 429)
     return {"success": True, "post": with_media(post)}
 
 
@@ -1336,7 +1400,10 @@ def media_info(post: dict) -> Optional[dict]:
 
 
 def with_media(post: dict) -> dict:
-    return {**post, "media": media_info(post)}
+    out = {**post, "media": media_info(post)}
+    out.setdefault("review", "pending")
+    out.setdefault("archived", False)
+    return out
 
 
 def _media_file(post_id: str, kind: str, name: str) -> Optional[Path]:

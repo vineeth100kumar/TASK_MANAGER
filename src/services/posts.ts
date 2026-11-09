@@ -37,6 +37,9 @@ export interface Post {
   audit: 'pass' | 'fail' | null;
   auditNote: string;
   seconds: number | null;
+  review?: 'pending' | 'approved' | 'rejected';
+  archived?: boolean;
+  archivedAt?: string | null;
   posted: boolean;
   postedAt: string | null;
   emailed: boolean;
@@ -92,8 +95,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+export type ReviewAction = 'approve' | 'reject' | 'reset';
+
 export const postsApi = {
-  list: (projectId = '') => call<{ status: MakerStatus; posts: Post[] }>(`/api/posts${projectId ? `?projectId=${enc(projectId)}` : ''}`),
+  list: (projectId = '', archived = false) =>
+    call<{ status: MakerStatus; posts: Post[] }>(`/api/posts?${projectId ? `projectId=${enc(projectId)}&` : ''}archived=${archived ? 'true' : 'false'}`),
   status: () => call<{ status: MakerStatus }>('/api/posts/status').then(d => d.status),
   check: (script: string) => call<{ check: ScriptCheck }>('/api/posts/check', { method: 'POST', body: JSON.stringify({ script }) }).then(d => d.check),
   create: (body: { script: string; title?: string; style?: string; format?: string; projectId?: string }) =>
@@ -103,6 +109,9 @@ export const postsApi = {
     call<{ post: Post }>(`/api/posts/${enc(id)}/rerender`, { method: 'POST', body: JSON.stringify(body) }).then(d => d.post),
   setPosted: (id: string, posted: boolean) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.post),
+  review: (id: string, action: ReviewAction) =>
+    call<{ post: Post }>(`/api/posts/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.post),
+  restore: (id: string) => call<{ post: Post }>(`/api/posts/${enc(id)}/restore`, { method: 'POST' }).then(d => d.post),
   send: (id: string) => call<{ post: Post }>(`/api/posts/${enc(id)}/send`, { method: 'POST' }).then(d => d.post),
   remove: (id: string) => call<{ success: boolean }>(`/api/posts/${enc(id)}`, { method: 'DELETE' }),
 };

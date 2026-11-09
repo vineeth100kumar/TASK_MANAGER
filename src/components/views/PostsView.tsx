@@ -2,7 +2,7 @@
 // The list, the New post screen and one post's page, with the project filter
 // when it is opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { MakerStatus, POST_EVENT, Post, mediaUrl, postsApi, postsAvailable } from '../../services/posts';
@@ -17,17 +17,18 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
   const [posts, setPosts] = useState<Post[] | null>(null);
   const [status, setStatus] = useState<MakerStatus | null>(null);
   const [error, setError] = useState('');
+  const [archived, setArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await postsApi.list(projectId);
+      const data = await postsApi.list(projectId, archived);
       setPosts(data.posts);
       setStatus(data.status);
       setError('');
     } catch (e: any) {
       setError(e.message || "Can't reach the Pi");
     }
-  }, [projectId]);
+  }, [projectId, archived]);
 
   useEffect(() => { if (postsAvailable()) load(); }, [load]);
   useEffect(() => {
@@ -74,9 +75,14 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
           <h2 className="text-[20px] font-semibold tracking-tight text-gray-900 dark:text-white">Posts{filtered ? ` · ${filtered}` : ''}</h2>
           <p className="text-[12.5px] text-gray-500">Paste a script and the Pi draws the carousel, then emails you.</p>
         </div>
-        <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold shrink-0 active:scale-95 transition">
-          <Plus size={16} /> New post
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setArchived(a => !a)} className={`h-10 px-3.5 rounded-xl text-[13px] font-semibold flex items-center gap-1.5 ${archived ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-200' : 'bg-black/[0.06] dark:bg-white/10 text-gray-600 dark:text-gray-300'}`}>
+            <Archive size={15} /> {archived ? 'Archived' : 'Archive'}
+          </button>
+          <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold active:scale-95 transition">
+            <Plus size={16} /> New post
+          </button>
+        </div>
       </div>
 
       {status && !status.ready && (
@@ -87,7 +93,14 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
       {error && <p className="text-[13px] text-red-600 mb-3">{error}</p>}
 
       {posts === null && !error && <div className="skeleton h-40 rounded-3xl" />}
-      {posts && posts.length === 0 && (
+      {posts && posts.length === 0 && archived && (
+        <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-8 text-center space-y-3">
+          <Archive size={28} className="mx-auto text-gray-400" />
+          <p className="text-[15px] font-semibold text-gray-900 dark:text-white">Nothing archived</p>
+          <p className="text-[13px] text-gray-500">Rejected posts land here. The script is kept, so you can bring one back and redraw its slides.</p>
+        </div>
+      )}
+      {posts && posts.length === 0 && !archived && (
         <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-8 text-center space-y-3">
           <ImagePlus size={28} className="mx-auto text-purple-500" />
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white">No posts yet</p>
@@ -111,7 +124,7 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
               <span className="min-w-0 flex-1">
                 <span className="block text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{p.title}</span>
                 <span className="block text-[12px] text-gray-500 truncate">
-                  {p.status === 'done' ? `${p.slideCount} slides` : p.status === 'failed' ? 'Failed' : `Drawing ${p.progress.done}/${p.progress.total}`}
+                  {p.archived ? 'Archived · script kept' : p.status === 'done' ? `${p.slideCount} slides${p.review === 'approved' ? ' · Approved' : ''}` : p.status === 'failed' ? 'Failed' : `Drawing ${p.progress.done}/${p.progress.total}`}
                   {p.posted ? ' · Posted' : ''}{projectName(p.projectId) && !projectId ? ` · ${projectName(p.projectId)}` : ''} · {timeAgo(p.createdAt)}
                 </span>
               </span>
