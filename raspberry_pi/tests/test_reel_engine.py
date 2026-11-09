@@ -296,9 +296,11 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(compose.piece_motion("cover-headline")[0], "words")   # text writes itself
         self.assertEqual(compose.piece_motion("image-frame")[0], "reveal")
         self.assertEqual(compose.piece_motion("data-table")[0], "grow")
-        self.assertEqual(compose.piece_motion("list-item"), ("slide", -1))
-        self.assertEqual(compose.piece_motion("compare-col right"), ("slide", 1))
-        self.assertEqual(compose.piece_motion("stat-body", "rise"), ("rise", 0))   # unknown: the slide's own
+        self.assertEqual(compose.piece_motion("list-item")[0], "words")        # a step is typed, its badge pops
+        self.assertEqual(compose.piece_motion("compare-col right")[0], "words")
+        self.assertEqual(compose.piece_motion("accent-pill")[0], "words")      # pill laid down, then typed on
+        self.assertEqual(compose.piece_motion("kicker")[0], "label")           # a label rises out of a slot
+        self.assertEqual(compose.piece_motion("mystery-thing", "rise"), ("rise", 0))   # unknown: the slide's own
 
     def test_a_piece_uses_its_own_motion_over_the_slides(self):
         clip = self.clip("rise")
@@ -409,9 +411,9 @@ class ComposeTests(unittest.TestCase):
     def test_settled_frames_are_reused(self):
         tl = compose.Timeline([self.clip()], [], 4.0)
         tl.frame(2.0)
-        inner = tl._last_frame                      # the picture itself is drawn once and kept...
+        inner = tl._cache[0]                        # the slide itself is drawn once and kept...
         tl.frame(2.1)
-        self.assertIs(tl._last_frame, inner)
+        self.assertIs(tl._cache[0], inner)
         self.assertFalse((tl.frame(2.0)[0] == tl.frame(3.0)[0]).all())   # ...only the bar moves on
 
     def test_caption_shows_only_in_its_window(self):
@@ -509,6 +511,200 @@ say: The financial crisis hit sales and profits, and the listing helped repay de
 
 
 @unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")
+class MotionTests(unittest.TestCase):
+    """Each thing on a slide arrives the way that kind of thing would."""
+
+    def base(self):
+        from PIL import Image
+        return Image.new("RGB", (compose.W, compose.H), (255, 255, 255))
+
+    def test_a_highlight_with_an_apostrophe_is_coloured_not_printed(self):
+        from autocontent.render.renderer import decorate_html
+        html = "<style></style><body><h1>The Freescale merger ==expanded NXP's reach.==</h1></body>"
+        out = decorate_html(html, {}, "#EE4425")
+        self.assertIn('<span class="hlw">expanded NXP\'s reach.</span>', out)
+        self.assertNotIn("==", out.split("<body")[1])
+
+    def test_a_stray_highlight_mark_is_dropped(self):
+        from autocontent.render.renderer import decorate_html
+        out = decorate_html('<style></style><body><h1 class="x">An ==unclosed mark</h1></body>', {}, "#EE4425")
+        self.assertNotIn("==", out.split("<body")[1])
+        self.assertIn("An unclosed mark", out)
+
+    def test_a_label_rises_out_of_a_slot(self):
+        from PIL import Image
+        piece = compose.Piece(Image.new("RGBA", (300, 40), (238, 68, 37, 255)), (100, 300, 300, 40), at=1.0, motion="label")
+        clip = compose.SceneClip(0, 4, self.base(), [piece])
+        dur = compose.MOTIONS["label"][0]
+        arr, x, y, op = compose._piece_state(piece, 1.0 + dur * 0.3, "rise", clip)
+        self.assertLess(arr.shape[0], 40)            # only its top shows yet...
+        self.assertEqual(y + arr.shape[0], 340)      # ...standing on the label's own floor
+        self.assertEqual(op, 1.0)                    # it is not faded in
+        arr, x, y, op = compose._piece_state(piece, 1.0 + dur, "rise", clip)
+        self.assertEqual((arr.shape[0], y), (40, 300))
+
+    def piece_with_parts(self):
+        """A 600x200 piece: a pill backing, a dot in front of the words, a rule under them."""
+        from PIL import Image
+        im = Image.new("RGBA", (600, 200), (0, 0, 0, 0))
+        px = im.load()
+        for xx in range(600):
+            for yy in range(200):
+                if 40 <= xx < 560 and 20 <= yy < 120:
+                    px[xx, yy] = (238, 68, 37, 255)          # the pill
+                if 10 <= xx < 30 and 60 <= yy < 80:
+                    px[xx, yy] = (20, 20, 20, 255)           # the dot
+                if 40 <= xx < 300 and 170 <= yy < 180:
+                    px[xx, yy] = (238, 68, 37, 255)          # the rule
+                if 80 <= xx < 520 and 45 <= yy < 95 and xx % 20 < 12:
+                    px[xx, yy] = (255, 255, 255, 255)        # the words, white on the pill
+        back = Image.new("RGBA", (600, 200), (0, 0, 0, 0))
+        back.paste(im.crop((40, 20, 560, 120)).point(lambda v: v), (40, 20))
+        bpx = back.load()
+        for xx in range(40, 560):
+            for yy in range(20, 120):
+                bpx[xx, yy] = (238, 68, 37, 255)
+        return compose.Piece(im, (100, 500, 600, 200), at=1.0, motion="words",
+                             words=[(80, 45, 200, 50), (300, 45, 220, 50)],
+                             decos=[(10, 60, 20, 20, "dot"), (40, 170, 260, 10, "line")],
+                             backing=back, word_rgb=[(255, 255, 255), (255, 255, 255)])
+
+    def test_a_pill_is_laid_down_before_its_text_is_typed(self):
+        p = self.piece_with_parts()
+        clip = compose.SceneClip(0, 6, self.base(), [p])
+        tl = compose.Timeline([clip], [], 6.0, bar=False)
+        early = tl.frame(1.0 + compose.BACK_IN * 0.3)
+        self.assertEqual(tuple(early[500 + 70, 100 + 60]), (238, 68, 37))     # the pill's left end is down
+        self.assertTrue((early[500 + 70, 100 + 540] == 255).all())            # its right end isn't yet
+        self.assertGreater(p.lead_in, 0)                                       # the text waits for it
+
+    def test_a_rule_under_the_text_is_drawn_after_the_typing(self):
+        p = self.piece_with_parts()
+        k = next(i for i, part in enumerate(p.deco_parts) if part[3] == "line")
+        self.assertTrue(p.deco_parts[k][4], "a rule below the text comes after it")
+        typed = p.lead_in + p.typing[-1][0] + p.typing[-1][1]
+        self.assertGreater(p.deco_begins(k), typed - 0.1)
+        dot = next(i for i, part in enumerate(p.deco_parts) if part[3] == "dot")
+        self.assertLess(p.deco_begins(dot), p.lead_in + 0.01)                # the dot pops ahead of its line
+
+    def test_the_caret_on_a_pill_is_the_text_colour(self):
+        p = self.piece_with_parts()
+        clip = compose.SceneClip(0, 6, self.base(), [p])
+        t = 1.0 + p.lead_in + p.typing[0][1] * 0.5
+        parts = compose._word_states(p, t, clip)
+        caret = parts[-1][0]
+        self.assertEqual(caret.shape[1], compose.CARET_W)
+        self.assertEqual(tuple(caret[0, 0, :3]), (255, 255, 255))
+
+    def test_a_background_line_is_drawn_on_then_keeps_flowing(self):
+        from PIL import Image
+        draw = [Image.new("RGBA", (40, 40), (i, 0, 0, 255)) for i in range(1, 11)]
+        flow = [Image.new("RGBA", (40, 40), (0, i, 0, 255)) for i in range(1, 9)]
+        d = compose.DoodleClip(draw, flow, (10, 300, 40, 40), at=1.0, length=600)
+        self.assertIsNone(d.state(0.9))
+        first = d.state(1.0 + 0.05)[0][0, 0, 0]
+        later = d.state(1.0 + d.draw_takes * 0.8)[0][0, 0, 0]
+        self.assertLess(first, later)                                          # the pen moves along it
+        seen = {int(d.state(1.0 + d.draw_takes + 0.05 + k * 0.1)[0][0, 0, 1]) for k in range(40)}
+        self.assertGreater(len(seen), 4)                                       # then the dashes run, looping
+        clip = compose.SceneClip(0, 8, self.base(), [], doodles=[d])
+        tl = compose.Timeline([clip], [], 8.0, bar=False)
+        self.assertFalse((tl.frame(5.0)[310, 20] == tl.frame(5.2)[310, 20]).all())   # still moving when all else is still
+
+    def test_background_lines_are_placed_clear_of_everything(self):
+        from autocontent.reel import doodles
+        shapes, _ = doodles._candidates(1080, 1920)
+        # a fit that only exists far from the text in the corner
+        idx = next(i for i, s in enumerate(shapes) if s["name"] == "wave" and s["scale"] == 1.0)
+        found = [[idx, 300, 1200, 600.0]]
+        picks = doodles.choose(found, shapes, 1, None, 1080, 1920)
+        self.assertEqual(len(picks), 1)
+        self.assertEqual(picks[0][0]["name"], "wave")
+        self.assertEqual(doodles.choose([], shapes, 1, None, 1080, 1920), [])     # no room, no line
+        d, w, h = doodles.transform("M 0 0 C 10 0, 20 10, 30 30", 2.0, True)
+        self.assertEqual((w, h), (60.0, 60.0))
+        self.assertTrue(d.startswith("M 60.0 0.0"))                            # mirrored: starts at the right
+
+    @unittest.skipUnless(CHROMIUM, "needs Chromium")
+    def test_lines_never_touch_the_words_on_a_real_slide(self):
+        os.environ["AUTOCONTENT_CHROMIUM"] = CHROMIUM
+        os.environ["AUTOCONTENT_NO_SANDBOX"] = "1"
+        import tempfile
+        from autocontent.render.renderer import SlideRenderer, browser_launch_options
+        from autocontent.reel import doodles
+        from playwright.sync_api import sync_playwright
+        slide = {"n": 2, "type": "point", "kicker": "2006: A NEW COMPANY",
+                 "headline": "Philips sold control of **its chip business.**",
+                 "bullets": ["Investors bought an 80.1% stake.", "The business became NXP Semiconductors."]}
+        renderer = SlideRenderer("grid_pill", canvas_format="reel")
+        with sync_playwright() as pw, tempfile.TemporaryDirectory() as tmp:
+            browser = pw.chromium.launch(**browser_launch_options())
+            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
+            renderer.lay_out(page, slide, renderer.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@mind.deeds"}, 3, 1))
+            words = page.evaluate("""() => { const out = []; const w = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+                let n; while ((n = w.nextNode())) { if (!n.nodeValue.trim()) continue; const r = document.createRange();
+                r.selectNodeContents(n); for (const b of r.getClientRects()) if (b.width > 1) out.push([b.left, b.top, b.right, b.bottom]); }
+                return out; }""")
+            lines = doodles.make(page, slide, "light", Path(tmp), 2, 1080, 1920)
+            self.assertTrue(lines, "a slide with free room gets a line")
+            for ln in lines:
+                self.assertEqual(len(ln.draw), doodles.DRAW_FRAMES)
+                self.assertEqual(len(ln.flow), doodles.FLOW_FRAMES)
+                x, y, w, h = ln.box
+                from PIL import Image
+                ink = np.asarray(Image.open(ln.flow[0]))[..., 3] > 20
+                ys, xs = np.nonzero(ink)
+                for wx0, wy0, wx1, wy1 in words:
+                    hit = ((xs + x >= wx0 - 8) & (xs + x <= wx1 + 8) & (ys + y >= wy0 - 8) & (ys + y <= wy1 + 8)).any()
+                    self.assertFalse(hit, f"a line runs into text at {wx0:.0f},{wy0:.0f}")
+                self.assertGreaterEqual(y, doodles.TOP_BAND - 10)
+                self.assertLessEqual(y + h, doodles.CAPTION_BAND[0] + 10)
+            browser.close()
+
+    @unittest.skipUnless(CHROMIUM, "needs Chromium")
+    def test_a_big_statement_with_a_highlight_still_fits(self):
+        """The fail-safe shrank only childless elements, so a headline with a highlighted word in it
+        (its words sit around a <span>) stayed huge and the slide failed."""
+        os.environ["AUTOCONTENT_CHROMIUM"] = CHROMIUM
+        os.environ["AUTOCONTENT_NO_SANDBOX"] = "1"
+        from autocontent.render.renderer import SlideRenderer, browser_launch_options
+        from playwright.sync_api import sync_playwright
+        slide = {"n": 1, "type": "statement", "kicker": "The real reason", "theme": "dark",
+                 "headline": "It is not the tech. It is the **first 30 days.**"}
+        renderer = SlideRenderer("beige_grain", canvas_format="reel")
+        renderer.collect_fit = True
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(**browser_launch_options())
+            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
+            renderer.lay_out(page, slide, renderer.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@m"}, 1, 1))
+            browser.close()
+        self.assertTrue(renderer.fit_report[0]["ok"], renderer.fit_report[0]["problems"])
+
+    @unittest.skipUnless(CHROMIUM, "needs Chromium")
+    def test_a_tall_cover_headline_clears_the_brand_row_with_its_underline_under_it(self):
+        os.environ["AUTOCONTENT_CHROMIUM"] = CHROMIUM
+        os.environ["AUTOCONTENT_NO_SANDBOX"] = "1"
+        from autocontent.render.renderer import SlideRenderer, browser_launch_options
+        from playwright.sync_api import sync_playwright
+        slide = {"n": 1, "type": "cover", "kicker": "THE QUIET TRUTH", "headline": "9 in 10 shops still sell **offline**"}
+        renderer = SlideRenderer("beige_grain", canvas_format="reel")
+        renderer.collect_fit = True
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(**browser_launch_options())
+            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
+            renderer.lay_out(page, slide, renderer.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@m"}, 1, 1))
+            got = page.evaluate("""() => ({
+                head: document.querySelector('.header-row').getBoundingClientRect().bottom,
+                top: Math.min(...[...document.querySelectorAll('.headline-container *')].map((e) => e.getBoundingClientRect())
+                     .filter((r) => r.height > 1).map((r) => r.top)),
+                base: document.getElementById('baseline-anchor').getBoundingClientRect().bottom,
+                line: document.querySelector('svg.doodle-underline polygon').getBoundingClientRect().top })""")
+            browser.close()
+        self.assertGreater(got["top"], got["head"] + 40)
+        self.assertGreater(got["line"], got["base"])            # under the last line, not through it
+        self.assertLess(got["line"], got["base"] + 60)
+
+
 class EndToEndTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):

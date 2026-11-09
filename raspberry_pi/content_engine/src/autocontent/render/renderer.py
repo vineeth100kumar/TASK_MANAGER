@@ -73,7 +73,11 @@ DEFAULT_ALIGN = {"stat": "center", "quote": "center", "statement": "center"}
 BALANCED_TYPES = ("point", "list", "stat", "quote", "table", "chart", "image", "statement", "compare")
 
 _HEX6 = re.compile(r"#[0-9a-fA-F]{6}\b")
-_HIGHLIGHT = re.compile(r"==([^=<>'\"\n]{1,120}?)==")
+# ==word== in the slide text. An apostrophe is allowed inside (==NXP's reach==): the renderer does
+# not escape text, so leaving it out made any highlight with an apostrophe print its == marks.
+_HIGHLIGHT = re.compile(r"==([^=<>\"\n]{1,160}?)==")
+# A == left over in the text (an unclosed or overlong mark) is dropped rather than printed
+_STRAY_MARK = re.compile(r"==(?![^<]*>)")
 _CONTAINER = re.compile(r'(<div class="(?:content-container|headline-container|cta-container)"[^>]*>)')
 
 
@@ -118,6 +122,9 @@ def decorate_html(html: str, slide: Dict[str, Any], accent: str) -> str:
            f" text-transform: uppercase; color: {accent}; margin-bottom: 26px; line-height: 1.2; }}\n")
     html = html.replace("</style>", css + "</style>", 1)
     html = _HIGHLIGHT.sub(r'<span class="hlw">\1</span>', html)
+    body_at = html.find("<body")
+    if body_at >= 0:
+        html = html[:body_at] + _STRAY_MARK.sub("", html[body_at:])
     kicker = str(slide.get("kicker") or "").strip()
     if kicker:
         from html import escape
@@ -874,8 +881,10 @@ class SlideRenderer:
                     window.__contentBottom = {floor_y};
                     const boxes = [...document.querySelectorAll('.content-container, .headline-container')];
                     if (!boxes.length) return {{ success: true }};
+                    // every element that holds words itself, including a headline whose words sit
+                    // around a highlighted <span> (only taking childless elements left those huge)
                     const texts = boxes.flatMap((b) => [...b.querySelectorAll('*')])
-                        .filter((e) => e.children.length === 0 && (e.innerText || '').trim());
+                        .filter((e) => [...e.childNodes].some((c) => c.nodeType === 3 && c.nodeValue.trim()));
                     const sizes = new Map(texts.map((e) => [e, parseFloat(getComputedStyle(e).fontSize) || 0]));
                     const over = () => Math.max(0, ...boxes.flatMap((b) => [...b.querySelectorAll('*')])
                         .map((e) => e.getBoundingClientRect().bottom)) - {floor_y};
@@ -904,6 +913,41 @@ class SlideRenderer:
                     return {{ success: false, reason: `there is {{OVER}}px more text than the screen has room for, even at the smallest size; cut a bullet or shorten the headline`.replace('{{OVER}}', Math.round(over())) }};
                 }}
             """, "slide content"))
+
+        if floor_y and slide_type in ("cover", "cta"):
+            # A cover or closing headline is hung from its baseline. In a tall frame a big headline
+            # hung that way can climb into the brand row, and the hand-drawn underline (drawn at the
+            # feed's fixed height) then cuts through the last line instead of sitting under it. The
+            # headline is set smaller until it clears the brand row, and the underline is moved to
+            # sit under whatever the last line now is.
+            steps.append(("""
+                () => {
+                    const box = document.querySelector('.cta-container') || document.querySelector('.headline-container');
+                    const anchor = document.getElementById('cta-baseline-anchor') || document.getElementById('baseline-anchor');
+                    const head = document.querySelector('.header-row');
+                    if (!box || !anchor) return { success: true };
+                    const minTop = (head ? head.getBoundingClientRect().bottom : 180) + 70;
+                    const top = () => Math.min(...[box, ...box.querySelectorAll('*')].map((e) => e.getBoundingClientRect())
+                        .filter((r) => r.height > 1).map((r) => r.top));
+                    const hung = anchor.getBoundingClientRect().bottom;
+                    const texts = [...box.querySelectorAll('*')].filter((e) =>
+                        [...e.childNodes].some((c) => c.nodeType === 3 && c.nodeValue.trim()));
+                    const sizes = new Map(texts.map((e) => [e, parseFloat(getComputedStyle(e).fontSize) || 0]));
+                    for (let k = 0.96; top() < minTop && k >= 0.5; k -= 0.04) {
+                        texts.forEach((e) => { e.style.fontSize = Math.round(sizes.get(e) * k) + 'px'; });
+                        const cur = parseFloat(getComputedStyle(box).top) || 0;
+                        box.style.top = (cur + (hung - anchor.getBoundingClientRect().bottom)) + 'px';
+                    }
+                    const line = document.querySelector('svg.doodle-underline');
+                    const mark = line && (line.querySelector('polygon, path') || line);
+                    if (mark) {
+                        const shift = anchor.getBoundingClientRect().bottom + 16 - mark.getBoundingClientRect().top;
+                        line.style.transform = `translateY(${shift}px)`;
+                    }
+                    return top() >= minTop ? { success: true }
+                        : { success: false, reason: 'the headline is too long to clear the top of the screen; shorten it' };
+                }
+            """, "headline below the brand row"))
 
         if "type_scale" in preset:
             steps = [(_scale_fit_text(js, preset["type_scale"]), label) for js, label in steps]

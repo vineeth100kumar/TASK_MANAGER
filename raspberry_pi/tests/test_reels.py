@@ -414,8 +414,10 @@ class MakeTests(unittest.IsolatedAsyncioTestCase):
             reel = await self.finish(reel)
             self.assertEqual(reel["status"], "done", reel.get("error"))
             self.assertIn("isn't set up", reel["emailError"])
-            again = reels.restart(reel, SMALL.replace("Three things that matter", "Four things that matter"))
+            again = reels.restart(reel, SMALL.replace("Three things that matter", "Four things that matter")
+                                  .replace("title: Tiny reel", "title: A different reel"))
             self.assertEqual(again["status"], "queued")          # the kept recording was used: no new upload
+            self.assertEqual(again["title"], "A different reel")  # an edited script brings its own name
             again = await self.finish(again)
             self.assertEqual(again["status"], "done", again.get("error"))
             self.assertIn("Four things", again["script"])

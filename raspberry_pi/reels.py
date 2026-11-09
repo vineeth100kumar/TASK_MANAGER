@@ -388,6 +388,9 @@ def restart(reel: dict, script: str = "", style: str = "") -> dict:
         report = check(script)
         if not report["ok"]:
             raise ValueError(_first_error(report))
+        # an edited script brings its own title: a reel must not keep the name of the one it replaced
+        if report.get("title"):
+            reel["title"] = str(report["title"]).strip()[:120]
         reel.update(script=script, caption=report["caption"], hashtags=report["hashtags"], voice=report["voice"],
                     needsRecording=report["needsRecording"], scenes=len(report["scenes"]), estimate=report["seconds"])
     if style in STYLES:

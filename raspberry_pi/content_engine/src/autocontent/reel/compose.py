@@ -32,6 +32,7 @@ MOTIONS = {
     "fade":     (0.36, 10),    # body text, a caption, a source line
     "words":    (0.24, 20),    # text: one word at a time, the way the captions run
     "count":    (1.10, 0),     # a big number running up to its real value
+    "label":    (0.42, 0),     # a small label over a headline: rises into place out of a slot
     # the author's own names
     "rise":     (0.55, 64),
     "stagger":  (0.50, 48),
@@ -56,25 +57,38 @@ DIM_IN = 0.45          # how long it takes to fade back
 BAR_H = 8              # the progress bar across the top of the reel
 MARK_IN = 0.0          # a highlighted word is not underlined: the slide designs draw their own
                        # rule under a headline, and a second one under the word reads as a mistake
+# The parts of a piece that are not words, each arriving the way that kind of thing would
+POP_IN = 0.34          # a dot or a numbered/ticked badge: grows from small, a touch past its size
+LINE_IN = 0.36         # a rule: drawn along its length, left to right
+BACK_IN = 0.40         # a pill or a card behind text: laid down from its left end, then the text is typed on
+FADE_IN = 0.22         # anything else that is not a word
+DOODLE_SPEED = 620.0   # px a second a background line is drawn at
+DOODLE_DRAW = (0.9, 2.2)   # however long the line, drawing it takes between these many seconds
+DOODLE_FLOW = 22.0     # px a second its dashes then run along it
 
 # What a piece is, from the classes the renderer gave it, and so how it should arrive.
 # The first match wins, so the more particular classes come first.
 KINDS = (
+    ("kicker", "label", 0),
     ("stat-number", "punch", 0),
-    ("accent-pill", "stamp", 0),
-    ("cta-pill", "stamp", 0),
     ("image-frame", "reveal", 0),
     ("data-table", "grow", 0),
     ("chart-wrap", "grow", 0),
-    ("compare-col left", "slide", -1),
-    ("compare-col right", "slide", 1),
-    ("list-item", "slide", -1),
-    ("bullet-row", "slide", -1),
+    # everything with words in it is typed; its pill, card, rule, dot or badge arrives its own way
+    ("accent-pill", "words", 0),
+    ("cta-pill", "words", 0),
+    ("compare-col", "words", 0),
+    ("list-item", "words", 0),
+    ("bullet-row", "words", 0),
     ("headline", "words", 0),
     ("quote-body", "words", 0),
     ("statement-body", "words", 0),
     ("point-body", "words", 0),
-    ("author-wrapper", "fade", 0),
+    ("stat-body", "words", 0),
+    ("cta-subtext", "words", 0),
+    ("image-caption", "words", 0),
+    ("compare-body", "words", 0),
+    ("author-wrapper", "words", 0),
 )
 
 
@@ -147,7 +161,14 @@ class Piece:
     next one it fades back, so the step being talked about is always the one the eye goes to."""
     count: List[Image.Image] = field(default_factory=list)
     """The same big number photographed on its way up to itself: it runs like a counter."""
+    decos: List[Tuple[int, int, int, int, str]] = field(default_factory=list)
+    """Parts that are not words, inside the picture: (x, y, w, h, kind), kind line | dot | badge."""
+    backing: Optional[Image.Image] = None
+    """The piece with its text invisible, when the text sits on a pill or a card."""
+    word_rgb: List[Tuple[int, int, int]] = field(default_factory=list)
     _rgba: Optional[np.ndarray] = None
+    _back: Optional[np.ndarray] = None
+    _deco_parts: Optional[List[Tuple[np.ndarray, int, int, str, bool]]] = None
     _count: Optional[List[np.ndarray]] = None
     _typing: Optional[List[Tuple[float, float]]] = None
     _parts: Optional[List[Tuple[np.ndarray, int, int]]] = None
@@ -155,14 +176,82 @@ class Piece:
     def how(self, slide_motion: str) -> str:
         if self.count:
             return "count"
+        if self.motion == "label":
+            return "label"
         if self.words and (self.motion in ("words", "sweep") or (not self.motion and slide_motion == "sweep")):
             return "words"
         return self.motion or slide_motion
 
     def takes(self, slide_motion: str) -> float:
         if self.how(slide_motion) == "words":
-            return self.typing[-1][0] + self.typing[-1][1] if self.typing else WORD_IN
+            end = self.lead_in + (self.typing[-1][0] + self.typing[-1][1] if self.typing else WORD_IN)
+            if any(after for *_, after in self.deco_parts):
+                end += LINE_IN
+            return max(end, BACK_IN if self.backing is not None else 0.0)
         return MOTIONS.get(self.how(slide_motion), MOTIONS["fade"])[0]
+
+    @property
+    def lead_in(self) -> float:
+        """How long the text waits before it is typed: for its pill or card to be laid down, or
+        for the dot or badge in front of it to pop on."""
+        if self.backing is not None:
+            return BACK_IN * 0.62
+        if self.words and self.deco_parts:
+            fx, fy, _, fh = self.words[0]
+            bx, by, _, _ = self.box
+            for tile, x, y, kind, after in self.deco_parts:
+                mid = y - by + tile.shape[0] / 2
+                if kind != "line" and not after and fy - 6 <= mid <= fy + fh + 6 and x - bx < fx:
+                    return POP_IN * 0.45          # a dot or number in front of the first words
+        return 0.0
+
+    @property
+    def deco_parts(self) -> List[Tuple[np.ndarray, int, int, str, bool]]:
+        """(pixels, x, y, kind, after) for each part that is not a word. `after` is a part below
+        the text (the rule or underline under a headline): it is drawn once the typing is done."""
+        if self._deco_parts is None:
+            x, y, _, _ = self.box
+            last_mid = max((wy + wh / 2 for _, wy, _, wh in self.words), default=0)
+            out = []
+            for dx, dy, dw, dh, kind in self.decos:
+                tile = self.array[dy:dy + dh, dx:dx + dw].copy()
+                if not tile[..., 3].any():
+                    continue
+                out.append((tile, x + dx, y + dy, kind, bool(self.words) and dy + dh / 2 > last_mid + 4))
+            self._deco_parts = out
+        return self._deco_parts
+
+    def deco_begins(self, k: int) -> float:
+        """When part k (of deco_parts) starts arriving, from the start of the piece. A rule under
+        the text waits for the typing to finish; a dot, tick or number pops on just before the
+        line it stands in front of starts being typed; a rule above the text starts at once."""
+        tile, x, y, kind, after = self.deco_parts[k]
+        plan = self.typing
+        lead = self.lead_in
+        if after:
+            return lead + (plan[-1][0] + plan[-1][1] if plan else 0.0) - 0.06
+        if kind == "line" or not self.words:
+            return lead if kind == "line" else 0.0
+        bx, by, _, _ = self.box
+        mid = y - by + tile.shape[0] / 2
+        left = x - bx + tile.shape[1]
+        # the first word on the same line, to its right
+        for i, (wx, wy, ww, wh) in enumerate(self.words):
+            if wy - 6 <= mid <= wy + wh + 6 and wx >= left - 8:
+                return max(0.0, lead + plan[i][0] - POP_IN * 0.5)
+        return 0.0
+
+    @property
+    def back(self) -> Optional[np.ndarray]:
+        """The pill or card behind the text, without the text and without the dots and rules."""
+        if self.backing is None:
+            return None
+        if self._back is None:
+            arr = np.asarray(self.backing, dtype=np.uint8).copy()
+            for dx, dy, dw, dh, _ in self.decos:
+                arr[dy:dy + dh, dx:dx + dw, 3] = 0
+            self._back = arr
+        return self._back
 
     @property
     def typing(self) -> List[Tuple[float, float]]:
@@ -193,6 +282,10 @@ class Piece:
             for wx, wy, ww, wh in self.words:
                 tiles.append((self.array[wy:wy + wh, wx:wx + ww].copy(), x + wx, y + wy))
                 rest[wy:wy + wh, wx:wx + ww, 3] = 0
+            for dx, dy, dw, dh, _ in self.decos:
+                rest[dy:dy + dh, dx:dx + dw, 3] = 0
+            if self.backing is not None:
+                rest[..., 3] = 0                 # the backing stands in for it, whole
             self._parts = ([(rest, x, y)] if rest[..., 3].any() else []) + tiles
         return self._parts
 
@@ -210,12 +303,48 @@ class Piece:
 
 
 @dataclass
+class DoodleClip:
+    """A background line: drawn on from `at`, then its dashes keep running along it."""
+    draw: List[Image.Image]
+    flow: List[Image.Image]
+    box: Tuple[int, int, int, int]
+    at: float
+    length: float = 600.0
+    period: float = 32.0
+    opacity: float = 1.0
+    _draw: Optional[List[np.ndarray]] = None
+    _flow: Optional[List[np.ndarray]] = None
+
+    @property
+    def draw_takes(self) -> float:
+        lo, hi = DOODLE_DRAW
+        return min(hi, max(lo, self.length / DOODLE_SPEED))
+
+    def state(self, t: float) -> Optional[Tuple[np.ndarray, int, int, float]]:
+        if t < self.at or not self.draw:
+            return None
+        if self._draw is None:
+            self._draw = [np.asarray(im, dtype=np.uint8) for im in self.draw]
+            self._flow = [np.asarray(im, dtype=np.uint8) for im in self.flow]
+        u = (t - self.at) / self.draw_takes
+        if u < 1.0:
+            k = min(len(self._draw) - 1, int(ease_in_out(u) * len(self._draw)))
+            return self._draw[k], self.box[0], self.box[1], self.opacity
+        if not self._flow:
+            return self._draw[-1], self.box[0], self.box[1], self.opacity
+        run = (t - self.at - self.draw_takes) * DOODLE_FLOW / max(self.period, 1.0)
+        k = int(run * len(self._flow)) % len(self._flow)
+        return self._flow[k], self.box[0], self.box[1], self.opacity
+
+
+@dataclass
 class SceneClip:
     t0: float
     t1: float
     base: Image.Image
     pieces: List[Piece] = field(default_factory=list)
     motion: str = "rise"
+    doodles: List[DoodleClip] = field(default_factory=list)
     _base_arr: Optional[np.ndarray] = None
 
     @property
@@ -283,6 +412,13 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
             arr = p.counting[k]
             x, y = p.box[0], p.box[1] + (h - arr.shape[0]) // 2
             opacity = min(1.0, u * 5.0)
+        elif m == "label":
+            # rises out of a slot whose floor is the label's own baseline: no fade, no drift
+            off = int(round((1 - e) * h))
+            if off >= h:
+                return None
+            arr = arr[:h - off]
+            y = y + off
         elif m in ("punch", "pop"):
             small = 0.74 if m == "punch" else 0.86
             arr, x, y = _scaled(p.image, p.box, small + (1 - small) * ease_out_back(u))
@@ -318,36 +454,85 @@ def _piece_state(p: Piece, t: float, motion: str, clip: SceneClip) -> Optional[T
     return arr, int(x + dx), int(y + dy), opacity
 
 
+def _pop(tile: np.ndarray, x: int, y: int, u: float) -> Tuple[np.ndarray, int, int, float]:
+    """A dot or badge growing from small to a touch past its size, then settling."""
+    k = 0.25 + 0.75 * ease_out_back(u)
+    h, w = tile.shape[:2]
+    nw, nh = max(1, int(round(w * k))), max(1, int(round(h * k)))
+    if (nw, nh) != (w, h):
+        tile = np.asarray(Image.fromarray(tile).resize((nw, nh), Image.BICUBIC), dtype=np.uint8)
+    return tile, x + (w - nw) // 2, y + (h - nh) // 2, min(1.0, u * 3.0)
+
+
+def _drawn(tile: np.ndarray, x: int, y: int, u: float) -> Tuple[np.ndarray, int, int, float]:
+    """A rule drawn along its length: a hard leading edge, like a pen."""
+    cut = max(1, int(round(tile.shape[1] * ease_out_cubic(u))))
+    return tile[:, :cut], x, y, 1.0
+
+
+def _laid(tile: np.ndarray, x: int, y: int, u: float) -> Tuple[np.ndarray, int, int, float]:
+    """A pill or card laid down from its left end: it stretches out a little past its length and
+    settles, so it lands with weight, and the text is then typed onto it."""
+    h, w = tile.shape[:2]
+    k = max(0.02, ease_out_back(u))
+    nw = max(1, int(round(w * k)))
+    if nw != w:
+        tile = np.asarray(Image.fromarray(tile).resize((nw, h), Image.BICUBIC), dtype=np.uint8)
+    return tile, x, y, min(1.0, u * 4.0)
+
+
 def _word_states(p: Piece, t: float, clip: SceneClip) -> List[Tuple[np.ndarray, int, int, float]]:
-    """Every visible part of a typed piece at time t. The text is typed out left to right with a
-    hard edge, one word after another, with a caret standing at the point it has reached, so a
-    headline is written on the screen rather than switched on."""
+    """Every visible part of a typed piece at time t, each part arriving as what it is:
+    a pill or card is laid down, a dot or badge pops on, the text is typed out left to right with
+    a hard edge and a caret standing where it has reached, and a rule under the text is drawn
+    once the typing is done."""
     out: List[Tuple[np.ndarray, int, int, float]] = []
+    if t < p.at:
+        return out
+    since = t - p.at
+    back = p.back
+    if back is not None:
+        u = since / BACK_IN
+        out.append(_laid(back, p.box[0], p.box[1], u) if u < 1 else (back, p.box[0], p.box[1], 1.0))
     parts = p.parts
     plan = p.typing
-    extra = len(parts) - len(p.words)          # the leading not-a-word part, if there is one
-    caret = None
-    for k, (arr, x, y) in enumerate(parts):
-        w = k - extra
-        if w < 0:                              # rules, bullets, a marker behind the text
-            if t >= p.at:
-                out.append((arr, int(x), int(y), 1.0))
-            continue
-        start, dur = plan[w]
-        u = (t - (p.at + start)) / dur
+    lead = p.lead_in
+    for k, (tile, x, y, kind, after) in enumerate(p.deco_parts):
+        begin = p.deco_begins(k)
+        u = (since - begin) / (LINE_IN if kind == "line" else POP_IN)
         if u <= 0:
             continue
+        if u >= 1:
+            out.append((tile, x, y, 1.0))
+        elif kind == "line":
+            out.append(_drawn(tile, x, y, u))
+        else:
+            out.append(_pop(tile, x, y, u))
+    extra = len(parts) - len(p.words)          # the leading not-a-word part, if there is one
+    caret = None
+    caret_rgb = p.accent_rgb
+    for k, (arr, x, y) in enumerate(parts):
+        w = k - extra
+        if w < 0:                              # whatever else is left: it simply fades in
+            out.append((arr, int(x), int(y), min(1.0, since / FADE_IN)))
+            continue
+        start, dur = plan[w]
+        u = (since - lead - start) / dur
+        if u <= 0:
+            continue
+        if back is not None and w < len(p.word_rgb):
+            caret_rgb = p.word_rgb[w]          # on a pill the caret is the text's colour, not the pill's
         if u < 1.0:
             cut = max(1, int(round(arr.shape[1] * u)))
             arr = arr[:, :cut]
             caret = (x + cut, y, arr.shape[0])
-        elif w + 1 < len(plan) and t < p.at + plan[w + 1][0]:
+        elif w + 1 < len(plan) and since - lead < plan[w + 1][0]:
             caret = (x + arr.shape[1], y, arr.shape[0])   # waiting between two words
         out.append((arr, int(x), int(y), 1.0))
     if caret is not None:
         cx, cy, ch = caret
         bar = np.zeros((ch + CARET_PAD * 2, CARET_W, 4), dtype=np.uint8)
-        bar[..., :3] = p.accent_rgb
+        bar[..., :3] = caret_rgb
         bar[..., 3] = 255
         out.append((bar, int(cx) + 4, int(cy) - CARET_PAD, 1.0))
     return out
@@ -378,8 +563,7 @@ class Timeline:
         self.clips = clips
         self.captions = captions
         self.total = total
-        self._last_key = None
-        self._last_frame: Optional[np.ndarray] = None
+        self._cache: Dict[int, np.ndarray] = {}
 
     def _clip_at(self, t: float) -> Tuple[int, SceneClip]:
         for i, c in enumerate(self.clips):
@@ -390,14 +574,7 @@ class Timeline:
     def frame(self, t: float) -> np.ndarray:
         i, clip = self._clip_at(t)
         cap = next((c for c in self.captions if c.t0 <= t < c.t1), None)
-        settled = (not clip.moving and clip.settles_at <= t < clip.t1 - EXIT)
-        # while the camera sits on the same pixel and nothing is arriving, the frame is the one before
-        fading = any(p.seq and t < p.at + DIM_IN + 0.02 for p in clip.pieces)
-        settled = settled and not fading
-        key = (i, cap.t0 if cap else None, cap.first and t < (cap.t0 + 0.12) if cap else None) if settled else None
-        if key is not None and key == self._last_key and self._last_frame is not None:
-            return self._with_bar(self._last_frame, t)
-        frame = self._content(clip, t)
+        frame = self._scene(i, t)
         # the slide change: the next slide's backdrop is wiped over this one as it leaves,
         # alternating direction, so one slide becomes the next instead of simply cutting
         if i + 1 < len(self.clips) and t > clip.t1 - EXIT:
@@ -406,7 +583,7 @@ class Timeline:
                 ramp = _rows(a, up=bool(i % 2))
                 # the next slide is wiped in already carrying whatever has started arriving on it,
                 # so the change never shows a bare backdrop
-                nxt = self._content(self.clips[i + 1], t).astype(np.float32)
+                nxt = self._scene(i + 1, t).astype(np.float32)
                 frame = (frame.astype(np.float32) * (1 - ramp) + nxt * ramp).astype(np.uint8)
         if cap:
             arr = cap.array
@@ -421,8 +598,28 @@ class Timeline:
             if leave > 0 and i + 1 >= len(self.clips):
                 op *= max(0.0, 1 - leave)
             _blend(frame, arr, x, y, op)
-        self._last_key, self._last_frame = key, frame
         return self._with_bar(frame, t)
+
+    def _scene(self, i: int, t: float) -> np.ndarray:
+        """Slide i at time t, as a fresh array: its backdrop and pieces (kept once nothing on it
+        moves any more), then its background lines, which keep running until it leaves."""
+        clip = self.clips[i]
+        fading = any(p.seq and t < p.at + DIM_IN + 0.02 for p in clip.pieces)
+        settled = not clip.moving and not fading and t >= clip.settles_at
+        cached = self._cache.get(i)
+        if settled and cached is not None:
+            frame = cached.copy()
+        else:
+            frame = self._content(clip, t)
+            if settled:
+                self._cache = {k: v for k, v in self._cache.items() if k >= i - 1}
+                self._cache[i] = frame.copy()
+        for d in clip.doodles:
+            state = d.state(t)
+            if state:
+                arr, x, y, op = state
+                _blend(frame, arr, x, y, op)
+        return frame
 
     @staticmethod
     def _content(clip: SceneClip, t: float) -> np.ndarray:
