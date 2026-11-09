@@ -510,7 +510,6 @@ say: The financial crisis hit sales and profits, and the listing helped repay de
         self.assertLessEqual(bottom, floor + 1, "the slide's content must stop above the caption band")
 
 
-@unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")
 class MotionTests(unittest.TestCase):
     """Each thing on a slide arrives the way that kind of thing would."""
 
@@ -705,6 +704,7 @@ class MotionTests(unittest.TestCase):
         self.assertLess(got["line"], got["base"] + 60)
 
 
+@unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")
 class EndToEndTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
