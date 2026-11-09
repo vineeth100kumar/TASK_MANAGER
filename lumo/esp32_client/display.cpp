@@ -71,23 +71,35 @@ static float   blCur    = -1;     // brightness now, 0..100 (-1 = not set up yet
 static float   blTarget = 0;      // where it is easing to
 static uint32_t blLastTick = 0;
 static int32_t blLastDuty = -1;
+static uint8_t blRes     = BL_RES;   // the PWM resolution actually in use
+static int32_t blMaxDuty = (1 << BL_RES) - 1;
 
 static void blWriteDuty(float pct) {
   if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
-  const int32_t maxDuty = (1 << BL_RES) - 1;
-  int32_t duty = (int32_t)(powf(pct / 100.0f, BL_GAMMA) * maxDuty + 0.5f);
-  if (pct >= 100) duty = maxDuty;             // dead-on full, no PWM ripple
+  int32_t duty = (int32_t)(powf(pct / 100.0f, BL_GAMMA) * blMaxDuty + 0.5f);
+  if (pct >= 100) duty = blMaxDuty;           // dead-on full, no PWM ripple
   if (duty == blLastDuty) return;
   blLastDuty = duty;
   ledcWrite(BL_PIN, duty);
 }
 
 void backlightInit(uint8_t level) {
-  ledcAttach(BL_PIN, BL_FREQ, BL_RES);
+  // LEDC runs off an 80 MHz clock: freq * 2^res must fit under it, or the
+  // attach fails and the pin does nothing. Drop the resolution until the
+  // carrier fits (20 kHz needs 11 bits, not 12), the same guard the haptics
+  // use. That is still 2048 steps, smooth for brightness.
+  blRes = BL_RES;
+  while (blRes > 4 && (80000000UL >> blRes) < BL_FREQ) blRes--;
+  if (!ledcAttach(BL_PIN, BL_FREQ, blRes)) {   // belt and suspenders
+    blRes = 10;
+    ledcAttach(BL_PIN, BL_FREQ, blRes);
+  }
+  blMaxDuty = (1 << blRes) - 1;
   blCur = blTarget = level;
   blLastDuty = -1;
   blWriteDuty(blCur);
   blLastTick = millis();
+  Serial.printf("[BL] backlight PWM on GPIO%d: %u Hz, %u-bit\n", BL_PIN, (unsigned)BL_FREQ, (unsigned)blRes);
 }
 
 void backlightSet(uint8_t level, bool immediate) {
