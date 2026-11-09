@@ -157,7 +157,7 @@
 #define FRAME_VERT    20
 
 // ===================== FIRMWARE =====================
-#define FW_VERSION "2.24.0"
+#define FW_VERSION "2.24.1"
 
 // Trial boot (2.18, ota.cpp): a new version is kept once Sage has accepted it
 // and it has run this long without restarting...
