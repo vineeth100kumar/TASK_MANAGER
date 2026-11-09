@@ -353,6 +353,16 @@ def _word_states(p: Piece, t: float, clip: SceneClip) -> List[Tuple[np.ndarray, 
     return out
 
 
+def tidy_captions(clips: List[CaptionClip]) -> List[CaptionClip]:
+    """Two captions must never be on screen together, and the band shouldn't blink empty between
+    phrases: each caption ends exactly where the next begins, and the last word of a phrase holds
+    (up to a second and a half) into the gap before the next one."""
+    clips = sorted(clips, key=lambda c: c.t0)
+    for a, b in zip(clips, clips[1:]):
+        a.t1 = min(b.t0, a.t1 + 1.5) if b.t0 > a.t1 else b.t0
+    return clips
+
+
 def _rows(done: float, up: bool) -> np.ndarray:
     """A top-to-bottom (or bottom-to-top) alpha ramp for the whole frame: the slide change."""
     edge = np.arange(H) if not up else (H - 1 - np.arange(H))

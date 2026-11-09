@@ -199,11 +199,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     caption_clips.append(compose.CaptionClip(
                         t0=start, t1=max(end, start + 0.05), image=Image.open(ph.pictures[k]).convert("RGBA"),
                         box=ph.box, first=(k == 0)))
-            # a caption shouldn't blink out between phrases: the last word of one holds until the
-            # next phrase starts (up to a second and a half), so the band is never empty mid-slide
-            for a, b in zip(caption_clips, caption_clips[1:]):
-                if b.t0 > a.t1:
-                    a.t1 = min(b.t0, a.t1 + 1.5)
+            caption_clips = compose.tidy_captions(caption_clips)
         browser.close()
 
     # --- the video ---

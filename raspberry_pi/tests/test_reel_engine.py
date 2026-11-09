@@ -353,6 +353,17 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(tuple(caret(early)[0][0, 0, :3]), (238, 68, 37))
         self.assertLess(caret(early)[1], caret(late)[1], "the caret moves along as the text is typed")
 
+    def test_two_captions_are_never_on_screen_together(self):
+        from PIL import Image
+        pic = Image.new("RGBA", (200, 80), (0, 0, 0, 255))
+        clips = [compose.CaptionClip(0.0, 1.4, pic, (0, 1550)),     # runs past the next one
+                 compose.CaptionClip(1.0, 1.6, pic, (0, 1550)),
+                 compose.CaptionClip(4.0, 4.2, pic, (0, 1550))]     # a gap before this one
+        out = compose.tidy_captions(clips)
+        for a, b in zip(out, out[1:]):
+            self.assertLessEqual(a.t1, b.t0, "captions must not overlap")
+        self.assertEqual(out[1].t1, 3.1, "the last caption of a phrase holds into the gap, up to 1.5s")
+
     def test_a_big_number_counts_up_to_itself(self):
         from PIL import Image
         steps = layers.count_steps("65%")
@@ -398,6 +409,91 @@ class ComposeTests(unittest.TestCase):
         self.assertTrue((tl.frame(0.5)[1580, 540] == 255).all())
         self.assertEqual(tuple(tl.frame(1.5)[1580, 540]), (0, 0, 255))
         self.assertTrue((tl.frame(2.5)[1580, 540] == 255).all())
+
+
+class CrowdedSlideTests(unittest.TestCase):
+    """A script can arrive with far more on a slide than a phone screen holds — an AI wrote it, or
+    the author pasted a paragraph. The check says so, and the renderer makes it fit anyway."""
+
+    HUGE = """---
+autocontent: reel
+title: Too much
+voice: af_heart
+---
+
+## point
+kicker: A KICKER THAT IS FAR TOO LONG TO BE A LABEL
+headline: This headline goes on and on and will not fit the screen at all
+- The financial crisis hurt sales and profitability across the whole business
+- Its two thousand and ten stock listing helped repay a great deal of debt
+- A third bullet that also runs on well past the room a reel screen has
+- And a fourth one, because nothing stopped the writer putting it in
+- And a fifth for good measure
+source: Somewhere, 2026
+say: There is far too much on this slide for anyone to read in four seconds.
+"""
+
+    def test_an_overstuffed_slide_is_an_error_with_a_way_out(self):
+        reel = parse_reel(self.HUGE)
+        codes = [i.code for i in reel.issues]
+        self.assertIn("SLIDE_TOO_FULL", codes)
+        self.assertFalse(reel.ok, "it should stop before anything is drawn")
+        too_full = next(i for i in reel.issues if i.code == "SLIDE_TOO_FULL")
+        self.assertEqual(too_full.slide, 1)
+        self.assertIn("Split it", too_full.hint)
+        self.assertIn("KICKER_LONG", codes)
+        self.assertIn("HEADLINE_LONG", codes)
+
+    FULL = """---
+autocontent: reel
+title: A full slide
+voice: af_heart
+---
+
+## cover
+headline: Three habits that save an **hour**
+say: Three small habits give you back an hour a day.
+
+## point
+headline: What the crisis did
+- The financial crisis hurt sales and profitability
+- The 2010 listing helped repay a good deal of debt
+- Restructuring took the best part of two long years
+say: The financial crisis hit sales and profits, and the listing helped repay debt.
+"""
+
+    def test_a_full_slide_is_only_a_warning(self):
+        reel = parse_reel(self.FULL)
+        self.assertTrue(reel.ok, [i.message for i in reel.errors])
+        self.assertIn("SLIDE_FULL", [i.code for i in reel.issues])
+
+    @unittest.skipUnless(CHROMIUM, "needs Chromium")
+    def test_the_renderer_makes_a_full_slide_fit_above_the_captions(self):
+        os.environ["AUTOCONTENT_CHROMIUM"] = CHROMIUM
+        os.environ["AUTOCONTENT_NO_SANDBOX"] = "1"
+        """The fail-safe: whatever the script asks for, the slide's own content stops above the
+        band the spoken captions run in. Nothing may be drawn over them."""
+        from autocontent.render.renderer import SlideRenderer, browser_launch_options
+        from autocontent.render.style_config import CANVAS_FORMATS
+        from playwright.sync_api import sync_playwright
+        floor = CANVAS_FORMATS["reel"]["content_bottom"]
+        slide = {"n": 1, "type": "point", "kicker": "2008-2010: THE EARLY TEST",
+                 "headline": "A difficult start led to **restructuring** of the whole business",
+                 "bullets": ["The financial crisis hurt sales and profitability",
+                             "Its 2010 stock listing helped repay a great deal of debt",
+                             "A third bullet, because an AI wrote the script"],
+                 "source_note": "NXP SEC Form 6-K, Nov 2010"}
+        renderer = SlideRenderer("grid_pill", canvas_format="reel")
+        renderer.collect_fit = True
+        with sync_playwright() as pw:
+            browser = pw.chromium.launch(**browser_launch_options())
+            page = browser.new_page(viewport={"width": 1080, "height": 1920}, device_scale_factor=1)
+            renderer.lay_out(page, slide, renderer.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@mind.deeds"}, 1, 1))
+            bottom = page.evaluate("""() => Math.max(0, ...[...document.querySelectorAll('.content-container *')]
+                .map((e) => e.getBoundingClientRect().bottom).filter((v) => v > 0))""")
+            browser.close()
+        self.assertTrue(renderer.fit_report[0]["ok"], renderer.fit_report[0]["problems"])
+        self.assertLessEqual(bottom, floor + 1, "the slide's content must stop above the caption band")
 
 
 @unittest.skipUnless(CHROMIUM and FFMPEG, "needs Chromium and ffmpeg")

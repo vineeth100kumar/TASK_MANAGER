@@ -41,6 +41,30 @@ DEFAULT_VOICE = "af_heart"
 WORDS_PER_SECOND = 2.55      # a calm spoken pace, for the length estimate before any voice exists
 MAX_SECONDS = 90.0           # a reel longer than this loses most viewers
 LONG_SCENE_WORDS = 55
+# How much text one reel slide can carry and still be read on a phone. A reel sets type far
+# larger than a feed slide, so the room runs out much sooner; these are the numbers the fitter
+# can still honour without shrinking the slide back to feed size.
+SLIDE_WORDS_ROOMY = 26       # over this, the slide is set smaller than it should be
+SLIDE_WORDS_FULL = 40        # over this, something has to go
+BULLETS_FULL = 4
+HEADLINE_WORDS = 9
+KICKER_CHARS = 28
+
+
+def _slide_text(slide: Dict[str, Any]) -> Tuple[List[str], int]:
+    """Everything that is set on the slide itself: the pieces of text, and the total word count."""
+    parts: List[str] = []
+    for key in ("headline", "body", "number", "subtext", "text", "quote", "author", "kicker", "pill"):
+        v = slide.get(key)
+        if isinstance(v, str) and v.strip():
+            parts.append(v.strip())
+    for key in ("bullets", "items", "numbered", "left", "right", "points"):
+        v = slide.get(key)
+        if isinstance(v, list):
+            parts += [str(x) for x in v if str(x).strip()]
+        elif isinstance(v, dict):
+            parts += [str(x) for x in v.values() if str(x).strip()]
+    return parts, sum(len(re.findall(r"\S+", p)) for p in parts)
 
 
 @dataclass
@@ -273,6 +297,29 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
         if s.say and re.search(r"[#*_`<>{}\[\]|]", s.say):
             issues.append(SpecIssue("WARN", "SAY_SYMBOLS", f"Slide {s.n}'s narration has symbols that a voice may read aloud or skip.",
                                     slide=s.n, line=s.line, hint="Write it the way it is spoken."))
+        texts, n_words = _slide_text(s.slide)
+        bullets = [k for k in ("bullets", "items", "numbered", "points") if isinstance(s.slide.get(k), list)]
+        n_bullets = max([len(s.slide[k]) for k in bullets] or [0])
+        if n_words > SLIDE_WORDS_FULL or n_bullets > BULLETS_FULL:
+            issues.append(SpecIssue("ERROR", "SLIDE_TOO_FULL",
+                                    f"Slide {s.n} has {n_words} words of text{f' in {n_bullets} bullets' if n_bullets else ''}; "
+                                    f"a reel screen holds about {SLIDE_WORDS_ROOMY}.",
+                                    slide=s.n, line=s.line,
+                                    hint="Split it into two slides, or cut it to three short bullets. The voice carries the detail; the slide carries the point."))
+        elif n_words > SLIDE_WORDS_ROOMY:
+            issues.append(SpecIssue("WARN", "SLIDE_FULL",
+                                    f"Slide {s.n} has {n_words} words of text; over about {SLIDE_WORDS_ROOMY} the type is set smaller to fit.",
+                                    slide=s.n, line=s.line, hint="Shorten a bullet or move a detail into `say:`."))
+        head = str(s.slide.get("headline") or "")
+        if len(head.split()) > HEADLINE_WORDS:
+            issues.append(SpecIssue("WARN", "HEADLINE_LONG",
+                                    f"Slide {s.n}'s headline is {len(head.split())} words; under {HEADLINE_WORDS} reads at a glance.",
+                                    slide=s.n, line=s.line, hint="Say the rest in `say:`."))
+        kicker = str(s.slide.get("kicker") or "")
+        if len(kicker) > KICKER_CHARS:
+            issues.append(SpecIssue("WARN", "KICKER_LONG",
+                                    f"Slide {s.n}'s kicker is {len(kicker)} characters; it is a label, not a sentence.",
+                                    slide=s.n, line=s.line, hint=f"Keep it under {KICKER_CHARS} characters, or drop it."))
         if s.show and s.say:
             hay = _norm(s.say)
             for cue in s.show:
