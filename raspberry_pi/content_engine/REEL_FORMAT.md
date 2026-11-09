@@ -28,6 +28,7 @@ HOW A GOOD REEL WORKS
 - HOW MUCH GOES ON THE SLIDE ITSELF (this is a hard limit, not a style note — a reel sets type far larger than a feed slide): about 26 words of slide text in all, counting the headline, the bullets, the body and the kicker. Over 40 words, or more than four bullets, and the script is refused. Three short bullets is the comfortable shape. The voice carries the detail; the slide carries the point.
 - A headline is under 9 words. A kicker is a label under 28 characters, not a sentence. A stat's number is a number, not a sentence.
 - Write the narration the way people talk: short sentences, plain words, contractions. Read it aloud. Spell out how numbers are said ("two thirds", "five lakh rupees"), or write 65% / ₹5 lakh and the voice will say them properly.
+- For an abbreviation the voice should spell out, put spaces between the capitals in `say:` ("N X P", "A I", "U K"). The captions put it back together and show NXP, AI, UK.
 - The narration and the slide say the same thing in different ways: the slide shows the number or the three steps, the voice explains why it matters. Do not read the slide word for word.
 - Build curiosity slide to slide; save the best insight for the middle; end with a reason to save or comment.
 - Use only facts you were given and never invent statistics. Put `source:` on slides that state facts.
@@ -88,7 +89,7 @@ These are the reel's own lines.
 | `transition:` | header | The slide change; `fade` is the default and the only one that differs visibly today. | |
 | `music:` | header | **Ignored, with a warning.** Add trending audio in Instagram. | |
 | `aspect:` / `format:` | header | **Ignored, with a warning.** A reel is always 9:16, 1080x1920. | `ratio:`, `size:` |
-| `say:` | each slide | The narration. A continuation line may be indented under it. | `vo:`, `voiceover:`, `narration:`, `speak:` |
+| `say:` | each slide | The narration. A continuation line may be indented under it. Single capitals in a row ("N X P") are spoken as letters and shown joined up on the caption. | `vo:`, `voiceover:`, `narration:`, `speak:` |
 | `show:` | each slide | Cue phrases copied from `say:`, separated by `\|` (`;`, `->` and `→` also work). One per piece. With one fewer than there are pieces, the first piece opens the slide and the cues start at the second. | `cue:`, `cues:` |
 | `motion:` | each slide | Forces one motion on the whole slide (see below). Leave it out and each piece gets its own. | `animation:`, `animate:` |
 | `duration:` | each slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |

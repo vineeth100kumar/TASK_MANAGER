@@ -6,6 +6,7 @@ the right moment, so the caption follows the voice like the captions people expe
 Colours follow the slide behind them (dark text on light slides, white text on dark and accent ones).
 """
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Sequence, Tuple
@@ -42,10 +43,45 @@ class Phrase:
         return self.words[-1].end
 
 
+_LETTER = re.compile(r"^([A-Z])([.,!?;:\"')\u201d\u2019\u2026-]*)$")
+
+
+def join_spelled(words: List[Timed]) -> List[Timed]:
+    """Put a spelled-out abbreviation back together for the caption.
+
+    A narration says "N X P" so the voice reads the letters rather than a word, but on screen the
+    viewer should read NXP. Any run of two or more single capital letters becomes one caption word,
+    spanning from the first letter's start to the last one's end, so it is still highlighted at the
+    moment it is being said. Lower-case letters are left alone, so "a" and "I" in ordinary writing
+    are never swallowed."""
+    out: List[Timed] = []
+    i = 0
+    while i < len(words):
+        run = []
+        j = i
+        while j < len(words):
+            m = _LETTER.match(words[j].text)
+            if not m or (run and run[-1][1]):      # punctuation ends the abbreviation
+                if m and not run:
+                    run.append(m.groups())
+                    j += 1
+                break
+            run.append(m.groups())
+            j += 1
+        if len(run) >= 2:
+            out.append(Timed("".join(a for a, _ in run) + run[-1][1], words[i].start, words[j - 1].end))
+            i = j
+        else:
+            out.append(words[i])
+            i += 1
+    return out
+
+
 def make_phrases(scene_words: Sequence[Tuple[int, List[Timed]]]) -> List[Phrase]:
     """Cut each slide's words into short phrases at sentence ends, commas, pauses and a length limit."""
     phrases: List[Phrase] = []
     for scene, words in scene_words:
+        words = join_spelled(words)
         cur: List[Timed] = []
         for i, w in enumerate(words):
             cur.append(w)

@@ -353,6 +353,18 @@ class ComposeTests(unittest.TestCase):
         self.assertEqual(tuple(caret(early)[0][0, 0, :3]), (238, 68, 37))
         self.assertLess(caret(early)[1], caret(late)[1], "the caret moves along as the text is typed")
 
+    def test_a_spelled_out_abbreviation_reads_as_a_word(self):
+        """`say: N X P` makes the voice read the letters; the caption should still show NXP."""
+        make = lambda text: [align.Timed(w, i * 0.3, i * 0.3 + 0.25) for i, w in enumerate(text.split())]
+        said = lambda text: [w.text for w in captions.join_spelled(make(text))]
+        self.assertEqual(said("N X P restructured, then listed"), ["NXP", "restructured,", "then", "listed"])
+        self.assertEqual(said("running on A I. devices"), ["running", "on", "AI.", "devices"])
+        self.assertEqual(said("In the U K, sales rose"), ["In", "the", "UK,", "sales", "rose"])
+        self.assertEqual(said("a I think so"), ["a", "I", "think", "so"])   # ordinary words are left alone
+        joined = captions.join_spelled(make("N X P grew"))[0]
+        self.assertAlmostEqual(joined.start, 0.0)
+        self.assertAlmostEqual(joined.end, 0.85)      # it is lit for as long as the letters are said
+
     def test_two_captions_are_never_on_screen_together(self):
         from PIL import Image
         pic = Image.new("RGBA", (200, 80), (0, 0, 0, 255))
