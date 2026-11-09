@@ -56,7 +56,10 @@ ENGINE_DIR = posts.ENGINE_DIR
 REELS_DIR = notifier.DATA_DIR / "sage_reels"
 STYLES = posts.STYLES
 MAX_SCRIPT = 60_000          # characters
-MAX_QUEUE = 3                # reels waiting or being made at once
+MAX_QUEUE = 4                # reels waiting or being made at once
+# A quiet minute between videos: when one render finishes, the next queued reel waits this long
+# before it starts, so the Pi settles (and its CPU, memory and disk recover) between videos.
+COOLDOWN_SECONDS = int(os.environ.get("SAGE_REELS_COOLDOWN", "60"))
 RENDER_TIMEOUT = 2400        # seconds; a Pi 5 needs a few minutes for a minute of video
 KEEP = 30                    # reels kept (a finished one is 10 to 60 MB)
 LOG_LINES = 120
@@ -67,6 +70,7 @@ MEMORY_CHECK_SECONDS = 2.0
 
 _ids = re.compile(r"[0-9a-f]{12}")
 _tasks: set = set()
+_last_finished: float = 0.0   # time.monotonic() when the last reel render ended (for the cooldown)
 
 PROGRESS = posts.PROGRESS
 # progress lines the engine prints, and how far through the work each one is
@@ -153,7 +157,7 @@ def get(reel_id: str) -> Optional[dict]:
     return json.loads(row["payload"]) if row else None
 
 
-def recent(project_id: str = "", limit: int = 60) -> List[dict]:
+def recent(project_id: str = "", limit: int = 60, archived: bool = False) -> List[dict]:
     conn = _db()
     try:
         rows = conn.execute("SELECT payload FROM reels ORDER BY created_at DESC").fetchall()
@@ -164,10 +168,35 @@ def recent(project_id: str = "", limit: int = 60) -> List[dict]:
         reel = json.loads(row["payload"])
         if project_id and reel.get("projectId") != project_id:
             continue
+        # Rejected reels are kept in the archive (their script stays, the video is gone); the main
+        # list shows live reels only, and ?archived=true shows the archive instead.
+        if bool(reel.get("archived")) != bool(archived):
+            continue
         out.append(summary(reel))
         if limit and len(out) >= limit:
             break
+    _mark_queue_positions(out)
     return out
+
+
+def queue_position(reel_id: str) -> int:
+    """This reel's place in the make line: 1 is being made (or next), 2 is behind it, and so on.
+    0 means it isn't waiting."""
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT id FROM reels WHERE status IN ('queued', 'running') ORDER BY created_at ASC").fetchall()
+    finally:
+        conn.close()
+    ids = [r["id"] for r in rows]
+    return ids.index(reel_id) + 1 if reel_id in ids else 0
+
+
+def _mark_queue_positions(rows: List[dict]) -> None:
+    """Number the waiting reels in a list by when they were made, cheaply (no per-row query)."""
+    waiting = sorted((r for r in rows if r.get("status") in ("queued", "running")),
+                     key=lambda r: r.get("createdAt") or "")
+    for i, r in enumerate(waiting, start=1):
+        r["queuePosition"] = i
 
 
 _ROW_DROP = ("script", "log", "caption", "timeline", "warnings")
@@ -178,6 +207,9 @@ def summary(reel: dict) -> dict:
     keep = {k: v for k, v in reel.items() if k not in _ROW_DROP}
     keep["captionStart"] = (reel.get("caption") or "")[:140]
     keep["media"] = media_info(reel)
+    keep.setdefault("review", "pending")
+    keep.setdefault("archived", False)
+    keep["queuePosition"] = 0
     return keep
 
 
@@ -348,6 +380,9 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
         "projectId": project_id or None,
         "taskId": None,
         "status": "waiting" if report["needsRecording"] else "queued",
+        "review": "pending",   # pending | approved | rejected
+        "archived": False,     # a rejected reel is archived: the script is kept, the video removed
+        "archivedAt": None,
         "error": "",
         "log": [],
         "progress": {"percent": 0, "stage": ""},
@@ -492,8 +527,24 @@ def _note(reel: dict, text: str) -> None:
     del reel["log"][:-LOG_LINES]
 
 
+async def _cooldown(reel: dict) -> None:
+    """Wait out the quiet minute after the previous video before this one starts. The reel stays
+    'queued' meanwhile, with the stage saying how long is left, so the page shows it resting."""
+    if _last_finished <= 0 or COOLDOWN_SECONDS <= 0:
+        return
+    remaining = COOLDOWN_SECONDS - (time.monotonic() - _last_finished)
+    while remaining > 0:
+        reel["progress"] = {"percent": 0, "stage": f"A short rest between videos — starting in {round(remaining)}s"}
+        await save_async(reel)
+        await _announce(reel)
+        await asyncio.sleep(min(remaining, 5.0))
+        remaining = COOLDOWN_SECONDS - (time.monotonic() - _last_finished)
+
+
 async def _run(reel: dict) -> None:
+    global _last_finished
     async with posts._lock:  # one post or reel at a time on the Pi
+        await _cooldown(reel)
         folder = REELS_DIR / reel["id"]
         out = folder / "out"
         shutil.rmtree(out, ignore_errors=True)
@@ -512,6 +563,7 @@ async def _run(reel: dict) -> None:
             reel["status"], reel["error"] = "failed", f"Making it took longer than {RENDER_TIMEOUT // 60} minutes and was stopped."
         except Exception as e:
             reel["status"], reel["error"] = "failed", str(e)[:300] or e.__class__.__name__
+        _last_finished = time.monotonic()  # the cooldown for the next video runs from here
         _finish(reel, folder, code)
         reel["finishedAt"] = _utc()
         await save_async(reel)
@@ -767,6 +819,13 @@ def delete(reel_id: str) -> bool:
     return cur.rowcount > 0
 
 
+def _strip_media(reel: dict) -> None:
+    """Remove a reel's rendered video (and poster), keeping its script and any uploaded voice so it
+    can be remade from the archive later. The out/ folder holds the render; the voice sits beside it."""
+    shutil.rmtree(REELS_DIR / reel["id"] / "out", ignore_errors=True)
+    reel["size"] = 0
+
+
 # --- Media files: the finished video and its poster, served straight off disk ---
 #
 # Same rules as /media/posts/ (posts.py): the login cookie, the API key or the reel's own signed
@@ -793,7 +852,11 @@ def media_info(reel: dict) -> Optional[dict]:
 
 
 def with_media(reel: dict) -> dict:
-    return {**reel, "media": media_info(reel)}
+    out = {**reel, "media": media_info(reel)}
+    out.setdefault("review", "pending")
+    out.setdefault("archived", False)
+    out["queuePosition"] = queue_position(reel["id"]) if reel.get("status") in ("queued", "running") else 0
+    return out
 
 
 def _download_name(raw: str, ext: str) -> str:
@@ -831,8 +894,9 @@ def _bad(message: str, code: int = 400) -> JSONResponse:
 
 
 @router.get("/api/reels")
-def reels_list(projectId: str = "", limit: int = 60):
-    return {"success": True, "status": status(), "reels": recent(projectId, max(1, min(limit, 100)))}
+def reels_list(projectId: str = "", limit: int = 60, archived: bool = False):
+    return {"success": True, "status": status(),
+            "reels": recent(projectId, max(1, min(limit, 100)), archived)}
 
 
 @router.get("/api/reels/status")
@@ -915,6 +979,52 @@ async def reels_posted(reel_id: str, undo: bool = False):
         await _move_task(reel, "editing", "in_progress")
     else:
         await _move_task(reel, "published", "done")
+    return {"success": True, "reel": with_media(reel)}
+
+
+class ReviewBody(BaseModel):
+    action: str = ""   # approve | reject | reset
+
+
+@router.post("/api/reels/{reel_id}/review")
+async def reels_review(reel_id: str, body: ReviewBody):
+    """Approve a reel (mark it ready to post), reject it (send it to the archive, keeping the
+    script but removing the video), or reset it back to pending."""
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    if reel["status"] in ("queued", "running"):
+        return _bad("Wait for it to finish, then approve or reject it.", 409)
+    action = (body.action or "").strip().lower()
+    if action == "approve":
+        reel.update(review="approved", archived=False, archivedAt=None)
+    elif action == "reject":
+        reel.update(review="rejected", archived=True, archivedAt=_utc(), posted=False, postedAt=None)
+        _strip_media(reel)
+        await _move_task(reel, "scripting", "todo")
+    elif action == "reset":
+        reel.update(review="pending", archived=False, archivedAt=None)
+    else:
+        return _bad("Unknown review action.")
+    await save_async(reel)
+    return {"success": True, "reel": with_media(reel)}
+
+
+@router.post("/api/reels/{reel_id}/restore")
+async def reels_restore(reel_id: str):
+    """Bring a rejected reel back from the archive and remake its video from the kept script."""
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    reel.update(archived=False, archivedAt=None, review="pending")
+    try:
+        reel = restart(reel)
+    except ValueError:
+        # It can't be remade right now (e.g. it still needs a recording); just un-archive it.
+        await save_async(reel)
+    except Busy as e:
+        await save_async(reel)
+        return _bad(str(e), 429)
     return {"success": True, "reel": with_media(reel)}
 
 

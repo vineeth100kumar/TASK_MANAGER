@@ -44,6 +44,10 @@ export interface Reel {
   caption?: string;
   captionStart?: string;
   hashtags: string[];
+  review?: 'pending' | 'approved' | 'rejected';
+  archived?: boolean;
+  archivedAt?: string | null;
+  queuePosition?: number;        // 1 = being made or next in line; 0 = not waiting
   posted: boolean;
   postedAt: string | null;
   emailed: boolean;
@@ -101,8 +105,11 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+export type ReviewAction = 'approve' | 'reject' | 'reset';
+
 export const reelsApi = {
-  list: (projectId = '') => call<{ status: ReelMakerStatus; reels: Reel[] }>(`/api/reels${projectId ? `?projectId=${enc(projectId)}` : ''}`),
+  list: (projectId = '', archived = false) =>
+    call<{ status: ReelMakerStatus; reels: Reel[] }>(`/api/reels?${projectId ? `projectId=${enc(projectId)}&` : ''}archived=${archived ? 'true' : 'false'}`),
   check: (script: string) => call<{ check: ReelCheck }>('/api/reels/check', { method: 'POST', body: JSON.stringify({ script }) }).then(d => d.check),
   create: (body: { script: string; title?: string; style?: string; projectId?: string }) =>
     call<{ reel: Reel }>('/api/reels', { method: 'POST', body: JSON.stringify(body) }).then(d => d.reel),
@@ -111,6 +118,9 @@ export const reelsApi = {
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/remake`, { method: 'POST', body: JSON.stringify(body) }).then(d => d.reel),
   setPosted: (id: string, posted: boolean) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.reel),
+  review: (id: string, action: ReviewAction) =>
+    call<{ reel: Reel }>(`/api/reels/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.reel),
+  restore: (id: string) => call<{ reel: Reel }>(`/api/reels/${enc(id)}/restore`, { method: 'POST' }).then(d => d.reel),
   send: (id: string) => call<{ reel: Reel }>(`/api/reels/${enc(id)}/send`, { method: 'POST' }).then(d => d.reel),
   remove: (id: string) => call<{ success: boolean }>(`/api/reels/${enc(id)}`, { method: 'DELETE' }),
 };

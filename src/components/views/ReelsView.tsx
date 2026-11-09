@@ -2,7 +2,7 @@
 // The list, the New reel screen and one reel's page, with the project filter when it is
 // opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { CheckCircle2, Clapperboard, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CheckCircle2, Clapperboard, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { REEL_EVENT, Reel, ReelMakerStatus, formatSeconds, posterUrl, reelsApi, reelsAvailable } from '../../services/reels';
@@ -17,17 +17,18 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
   const [reels, setReels] = useState<Reel[] | null>(null);
   const [status, setStatus] = useState<ReelMakerStatus | null>(null);
   const [error, setError] = useState('');
+  const [archived, setArchived] = useState(false);
 
   const load = useCallback(async () => {
     try {
-      const data = await reelsApi.list(projectId);
+      const data = await reelsApi.list(projectId, archived);
       setReels(data.reels);
       setStatus(data.status);
       setError('');
     } catch (e: any) {
       setError(e.message || "Can't reach the Pi");
     }
-  }, [projectId]);
+  }, [projectId, archived]);
 
   useEffect(() => { if (reelsAvailable()) load(); }, [load]);
   useEffect(() => {
@@ -68,10 +69,11 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
   const filtered = projectId ? projectName(projectId) : '';
 
   const line = (r: Reel) => {
-    if (r.status === 'done') return `${formatSeconds(r.seconds)} · ${r.scenes} slides`;
+    if (r.archived) return 'Archived · script kept';
+    if (r.status === 'done') return `${formatSeconds(r.seconds)} · ${r.scenes} slides${r.review === 'approved' ? ' · Approved' : ''}`;
     if (r.status === 'failed') return 'Failed';
     if (r.status === 'waiting') return 'Needs your voice-over';
-    if (r.status === 'queued') return 'Waiting for its turn';
+    if (r.status === 'queued') return r.queuePosition && r.queuePosition > 1 ? `In the queue · ${r.queuePosition} in line` : 'Waiting for its turn';
     return `Making ${Math.round(r.progress.percent)}%`;
   };
 
@@ -82,9 +84,14 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
           <h2 className="text-[20px] font-semibold tracking-tight text-gray-900 dark:text-white">Reels{filtered ? ` · ${filtered}` : ''}</h2>
           <p className="text-[12.5px] text-gray-500">Paste a script, add a voice, and the Pi makes the video, then emails you.</p>
         </div>
-        <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold shrink-0 active:scale-95 transition">
-          <Plus size={16} /> New reel
-        </button>
+        <div className="flex items-center gap-2 shrink-0">
+          <button onClick={() => setArchived(a => !a)} className={`h-10 px-3.5 rounded-xl text-[13px] font-semibold flex items-center gap-1.5 ${archived ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-200' : 'bg-black/[0.06] dark:bg-white/10 text-gray-600 dark:text-gray-300'}`}>
+            <Archive size={15} /> {archived ? 'Archived' : 'Archive'}
+          </button>
+          <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold active:scale-95 transition">
+            <Plus size={16} /> New reel
+          </button>
+        </div>
       </div>
 
       {status && !status.ready && (
@@ -95,7 +102,14 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
       {error && <p className="text-[13px] text-red-600 mb-3">{error}</p>}
 
       {reels === null && !error && <div className="skeleton h-40 rounded-3xl" />}
-      {reels && reels.length === 0 && (
+      {reels && reels.length === 0 && archived && (
+        <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-8 text-center space-y-3">
+          <Archive size={28} className="mx-auto text-gray-400" />
+          <p className="text-[15px] font-semibold text-gray-900 dark:text-white">Nothing archived</p>
+          <p className="text-[13px] text-gray-500">Rejected reels land here. The script is kept, so you can bring one back and remake its video.</p>
+        </div>
+      )}
+      {reels && reels.length === 0 && !archived && (
         <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-8 text-center space-y-3">
           <Clapperboard size={28} className="mx-auto text-purple-500" />
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white">No reels yet</p>

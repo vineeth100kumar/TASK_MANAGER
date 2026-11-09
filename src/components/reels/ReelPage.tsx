@@ -7,10 +7,10 @@
 // <video> element streams, seeks and caches it by itself.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, ArrowLeft, Check, CheckCircle2, Copy, Download, FileAudio, LoaderCircle, Mail, Mic, Pencil, RefreshCw, Send, Share2, Smartphone, Square, Trash2,
+  AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Check, CheckCircle2, Copy, Download, FileAudio, LoaderCircle, Mail, Mic, Pencil, RefreshCw, Send, Share2, Smartphone, Square, ThumbsUp, Trash2,
 } from 'lucide-react';
 import {
-  REEL_EVENT, Reel, ReelMakerStatus, canShareVideo, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
+  REEL_EVENT, Reel, ReelMakerStatus, ReviewAction, canShareVideo, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
 } from '../../services/reels';
 import { copyText, fetchBlob } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
@@ -129,6 +129,24 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
     catch (e: any) { showToast(e.message || "Couldn't start again", 'error'); }
     finally { setBusy(''); }
   };
+  const review = async (action: ReviewAction) => {
+    if (!reel) return;
+    setBusy(action);
+    try {
+      const updated = await reelsApi.review(reel.id, action);
+      if (action === 'reject') { showToast('Moved to the archive. The script is kept.'); onDeleted(); return; }
+      setReel(updated);
+      showToast(action === 'approve' ? 'Approved — ready to post' : 'Back to pending');
+    } catch (e: any) { showToast(e.message || "Couldn't update", 'error'); }
+    finally { setBusy(''); }
+  };
+  const restore = async () => {
+    if (!reel) return;
+    setBusy('restore');
+    try { setReel(await reelsApi.restore(reel.id)); showToast('Restored — remaking the video'); }
+    catch (e: any) { showToast(e.message || "Couldn't restore", 'error'); }
+    finally { setBusy(''); }
+  };
   const remove = async () => {
     if (!reel || !window.confirm('Delete this reel and its video?')) return;
     try { await reelsApi.remove(reel.id); onDeleted(); } catch (e: any) { showToast(e.message || "Couldn't delete", 'error'); }
@@ -154,12 +172,36 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
             {reel.posted ? ' · Posted' : ''}
           </p>
         </div>
-        {done && (
+        {reel.archived ? (
+          <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">
+            <Archive size={13} /> Archived
+          </span>
+        ) : reel.review === 'approved' ? (
+          <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
+            <ThumbsUp size={13} /> Approved
+          </span>
+        ) : done ? (
           <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-emerald-100 text-emerald-800 dark:bg-emerald-500/20 dark:text-emerald-200">
             <CheckCircle2 size={13} /> Ready
           </span>
-        )}
+        ) : null}
       </div>
+
+      {reel.archived && (
+        <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-5 space-y-3">
+          <div className="flex items-start gap-2 text-gray-700 dark:text-gray-200">
+            <Archive size={18} className="shrink-0 mt-0.5" />
+            <div><b>This reel is archived.</b> <span className="text-[14px]">The video was removed to save space, but the script is kept. Restore it to make the video again.</span></div>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={restore} disabled={busy === 'restore'} className="h-9 px-4 rounded-xl bg-purple-600 text-white text-[13px] font-semibold flex items-center gap-1.5">
+              {busy === 'restore' ? <LoaderCircle size={14} className="animate-spin" /> : <ArchiveRestore size={14} />} Restore &amp; remake
+            </button>
+            <button onClick={() => onEdit(reel)} className="h-9 px-4 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold">Edit script</button>
+            <button onClick={remove} className="h-9 px-3 rounded-xl text-red-600 text-[13px] font-semibold">Delete</button>
+          </div>
+        </div>
+      )}
 
       {reel.status === 'waiting' && (
         <RecordStep reel={reel} status={status} onUploaded={r => setReel(r)} onEdit={() => onEdit(reel)} />
@@ -169,7 +211,11 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
         <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-5 space-y-4" aria-live="polite">
           <div className="flex items-center gap-2">
             <LoaderCircle size={18} className="animate-spin text-purple-500" />
-            <h3 className="font-semibold text-[15px] text-gray-900 dark:text-white">{reel.status === 'queued' ? 'Waiting for its turn' : 'Making your reel'}</h3>
+            <h3 className="font-semibold text-[15px] text-gray-900 dark:text-white">
+              {reel.status === 'queued'
+                ? (reel.queuePosition && reel.queuePosition > 1 ? `In the queue — ${ordinal(reel.queuePosition)} in line` : 'Waiting for its turn')
+                : 'Making your reel'}
+            </h3>
             <span className="text-[12px] text-gray-400 ml-auto tabular-nums">{Math.round(reel.progress.percent)}%</span>
           </div>
           <div className="h-2 rounded-full bg-black/[0.06] dark:bg-white/10 overflow-hidden">
@@ -194,7 +240,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
         </div>
       )}
 
-      {done && (
+      {done && !reel.archived && (
         <>
           {reel.warnings && reel.warnings.length > 0 && (
             <div className="mb-4 rounded-2xl bg-amber-50 dark:bg-amber-500/10 text-amber-900 dark:text-amber-200 p-3.5 text-[13px] space-y-1">
@@ -256,6 +302,18 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
                 <button onClick={() => onEdit(reel)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Pencil size={14} /> Edit script</button>
                 <button onClick={again} disabled={busy === 'again'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><RefreshCw size={14} /> Make again</button>
                 <button onClick={remove} className="h-9 px-3.5 rounded-xl text-red-600 text-[13px] font-semibold flex items-center gap-1.5 hover:bg-red-50 dark:hover:bg-red-500/10"><Trash2 size={14} /> Delete</button>
+              </div>
+              <div className="flex flex-wrap gap-2 pt-1 border-t border-black/5 dark:border-white/10">
+                {reel.review !== 'approved' ? (
+                  <button onClick={() => review('approve')} disabled={busy === 'approve'} className="h-9 px-3.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-[13px] font-semibold flex items-center gap-1.5">
+                    {busy === 'approve' ? <LoaderCircle size={14} className="animate-spin" /> : <ThumbsUp size={14} />} Approve
+                  </button>
+                ) : (
+                  <button onClick={() => review('reset')} disabled={busy === 'reset'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ThumbsUp size={14} /> Approved · undo</button>
+                )}
+                <button onClick={() => review('reject')} disabled={busy === 'reject'} className="h-9 px-3.5 rounded-xl text-amber-700 dark:text-amber-300 text-[13px] font-semibold flex items-center gap-1.5 hover:bg-amber-50 dark:hover:bg-amber-500/10">
+                  {busy === 'reject' ? <LoaderCircle size={14} className="animate-spin" /> : <Archive size={14} />} Reject (archive)
+                </button>
               </div>
               {!status?.secureLink && <p className="text-[12px] text-gray-400">The share button needs the https link to Sage (your tunnel). On the home network use Download.</p>}
               {reel.emailed && <p className="text-[12px] text-gray-400 flex items-center gap-1.5"><Mail size={13} /> Emailed to {status?.emailTo}</p>}
@@ -389,6 +447,12 @@ function RecordStep({ reel, status, onUploaded, onEdit }: { reel: Reel; status: 
       )}
     </div>
   );
+}
+
+/** 1 -> "1st", 2 -> "2nd", for the queue line. */
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd'], v = n % 100;
+  return n + (s[(v - 20) % 10] || s[v] || s[0]);
 }
 
 /** A phone whose browser can hand files to the share sheet. */
