@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { EXAMPLE_REEL, ReelCheck, ReelMakerStatus, STYLE_LABELS, formatSeconds, reelsApi } from '../../services/reels';
+import { EXAMPLE_REEL, ReelCheck, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
 import type { Reel } from '../../services/reels';
@@ -23,6 +23,8 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
   const { showToast } = useToast();
   const [script, setScript] = useState(edit?.script || '');
   const [style, setStyle] = useState(edit?.style || '');
+  // "script" = keep what the script says; "mine" = own recording; any voice id overrides it
+  const [voice, setVoice] = useState('script');
   const [project, setProject] = useState(projectId);
   const [check, setCheck] = useState<ReelCheck | null>(null);
   const [checking, setChecking] = useState(false);
@@ -34,15 +36,18 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
     [],
   );
 
+  // The script sent to the Pi, with the voice pick applied on top
+  const scriptForPi = useMemo(() => withVoice(script, voice), [script, voice]);
+
   // Check a moment after typing stops.
   useEffect(() => {
-    if (!script.trim()) { setCheck(null); return; }
+    if (!scriptForPi.trim()) { setCheck(null); return; }
     setChecking(true);
     const timer = setTimeout(() => {
-      reelsApi.check(script).then(setCheck).catch(() => setCheck(null)).finally(() => setChecking(false));
+      reelsApi.check(scriptForPi).then(setCheck).catch(() => setCheck(null)).finally(() => setChecking(false));
     }, 600);
     return () => clearTimeout(timer);
-  }, [script]);
+  }, [scriptForPi]);
 
   const paste = async () => {
     try {
@@ -69,8 +74,8 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
     setBusy(true);
     try {
       const reel = edit
-        ? await reelsApi.remake(edit.id, { script, style: effectiveStyle })
-        : await reelsApi.create({ script, style: effectiveStyle, projectId: project });
+        ? await reelsApi.remake(edit.id, { script: scriptForPi, style: effectiveStyle })
+        : await reelsApi.create({ script: scriptForPi, style: effectiveStyle, projectId: project });
       onMade(reel);
     } catch (e: any) {
       showToast(e.message || "Couldn't start the reel", 'error');
@@ -177,8 +182,16 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
               {(status?.styles || ['grid_pill', 'beige_grain']).map(s => <option key={s} value={s}>{STYLE_LABELS[s] || s}</option>)}
             </Select>
           </div>
+          <div>
+            <label className="field-label mb-1.5">Voice</label>
+            <Select value={voice} onChange={setVoice} className="field w-full" aria-label="Voice">
+              <option value="script">From the script</option>
+              {VOICE_PICKS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+              <option value="mine">Your own recording</option>
+            </Select>
+          </div>
           {!edit && (
-            <div>
+            <div className="sm:col-span-2">
               <label className="field-label mb-1.5">Project</label>
               <Select value={project} onChange={setProject} className="field w-full" aria-label="Project">
                 <option value="">No project</option>

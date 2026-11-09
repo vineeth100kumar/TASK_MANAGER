@@ -168,6 +168,36 @@ export const formatSeconds = (s: number | null | undefined): string => {
 
 export const STYLE_LABELS: Record<string, string> = { grid_pill: 'Grid pill', beige_grain: 'Beige grain' };
 
+/** A short pick-list of the built-in voices, two women and two men. The full fourteen are still
+ *  there and `voice:` in a script can pick any of them; the picker is the comfortable choice. */
+export const VOICE_PICKS: { id: string; label: string }[] = [
+  { id: 'af_heart', label: 'Warm (US, woman)' },
+  { id: 'af_bella', label: 'Bright (US, woman)' },
+  { id: 'am_michael', label: 'Steady (US, man)' },
+  { id: 'bm_george', label: 'British (UK, man)' },
+];
+
+/** Replace or add `voice: <id>` in the script's frontmatter. `id` of "" or "script" leaves it
+ *  alone, so whatever the script wrote (or the default) wins. Keeps the rest of the text as it is. */
+export function withVoice(script: string, id: string): string {
+  if (!id || id === 'script') return script;
+  // the frontmatter sits between the first pair of --- lines
+  const start = script.search(/^---\s*$/m);
+  if (start < 0) return script;
+  const rest = script.slice(start + 3);
+  const endOffset = rest.search(/^---\s*$/m);
+  if (endOffset < 0) return script;
+  const head = script.slice(0, start + 3);
+  const front = rest.slice(0, endOffset);
+  const tail = rest.slice(endOffset);
+  const line = `voice: ${id}`;
+  const re = /^(\s*)voice\s*:\s*[^\n]*$/m;
+  const newFront = re.test(front)
+    ? front.replace(re, (_m, pad) => `${pad}${line}`)
+    : `${front.replace(/\s+$/, '')}\n${line}\n`;
+  return head + newFront + tail;
+}
+
 export const EXAMPLE_REEL = `---
 autocontent: reel
 title: Three habits that save an hour
