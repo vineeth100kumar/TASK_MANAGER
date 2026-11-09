@@ -59,7 +59,8 @@ A caption.
 
 
 def run(coro):
-    return asyncio.get_event_loop().run_until_complete(coro)
+    # A fresh loop per call (asyncio.get_event_loop() raises on 3.11+ when none is running).
+    return asyncio.run(coro)
 
 
 class ReelQueueTests(unittest.TestCase):
