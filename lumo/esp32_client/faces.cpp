@@ -207,7 +207,13 @@ static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
 // ------------------------------------------------------------- Stacked
 // Hours over minutes, big and bold, with a column of details on the right.
 
-static const uint16_t STACK_BG = 0x0021;  // (6,6,8)
+// True black, framed or not (2.24): the panel shows the most contrast against
+// black, so the digits look as bright as the update screen's white. On the
+// Even Frame a hairline keeps the card's shape (see faceTickInner).
+static const uint16_t STACK_BG = 0x0000;
+static const uint16_t STACK_EDGE = 0x31A7;   // (48,52,56): the card's hairline
+// The day-phase dimming is gentler here: the face is never below 80%.
+static float stackedK(float k) { return 0.8f + 0.2f * (k - 0.5f) / 0.5f; }
 
 // The minute turns over by rolling: the old number slides up and out as the
 // new one rises in behind it (the hour too, when it changes).
@@ -223,9 +229,9 @@ static void rollText(AASurface& sf, int x, int base, int travel, const char* fro
 static void stacked(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
   if (!a.all && !a.timeBand) return;
   float k = a.k;
-  uint16_t bg = cardBg(STACK_BG);
-  uint16_t ink = aaRGB(245, 243, 238, k), acc = aaRGB(255, 159, 67, k), mute = aaRGB(128, 132, 140, k);
-  uint16_t rule = aaRGB(34 + lift(), 36 + lift(), 40 + lift(), k);
+  uint16_t bg = STACK_BG;
+  uint16_t ink = aaRGB(255, 255, 255, k), acc = aaRGB(255, 166, 72, k), mute = aaRGB(172, 176, 184, k);
+  uint16_t rule = aaRGB(56, 60, 66, k);
   AASurface sf;
   char buf[32], hs[4], ms[8];
 
@@ -431,7 +437,7 @@ static void dial(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
 
 static uint16_t faceBg(ClockStyle st) {
   switch (st) {
-    case CLOCK_STACKED:    return cardBg(STACK_BG);
+    case CLOCK_STACKED:    return STACK_BG;
     case CLOCK_NIGHTSTAND: return NIGHT_BG;
     case CLOCK_DIAL:       return cardBg(DIAL_BG);
     default:               return cardBg(MONO_BG);
@@ -487,7 +493,7 @@ static void faceTickInner(const LumoState& s, const ClockNow& c) {
   detailsDirty = false;
   FaceAnim an;
   an.enter = enter;
-  an.k = k * (enter >= 1 ? 1.0f : style == CLOCK_DIAL ? easeInOutCubic(enter)
+  an.k = (style == CLOCK_STACKED ? stackedK(k) : k) * (enter >= 1 ? 1.0f : style == CLOCK_DIAL ? easeInOutCubic(enter)
                                    : (int)(easeInOutCubic(enter) * 24 + 0.5f) / 24.0f);
   faceK = an.k;
   an.all = minute;
@@ -500,6 +506,13 @@ static void faceTickInner(const LumoState& s, const ClockNow& c) {
       FitCard card = fitCard();
       tft.fillScreen(0x0000);
       tft.fillRect(card.x, card.y, card.w, card.h, faceBg(style));
+      // Stacked's card is black like the frame: a hairline just outside it
+      // (left, top, bottom; the right is the glass) keeps its shape.
+      if (style == CLOCK_STACKED) {
+        tft.drawFastVLine(card.x - 1, card.y - 1, card.h + 2, STACK_EDGE);
+        tft.drawFastHLine(card.x - 1, card.y - 1, card.w + 1, STACK_EDGE);
+        tft.drawFastHLine(card.x - 1, card.y + card.h, card.w + 1, STACK_EDGE);
+      }
     } else {
       tft.fillScreen(faceBg(style));
     }
@@ -600,6 +613,9 @@ static void islandPaint(const LumoState& s, IsKind kind, bool big) {
   isDrawW = W; isDrawH = H;
   if (W > 2 && H > 2) {
     float r = min(H / 2.0f, 18.0f);
+    // On a black card (Stacked) a hairline shows the island's shape.
+    if (drawnStyle(s.clock_style) == CLOCK_STACKED && framed())
+      aaRoundRect(sf, x1 - W - 1, cy - H / 2.0f - 1, W + r + 1, H + 2, r + 1, STACK_EDGE);
     aaRoundRect(sf, x1 - W, cy - H / 2.0f, W + r, H, r, 0x0000);
     uint16_t white = aaRGB(238, 238, 238, faceK), muted = aaRGB(140, 144, 152, faceK);
     uint16_t amber = aaRGB(255, 159, 67, faceK), green = aaRGB(120, 200, 140, faceK);
