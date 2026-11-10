@@ -17,6 +17,8 @@ export interface Project {
   key: string;
   /** On: this content project has a Posts tab and makes slides with Auto Content (see posts.ts). */
   autoContent?: boolean;
+  /** ISO time the project was marked complete; null/absent = active. */
+  completedAt?: string | null;
   type?: string; // technical | nontech | content | other | a custom name; see projectTypes.ts
   color: string;
   sequence: number;
