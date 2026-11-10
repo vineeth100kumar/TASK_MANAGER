@@ -432,7 +432,8 @@ class ClaudeApiTests(unittest.TestCase):
         names = {t["name"] for t in client.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).json()["result"]["tools"]}
         self.assertTrue({"sage_post_format", "sage_post_check", "sage_post_create", "sage_post_get",
                          "sage_post_list", "sage_post_redo", "sage_reel_format", "sage_reel_check",
-                         "sage_reel_create", "sage_reel_get", "sage_reel_list", "sage_reel_redo"} <= names)
+                         "sage_reel_create", "sage_reel_get", "sage_reel_list", "sage_reel_redo",
+                         "sage_post_review", "sage_reel_review"} <= names)
 
         # The format is the engine's own prompt, plus an example that passes the check.
         err, fmt = call("sage_post_format", {})
@@ -496,6 +497,24 @@ class ClaudeApiTests(unittest.TestCase):
             self.assertEqual([p["id"] for p in listed["posts"]], [post["id"]])
             self.assertEqual(listed["projectsWithAutoContent"], [{"id": on["id"], "name": "Mind Deeds"}])
             self.assertTrue(listed["slideMaker"]["ready"])
+
+            # Approve, reject (archive) and restore, as the buttons do.
+            err, ok = call("sage_post_review", {"id": post["id"], "action": "approve"})
+            self.assertFalse(err, ok)
+            self.assertEqual(ok["post"]["review"], "approved")
+            err, gone = call("sage_post_review", {"id": post["id"], "action": "reject"})
+            self.assertFalse(err, gone)
+            self.assertEqual((gone["post"]["review"], gone["post"]["archived"]), ("rejected", True))
+            self.assertEqual(call("sage_post_list", {})[1]["posts"], [])
+            self.assertEqual(len(call("sage_post_list", {"archived": True})[1]["posts"]), 1)
+            self.assertTrue(call("sage_post_review", {"id": post["id"], "action": "nope"})[0])
+            self.assertTrue(call("sage_post_review", {"id": "000000000000", "action": "approve"})[0])
+            err, back = call("sage_post_review", {"id": post["id"], "action": "restore"})
+            self.assertFalse(err, back)
+            self.assertFalse(back["post"]["archived"])
+            redrawn = posts.get(post["id"])   # restoring queues a redraw; pretend it finished
+            redrawn.update(status="done")
+            posts.save(redrawn)
 
             err, again = call("sage_post_redo", {"id": post["id"], "style": "beige_grain"})
             self.assertFalse(err, again)

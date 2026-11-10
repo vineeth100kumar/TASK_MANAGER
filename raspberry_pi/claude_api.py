@@ -864,7 +864,8 @@ def _post_view(post: dict, full: bool = True) -> dict:
     """A post as Claude sees it: where it is, the link to open it, and the caption."""
     posts = _need_posts()
     keys = ("id", "title", "status", "error", "style", "format", "projectId", "taskId", "slideCount", "audit",
-            "auditNote", "seconds", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
+            "auditNote", "seconds", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError",
+            "review", "archived")
     out = {k: post.get(k) for k in keys}
     out["progress"] = post.get("progress") or {}
     out["link"] = posts.post_link(post) or None
@@ -997,7 +998,7 @@ async def list_posts(args: Any) -> dict:
         limit = max(1, min(int(args.get("limit") or 20), 100))
     except (TypeError, ValueError):
         limit = 20
-    rows = await asyncio.to_thread(posts.recent, project_id)
+    rows = await asyncio.to_thread(posts.recent, project_id, 100, bool(args.get("archived")))
     state = await asyncio.to_thread(posts.status)
     ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
     return {
@@ -1054,7 +1055,7 @@ def reel_format() -> dict:
 def _reel_view(reel: dict, full: bool = True) -> dict:
     reels = _need_reels()
     keys = ("id", "title", "status", "error", "style", "voice", "needsRecording", "projectId", "taskId", "scenes", "seconds",
-            "estimate", "madeIn", "size", "wordTiming", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
+            "estimate", "madeIn", "size", "wordTiming", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError", "review", "archived")
     out = {k: reel.get(k) for k in keys}
     out["progress"] = reel.get("progress") or {}
     out["link"] = reels.reel_link(reel) or None
@@ -1107,6 +1108,40 @@ async def _wait_for_reel(reel_id: str, seconds: Any) -> dict:
     if not reel:
         raise ApiError(404, "No reel has that id")
     return reel
+
+
+async def _review(kind: str, args: Any) -> dict:
+    """Approve, reject (archive: script kept, media removed), reset or restore a post/reel, the same as the
+    buttons in Sage."""
+    mod = _need_posts() if kind == "post" else _need_reels()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, f"Send the {kind}'s id")
+    action = str(args.get("action") or "").strip().lower()
+    if action not in ("approve", "reject", "reset", "restore"):
+        raise ApiError(400, "action must be approve, reject, reset or restore")
+    item_id = str(args["id"])
+    if not await asyncio.to_thread(mod.get, item_id):
+        raise ApiError(404, f"No {kind} has that id")
+    if action == "restore":
+        res = await (mod.posts_restore if kind == "post" else mod.reels_restore)(item_id)
+    else:
+        res = await (mod.posts_review if kind == "post" else mod.reels_review)(item_id, mod.ReviewBody(action=action))
+    if hasattr(res, "status_code") and res.status_code >= 400:
+        try:
+            msg = json.loads(res.body).get("error")
+        except Exception:
+            msg = None
+        raise ApiError(res.status_code, msg or "That didn't work")
+    item = await asyncio.to_thread(mod.get, item_id)
+    return (_post_answer if kind == "post" else _reel_answer)(item, did=action)
+
+
+async def review_post(args: Any) -> dict:
+    return await _review("post", args)
+
+
+async def review_reel(args: Any) -> dict:
+    return await _review("reel", args)
 
 
 def _reel_answer(reel: dict, **extra) -> dict:
@@ -1181,7 +1216,7 @@ async def list_reels(args: Any) -> dict:
         limit = max(1, min(int(args.get("limit") or 20), 100))
     except (TypeError, ValueError):
         limit = 20
-    rows = await asyncio.to_thread(reels.recent, project_id)
+    rows = await asyncio.to_thread(reels.recent, project_id, 100, bool(args.get("archived")))
     state = await asyncio.to_thread(reels.status)
     ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
     return {
@@ -1342,6 +1377,12 @@ async def http_redo_post(post_id: str, request: Request):
     return await _answer(lambda: redo_post({**(body if isinstance(body, dict) else {}), "id": post_id}))
 
 
+@router.post("/posts/{post_id}/review")
+async def http_review_post(post_id: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: review_post({**(body if isinstance(body, dict) else {}), "id": post_id}))
+
+
 @router.get("/reels/format")
 async def http_reel_format():
     return await _answer(reel_format)
@@ -1373,6 +1414,12 @@ async def http_get_reel(reel_id: str, wait: float = 0):
 async def http_redo_reel(reel_id: str, request: Request):
     body = await _body(request)
     return await _answer(lambda: redo_reel({**(body if isinstance(body, dict) else {}), "id": reel_id}))
+
+
+@router.post("/reels/{reel_id}/review")
+async def http_review_reel(reel_id: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: review_reel({**(body if isinstance(body, dict) else {}), "id": reel_id}))
 
 
 @router.get("/{table}")
@@ -1432,6 +1479,10 @@ To make an Instagram carousel post, read the script format with sage_post_format
 sage_post_check, then send it with sage_post_create: the Pi draws the slides, emails Vineeth when they're ready and
 gives back a link and the caption (wait for it with sage_post_get). A post can go into a content project only when
 that project has Use Auto Content switched on.
+To make a vertical reel video, read sage_reel_format, check the script with sage_reel_check, send it with
+sage_reel_create (it takes minutes; poll sage_reel_get). Once a post or reel is done, sage_post_review and
+sage_reel_review approve it, reject it (archive) or restore it, and sage_post_list/sage_reel_list with
+archived true show the archive.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
 why something failed. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
@@ -1560,6 +1611,7 @@ def _tools() -> List[dict]:
          "the caption; whether the slide maker and email are ready; and which projects have Use Auto Content on.",
          "inputSchema": {"type": "object", "properties": {
              "project": {"type": "string", "description": "Only this project's posts (id or name)"},
+             "archived": {"type": "boolean", "description": "true lists the archive of rejected posts instead"},
              "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
         {"name": "sage_post_redo", "description": "Draw a post again, keeping its id and link: send an edited "
          "script to fix it, or a new style or size. Emails again when done.",
@@ -1569,6 +1621,13 @@ def _tools() -> List[dict]:
              "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
              "size": {"type": "string", "enum": ["portrait", "square"]},
              "wait": {"type": "number", "description": f"Seconds to wait for the slides (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_post_review", "description": "Approve, reject or reset a finished post after looking at it, or restore a "
+         "rejected one. approve = ready to post; reject = send to the archive (the script is kept, the media is deleted); "
+         "reset = back to pending; restore = bring a rejected post back and make it again from its kept script. "
+         "Only on a finished post.",
+         "inputSchema": {"type": "object", "required": ["id", "action"], "properties": {
+             "id": {"type": "string"},
+             "action": {"type": "string", "enum": ["approve", "reject", "reset", "restore"]}}}},
         {"name": "sage_reel_format", "description": "How to write a script for an Instagram reel (a 1080x1920 video "
          "with a voice-over): the post script format plus a `say:` line per slide for the narration, optional `show:` "
          "cues, `motion:`, and the header lines voice, captions and fps; with a full example and the list of voices. "
@@ -1599,6 +1658,7 @@ def _tools() -> List[dict]:
          "caption; whether the reel maker, its voice and email are ready; and which projects have Use Auto Content on.",
          "inputSchema": {"type": "object", "properties": {
              "project": {"type": "string", "description": "Only this project's reels (id or name)"},
+             "archived": {"type": "boolean", "description": "true lists the archive of rejected reels instead"},
              "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
         {"name": "sage_reel_redo", "description": "Make a reel again, keeping its id and link: send an edited script to "
          "fix it, or a new style. A recording Vineeth already gave is reused. Emails again when done.",
@@ -1607,6 +1667,13 @@ def _tools() -> List[dict]:
              "script": {"type": "string", "description": "The fixed script; leave out to make the same one"},
              "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
              "wait": {"type": "number", "description": f"Seconds to wait (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_reel_review", "description": "Approve, reject or reset a finished reel after looking at it, or restore a "
+         "rejected one. approve = ready to post; reject = send to the archive (the script is kept, the media is deleted); "
+         "reset = back to pending; restore = bring a rejected reel back and make it again from its kept script. "
+         "Only on a finished reel.",
+         "inputSchema": {"type": "object", "required": ["id", "action"], "properties": {
+             "id": {"type": "string"},
+             "action": {"type": "string", "enum": ["approve", "reject", "reset", "restore"]}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
         {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
@@ -1676,6 +1743,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await list_posts(args)
     if name == "sage_post_redo":
         return await redo_post(args)
+    if name == "sage_post_review":
+        return await review_post(args)
     if name == "sage_reel_format":
         return reel_format()
     if name == "sage_reel_check":
@@ -1688,6 +1757,8 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await list_reels(args)
     if name == "sage_reel_redo":
         return await redo_reel(args)
+    if name == "sage_reel_review":
+        return await review_reel(args)
     if name == "sage_history":
         return history(args.get("limit", 50))
     if name == "sage_logs":
