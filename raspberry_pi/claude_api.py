@@ -949,6 +949,20 @@ def check_post(args: Any) -> dict:
         raise ApiError(400, f"Couldn't read that script: {str(e)[:200]}")
 
 
+def _corrections(kind: str, report: dict) -> dict:
+    """The instant review of a script: every problem as a correction to make, so the AI can fix the script
+    and send it again without another round trip."""
+    fixes = []
+    for i in report.get("issues") or []:
+        fixes.append({"severity": i.get("severity"), "line": i.get("line"), "slide": i.get("slide"),
+                      "problem": i.get("message"), "fix": i.get("hint") or ""})
+    fixes.sort(key=lambda f: (f["severity"] != "ERROR", f["line"] or 0))
+    return {"accepted": False, "needsFixes": True, "errors": report.get("errors", 0),
+            "warnings": report.get("warnings", 0), "corrections": fixes,
+            "next": f"Nothing was queued. Fix every ERROR in the script (and the warnings if you can), then call "
+                    f"sage_{kind}_create again with the corrected script. Read sage_{kind}_format if unsure."}
+
+
 async def create_post(args: Any) -> dict:
     """Queues a script on the Pi's slide maker, the same as pressing Make in
     Posts: it draws the slides, emails when done and, with a project, adds the
@@ -960,6 +974,14 @@ async def create_post(args: Any) -> dict:
     state = await asyncio.to_thread(posts.status)
     if not state["ready"]:
         raise ApiError(503, "The slide maker isn't ready on the Pi: " + " ".join(state["problems"]))
+    script_text = str(args.get("script") or "")
+    if script_text.strip() and len(script_text) <= posts.MAX_SCRIPT:
+        try:
+            report = posts.check(posts._clean_script(script_text))
+        except Exception:
+            report = None
+        if report is not None and not report.get("ok", True):
+            return _corrections("post", report)
     try:
         post = posts.start(str(args.get("script") or ""), str(args.get("title") or ""),
                            str(args.get("style") or ""), str(args.get("size") or args.get("format") or ""),
@@ -970,7 +992,7 @@ async def create_post(args: Any) -> dict:
         raise ApiError(400, f"{e} Run sage_post_check for every issue with its line.")
     if args.get("wait"):
         post = await _wait_for(post["id"], args["wait"])
-    extra = {"project": project.get("name") if project else None}
+    extra = {"project": project.get("name") if project else None, "accepted": True}
     if not state["emailReady"]:
         extra["emailSetUp"] = False
     return _post_answer(post, **extra)
@@ -1176,6 +1198,15 @@ async def create_reel(args: Any) -> dict:
     state = await asyncio.to_thread(reels.status)
     if not state["ready"]:
         raise ApiError(503, "The reel maker isn't ready on the Pi: " + " ".join(state["problems"]))
+    script_text = str(args.get("script") or "")
+    report = None
+    if script_text.strip() and len(script_text) <= reels.MAX_SCRIPT:
+        try:
+            report = reels.check(reels._clean_script(script_text))
+        except Exception:
+            report = None
+        if report is not None and not report.get("ok", True):
+            return _corrections("reel", report)
     try:
         reel = reels.start(str(args.get("script") or ""), str(args.get("title") or ""), str(args.get("style") or ""),
                            project["id"] if project else "")
@@ -1188,7 +1219,11 @@ async def create_reel(args: Any) -> dict:
         await asyncio.to_thread(reels.save, reel)
     elif args.get("wait") and reel["status"] != "waiting":
         reel = await _wait_for_reel(reel["id"], args["wait"])
-    extra = {"project": project.get("name") if project else None}
+    extra = {"project": project.get("name") if project else None, "accepted": True}
+    if report is not None:
+        extra["review"] = {"warnings": [{"line": i.get("line"), "slide": i.get("slide"), "problem": i.get("message"),
+                                         "fix": i.get("hint") or ""} for i in report.get("issues") or []],
+                           "scenes": len(report.get("scenes") or []), "seconds": report.get("seconds")}
     if not state["emailReady"]:
         extra["emailSetUp"] = False
     return _reel_answer(reel, **extra)
@@ -1480,7 +1515,9 @@ sage_post_check, then send it with sage_post_create: the Pi draws the slides, em
 gives back a link and the caption (wait for it with sage_post_get). A post can go into a content project only when
 that project has Use Auto Content switched on.
 To make a vertical reel video, read sage_reel_format, check the script with sage_reel_check, send it with
-sage_reel_create (it takes minutes; poll sage_reel_get). Once a post or reel is done, sage_post_review and
+sage_reel_create (it takes minutes; poll sage_reel_get). sage_post_create and sage_reel_create review the script
+the moment it arrives: if it has errors nothing is queued and the reply has accepted false and a corrections list
+(line, problem, fix); apply them and send the corrected script again. Once a post or reel is done, sage_post_review and
 sage_reel_review approve it, reject it (archive) or restore it, and sage_post_list/sage_reel_list with
 archived true show the archive.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own

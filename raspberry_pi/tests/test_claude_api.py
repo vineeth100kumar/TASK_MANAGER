@@ -469,8 +469,16 @@ class ClaudeApiTests(unittest.TestCase):
 
             # A script with errors comes back with the reason.
             err, text = call("sage_post_create", {"script": "hello world"})
-            self.assertTrue(err)
-            self.assertIn("sage_post_check", text)
+            self.assertFalse(err)
+            self.assertFalse(text["accepted"])
+
+            # A script with fixable errors is reviewed at once: nothing queued, corrections sent back.
+            err, fixes = call("sage_post_create", {"script": fmt["example"] + "\n## chart\nheadline: Nothing to plot\n"})
+            self.assertFalse(err, fixes)
+            self.assertFalse(fixes["accepted"])
+            self.assertTrue(fixes["corrections"])
+            self.assertIn("sage_post_create", fixes["next"])
+            self.assertEqual(started, [])
 
             err, made = call("sage_post_create", {"script": fmt["example"], "project": "mind deeds", "title": "AI post"})
             self.assertFalse(err, made)
