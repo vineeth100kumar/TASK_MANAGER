@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, Clapperboard } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, Clapperboard, CheckCircle2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -108,6 +108,7 @@ export function Sidebar({
   // Content projects only: makes carousel posts with Auto Content (Posts tab on the project).
   const [newProjAuto, setNewProjAuto] = useState(false);
   // Set while the project form edits an existing project instead of making one.
+  const [showCompleted, setShowCompleted] = useState(false);
   const [editingProjId, setEditingProjId] = useState<string | null>(null);
   const openNewProject = () => {
     setEditingProjId(null);
@@ -482,7 +483,7 @@ export function Sidebar({
                     <button onClick={openNewProject} className="text-gray-400 hover:text-gray-900 dark:hover:text-white rounded-md p-1 transition-colors" title="Add Project" aria-label="Add Project"><Plus size={16}/></button>
                   </div>
                   {(() => {
-                    const groups = groupProjectsByType(projects);
+                    const groups = groupProjectsByType(projects.filter(p => !p.completedAt));
                     // One kind of project needs no headings; several get one each.
                     const showHeads = groups.length > 1;
                     return groups.map(({ type, projects: inGroup }) => {
@@ -526,6 +527,28 @@ export function Sidebar({
                       );
                     });
                   })()}
+                  {projects.some(p => p.completedAt) && (
+                    <div className="pt-1">
+                      <button type="button" onClick={() => setShowCompleted(v => !v)} aria-expanded={showCompleted}
+                        className="w-full flex items-center gap-1.5 px-3 py-1 rounded-lg text-[11.5px] font-semibold text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 transition-colors">
+                        <CheckCircle2 size={12} />
+                        <span>Completed</span>
+                        <span className="text-gray-400 font-medium tabular-nums">{projects.filter(p => p.completedAt).length}</span>
+                        <ChevronDown size={12} className={`ml-auto transition-transform ${showCompleted ? '' : '-rotate-90'}`} />
+                      </button>
+                      {showCompleted && projects.filter(p => p.completedAt).map(project => {
+                        const isActive = activeView === 'tasks' && activeWorkspace === project.id;
+                        return (
+                          <button key={project.id} onClick={() => openProject(project.id)} aria-current={isActive ? 'page' : undefined}
+                            className={`w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors opacity-60 hover:opacity-100 ${isActive ? 'bg-white dark:bg-white/10 shadow-sm' : 'hover:bg-black/[0.04] dark:hover:bg-white/5'} text-gray-600 dark:text-gray-400`}>
+                            <CheckCircle2 size={13} className="text-green-500 shrink-0" />
+                            <span className="text-[14px] truncate flex-1 text-left font-medium line-through decoration-gray-400/60">{project.name}</span>
+                            <span className="text-[10px] font-semibold tracking-wide text-gray-400">{project.key}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
                   {projects.length === 0 && (
                     <div className="text-xs text-gray-400 px-3 py-2">No projects yet. Click + to add one.</div>
                   )}
