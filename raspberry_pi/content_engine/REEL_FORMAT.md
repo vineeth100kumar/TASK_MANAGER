@@ -89,14 +89,59 @@ These are the reel's own lines.
 | `transition:` | header | The slide change; `fade` is the default and the only one that differs visibly today. | |
 | `music:` | header | **Ignored, with a warning.** Add trending audio in Instagram. | |
 | `aspect:` / `format:` | header | **Ignored, with a warning.** A reel is always 9:16, 1080x1920. | `ratio:`, `size:` |
-| `say:` | each slide | The narration. A continuation line may be indented under it. Single capitals in a row ("N X P") are spoken as letters and shown joined up on the caption. | `vo:`, `voiceover:`, `narration:`, `speak:` |
-| `show:` | each slide | Cue phrases copied from `say:`, separated by `\|` (`;`, `->` and `→` also work). One per piece. With one fewer than there are pieces, the first piece opens the slide and the cues start at the second. | `cue:`, `cues:` |
+| `say:` | each slide | The narration. A continuation line may be indented under it. Single capitals in a row ("N X P") are spoken as letters and shown joined up on the caption. The order of the slide and the order of the words in `say:` must agree: the voice should mention the first piece first, the second one second, and so on. | `vo:`, `voiceover:`, `narration:`, `speak:` |
+| `show:` | each slide | **How you sync pieces to the voice.** Cue phrases copied verbatim from `say:`, separated by `\|` (`;`, `->` and `→` also work). One per piece. The piece lands 0.18 s before its cue word is spoken. With one fewer cue than pieces, the first piece opens the slide and the cues start at the second. A cue not found in `say:` is a warning and the pieces for that slide are spread evenly instead. See the sync section below. | `cue:`, `cues:` |
 | `motion:` | each slide | Only for a piece the reel doesn't recognise (see below); every known piece always gets its own. | `animation:`, `animate:` |
 | `duration:` | each slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |
 | `pause:` | each slide | Extra silence after this slide's narration; 0 to 5 seconds. | |
 
 A slide with neither `say:` nor `duration:` is held for 3 seconds, and there is always a 0.38 s
 breath between one slide's narration and the next.
+
+### How audio and slides stay in sync
+
+The voice is the clock. Slides and pieces are placed on the reel's timeline from where each word
+of `say:` is actually spoken. You never write timestamps; you write the narration and (where it
+matters) which word introduces which piece.
+
+**Step 1 — the voice is made.** Kokoro says every slide's `say:` line in order, with a 0.38 s
+breath between slides and whatever `pause:` the slide asks for after that. With `voice: mine` the
+same happens from your recording, read in slide order.
+
+**Step 2 — each word is timed.** Whisper on the Pi listens to the finished voice track and
+records when every spoken word starts and ends. If Whisper isn't installed, the words are spread
+evenly across the pauses in the audio; a script that leans on cues should assume Whisper is
+there.
+
+**Step 3 — the slide windows.** A slide starts just before its first spoken word (about 0.14 s
+earlier) and ends the moment the next slide's first word begins. There is no blank frame between
+two slides: the next one's first piece has already started moving in before the old one leaves,
+and the wipe carries the old one away. A slide with no `say:` holds for its `duration:` (3 s
+without one). The last slide holds for `end_hold:` seconds after its last word (default 1.2 s).
+
+**Step 4 — the pieces, one at a time.** Each slide has an ordered list of pieces (the headline,
+each bullet, the number, the picture…). `show:` names them by a word or phrase from `say:`. The
+first piece defaults to "open the slide" — so a line of three bullets usually only needs two
+cues. The piece lands 0.18 s before the first letter of its cue word hits the speaker. No cue, no
+`show:`, or a cue not found in `say:` falls back to spreading the pieces evenly across the
+narration, in order.
+
+**Step 5 — the captions.** Every spoken word is written along the bottom of the frame as it is
+said, with a brand-colour marker under the word being spoken right now. A spelled-out
+abbreviation ("N X P") is shown as one word on the caption ("NXP").
+
+Three rules for an AI that writes a script that stays in sync:
+
+1. **Mention things in slide order inside `say:`.** For a list of three steps, the voice should
+   name step one first, step two second, step three third. The pieces then ride along even
+   without `show:`.
+2. **For a slide with more than two pieces, write `show:` with one cue per piece after the
+   first.** Each cue is a word or short phrase that appears, verbatim and only once in that
+   slide's `say:`, at the moment the piece should appear. For a list of three steps, something
+   like `show: first | second | third` (when `say:` uses those words).
+3. **Use `pause:` to let a piece breathe.** A big number or a strong statement that the viewer
+   should sit with reads better with `pause: 0.4` to `pause: 1.0` after the slide's narration,
+   than with a longer last sentence.
 
 ### How things move
 
