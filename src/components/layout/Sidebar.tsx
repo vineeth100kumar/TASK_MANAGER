@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, Clapperboard, CheckCircle2 } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, CheckCircle2 } from 'lucide-react';
+import ClapperIcon from '../icons/ClapperIcon';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -383,7 +384,7 @@ export function Sidebar({
                 // Instagram carousels the Pi draws from a pasted script (Auto Content).
                 ...(lifeContext === 'personal' ? [] : [{ id: 'posts', name: 'Posts', icon: GalleryHorizontal, color: 'text-pink-500' }]),
                 // Vertical videos with a voice-over the Pi makes from a pasted script.
-                ...(lifeContext === 'personal' ? [] : [{ id: 'reels', name: 'Reels', icon: Clapperboard, color: 'text-rose-500' }]),
+                ...(lifeContext === 'personal' ? [] : [{ id: 'reels', name: 'Reels', icon: ClapperIcon, color: 'text-rose-500' }]),
                 // Private tasks no other list shows, behind the password.
                 { id: 'hidden', name: 'Hidden', icon: EyeOff },
                 // Radar is work, so it stays out of the Personal space.

@@ -440,19 +440,20 @@
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="dashboard"] rect:nth-child(odd) { animation: ic-pulse 520ms var(--ease-spring) both; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="dashboard"] rect:nth-child(even) { animation: ic-pulse 520ms 90ms var(--ease-spring) both; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="inbox"] { animation: ic-drop 520ms var(--ease-spring); }
-  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="focus"] circle:nth-child(3) { animation: ic-pulse 560ms var(--ease-spring) both; }
+  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="focus"] circle:nth-child(3) { animation: ic-ping 560ms var(--ease-out-expo) both; }
+  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="focus"] circle:nth-child(2) { animation: ic-ping 560ms 90ms var(--ease-out-expo) both; }
+  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="focus"] circle:nth-child(1) { animation: ic-ping 560ms 180ms var(--ease-out-expo) both; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="waiting_for"] { animation: ic-flip 700ms var(--ease-out-expo); }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="all"] path:first-child { animation: ic-lift 520ms var(--ease-spring) both; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="notes"] { animation: ic-wiggle 520ms ease-in-out; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="canvas"] { animation: ic-write 640ms ease-in-out; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="drop"] { animation: ic-up 560ms var(--ease-spring); }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="posts"] { animation: ic-slide 640ms var(--ease-spring); }
-  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="reels"] path:first-child { animation: ic-clap 640ms ease-in-out both; }
-  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="reels"] { animation: ic-nudge 640ms ease-in-out; }
+  :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="reels"] .clap-arm { animation: ic-clap 760ms ease-in-out both; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="hidden"] { animation: ic-blink 520ms ease-in-out; }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="radar"] { animation: ic-spin 900ms var(--ease-out-expo); }
   :is(.group:hover .nav-icon, [aria-current="page"] .nav-icon, .icon-play)[data-nav="lumo"] { animation: ic-ring 640ms ease-in-out; }
-  .icon-play[data-nav="reels"] path:first-child, .nav-icon[data-nav="reels"] path:first-child { transform-box: view-box; transform-origin: 3px 11px; }
+  [data-nav="reels"] .clap-arm { transform-box: view-box; transform-origin: 3px 11px; }
   @keyframes ic-pulse { 40% { transform: scale(0.72); } 100% { transform: scale(1); } }
   @keyframes ic-drop { 35% { transform: translateY(3px); } 65% { transform: translateY(-1px); } }
   @keyframes ic-flip { to { transform: rotate(180deg); } }
@@ -461,9 +462,9 @@
   @keyframes ic-write { 20% { transform: translate(2px,-1px) rotate(6deg); } 45% { transform: translate(-1px,1px); } 70% { transform: translate(2px,-1px) rotate(4deg); } }
   @keyframes ic-up { 40% { transform: translateY(-3.5px); } 70% { transform: translateY(0.5px); } }
   @keyframes ic-slide { 30% { transform: translateX(-3px); } 65% { transform: translateX(3px); } }
-  @keyframes ic-clap { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-24deg); } 50% { transform: rotate(0); } 70% { transform: rotate(-18deg); } 88% { transform: rotate(0); } }
-  @keyframes ic-nudge { 50% { transform: translateY(1px); } }
-  @keyframes ic-blink { 45% { transform: scaleY(0.15); } }
+  @keyframes ic-clap { 0% { transform: rotate(0); } 18% { transform: rotate(-28deg); } 40% { transform: rotate(0); } 60% { transform: rotate(-20deg); } 82%, 100% { transform: rotate(0); } }
+  @keyframes ic-ping { from { transform: scale(0.45); } to { transform: scale(1); } }
+  @keyframes ic-blink { 35%, 65% { transform: scaleY(0.72); } }
   @keyframes ic-spin { to { transform: rotate(360deg); } }
   @keyframes ic-ring { 10%, 50% { transform: rotate(-14deg); } 30%, 70% { transform: rotate(14deg); } 90%, 100% { transform: rotate(0); } }
 
