@@ -2,7 +2,8 @@
 // The list, the New reel screen and one reel's page, with the project filter when it is
 // opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, CheckCircle2, Clapperboard, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CheckCircle2, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
+import ClapperIcon from '../icons/ClapperIcon';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { REEL_EVENT, Reel, ReelMakerStatus, formatSeconds, posterUrl, reelsApi, reelsAvailable } from '../../services/reels';
@@ -111,7 +112,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
       )}
       {reels && reels.length === 0 && !archived && (
         <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-8 text-center space-y-3">
-          <Clapperboard size={28} data-nav="reels" className="icon-play mx-auto text-purple-500" />
+          <ClapperIcon size={28} data-nav="reels" className="icon-play mx-auto text-purple-500" />
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white">No reels yet</p>
           <p className="text-[13px] text-gray-500">Paste a script (or try the example) and get a vertical video with a voice-over and word-by-word captions.</p>
           <button onClick={() => setScreen({ name: 'new' })} className="h-10 px-5 rounded-xl bg-purple-600 text-white text-[14px] font-semibold">Make the first one</button>
