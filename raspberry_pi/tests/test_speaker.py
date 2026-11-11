@@ -226,3 +226,21 @@ class LatencyTests(unittest.TestCase):
         self.assertIn("--pcm-period-time=50000", cmd)
         self.assertEqual(cmd[-1], "11:22:33:44:55:66")
         self.assertIn("--pcm-buffer-time=500000", speaker.passthrough_cmd("x", "y", "steady"))
+
+
+class GreetGapTests(unittest.TestCase):
+    def test_once_every_six_hours(self):
+        self.assertTrue(speaker.greet_due(0, 1_000_000))
+        self.assertFalse(speaker.greet_due(1_000_000, 1_000_000 + 5.9 * 3600, 6))
+        self.assertTrue(speaker.greet_due(1_000_000, 1_000_000 + 6 * 3600, 6))
+
+    def test_stored(self):
+        speaker._store_greet_time(1234)
+        self.assertEqual(speaker.get_settings()["lastGreetAt"], 1234)
+        # a settings save from the app keeps it
+        speaker.save_settings({"greet": True})
+        self.assertEqual(speaker.get_settings()["lastGreetAt"], 1234)
+
+    def test_template_says_sir_without_a_name(self):
+        f = speaker.greeting_facts(at(19), [], [], False, None, [], "")
+        self.assertIn("Good evening, sir.", speaker.template_greeting(f))
