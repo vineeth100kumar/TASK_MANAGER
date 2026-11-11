@@ -228,6 +228,97 @@ class AlignTests(unittest.TestCase):
             self.assertAlmostEqual(align.duration(wav), len(np.concatenate(sig)) / 24000, places=1)
 
 
+class NaturalVoiceTests(unittest.TestCase):
+    def test_pieces_follow_punctuation_and_marks(self):
+        p = voice.pieces("It costs 2.5 lakh. Why? [pause 0.8] Because it lasts… forever")
+        self.assertEqual([x[0] for x in p], ["It costs 2.5 lakh.", "Why?", "Because it lasts…", "forever"])
+        self.assertAlmostEqual(p[0][1], 0.30)
+        self.assertAlmostEqual(p[1][1], 0.8)        # the mark wins over the question's own 0.42
+        self.assertAlmostEqual(p[2][1], 0.48)
+
+    def test_blend_and_check(self):
+        self.assertEqual(voice.parse_blend("af_heart*0.7 + af_bella*0.3"), [("af_heart", 0.7), ("af_bella", 0.3)])
+        self.assertEqual(voice.parse_blend("af_heart 70% + af_bella 30%"), [("af_heart", 0.7), ("af_bella", 0.3)])
+        self.assertEqual(voice.parse_blend("af_heart, bm_george"), [("af_heart", 0.5), ("bm_george", 0.5)])
+        self.assertIsNone(voice.check_voice("af_heart*0.6 + am_michael*0.4"))
+        self.assertIsNotNone(voice.check_voice("af_heart + robot"))
+
+    def test_pronounce(self):
+        self.assertEqual(voice.speakable("Pay by UPI on the Pi", {"Nvidia": "en-vidia"}), "Pay by U P I on the pie")
+        self.assertEqual(voice.speakable("nvidia rose", {"nvidia": "en-vidia"}), "en-vidia rose")
+
+    def test_script_keys(self):
+        text = """---
+autocontent: reel
+title: T
+voice: af_heart*0.7 + af_bella*0.3
+pauses: relaxed
+polish: warm
+loudness: 16
+pronounce: Nvidia = en-vidia; Kubernetes = koo-ber-net-eez
+---
+
+## cover
+headline: Hello
+say: This is the hook. [pause] Ready?
+
+## point
+headline: Two
+text: More
+say: Calm words here.
+tone: calm
+voice: am_michael
+
+## stat
+number: 65%
+label: Share
+say: Sixty five percent.
+"""
+        r = parse_reel(text)
+        self.assertEqual(r.meta["pauses"], 1.35)
+        self.assertEqual(r.meta["polish"], "warm")
+        self.assertEqual(r.meta["loudness"], -16)
+        self.assertEqual(r.meta["pronounce"]["Kubernetes"], "koo-ber-net-eez")
+        a, b, c = r.scenes
+        self.assertEqual(a.say, "This is the hook. Ready?")          # the mark is not captioned
+        self.assertIn("[pause]", a.say_raw)
+        self.assertEqual((a.tone, a.speed), ("hook", 1.08))
+        self.assertEqual((b.tone, b.speed, b.voice), ("calm", 0.95, "am_michael"))
+        self.assertEqual(c.tone, "emphasis")
+        self.assertFalse([i for i in r.issues if i.code == "SAY_SYMBOLS"])
+
+    @unittest.skipUnless(FFMPEG, "no ffmpeg")
+    def test_render_uses_slide_pace_voice_and_pauses(self):
+        calls = []
+
+        def spy(text, v, speed):
+            calls.append((text, v, round(speed, 3)))
+            return tone_voice(text, v, speed)
+        r = parse_reel("""---
+autocontent: reel
+title: T
+pauses: tight
+---
+
+## cover
+headline: Hi
+say: First one. [beat] Second one.
+
+## point
+headline: P
+text: x
+say: Now slower.
+speed: 0.9
+voice: bm_george
+""")
+        with tempfile.TemporaryDirectory() as d:
+            track = voice.render_tts(r.scenes, "af_heart", 1.0, Path(d), engine=spy)
+            self.assertTrue(track.path.is_file())
+        self.assertEqual(calls[0], ("First one.", "af_heart", 1.08))
+        self.assertEqual(calls[1], ("Second one.", "af_heart", 1.08))
+        self.assertEqual(calls[2], ("Now slower.", "bm_george", 0.9))
+
+
 class VoiceTextTests(unittest.TestCase):
     def test_speakable(self):
         self.assertEqual(voice.speakable("151% a year"), "151 percent a year")
