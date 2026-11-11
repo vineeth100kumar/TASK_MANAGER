@@ -59,6 +59,14 @@ class GreetingTests(unittest.TestCase):
                          "Pardon the interruption. A reminder: Pay rent.")
 
 
+class HelloTests(unittest.TestCase):
+    def test_hello_varies_and_names(self):
+        first = speaker.hello_line(at(19), "sir")
+        self.assertIn("sir", first)
+        for _ in range(20):
+            self.assertNotEqual(speaker.hello_line(at(19), "sir", first), first)
+
+
 class SettingsTests(unittest.TestCase):
     def test_clean(self):
         s = speaker.clean_settings({"address": "aa:bb:cc:dd:ee:ff", "volume": 500, "speed": 3})
