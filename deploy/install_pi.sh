@@ -22,7 +22,8 @@
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
 #   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
-#      (speaker.py). Run once with --only audio,server,web.
+#      (speaker.py), and go-librespot so the Pi is a Spotify Connect speaker
+#      on that soundbar (spotify.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -192,8 +193,8 @@ part_audio() {
   step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
   # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
   # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
-  # source) and can take the phone's audio to pass on (A2DP sink). speaker.py
-  # drops the phone's audio link whenever there's no soundbar to play it on.
+  # source) only. It is no longer a Bluetooth speaker for the phone (A2DP
+  # sink): that was laggy; Spotify Connect (below) replaces it.
   # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
   as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
@@ -207,11 +208,13 @@ part_audio() {
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
-    # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Nothing plays the phone's audio on the Pi any more.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload
-    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+    systemctl enable "$UNIT" >/dev/null 2>&1 || true
+    # Restart so a daemon still running with the old a2dp-sink profile drops it.
+    systemctl restart "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
@@ -225,6 +228,7 @@ part_audio() {
   else
     echo "The surround plugin didn't build, so Surround stays off. Try: sudo apt-get install gcc libc6-dev"
   fi
+  install_spotify
   # Sage's Wi-Fi switch (Settings > Bluetooth): with Ethernet, Wi-Fi off frees the
   # radio for Bluetooth audio. Only these two exact commands.
   NMCLI="$(command -v nmcli || echo /usr/bin/nmcli)"
@@ -233,6 +237,49 @@ part_audio() {
   if visudo -cf /etc/sudoers.d/sage-wifi.tmp >/dev/null; then mv /etc/sudoers.d/sage-wifi.tmp /etc/sudoers.d/sage-wifi; else rm -f /etc/sudoers.d/sage-wifi.tmp; fi
   # The Sage user talks to bluez-alsa over D-Bus; its policy allows the audio group.
   usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
+}
+
+# Spotify Connect (spotify.py): go-librespot, a prebuilt open-source Spotify
+# client. Sage runs it and you sign in with a code at spotify.com/pair, so no
+# Spotify developer app or keys are needed. Pinned; bump SPOTIFY_VERSION to update.
+SPOTIFY_VERSION="${SAGE_SPOTIFY_VERSION:-v0.10.5}"
+install_spotify() {
+  step "Spotify Connect (go-librespot $SPOTIFY_VERSION)"
+  # Runtime libraries; package names differ between Bookworm and Trixie (t64).
+  for pkg in libasound2t64:libasound2 libogg0 libvorbis0a libvorbisfile3 libflac14:libflac12 libmpg123-0t64:libmpg123-0 ca-certificates curl; do
+    apt-get install -y -qq "${pkg%%:*}" >/dev/null 2>&1 || { [ "${pkg#*:}" != "$pkg" ] && apt-get install -y -qq "${pkg#*:}" >/dev/null 2>&1; } || true
+  done
+  local variant
+  case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
+    arm64|aarch64) variant=arm64 ;;
+    armhf|armv7l) variant=armv6 ;;
+    armel|armv6l) variant=armv6_rpi ;;
+    amd64|x86_64) variant=x86_64 ;;
+    *) echo "No go-librespot build for this Pi ($(uname -m)), so Spotify stays off."; return 0 ;;
+  esac
+  local have=""
+  [ -x /usr/local/bin/go-librespot ] && have="$(cat /usr/local/lib/sage/go-librespot.version 2>/dev/null || true)"
+  if [ "$have" = "$SPOTIFY_VERSION-$variant" ]; then
+    echo "go-librespot $SPOTIFY_VERSION is already installed."
+  else
+    local tmp; tmp="$(mktemp -d)"
+    if curl -fsSL --retry 3 -o "$tmp/glr.tar.gz" \
+         "https://github.com/devgianlu/go-librespot/releases/download/$SPOTIFY_VERSION/go-librespot_linux_$variant.tar.gz" \
+       && tar -xzf "$tmp/glr.tar.gz" -C "$tmp" go-librespot \
+       && "$tmp/go-librespot" --help >/dev/null 2>&1; then
+      install -m 755 "$tmp/go-librespot" /usr/local/bin/go-librespot
+      mkdir -p /usr/local/lib/sage
+      echo "$SPOTIFY_VERSION-$variant" > /usr/local/lib/sage/go-librespot.version
+      echo "Installed go-librespot $SPOTIFY_VERSION ($variant)."
+    else
+      echo "go-librespot didn't install, so Spotify stays off. Missing libraries:"
+      ldd "$tmp/go-librespot" 2>/dev/null | grep "not found" || echo "  (download failed; check the Pi's internet)"
+    fi
+    rm -rf "$tmp"
+  fi
+  # Its sign-in and state live here; Sage writes config.yml on each start.
+  HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
+  as_user mkdir -p "$HOME_DIR/.config/sage-spotify"
 }
 
 part_check() {

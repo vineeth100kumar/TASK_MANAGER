@@ -13,6 +13,7 @@ import {
 import { useBluetooth, type BluetoothDevice, type DeviceKind } from '../../services/bluetooth';
 import { useToast } from '../../context/ToastContext';
 import { SpeakerCard } from './SpeakerCard';
+import { SpotifyCard } from './SpotifyCard';
 
 const card = 'p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-4';
 const smallButton = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap';
@@ -243,6 +244,7 @@ export function BluetoothSettings() {
       )}
 
       {adapter.powered && <SpeakerCard devices={devices} />}
+      {adapter.powered && <SpotifyCard />}
 
       {adapter.powered && (state.scanning || nearby.length > 0) && (
         <div className={card}>

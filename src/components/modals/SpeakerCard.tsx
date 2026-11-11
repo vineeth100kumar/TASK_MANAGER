@@ -1,10 +1,11 @@
 // SpeakerCard - pick a paired soundbar as Sage's speaker: the welcome-home
-// greeting, spoken reminders and phone pass-through (raspberry_pi/speaker.py).
+// greeting and spoken reminders (raspberry_pi/speaker.py). Spotify plays on it
+// too: see SpotifyCard.
 
 import { Select } from '../common/Select';
 import { useState } from 'react';
 import { Speaker, Loader2, Volume2, Link2, Unplug, Moon, AudioWaveform } from 'lucide-react';
-import { useSpeaker, type SpeakerSettings, type SurroundMode, type LatencyMode } from '../../services/speaker';
+import { useSpeaker, type SpeakerSettings, type SurroundMode } from '../../services/speaker';
 import type { BluetoothDevice } from '../../services/bluetooth';
 import { useToast } from '../../context/ToastContext';
 
@@ -25,13 +26,7 @@ const SURROUND_MODES: { mode: Exclude<SurroundMode, 'off'>; label: string; hint:
   { mode: 'wide', label: 'Wide', hint: 'The biggest sound. Best for games and concerts; can feel hollow on talk.' },
 ];
 
-const LATENCY_MODES: { mode: LatencyMode; label: string; hint: string }[] = [
-  { mode: 'lowest', label: 'Lowest', hint: 'About 0.1 s of buffer on the Pi. Least lag; may crackle if Bluetooth is busy.' },
-  { mode: 'low', label: 'Low', hint: 'About 0.2 s of buffer on the Pi. A good balance for videos.' },
-  { mode: 'steady', label: 'Steady', hint: 'About 0.5 s of buffer (the old setting). Most lag, fewest dropouts.' },
-];
-
-function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (on: boolean) => void; label: string; hint: string }) {
+export function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (on: boolean) => void; label: string; hint: string }) {
   return (
     <label className="flex items-start gap-3 cursor-pointer">
       <button role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
@@ -68,7 +63,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
   const missing = [!s.tools.bluealsa && 'bluez-alsa', !s.tools.aplay && 'aplay', !s.tools.voice && 'the Kokoro voice'].filter(Boolean);
   const status = !set.address ? 'Off'
     : s.speaking ? 'Speaking…'
-    : s.soundbar.connected ? (s.passing ? 'Connected · playing your phone' : 'Connected') + (s.surroundOn ? ' · surround' : '')
+    : s.soundbar.connected ? 'Connected' + (s.surroundOn ? ' · surround' : '')
     : 'Not connected · connects when you get home';
 
   return (
@@ -115,29 +110,10 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />
-          <Switch on={set.passthrough} onChange={on => save({ passthrough: on })} label="Be a speaker for my phone"
-            hint="Your phone sees the Pi as a speaker and its music plays on the soundbar. Sage pauses it for a moment to speak." />
-
-          {set.passthrough && (
-            <div className="pl-[3.25rem] space-y-1.5 -mt-2">
-              <span className="block text-xs text-gray-500">Phone audio delay</span>
-              <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Phone audio delay">
-                {LATENCY_MODES.map(m => (
-                  <button key={m.mode} role="radio" aria-checked={(set.latency || 'low') === m.mode} disabled={busy}
-                    onClick={() => save({ latency: m.mode })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold ${(set.latency || 'low') === m.mode ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'}`}>
-                    {m.label}
-                  </button>
-                ))}
-              </div>
-              <p className="text-[11px] text-gray-400">{LATENCY_MODES.find(m => m.mode === (set.latency || 'low'))?.hint}</p>
-            </div>
-          )}
-
           <div className="space-y-2">
             <Switch on={(set.surround || 'off') !== 'off'} onChange={on => save({ surround: on ? lastMode : 'off' })}
               label="Surround sound"
-              hint="Makes the soundbar sound wider and roomier, for the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
+              hint="Makes the soundbar sound wider and roomier, for Spotify and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
             {(set.surround || 'off') !== 'off' && (
               <div className="pl-[3.25rem] space-y-1.5">
                 <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Surround mode">

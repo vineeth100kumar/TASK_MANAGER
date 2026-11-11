@@ -84,11 +84,11 @@ class LinkTests(unittest.TestCase):
             "/org/bluez/hci0/dev_AA/fd0": {"org.bluez.MediaTransport1": {}},
             "/org/bluez/hci0/dev_BB": {"org.bluez.Device1": {"Address": "BB:BB:BB:BB:BB:BB", "Connected": True, "Paired": True}},
         }
-        links = speaker.audio_links(objects, "aa:aa:aa:aa:aa:aa", "BB:BB:BB:BB:BB:BB")
+        links = speaker.audio_links(objects, "aa:aa:aa:aa:aa:aa")
         self.assertTrue(links["soundbar"]["connected"])
         self.assertTrue(links["soundbar"]["audio"])
         self.assertEqual(links["soundbar"]["name"], "Soundbar")
-        self.assertFalse(links["phoneAudio"])
+        self.assertNotIn("phoneAudio", links)
 
 
 class WifiTests(unittest.TestCase):
@@ -213,19 +213,11 @@ class SurroundPluginTests(unittest.TestCase):
         self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
 
 
-class LatencyTests(unittest.TestCase):
-    def test_settings(self):
-        self.assertEqual(speaker.DEFAULTS["latency"], "low")
-        self.assertEqual(speaker.clean_settings({"latency": "lowest"})["latency"], "lowest")
-        with self.assertRaises(ValueError):
-            speaker.clean_settings({"latency": "zero"})
-
-    def test_command(self):
-        cmd = speaker.passthrough_cmd("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", "11:22:33:44:55:66", "low")
-        self.assertIn("--pcm-buffer-time=200000", cmd)
-        self.assertIn("--pcm-period-time=50000", cmd)
-        self.assertEqual(cmd[-1], "11:22:33:44:55:66")
-        self.assertIn("--pcm-buffer-time=500000", speaker.passthrough_cmd("x", "y", "steady"))
+class NoPassThroughTests(unittest.TestCase):
+    def test_old_settings_are_dropped(self):
+        self.assertNotIn("passthrough", speaker.DEFAULTS)
+        self.assertNotIn("latency", speaker.DEFAULTS)
+        self.assertNotIn("passthrough", speaker.clean_settings({"passthrough": True, "latency": "low"}))
 
 
 class GreetGapTests(unittest.TestCase):

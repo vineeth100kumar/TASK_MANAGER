@@ -1,28 +1,24 @@
 // speaker.ts - Sage's voice on a Bluetooth soundbar (raspberry_pi/speaker.py):
-// the welcome-home greeting, spoken reminders and phone pass-through.
+// the welcome-home greeting and spoken reminders. Spotify plays on it too (spotify.ts).
 
 import { useCallback, useEffect, useState } from 'react';
 import { piBackendUrl, piHeaders } from './piBackend';
 import { SPEAKER_EVENT } from './liveStream';
 
 export type SurroundMode = 'off' | 'music' | 'movie' | 'wide';
-export type LatencyMode = 'lowest' | 'low' | 'steady';
 
 export interface SpeakerSettings {
-  address: string; name: string; greet: boolean; reminders: boolean; passthrough: boolean; witty: boolean;
+  address: string; name: string; greet: boolean; reminders: boolean; witty: boolean;
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
   surround?: SurroundMode;
-  latency?: LatencyMode;
 }
 
 export interface SpeakerState {
   settings: SpeakerSettings;
-  tools: { aplay: boolean; bluealsa: boolean; passthrough: boolean; surround?: boolean; voice: boolean };
+  tools: { aplay: boolean; bluealsa: boolean; surround?: boolean; voice: boolean };
   voiceProblem: string;
   voices: string[];
   soundbar: { known: boolean; paired: boolean; connected: boolean; audio: boolean; name: string };
-  phoneAudio: boolean;
-  passing: boolean;
   surroundOn?: boolean;
   speaking: string;
   last: { text: string; kind: string; at: number } | null;
