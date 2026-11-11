@@ -92,6 +92,34 @@ class SignInTests(unittest.TestCase):
         self.assertEqual(spotify.friendly_log(line), 'failed loading "x": ALSA error at snd_pcm_open: No such device')
 
 
+class RefusedTests(unittest.TestCase):
+    def test_refused(self):
+        self.assertTrue(spotify.refused("failed creating stream for x: failed retrieving audio key: failed retrieving aes key with code 1"))
+        self.assertFalse(spotify.refused("media is restricted"))
+        self.assertFalse(spotify.refused("ALSA error at snd_pcm_open: No such device"))
+
+    def test_stops_after_a_run(self):
+        import asyncio
+        calls = []
+
+        async def fake(method, path, body=None, timeout=5):
+            calls.append(path)
+
+        c = spotify.SpotifyConnect()
+        c.api = fake
+
+        async def go():
+            err = {"uri": "spotify:track:1", "message": "failed retrieving aes key with code 1"}
+            for _ in range(spotify.REFUSED_LIMIT - 1):
+                await c.on_playback_error(err)
+            self.assertNotIn("/player/stop", calls)
+            await c.on_playback_error(err)
+            self.assertIn("/player/stop", calls)
+            self.assertIn("refusing", c.error["message"])
+
+        asyncio.run(go())
+
+
 if __name__ == "__main__":
     unittest.main()
 

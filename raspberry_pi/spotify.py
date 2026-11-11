@@ -36,7 +36,7 @@ import sqlite3
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 log = logging.getLogger("spotify")
 
@@ -213,6 +213,20 @@ def forget_user(config_dir: Path = CONFIG_DIR) -> None:
         os.replace(tmp, path)
 
 
+REFUSED_LIMIT = 5        # refused songs in a row before Sage stops the skipping
+REFUSED_WINDOW = 90.0    # seconds; refusals further apart than this start a new count
+REFUSED_MESSAGE = ("Spotify is refusing to unlock songs for this account on the Pi (every song came back with "
+                   "\"failed retrieving aes key\"), so Sage stopped it instead of letting it skip forever. This is "
+                   "Spotify's check on its side, which some accounts fail with open-source players; the Pi and the "
+                   "soundbar are fine. It sometimes clears by itself: pick Sage again later to try.")
+
+
+def refused(message: str) -> bool:
+    """True when Spotify refused to unlock the song (its audio key), not a local problem. Pure."""
+    m = (message or "").lower()
+    return "aes key" in m or "audio key" in m
+
+
 def friendly_log(line: str) -> str:
     """go-librespot's log line without logrus' level= / msg= noise. Pure."""
     msg = re.search(r'msg="((?:[^"\\]|\\.)*)"', line)
@@ -248,6 +262,7 @@ class SpotifyConnect:
         self.retry: Optional[dict] = None    # a song that failed to start before the soundbar was up
         self.last_load: Optional[dict] = None
         self._connecting = False
+        self.refusals: List[float] = []   # when Spotify last refused a song's key, in a row
         self._last_sent = ""
         self._client = None
 
@@ -466,6 +481,8 @@ class SpotifyConnect:
             self.last_load = {"context": data.get("context_uri") or "", "uri": data.get("uri") or "", "at": time.time()}
             asyncio.ensure_future(self.soundbar_up())
         elif kind in ("active", "playing"):
+            if kind == "playing":
+                self.refusals = []
             asyncio.ensure_future(self.soundbar_up())
         elif kind == "playback_error":
             await self.on_playback_error(data)
@@ -482,12 +499,14 @@ class SpotifyConnect:
 
     async def on_playback_error(self, data: dict) -> None:
         uri = str(data.get("uri") or "")
+        why = str(data.get("message") or data.get("kind") or "unknown error")
+        if refused(why) and await self.on_refused():
+            return
         if self._connecting or not self._soundbar_ready():
             # The soundbar wasn't there yet: play it again once it is.
             load = self.last_load or {}
             self.retry = {"uri": uri or load.get("uri", ""), "context": load.get("context", "") if load.get("uri") == uri or not uri else ""}
             return
-        why = str(data.get("message") or data.get("kind") or "unknown error")
         if self.device.startswith("sage_surround") and self.speaker is not None and output_error(why):
             self.speaker._surround_failed("Spotify couldn't open it")
             await self.follow_output()
@@ -495,6 +514,23 @@ class SpotifyConnect:
             await self.replay()
             return
         self._fail(f"Spotify couldn't play that: {why[:160]}")
+
+    async def on_refused(self) -> bool:
+        """go-librespot skips a song Spotify won't unlock. When every song is
+        refused it skips forever, so stop after a few in a row. True when stopped."""
+        now = time.time()
+        self.refusals = [t for t in self.refusals if now - t < REFUSED_WINDOW] + [now]
+        if len(self.refusals) < REFUSED_LIMIT:
+            return False
+        self.refusals = []
+        self.retry = None
+        try:
+            await self.api("POST", "/player/stop")
+        except Exception as e:
+            log.info("Couldn't stop Spotify after refused songs: %s", e)
+        self._fail(REFUSED_MESSAGE)
+        await self.publish(force=True)
+        return True
 
     async def soundbar_up(self) -> None:
         """Connect the soundbar for Spotify, then retry a song that missed it."""
