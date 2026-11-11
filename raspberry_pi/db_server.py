@@ -1875,6 +1875,15 @@ async def speaker_say(body: Dict[str, Any]):
     return {"success": True, "text": text}
 
 
+@app.post("/api/speaker/wifi")
+async def speaker_wifi(body: Dict[str, Any]):
+    try:
+        await asyncio.to_thread(speaker.set_wifi, bool(body.get("on")))
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await speaker_state()
+
+
 @app.post("/api/speaker/{action}")
 async def speaker_action(action: str):
     if action == "connect":

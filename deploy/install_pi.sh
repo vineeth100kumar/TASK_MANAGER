@@ -215,6 +215,12 @@ part_audio() {
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
+  # Sage's Wi-Fi switch (Settings > Bluetooth): with Ethernet, Wi-Fi off frees the
+  # radio for Bluetooth audio. Only these two exact commands.
+  NMCLI="$(command -v nmcli || echo /usr/bin/nmcli)"
+  printf '%s ALL=(root) NOPASSWD: %s radio wifi on, %s radio wifi off\n' "$RUN_AS" "$NMCLI" "$NMCLI" > /etc/sudoers.d/sage-wifi.tmp
+  chmod 440 /etc/sudoers.d/sage-wifi.tmp
+  if visudo -cf /etc/sudoers.d/sage-wifi.tmp >/dev/null; then mv /etc/sudoers.d/sage-wifi.tmp /etc/sudoers.d/sage-wifi; else rm -f /etc/sudoers.d/sage-wifi.tmp; fi
   # The Sage user talks to bluez-alsa over D-Bus; its policy allows the audio group.
   usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
 }
