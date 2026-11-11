@@ -14,7 +14,7 @@ and the music plays on the soundbar:
   isn't already. If the first song tried to start before the soundbar was
   ready, Sage starts it again once it is.
 - Sage's own voice (greeting, reminders) pauses Spotify for a moment and then
-  carries on.
+  carries on. The optional phone pass-through steps aside while Spotify plays.
 - Surround (speaker.py) applies to Spotify too; switching it moves the music
   live through go-librespot's /player/output.
 - Settings > Bluetooth has a Spotify card: sign in, now playing, play/pause,
@@ -501,6 +501,7 @@ class SpotifyConnect:
             return
         self._connecting = True
         try:
+            await self.speaker.make_room()
             if not self._soundbar_ready():
                 if await self.speaker.ensure_connected():
                     await asyncio.sleep(0.5)

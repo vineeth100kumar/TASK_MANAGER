@@ -193,8 +193,10 @@ part_audio() {
   step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
   # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
   # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
-  # source) only. It is no longer a Bluetooth speaker for the phone (A2DP
-  # sink): that was laggy; Spotify Connect (below) replaces it.
+  # source) and, when "Be a speaker for my phone" is on, takes the phone's
+  # audio to pass on (A2DP sink). speaker.py drops the phone's audio link
+  # whenever that's off or there's no soundbar to play it on. Spotify Connect
+  # (below) is the low-lag way to play music.
   # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
   as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
@@ -208,13 +210,11 @@ part_audio() {
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
-    # Nothing plays the phone's audio on the Pi any more.
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload
-    systemctl enable "$UNIT" >/dev/null 2>&1 || true
-    # Restart so a daemon still running with the old a2dp-sink profile drops it.
-    systemctl restart "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
