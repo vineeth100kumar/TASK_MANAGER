@@ -21,6 +21,7 @@ export interface SpeakerState {
   speaking: string;
   last: { text: string; kind: string; at: number } | null;
   error: { message: string } | null;
+  wifi: { available: boolean; on: boolean | null; ethernet: boolean };
   quietNow: boolean;
 }
 
@@ -67,5 +68,6 @@ export function useSpeaker() {
     say: (text: string) => run('/say', { text }),
     connect: () => run('/connect'),
     disconnect: () => run('/disconnect'),
+    setWifi: (on: boolean) => run('/wifi', { on }),
   };
 }

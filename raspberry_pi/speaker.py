@@ -323,6 +323,50 @@ def _lower() -> None:
         pass
 
 
+# --- The Pi's Wi-Fi (off frees the radio for Bluetooth audio when on Ethernet) ---
+
+def _run(cmd: List[str], timeout: float = 10) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+def ethernet_up(root: str = "/sys/class/net") -> bool:
+    """True when a wired interface has a live link."""
+    try:
+        for name in os.listdir(root):
+            if name.startswith(("eth", "en")):
+                try:
+                    if Path(root, name, "carrier").read_text().strip() == "1":
+                        return True
+                except OSError:
+                    continue
+    except OSError:
+        pass
+    return False
+
+
+def wifi_state() -> dict:
+    """{available, on, ethernet}."""
+    nmcli = shutil.which("nmcli")
+    eth = ethernet_up()
+    if not nmcli:
+        return {"available": False, "on": None, "ethernet": eth}
+    try:
+        out = _run([nmcli, "radio", "wifi"]).stdout.strip().lower()
+    except (OSError, subprocess.TimeoutExpired):
+        return {"available": False, "on": None, "ethernet": eth}
+    return {"available": True, "on": out == "enabled", "ethernet": eth}
+
+
+def set_wifi(on: bool) -> dict:
+    nmcli = shutil.which("nmcli") or "/usr/bin/nmcli"
+    if not on and not ethernet_up():
+        raise ValueError("Plug in Ethernet first: with Wi-Fi off and no cable, the Pi would go offline.")
+    proc = _run(["sudo", "-n", nmcli, "radio", "wifi", "on" if on else "off"], timeout=20)
+    if proc.returncode:
+        raise RuntimeError("The Pi refused (run: sudo deploy/install_pi.sh --only audio). " + proc.stderr.strip()[-120:])
+    return wifi_state()
+
+
 # --- The speaker ---
 
 Emit = Callable[[dict], Awaitable[None]]
@@ -363,6 +407,7 @@ class Speaker:
             "speaking": self.speaking,
             "last": self.last,
             "error": self.error if self.error and time.time() - self.error["at"] < 600 else None,
+            "wifi": wifi_state(),
             "quietNow": in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]),
         }
 
@@ -489,6 +534,16 @@ class Speaker:
             await asyncio.wait_for(proc.wait(), timeout=3)
         except asyncio.TimeoutError:
             proc.kill()
+
+    async def wifi_guard(self) -> None:
+        """Wi-Fi off and the cable gone would leave the Pi unreachable: turn it back on."""
+        state = await asyncio.to_thread(wifi_state)
+        if state["available"] and state["on"] is False and not state["ethernet"]:
+            log.info("Ethernet is down with Wi-Fi off; turning Wi-Fi back on.")
+            try:
+                await asyncio.to_thread(set_wifi, True)
+            except Exception as e:
+                self._fail(f"Couldn't turn Wi-Fi back on: {e}")
 
     async def tick(self) -> None:
         """Every few seconds: keep pass-through, the phone's audio link and
@@ -723,6 +778,7 @@ class Speaker:
         asyncio.ensure_future(self._speak_loop())
         while True:
             try:
+                await self.wifi_guard()
                 if get_settings()["address"]:
                     await self.tick()
             except Exception as e:

@@ -104,6 +104,16 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.passthrough} onChange={on => save({ passthrough: on })} label="Be a speaker for my phone"
             hint="Your phone sees the Pi as a speaker and its music plays on the soundbar. Sage pauses it for a moment to speak." />
 
+          {s.wifi?.available && (
+            <div>
+              <Switch on={!!s.wifi.on} onChange={on => attempt(() => sp.setWifi(on))} label="Pi Wi-Fi"
+                hint={s.wifi.ethernet
+                  ? 'The Pi is on Ethernet, so Wi-Fi can be off. That leaves the radio to Bluetooth for cleaner sound.'
+                  : 'No Ethernet cable is connected, so Wi-Fi has to stay on.'} />
+              <p className="pl-[3.25rem] text-[11px] text-gray-400">If the cable is unplugged, the Pi turns Wi-Fi back on by itself.</p>
+            </div>
+          )}
+
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-gray-500 space-y-1"><span className="block">Voice</span>
               <select className={`${field} w-full`} value={set.voice} onChange={e => save({ voice: e.target.value })}>

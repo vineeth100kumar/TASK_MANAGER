@@ -91,5 +91,22 @@ class LinkTests(unittest.TestCase):
         self.assertFalse(links["phoneAudio"])
 
 
+class WifiTests(unittest.TestCase):
+    def test_ethernet_up(self):
+        root = Path(tempfile.mkdtemp())
+        (root / "eth0").mkdir()
+        (root / "eth0" / "carrier").write_text("0\n")
+        (root / "wlan0").mkdir()
+        self.assertFalse(speaker.ethernet_up(str(root)))
+        (root / "eth0" / "carrier").write_text("1\n")
+        self.assertTrue(speaker.ethernet_up(str(root)))
+
+    def test_refuses_off_without_cable(self):
+        from unittest import mock
+        with mock.patch.object(speaker, "ethernet_up", return_value=False):
+            with self.assertRaises(ValueError):
+                speaker.set_wifi(False)
+
+
 if __name__ == "__main__":
     unittest.main()
