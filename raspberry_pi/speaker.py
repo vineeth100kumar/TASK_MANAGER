@@ -97,11 +97,12 @@ LATENCY: Dict[str, Dict[str, int]] = {
 
 # Virtual surround presets: the sage_surround plugin's controls.
 # width 0..1 widens the side above the bass, space 0..1 adds early reflections,
-# dialog and bass are dB boosts (0..9) on the centre.
+# dialog and bass are dB boosts (0..9) on the centre, air a 10 kHz shelf (dB),
+# punch 0..1 a gentle compressor with make-up gain (fuller and louder).
 SURROUND: Dict[str, Dict[str, float]] = {
-    "music": {"width": 0.5, "space": 0.3, "dialog": 0, "bass": 3},
-    "movie": {"width": 0.7, "space": 0.5, "dialog": 4, "bass": 3},
-    "wide": {"width": 1.0, "space": 0.7, "dialog": 2, "bass": 2},
+    "music": {"width": 0.55, "space": 0.3, "dialog": 1, "bass": 4, "air": 3, "punch": 0.5},
+    "movie": {"width": 0.7, "space": 0.55, "dialog": 5, "bass": 4, "air": 2, "punch": 0.6},
+    "wide": {"width": 1.0, "space": 0.75, "dialog": 2, "bass": 3, "air": 3, "punch": 0.4},
 }
 SURROUND_PLUGIN = Path(os.getenv("SAGE_SURROUND_PLUGIN", "/usr/local/lib/sage/ladspa/sage_surround.so"))
 SURROUND_CONF = Path(os.getenv("SAGE_SURROUND_CONF", "/etc/alsa/conf.d/60-sage-surround.conf"))
@@ -365,7 +366,7 @@ def output_device(address: str, surround: str, ready: bool) -> str:
     if not preset:
         return f"bluealsa:DEV={address},PROFILE=a2dp"
     return (f"sage_surround:DEV={address},WIDTH={preset['width']:g},SPACE={preset['space']:g},"
-            f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g}")
+            f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g},AIR={preset['air']:g},PUNCH={preset['punch']:g}")
 
 
 def passthrough_cmd(device: str, phone: str, latency: str) -> List[str]:

@@ -21,8 +21,8 @@ const VOICE_LABEL: Record<string, string> = {
 };
 
 const SURROUND_MODES: { mode: Exclude<SurroundMode, 'off'>; label: string; hint: string }[] = [
-  { mode: 'music', label: 'Music', hint: 'A wider stage and a little more bass, voices left as they are.' },
-  { mode: 'movie', label: 'Movie', hint: 'Wide and roomy, with dialogue lifted so speech stays clear.' },
+  { mode: 'music', label: 'Music', hint: 'Wider, with fuller bass, crisper highs and more detail in quiet parts. Loud parts never clip.' },
+  { mode: 'movie', label: 'Movie', hint: 'Wide and roomy, with dialogue lifted and quiet scenes brought up so you hear every word.' },
   { mode: 'wide', label: 'Wide', hint: 'The biggest sound. Best for games and concerts; can feel hollow on talk.' },
 ];
 
