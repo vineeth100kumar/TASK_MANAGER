@@ -1,6 +1,7 @@
 // SpeakerCard - pick a paired soundbar as Sage's speaker: the welcome-home
 // greeting, spoken reminders and phone pass-through (raspberry_pi/speaker.py).
 
+import { Select } from '../common/Select';
 import { useState } from 'react';
 import { Speaker, Loader2, Volume2, Link2, Unplug, Moon } from 'lucide-react';
 import { useSpeaker, type SpeakerSettings } from '../../services/speaker';
@@ -78,15 +79,15 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
       {s.error && <div className="px-3 py-2 rounded-xl bg-red-50 dark:bg-red-500/10 text-xs text-red-700 dark:text-red-300">{s.error.message}</div>}
 
       <div className="flex flex-wrap items-center gap-2">
-        <select className={`${field} flex-1 min-w-[12rem]`} value={set.address} disabled={busy}
-          onChange={e => {
-            const d = candidates.find(c => c.address === e.target.value);
-            save({ address: e.target.value, name: d?.name || '' });
+        <Select className={`${field} flex-1 min-w-[12rem]`} value={set.address} disabled={busy} aria-label="Speaker"
+          onChange={v => {
+            const d = candidates.find(c => c.address === v);
+            save({ address: v, name: d?.name || '' });
           }}>
           <option value="">No speaker</option>
           {candidates.map(d => <option key={d.address} value={d.address}>{d.name}</option>)}
           {set.address && !candidates.some(d => d.address === set.address) && <option value={set.address}>{set.name || set.address}</option>}
-        </select>
+        </Select>
         {set.address && (s.soundbar.connected
           ? <button className={smallButton} disabled={busy} onClick={() => attempt(sp.disconnect)}><Unplug size={13} />Disconnect</button>
           : <button className={smallButton} disabled={busy} onClick={() => attempt(sp.connect)}><Link2 size={13} />Connect</button>)}
@@ -116,9 +117,9 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <label className="text-xs text-gray-500 space-y-1"><span className="block">Voice</span>
-              <select className={`${field} w-full`} value={set.voice} onChange={e => save({ voice: e.target.value })}>
+              <Select className={`${field} w-full`} value={set.voice} aria-label="Voice" onChange={v => save({ voice: v })}>
                 {s.voices.map(v => <option key={v} value={v}>{VOICE_LABEL[v] || v}</option>)}
-              </select>
+              </Select>
             </label>
             <label className="text-xs text-gray-500 space-y-1"><span className="block">Call me</span>
               <input className={`${field} w-full`} defaultValue={set.callMe} placeholder="sir, Vineeth, or leave empty" maxLength={30}

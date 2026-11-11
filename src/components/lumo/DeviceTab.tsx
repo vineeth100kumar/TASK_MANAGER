@@ -1,6 +1,7 @@
 // The LUMO page's device tab: is the clock there, how steady its link to the
 // Pi is, which firmware it runs, a remote for its buttons, and finding,
 // restarting and locking it.
+import { Select } from '../common/Select';
 import { useState } from 'react';
 import { Activity, ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Cpu, Download, Gauge, KeyRound, Lock, MapPin, Pin, Power, Radio, RefreshCw, RotateCcw, Wifi } from 'lucide-react';
 import { LumoLink, LumoPerf, LumoSettings, LumoSettingsUpdate, LumoStatus, LumoUpdates, lumoApi } from '../../services/lumo';
@@ -352,9 +353,9 @@ function OverTheAir({ updates: u, firmware, auto, setAuto, when, setWhen, act }:
         <Toggle on={auto} onChange={setAuto} label="Update automatically" />
       </Row>
       <Row title="When" hint="Automatic updates wait for this window. Update now doesn't.">
-        <select value={when} onChange={e => setWhen(e.target.value)} className={selectCls} aria-label="Update window">
+        <Select value={when} onChange={setWhen} className={selectCls} aria-label="Update window">
           {windows.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
-        </select>
+        </Select>
       </Row>
       <div className="flex flex-wrap gap-2">
         <button onClick={() => act(() => lumoApi.firmware('update'), 'Sending the update to LUMO')} disabled={busy}
