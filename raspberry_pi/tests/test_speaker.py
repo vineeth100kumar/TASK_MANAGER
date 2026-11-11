@@ -124,7 +124,7 @@ class SurroundTests(unittest.TestCase):
         self.assertEqual(speaker.output_device(a, "off", True), f"bluealsa:DEV={a},PROFILE=a2dp")
         self.assertEqual(speaker.output_device(a, "movie", False), f"bluealsa:DEV={a},PROFILE=a2dp")
         self.assertEqual(speaker.output_device(a, "movie", True),
-                         f"sage_surround:DEV={a},WIDTH=0.7,SPACE=0.5,DIALOG=4,BASS=3")
+                         f"sage_surround:DEV={a},WIDTH=0.7,SPACE=0.55,DIALOG=5,BASS=4,AIR=2,PUNCH=0.6")
 
     def test_failure_falls_back_until_switched(self):
         sp = speaker.Speaker()
@@ -170,17 +170,17 @@ class SurroundPluginTests(unittest.TestCase):
         cls.desc = lib.ladspa_descriptor(0)
         cls.ctypes = ctypes
 
-    def process(self, left, right, width, space, dialog, bass):
+    def process(self, left, right, width, space, dialog, bass, air=0, punch=0):
         ct, d = self.ctypes, self.desc.contents
         n = len(left)
-        controls = [ct.c_float(v) for v in (width, space, dialog, bass)]
+        controls = [ct.c_float(v) for v in (width, space, dialog, bass, air, punch)]
         ins = [(ct.c_float * n)(*left), (ct.c_float * n)(*right)]
         outs = [(ct.c_float * n)(), (ct.c_float * n)()]
         h = d.instantiate(ct.addressof(d), 48000)
         for i, c in enumerate(controls):
             d.connect(h, i, ct.pointer(c))
         for i, buf in enumerate(ins + outs):
-            d.connect(h, 4 + i, ct.cast(buf, ct.POINTER(ct.c_float)))
+            d.connect(h, 6 + i, ct.cast(buf, ct.POINTER(ct.c_float)))
         d.activate(h)
         d.run(h, n)
         d.cleanup(h)
@@ -200,7 +200,7 @@ class SurroundPluginTests(unittest.TestCase):
 
     def test_movie_is_wider_and_never_clips(self):
         left, right = self.signal()
-        ol, orr = self.process(left, right, 0.7, 0.5, 4, 3)
+        ol, orr = self.process(left, right, 0.7, 0.55, 5, 4, 2, 0.6)
         tail = slice(2400, None)
         def ratio(l, r):
             mid = sum(((a + b) / 2) ** 2 for a, b in zip(l[tail], r[tail]))
@@ -209,7 +209,27 @@ class SurroundPluginTests(unittest.TestCase):
         self.assertGreater(ratio(ol, orr), 1.5 * ratio(left, right))
         self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
         # full-scale input still stays inside the limit
-        ol, orr = self.process([1.0] * 4800, [-1.0] * 4800, 1, 0.7, 9, 9)
+        ol, orr = self.process([1.0] * 4800, [-1.0] * 4800, 1, 0.7, 9, 9, 9, 1)
+        self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
+
+    def test_music_is_fuller_brighter_and_louder(self):
+        import math
+        n = 48000
+        def tone(f, a):
+            return [a * math.sin(2 * math.pi * f * i / 48000) for i in range(n)]
+        def level(sig):
+            tail = sig[12000:]
+            return math.sqrt(sum(v * v for v in tail) / len(tail))
+        for f in (100, 12000):  # bass and air both come up
+            x = tone(f, 0.1)
+            ol, _ = self.process(x, x, 0.55, 0.3, 1, 4, 3, 0.5)
+            self.assertGreater(level(ol), 1.3 * level(x), f)
+        # a quiet passage gets louder overall (punch), a loud one stays under the ceiling
+        x = tone(1000, 0.05)
+        ol, _ = self.process(x, x, 0.55, 0.3, 1, 4, 3, 0.5)
+        self.assertGreater(level(ol), 1.3 * level(x))
+        x = tone(100, 0.9)
+        ol, orr = self.process(x, x, 0.55, 0.3, 1, 4, 3, 0.5)
         self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
 
 
