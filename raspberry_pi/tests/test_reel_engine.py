@@ -287,6 +287,7 @@ say: Sixty five percent.
         self.assertEqual(c.tone, "emphasis")
         self.assertFalse([i for i in r.issues if i.code == "SAY_SYMBOLS"])
 
+    @unittest.skipUnless(FFMPEG, "no ffmpeg")
     def test_render_uses_slide_pace_voice_and_pauses(self):
         calls = []
 
