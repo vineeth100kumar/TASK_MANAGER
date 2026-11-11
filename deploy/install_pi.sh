@@ -151,7 +151,7 @@ part_autosync() {
   if [ "$AUTOSYNC" -eq 1 ]; then
     step "Letting auto-sync restart sage (and nothing else) without root"
     SUDOERS=/etc/sudoers.d/sage-autosync
-    printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart sage\n' "$RUN_AS" > "$SUDOERS.tmp"
+    printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart sage, /usr/bin/systemctl stop sage\n' "$RUN_AS" > "$SUDOERS.tmp"
     chmod 440 "$SUDOERS.tmp"
     if visudo -cf "$SUDOERS.tmp" >/dev/null; then mv "$SUDOERS.tmp" "$SUDOERS"; else rm -f "$SUDOERS.tmp"; echo "Couldn't install the sudoers rule; auto-sync won't be able to restart services." >&2; fi
   fi
