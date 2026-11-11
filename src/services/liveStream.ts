@@ -20,6 +20,7 @@ const MAX_RETRY_MS = 60000;
 
 export const PHONE_EVENT = 'sage:phone';
 export const BLUETOOTH_EVENT = 'sage:bluetooth';
+export const SPEAKER_EVENT = 'sage:speaker';
 
 export class LiveStream {
   private socket: WebSocket | null = null;
@@ -89,6 +90,9 @@ export class LiveStream {
       } else if (event?.type === 'BT_STATE') {
         // The Bluetooth settings page (see BluetoothSettings) shows the device list live.
         window.dispatchEvent(new CustomEvent(BLUETOOTH_EVENT, { detail: event }));
+      } else if (event?.type === 'SPEAKER_STATE') {
+        // The soundbar card in Bluetooth settings (see SpeakerCard).
+        window.dispatchEvent(new CustomEvent(SPEAKER_EVENT, { detail: event }));
       }
     };
     socket.onclose = () => {

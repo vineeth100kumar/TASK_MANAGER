@@ -21,8 +21,8 @@
 #   4. Installs the sage and sage-autosync systemd units for one user and this
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
-#   5. Stops the Pi offering itself as Bluetooth audio, so your phone's sound
-#      stays on the phone (the Pi has no speaker).
+#   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
+#      (speaker.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -189,15 +189,34 @@ part_services() {
 }
 
 part_audio() {
-  step "No Bluetooth audio"
-  # Without this, a paired iPhone can route its sound to the Pi, which has no
-  # speaker. The phone link (notifications, now playing) doesn't use audio.
+  step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
+  # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
+  # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
+  # source) and can take the phone's audio to pass on (A2DP sink). speaker.py
+  # drops the phone's audio link whenever there's no soundbar to play it on.
   # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
   as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
   echo 'bluez_monitor.enabled = false' | as_user tee "$HOME_DIR/.config/wireplumber/bluetooth.lua.d/51-sage-no-audio.lua" >/dev/null
   printf 'wireplumber.profiles = {\n  main = {\n    monitor.bluez = disabled\n  }\n}\n' | as_user tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/51-sage-no-audio.conf" >/dev/null
   as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$RUN_AS")" systemctl --user restart wireplumber 2>/dev/null || true
+
+  apt-get install -y -qq bluez-alsa-utils libasound2-plugin-bluez alsa-utils ffmpeg >/dev/null 2>&1 \
+    || { echo "bluez-alsa didn't install, so the soundbar speaker is off. Try: sudo apt-get install bluez-alsa-utils libasound2-plugin-bluez"; return 0; }
+  DAEMON="$(command -v bluealsad || command -v bluealsa || true)"
+  UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
+  if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
+    mkdir -p "/etc/systemd/system/$UNIT.d"
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
+    systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+  else
+    echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
+  fi
+  # The Sage user talks to bluez-alsa over D-Bus; its policy allows the audio group.
+  usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
 }
 
 part_check() {

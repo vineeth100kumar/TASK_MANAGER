@@ -50,6 +50,9 @@ last_seen: Callable[[], float] = lambda: 0.0
 
 presence: Callable[[], Tuple[bool, bool]] = lambda: (False, False)
 
+# Set by db_server: called (from a worker thread) once per arrival, e.g. the soundbar greeting.
+on_arrival: Optional[Callable[[], None]] = None
+
 
 # --- Storage ---
 
@@ -286,6 +289,11 @@ async def run(broadcast: Broadcast, every: float = 3.0) -> None:
             known, home = presence()
             if watch.update(known, home, time.time(), last_seen()):
                 await asyncio.to_thread(record_arrival)
+                if on_arrival:
+                    try:
+                        await asyncio.to_thread(on_arrival)
+                    except Exception as e:
+                        print(f"Arrival hook failed: {e}")
             state = await asyncio.to_thread(current)
             state = {**state, "welcome": await asyncio.to_thread(pending_welcome)}
             if state != last:

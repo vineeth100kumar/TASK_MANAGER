@@ -30,6 +30,7 @@ import industry
 import item_actions
 import life_mode
 import phone_link
+import speaker
 import quick_add
 import markets
 import passkeys
@@ -742,6 +743,7 @@ async def startup_event():
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
     _background(life_mode.run(events.broadcast))
+    _background(speaker.speaker.run(events.broadcast, phone_link.link))
     _background(drop.run())
     if desk.ENABLED:
         from desk import run as desk_run
@@ -1838,6 +1840,50 @@ async def bluetooth_confirm(req: BluetoothDecision):
 @app.post("/api/bluetooth/devices/{address}/{action}")
 async def bluetooth_device(address: str, action: str):
     return await _bluetooth_do(lambda c: c.device_action(address, action))
+
+
+# --- Soundbar: greeting, spoken reminders, phone pass-through (see speaker.py) ---
+life_mode.on_arrival = speaker.speaker.on_arrival
+notifier.speak_reminder = speaker.speaker.on_reminder
+
+
+@app.get("/api/speaker")
+async def speaker_state():
+    return {"success": True, **(await asyncio.to_thread(speaker.speaker.snapshot))}
+
+
+@app.post("/api/speaker/settings")
+async def speaker_settings(update: Dict[str, Any]):
+    try:
+        await asyncio.to_thread(speaker.save_settings, update)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await speaker.speaker._publish(force=True)
+    return await speaker_state()
+
+
+@app.post("/api/speaker/say")
+async def speaker_say(body: Dict[str, Any]):
+    """Say a line now, or (no text) the welcome-home greeting. Ignores quiet hours."""
+    if not speaker.get_settings()["address"]:
+        raise HTTPException(status_code=400, detail="Pick a soundbar first.")
+    text = str(body.get("text") or "").strip()[:500]
+    if text:
+        await speaker.speaker.say(text, "test")
+    else:
+        text = await speaker.speaker.greet("test")
+    return {"success": True, "text": text}
+
+
+@app.post("/api/speaker/{action}")
+async def speaker_action(action: str):
+    if action == "connect":
+        asyncio.ensure_future(speaker.speaker.ensure_connected())
+    elif action == "disconnect":
+        await speaker.speaker.disconnect()
+    else:
+        raise HTTPException(status_code=404, detail="Unknown action.")
+    return await speaker_state()
 
 
 # --- Desk clock (see desk/) ---

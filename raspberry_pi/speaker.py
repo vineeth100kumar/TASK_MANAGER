@@ -333,7 +333,7 @@ class Speaker:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.emit: Optional[Emit] = None
         self.phone = None            # phone_link.link, set by run()
-        self.queue: "asyncio.Queue[dict]" = asyncio.Queue() if False else None  # made in run()
+        self.queue: Optional[asyncio.Queue] = None  # made in run()
         self.speaking = ""
         self.last: Optional[dict] = None
         self.error: Optional[dict] = None
