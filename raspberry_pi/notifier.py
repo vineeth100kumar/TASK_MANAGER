@@ -1000,7 +1000,16 @@ def _today_at(now: datetime.datetime, hhmm: str) -> datetime.datetime:
 clock_reminder: Optional[Callable[[dict, dict], bool]] = None
 
 
+# Set by db_server (speaker.py): also says the reminder on the soundbar when you're home.
+speak_reminder: Optional[Callable[[dict, dict], None]] = None
+
+
 def _taken_by_clock(item: dict, message: dict) -> bool:
+    if speak_reminder is not None:
+        try:
+            speak_reminder(item, message)
+        except Exception as e:
+            print(f"Speaking a reminder failed: {e}")
     if clock_reminder is None:
         return False
     try:
