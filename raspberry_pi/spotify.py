@@ -29,6 +29,7 @@ import logging
 import os
 import re
 import shutil
+import signal
 import sqlite3
 import time
 from collections import deque
@@ -228,6 +229,8 @@ class SpotifyConnect:
         self.fails = 0
         self.running_key = ""        # name|apiKey Soloist is running with
         self.device = ""             # the ALSA device the PipeWire sink feeds now
+        self.used_node = False       # the last start used the soundbar sink node
+        self.node_fails = 0          # quick crashes while the soundbar sink was used
         self.state: Optional[dict] = None   # last playback_state
         self.logged_in = False
         self.is_active = False
@@ -340,13 +343,27 @@ class SpotifyConnect:
         settings = get_settings()
         if not exe or not settings["enabled"] or not settings["apiKey"]:
             return
-        # Connect the soundbar first so its ALSA device exists for the sink.
-        if self.want_device() and self.speaker is not None:
-            try:
-                await self.speaker.ensure_connected()
-            except Exception as e:
-                log.debug("Soundbar not ready for Spotify: %s", e)
-        use_node = await self._write_sink(self.want_device())
+        # Clear any leftover Soloist still holding the data-dir lock, or the new
+        # one refuses to start ("Stop the running session before starting
+        # soloist again") and we loop forever.
+        await self._reap_strays()
+        want = self.want_device()
+        # After a couple of quick crashes with the soundbar sink, fall back to
+        # the Pi's own output so music at least plays while we sort the sink out.
+        use_node = False
+        if want and self.node_fails < 2:
+            # Connect the soundbar first so its ALSA device exists for the sink.
+            if self.speaker is not None:
+                try:
+                    await self.speaker.ensure_connected()
+                except Exception as e:
+                    log.debug("Soundbar not ready for Spotify: %s", e)
+            use_node = await self._write_sink(want)
+        else:
+            if want and self.node_fails >= 2:
+                self._fail("Spotify couldn't open the soundbar, so it's playing on the "
+                           "Pi's own output for now. Try Restart, or re-pick the soundbar.")
+            await self._write_sink("")
         DATA_DIR.mkdir(parents=True, exist_ok=True)
         CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self.lines.clear()
@@ -361,9 +378,28 @@ class SpotifyConnect:
             self.next_start = time.time() + 60
             return
         self.started_at = time.time()
+        self.used_node = use_node
         self.running_key = settings["name"] + "|" + settings["apiKey"]
         asyncio.ensure_future(self._read_log(self.proc))
         log.info("Spotify (Soloist) started as %r%s.", settings["name"], " on the soundbar" if use_node else "")
+
+    async def _reap_strays(self) -> None:
+        """Kill any Soloist process using our data dir, so a fresh start doesn't
+        collide with a leftover holding the session lock. Covers orphans that a
+        plain terminate() on a detached session missed."""
+        target = f"--data-dir {DATA_DIR}"
+        for sig in ("-TERM", "-KILL"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "pkill", sig, "-f", "--", target,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                code = await asyncio.wait_for(proc.wait(), timeout=5)
+            except (OSError, asyncio.TimeoutError) as e:
+                log.debug("Couldn't reap stray Soloist: %s", e)
+                return
+            if code != 0:      # nothing matched (exit 1): no stray to kill
+                return
+            await asyncio.sleep(1.0)   # give SIGTERM a moment before SIGKILL
 
     async def _read_log(self, proc: asyncio.subprocess.Process) -> None:
         assert proc.stdout is not None
@@ -381,18 +417,35 @@ class SpotifyConnect:
         self.state = None
         await self._close_ws()
         if proc is None or proc.returncode is not None:
+            # Even with no tracked process, a detached Soloist may linger and
+            # hold the lock; clear it so the next start is clean.
+            await self._reap_strays()
             return
-        proc.terminate()
+        # Soloist runs in its own session (start_new_session), so signal the
+        # whole group, not just the leader, or children keep the lock.
+        self._signal_group(proc, signal.SIGTERM)
         try:
             await asyncio.wait_for(proc.wait(), timeout=5)
         except asyncio.TimeoutError:
-            proc.kill()
+            self._signal_group(proc, signal.SIGKILL)
             await proc.wait()
+        await self._reap_strays()
+
+    @staticmethod
+    def _signal_group(proc: asyncio.subprocess.Process, sig: int) -> None:
+        try:
+            os.killpg(os.getpgid(proc.pid), sig)
+        except (ProcessLookupError, OSError):
+            try:
+                proc.send_signal(sig)
+            except (ProcessLookupError, OSError):
+                pass
 
     async def restart(self) -> None:
         await self.stop()
         self.next_start = 0.0
         self.fails = 0
+        self.node_fails = 0
         await self.supervise()
 
     async def supervise(self) -> None:
@@ -411,16 +464,29 @@ class SpotifyConnect:
         if self.proc is not None and self.proc.returncode is not None:
             code = self.proc.returncode
             lived = time.time() - self.started_at
-            last = next((friendly_log(l) for l in reversed(self.lines) if l.strip()), "")
+            tail = [friendly_log(l) for l in list(self.lines) if l.strip()][-3:]
+            last = " · ".join(tail) if tail else "exit " + str(code)
+            locked = any("another" in t.lower() or "running session" in t.lower() for t in tail)
             if expired(code):
                 self.build_expired = True
                 self._fail("Spotify's player (Soloist) has expired and needs updating. Run on the Pi: "
                            "sudo deploy/install_pi.sh --only audio")
                 self.next_start = time.time() + 3600
+            elif locked:
+                # A leftover held the lock; _reap_strays at the next start clears
+                # it. Retry soon and don't count it as a real failure.
+                self._fail("Spotify had a leftover player open; clearing it and starting again.")
+                self.next_start = time.time() + 4
             else:
+                # A quick crash while the soundbar sink was in use points at the
+                # sink; count it so start() can fall back to the Pi's output.
+                if self.used_node and lived < 30:
+                    self.node_fails += 1
+                elif lived >= 30:
+                    self.node_fails = 0
                 self.fails = self.fails + 1 if lived < 60 else 1
                 wait = min(300, 5 * 2 ** (self.fails - 1))
-                self._fail(f"Spotify stopped ({last or ('exit ' + str(code))}). Starting it again in {wait} s.")
+                self._fail(f"Spotify stopped ({last}). Starting it again in {wait} s.")
                 self.next_start = time.time() + wait
             self.proc = None
             self.ready = False
