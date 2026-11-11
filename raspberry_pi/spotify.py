@@ -1,29 +1,26 @@
 """
 spotify.py - the Pi as a Spotify Connect speaker, playing on Sage's soundbar.
 
-go-librespot (an open-source Spotify Connect client, installed by
-deploy/install_pi.sh --only audio) runs as a child of Sage. It signs in the
-way a TV or a games console does: it asks Spotify for a short code, you enter
-it at spotify.com/pair on your phone or laptop with your normal Spotify
-account (Premium), and it remembers you. No Spotify developer app or keys.
+This uses Spotify Soloist, Spotify's own player for headless devices (an
+official binary, not an open-source reimplementation), so Spotify plays
+properly instead of refusing the audio key. Sage runs it as a child process
+and controls it over its local WebSocket.
 
-Then "Sage" shows up in the Spotify app's device list, from anywhere. Pick it
-and the music plays on the soundbar:
+Sign in: you make a free Soloist API key once at
+developer.spotify.com/dashboard/soloist (the account needs Premium), paste it
+into Sage, and then pick "Sage" in the Spotify app's device list, from
+anywhere. No developer app, redirect URL or spotify.com/pair code: Soloist
+joins through Spotify Connect, the way a real speaker does, and remembers you.
 
-- When Spotify starts playing, Sage connects the soundbar (speaker.py) if it
-  isn't already. If the first song tried to start before the soundbar was
-  ready, Sage starts it again once it is.
-- Sage's own voice (greeting, reminders) pauses Spotify for a moment and then
-  carries on. The optional phone pass-through steps aside while Spotify plays.
-- Surround (speaker.py) applies to Spotify too; switching it moves the music
-  live through go-librespot's /player/output.
-- Settings > Bluetooth has a Spotify card: sign in, now playing, play/pause,
-  skip, volume, the name in the device list, quality, sign out.
+Audio: Soloist plays through PipeWire, so Sage makes a PipeWire sink that
+feeds the soundbar's bluez-alsa device (through the surround device when
+Surround is on) and points Soloist at it (`-d sage-spotify`). When no soundbar
+is picked, Soloist plays on the Pi's own output. Sage's voice (speaker.py)
+pauses Soloist for a moment and then carries on.
 
-go-librespot's own HTTP API listens on 127.0.0.1 only; Sage talks to it and
-the web app talks to Sage. Settings live in the metadata table under
-"spotify". Its sign-in and state live in SAGE_SPOTIFY_DIR (default
-~/.config/sage-spotify).
+Settings live in the metadata table under "spotify". Soloist's sign-in and
+state live in SAGE_SOLOIST_DIR (default ~/.local/share/sage-soloist). The API
+key is the only secret; it is never logged or sent anywhere but Soloist.
 """
 
 import asyncio
@@ -36,33 +33,34 @@ import sqlite3
 import time
 from collections import deque
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, Optional
+from typing import Any, Awaitable, Callable, Dict, List, Optional
 
 log = logging.getLogger("spotify")
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 SETTINGS_KEY = "spotify"
-PORT = int(os.getenv("SAGE_SPOTIFY_PORT", "3678"))
-API = f"http://127.0.0.1:{PORT}"
-CONFIG_DIR = Path(os.getenv("SAGE_SPOTIFY_DIR", "") or (Path.home() / ".config" / "sage-spotify"))
+WS_PORT = int(os.getenv("SAGE_SOLOIST_PORT", "3678"))
+WS = f"ws://127.0.0.1:{WS_PORT}"
+DATA_DIR = Path(os.getenv("SAGE_SOLOIST_DIR", "") or (Path.home() / ".local" / "share" / "sage-soloist"))
+CACHE_DIR = Path(os.getenv("SAGE_SOLOIST_CACHE", "") or (Path.home() / ".cache" / "sage-soloist"))
+PW_NODE = "sage-spotify"      # the PipeWire sink Soloist plays into
+PW_CONF = Path.home() / ".config" / "pipewire" / "pipewire.conf.d" / "50-sage-spotify.conf"
 CHECK_EVERY = 3.0
-QUALITIES = (96, 160, 320)
+
 
 DEFAULTS: Dict[str, Any] = {
-    "enabled": True,      # run the Spotify Connect speaker
+    "enabled": True,      # run the Spotify speaker
     "name": "Sage",       # the name in Spotify's device list
-    "quality": 320,       # kbps: 96 | 160 | 320
-    "normalise": True,    # even out loudness between songs
-    "autoplay": True,     # keep playing similar songs when a playlist ends
+    "apiKey": "",         # the Soloist API key (developer.spotify.com/dashboard/soloist)
 }
 
 
 def binary() -> str:
-    """Where go-librespot is, or ""."""
-    env = os.getenv("SAGE_SPOTIFY_BIN", "")
+    """Where the soloist binary is, or ""."""
+    env = os.getenv("SAGE_SOLOIST_BIN", "")
     if env:
         return env if os.access(env, os.X_OK) else ""
-    return shutil.which("go-librespot") or ("/usr/local/bin/go-librespot" if os.access("/usr/local/bin/go-librespot", os.X_OK) else "")
+    return shutil.which("soloist") or ("/usr/local/bin/soloist" if os.access("/usr/local/bin/soloist", os.X_OK) else "")
 
 
 # --- Settings ---
@@ -94,19 +92,18 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("enabled", "normalise", "autoplay"):
-        if key in update:
-            out[key] = bool(update[key])
+    if "enabled" in update:
+        out["enabled"] = bool(update["enabled"])
     if "name" in update:
         name = re.sub(r"[^\w .'&()-]", "", str(update.get("name") or "")).strip()[:40]
         if not name:
             raise ValueError("Give the speaker a name, like Sage or Living room.")
         out["name"] = name
-    if "quality" in update:
-        quality = int(update["quality"])
-        if quality not in QUALITIES:
-            raise ValueError("Quality is 96, 160 or 320 kbps.")
-        out["quality"] = quality
+    if "apiKey" in update:
+        key = str(update.get("apiKey") or "").strip()
+        if key and not re.fullmatch(r"[\w.-]{8,200}", key):
+            raise ValueError("That doesn't look like a Soloist API key.")
+        out["apiKey"] = key
     return out
 
 
@@ -121,106 +118,98 @@ def save_settings(update: dict) -> dict:
     return settings
 
 
+def public_settings(settings: dict) -> dict:
+    """Settings for the web app: the key becomes a yes/no, never sent out. Pure."""
+    out = {k: v for k, v in settings.items() if k != "apiKey"}
+    out["hasKey"] = bool(settings.get("apiKey"))
+    return out
+
+
 # --- Pure helpers ---
 
-def output_error(message: str) -> bool:
-    """Whether a playback error is about the audio output (ALSA, the surround
-    device) rather than Spotify itself (audio keys, the network, the track). Pure."""
-    m = (message or "").lower()
-    return any(w in m for w in ("alsa", "pcm", "output", "audio device", "sage_surround", "ladspa", "snd_"))
+def soloist_cmd(settings: dict, node: str) -> List[str]:
+    """How to launch Soloist. The key is passed on argv as the docs show. Pure."""
+    cmd = ["soloist", "--device-name", settings["name"], "--api-key", settings["apiKey"],
+           "--ws", f"127.0.0.1:{WS_PORT}", "--data-dir", str(DATA_DIR), "--cache-dir", str(CACHE_DIR)]
+    if node:
+        cmd += ["-d", node]
+    return cmd
 
 
-def daemon_config(settings: dict, device: str) -> dict:
-    """go-librespot's config.yml (JSON is valid YAML). Pure."""
-    return {
-        "log_level": "info",
-        "log_disable_timestamp": True,
-        "device_name": settings["name"],
-        "device_type": "speaker",
-        "audio_backend": "alsa",
-        "audio_device": device or "default",
-        # Music isn't lip-synced to anything, so a roomy buffer: fewer dropouts
-        # over Bluetooth, and the only cost is volume and skips landing 0.5 s later.
-        "audio_buffer_time": 500000,
-        "bitrate": settings["quality"],
-        "normalisation_disabled": not settings["normalise"],
-        "disable_autoplay": not settings["autoplay"],
-        "zeroconf_enabled": False,
-        "credentials": {"type": "device_auth"},
-        "server": {"enabled": True, "address": "127.0.0.1", "port": PORT, "image_size": "default"},
-    }
+def pipewire_sink_conf(node: str, alsa_device: str) -> str:
+    """A PipeWire config fragment: an ALSA sink named `node` that writes to the
+    soundbar's bluez-alsa device, so Soloist's audio reaches the soundbar. Pure."""
+    props = json.dumps({
+        "factory.name": "api.alsa.pcm.sink",
+        "node.name": node,
+        "node.description": "Spotify on the soundbar",
+        "media.class": "Audio/Sink",
+        "api.alsa.path": alsa_device,
+        "audio.format": "S16LE",
+        "audio.rate": 44100,
+        "audio.channels": 2,
+        "api.alsa.use-chmap": False,
+    })
+    return ("context.objects = [\n"
+            "  { factory = adapter\n"
+            f"    args = {props}\n"
+            "  }\n"
+            "]\n")
 
 
-def restart_keys(a: dict, b: dict) -> bool:
-    """True when a settings change needs go-librespot restarted. Pure."""
-    return any(a.get(k) != b.get(k) for k in ("name", "quality", "normalise", "autoplay"))
-
-
-def now_playing(status: Optional[dict]) -> Optional[dict]:
-    """The bits of go-librespot's /status the web app shows. Pure."""
-    if not status:
+def now_playing(state: Optional[dict]) -> Optional[dict]:
+    """The bits of Soloist's playback_state the web app shows. Pure."""
+    if not state:
         return None
-    track = status.get("track") or None
-    steps = int(status.get("volume_steps") or 100) or 100
+    item = state.get("item") or None
+    status = str(state.get("status") or "idle")
+    pos = state.get("position") or {}
+    options = state.get("options") or {}
+
+    def _deco(obj, *path, default=""):
+        cur = (obj or {}).get("decorations") or {}
+        for p in path:
+            cur = (cur or {}).get(p)
+            if cur is None:
+                return default
+        return cur
+
+    track = None
+    if item:
+        identity = ((item.get("decorations") or {}).get("identity") or {})
+        artists = identity.get("artists") or identity.get("artist_names") or []
+        if isinstance(artists, list):
+            artists = ", ".join(str(a.get("name") if isinstance(a, dict) else a) for a in artists)
+        track = {
+            "name": str(identity.get("name") or ""),
+            "artists": str(artists or ""),
+            "album": str(_deco(item, "album", "name") or identity.get("album") or ""),
+            "cover": str(_deco(item, "identity", "image_url") or identity.get("image_url") or ""),
+            "duration": int(_deco(item, "playback", "duration_ms", default=0) or 0),
+            "position": int(pos.get("position_ms") or 0),
+            "uri": str(item.get("uri") or ""),
+        }
     return {
-        "playing": not status.get("stopped") and not status.get("paused") and bool(track),
-        "paused": bool(status.get("paused")),
-        "stopped": bool(status.get("stopped")),
-        "buffering": bool(status.get("buffering")),
-        "volume": round(int(status.get("volume") or 0) * 100 / steps),
-        "shuffle": bool(status.get("shuffle_context")),
-        "context": status.get("context_name") or "",
-        "track": {
-            "name": track.get("name") or "",
-            "artists": ", ".join(track.get("artist_names") or []),
-            "album": track.get("album_name") or "",
-            "cover": track.get("album_cover_url") or "",
-            "duration": int(track.get("duration") or 0),
-            "position": int(track.get("position") or 0),
-            "uri": track.get("uri") or "",
-        } if track else None,
+        "playing": status == "playing",
+        "paused": status == "paused",
+        "stopped": status == "idle",
+        "buffering": status == "buffering",
+        "volume": int(state.get("volume") or 0),
+        "shuffle": bool(options.get("shuffle")),
+        "context": str(_deco(state.get("context"), "identity", "name") or ""),
+        "active": bool(state.get("is_active")),
+        "track": track,
     }
-
-
-def saved_user(config_dir: Path = CONFIG_DIR) -> str:
-    """The Spotify account go-librespot remembers, or ""."""
-    for name in ("state.json", "credentials.json"):
-        try:
-            data = json.loads((config_dir / name).read_text())
-        except (OSError, ValueError):
-            continue
-        creds = data.get("credentials", data) if isinstance(data, dict) else {}
-        if isinstance(creds, dict) and creds.get("username") and creds.get("data"):
-            return str(creds["username"])
-    return ""
-
-
-def forget_user(config_dir: Path = CONFIG_DIR) -> None:
-    """Sign out: drop the remembered account, keep the device id and volume."""
-    try:
-        (config_dir / "credentials.json").unlink()
-    except OSError:
-        pass
-    path = config_dir / "state.json"
-    try:
-        data = json.loads(path.read_text())
-    except (OSError, ValueError):
-        return
-    if isinstance(data, dict) and "credentials" in data:
-        data["credentials"] = {"username": "", "data": None}
-        tmp = path.with_suffix(".tmp")
-        tmp.write_text(json.dumps(data))
-        os.replace(tmp, path)
 
 
 def friendly_log(line: str) -> str:
-    """go-librespot's log line without logrus' level= / msg= noise. Pure."""
-    msg = re.search(r'msg="((?:[^"\\]|\\.)*)"', line)
-    err = re.search(r'error="((?:[^"\\]|\\.)*)"', line)
-    text = (msg.group(1) if msg else line).replace('\\"', '"')
-    if err:
-        text += ": " + err.group(1).replace('\\"', '"')
-    return text.strip()[:240]
+    """A Soloist log line, trimmed for showing. Pure."""
+    return re.sub(r"\s+", " ", line or "").strip()[:240]
+
+
+def expired(code: Optional[int]) -> bool:
+    """Soloist exits 10 when its build is more than 90 days old. Pure."""
+    return code == 10
 
 
 # --- The speaker ---
@@ -237,41 +226,18 @@ class SpotifyConnect:
         self.started_at = 0.0
         self.next_start = 0.0
         self.fails = 0
-        self.running_settings: Optional[dict] = None
-        self.device = ""             # the ALSA device go-librespot plays on now
-        self.status: Optional[dict] = None
-        self.auth: Optional[dict] = None
-        self.ready = False           # the API answered
-        self.user = ""
+        self.running_key = ""        # name|apiKey Soloist is running with
+        self.device = ""             # the ALSA device the PipeWire sink feeds now
+        self.state: Optional[dict] = None   # last playback_state
+        self.logged_in = False
+        self.is_active = False
+        self.ready = False           # the WebSocket is connected
+        self.build_expired = False
         self.error: Optional[dict] = None
-        self.held = False            # paused for Sage's voice
-        self.retry: Optional[dict] = None    # a song that failed to start before the soundbar was up
-        self.last_load: Optional[dict] = None
+        self.held = False
+        self._ws = None
         self._connecting = False
         self._last_sent = ""
-        self._client = None
-
-    # --- go-librespot's API ---
-
-    async def api(self, method: str, path: str, body: Optional[dict] = None, timeout: float = 5):
-        import httpx
-        if self._client is None:
-            self._client = httpx.AsyncClient(base_url=API)
-        try:
-            res = await self._client.request(method, path, json=body, timeout=timeout)
-        except httpx.HTTPError as e:
-            raise RuntimeError(f"Spotify on the Pi didn't answer ({type(e).__name__}).") from e
-        if res.status_code == 204:
-            return None
-        if res.status_code >= 400:
-            raise RuntimeError(res.text.strip()[:200] or f"HTTP {res.status_code}")
-        try:
-            return res.json()
-        except ValueError:
-            return {}
-
-    def alive(self) -> bool:
-        return self.proc is not None and self.proc.returncode is None
 
     # --- State for the web app ---
 
@@ -284,15 +250,14 @@ class SpotifyConnect:
         except Exception:
             soundbar = {"address": "", "name": ""}
         return {
-            "settings": settings,
+            "settings": public_settings(settings),
             "installed": bool(binary()),
             "running": self.alive(),
             "ready": self.ready,
-            "user": self.user or saved_user(),
-            "auth": self.auth,
-            "player": now_playing(self.status),
+            "loggedIn": self.logged_in,
+            "expired": self.build_expired,
+            "player": now_playing(self.state),
             "soundbar": {"address": soundbar.get("address", ""), "name": soundbar.get("name", ""), "connected": bool(sb.get("connected"))},
-            "device": self.device,
             "error": self.error if self.error and time.time() - self.error["at"] < 600 else None,
         }
 
@@ -314,10 +279,14 @@ class SpotifyConnect:
         except Exception:
             pass
 
-    # --- The process ---
+    def alive(self) -> bool:
+        return self.proc is not None and self.proc.returncode is None
+
+    # --- Audio routing (PipeWire sink -> the soundbar) ---
 
     def want_device(self) -> str:
-        """The soundbar (through surround when it's on), or the Pi's own output."""
+        """The soundbar's ALSA device (through surround when on), or "" for the
+        Pi's own output."""
         try:
             import speaker as speaker_mod
             settings = speaker_mod.get_settings()
@@ -325,30 +294,76 @@ class SpotifyConnect:
                 return self.speaker.device(settings)
         except Exception as e:
             log.debug("No soundbar device: %s", e)
-        return "default"
+        return ""
+
+    async def _write_sink(self, alsa_device: str) -> bool:
+        """Point the PipeWire sink at the soundbar; restart PipeWire if it changed.
+        Returns True when Soloist should play into the sink node."""
+        if not alsa_device:
+            if PW_CONF.exists():
+                try:
+                    PW_CONF.unlink()
+                    await self._restart_pipewire()
+                except OSError:
+                    pass
+            self.device = ""
+            return False
+        if self.device == alsa_device and PW_CONF.exists():
+            return True
+        try:
+            PW_CONF.parent.mkdir(parents=True, exist_ok=True)
+            PW_CONF.write_text(pipewire_sink_conf(PW_NODE, alsa_device))
+            await self._restart_pipewire()
+            self.device = alsa_device
+            return True
+        except OSError as e:
+            self._fail(f"Couldn't set up the Spotify sound output: {e}")
+            return False
+
+    async def _restart_pipewire(self) -> None:
+        env = dict(os.environ)
+        env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        for svc in ("pipewire", "pipewire-pulse", "wireplumber"):
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "systemctl", "--user", "restart", svc, env=env,
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except (OSError, asyncio.TimeoutError) as e:
+                log.debug("Couldn't restart %s: %s", svc, e)
+        await asyncio.sleep(1.0)  # let the nodes come back
+
+    # --- The process ---
 
     async def start(self) -> None:
         exe = binary()
-        if not exe:
-            return
         settings = get_settings()
-        self.device = self.want_device()
-        CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        (CONFIG_DIR / "config.yml").write_text(json.dumps(daemon_config(settings, self.device), indent=2))
+        if not exe or not settings["enabled"] or not settings["apiKey"]:
+            return
+        # Connect the soundbar first so its ALSA device exists for the sink.
+        if self.want_device() and self.speaker is not None:
+            try:
+                await self.speaker.ensure_connected()
+            except Exception as e:
+                log.debug("Soundbar not ready for Spotify: %s", e)
+        use_node = await self._write_sink(self.want_device())
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        CACHE_DIR.mkdir(parents=True, exist_ok=True)
         self.lines.clear()
         self.ready = False
+        self.build_expired = False
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                exe, "--config_dir", str(CONFIG_DIR),
+                *soloist_cmd(settings, PW_NODE if use_node else ""),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         except OSError as e:
-            self._fail(f"go-librespot didn't start: {e}")
+            self._fail(f"Soloist didn't start: {e}")
             self.next_start = time.time() + 60
             return
         self.started_at = time.time()
-        self.running_settings = settings
+        self.running_key = settings["name"] + "|" + settings["apiKey"]
         asyncio.ensure_future(self._read_log(self.proc))
-        log.info("Spotify Connect started as %r on %s.", settings["name"], self.device)
+        log.info("Spotify (Soloist) started as %r%s.", settings["name"], " on the soundbar" if use_node else "")
 
     async def _read_log(self, proc: asyncio.subprocess.Process) -> None:
         assert proc.stdout is not None
@@ -356,16 +371,15 @@ class SpotifyConnect:
             raw = await proc.stdout.readline()
             if not raw:
                 break
-            line = raw.decode(errors="replace").rstrip()
-            self.lines.append(line)
-            if "level=error" in line or "level=fatal" in line or "level=panic" in line:
-                log.info("go-librespot: %s", line[:300])
+            self.lines.append(raw.decode(errors="replace").rstrip())
 
     async def stop(self) -> None:
         proc, self.proc = self.proc, None
         self.ready = False
-        self.status = None
-        self.auth = None
+        self.logged_in = False
+        self.is_active = False
+        self.state = None
+        await self._close_ws()
         if proc is None or proc.returncode is not None:
             return
         proc.terminate()
@@ -382,193 +396,174 @@ class SpotifyConnect:
         await self.supervise()
 
     async def supervise(self) -> None:
-        """Keep go-librespot running when it's on, with a growing pause if it keeps dying."""
+        """Keep Soloist running when it's on, with a growing pause if it keeps dying."""
         settings = get_settings()
-        if not settings["enabled"] or not binary():
+        if not settings["enabled"] or not settings["apiKey"] or not binary():
             if self.alive():
                 await self.stop()
             return
         if self.alive():
-            if self.running_settings and restart_keys(self.running_settings, settings):
-                log.info("Spotify settings changed; restarting go-librespot.")
+            if self.running_key != settings["name"] + "|" + settings["apiKey"]:
+                log.info("Spotify settings changed; restarting Soloist.")
                 await self.stop()
             else:
                 return
         if self.proc is not None and self.proc.returncode is not None:
-            # It stopped by itself.
+            code = self.proc.returncode
             lived = time.time() - self.started_at
-            last = next((friendly_log(l) for l in reversed(self.lines) if "level=" in l and "level=info" not in l and "level=debug" not in l), "")
-            self.fails = self.fails + 1 if lived < 60 else 1
-            wait = min(300, 5 * 2 ** (self.fails - 1))
-            self._fail(f"Spotify stopped ({last or 'no reason given'}). Starting it again in {wait} s.")
-            self.next_start = time.time() + wait
+            last = next((friendly_log(l) for l in reversed(self.lines) if l.strip()), "")
+            if expired(code):
+                self.build_expired = True
+                self._fail("Spotify's player (Soloist) has expired and needs updating. Run on the Pi: "
+                           "sudo deploy/install_pi.sh --only audio")
+                self.next_start = time.time() + 3600
+            else:
+                self.fails = self.fails + 1 if lived < 60 else 1
+                wait = min(300, 5 * 2 ** (self.fails - 1))
+                self._fail(f"Spotify stopped ({last or ('exit ' + str(code))}). Starting it again in {wait} s.")
+                self.next_start = time.time() + wait
             self.proc = None
             self.ready = False
         if time.time() >= self.next_start:
             await self.start()
 
-    # --- Watching it ---
+    # --- The control socket ---
 
-    async def poll(self) -> None:
-        if not self.alive():
-            self.ready = False
-            return
-        try:
-            await self.api("GET", "/")
-            self.ready = True
-            self.auth = await self.api("GET", "/auth/code")
-            self.status = await self.api("GET", "/status")
-            if self.status and self.status.get("username"):
-                self.user = str(self.status["username"])
-                self.auth = None
-            if self.status and self.fails and time.time() - self.started_at > 60:
-                self.fails = 0
-        except Exception as e:
-            log.debug("Spotify API not answering: %s", e)
-            self.ready = False
-        await self.follow_output()
+    async def _close_ws(self) -> None:
+        ws, self._ws = self._ws, None
+        if ws is not None:
+            try:
+                await ws.close()
+            except Exception:
+                pass
 
-    async def follow_output(self) -> None:
-        """Surround switched or another soundbar picked: move the music live."""
-        want = self.want_device()
-        if not self.ready or want == self.device:
-            return
-        try:
-            await self.api("POST", "/player/output", {"device": want})
-            log.info("Spotify now plays on %s.", want)
-            self.device = want
-        except Exception as e:
-            log.info("Couldn't move Spotify to %s: %s", want, e)
-
-    async def events(self) -> None:
-        """go-librespot's event stream: start the soundbar the moment music starts."""
+    async def ws_loop(self) -> None:
+        """Hold a WebSocket to Soloist, read its events, keep state fresh."""
         import websockets
         while True:
-            if not self.ready:
-                await asyncio.sleep(2)
+            if not self.alive():
+                await asyncio.sleep(1.5)
                 continue
             try:
-                async with websockets.connect(f"ws://127.0.0.1:{PORT}/events", open_timeout=5, ping_interval=30) as ws:
+                async with websockets.connect(WS, open_timeout=5, ping_interval=30) as ws:
+                    self._ws = ws
+                    self.ready = True
+                    await self._send({"type": "command", "command": "get_auth_state"})
+                    await self._send({"type": "command", "command": "get_state"})
+                    await self.publish()
                     async for raw in ws:
                         try:
                             ev = json.loads(raw)
                         except ValueError:
                             continue
-                        await self.on_event(str(ev.get("type") or ""), ev.get("data") or {})
+                        await self.on_event(ev)
             except asyncio.CancelledError:
                 raise
             except Exception as e:
-                log.debug("Spotify events dropped: %s", e)
-            await asyncio.sleep(2)
+                log.debug("Spotify control socket dropped: %s", e)
+            finally:
+                self._ws = None
+                self.ready = False
+            await asyncio.sleep(1.5)
 
-    async def on_event(self, kind: str, data: dict) -> None:
-        if kind == "will_play":
-            self.last_load = {"context": data.get("context_uri") or "", "uri": data.get("uri") or "", "at": time.time()}
-            asyncio.ensure_future(self.soundbar_up())
-        elif kind in ("active", "playing"):
-            asyncio.ensure_future(self.soundbar_up())
-        elif kind == "playback_error":
-            await self.on_playback_error(data)
-        if kind in ("active", "inactive", "metadata", "will_play", "playing", "not_playing", "paused", "stopped", "volume", "shuffle_context"):
-            try:
-                self.status = await self.api("GET", "/status")
-            except Exception:
-                pass
-            await self.publish()
+    async def _send(self, message: dict) -> None:
+        ws = self._ws
+        if ws is None:
+            raise RuntimeError("Spotify isn't running on the Pi yet.")
+        await ws.send(json.dumps(message))
 
-    def _soundbar_ready(self) -> bool:
-        sb = (getattr(self.speaker, "links", None) or {}).get("soundbar") or {}
-        return bool(sb.get("connected"))
+    async def on_event(self, ev: dict) -> None:
+        kind = str(ev.get("type") or "")
+        if kind == "auth_state":
+            self.logged_in = bool(ev.get("logged_in"))
+            was_active, self.is_active = self.is_active, bool(ev.get("is_active"))
+            if self.logged_in:
+                self.error = None
+            if self.is_active and not was_active:
+                asyncio.ensure_future(self.on_active())
+        elif kind == "playback_state":
+            self.state = ev
+            self.is_active = bool(ev.get("is_active", self.is_active))
+        elif kind == "track_changed":
+            if self.state is not None:
+                self.state["item"] = ev.get("item")
+        elif kind == "playback_changed":
+            if self.state is not None:
+                self.state["status"] = ev.get("status")
+        elif kind == "volume_changed":
+            if self.state is not None:
+                self.state["volume"] = ev.get("volume")
+        elif kind == "position_sync":
+            if self.state is not None:
+                self.state["position"] = ev.get("position")
+        elif kind == "options_changed":
+            if self.state is not None:
+                self.state["options"] = ev.get("options")
+        elif kind == "context_changed":
+            if self.state is not None:
+                self.state["context"] = ev.get("context")
+        elif kind == "device_changed":
+            self.is_active = bool(ev.get("is_active", self.is_active))
+        elif kind == "error":
+            msg = str(ev.get("message") or "")
+            if "auth" not in msg.lower():   # "requires authentication" just means not picked yet
+                self._fail(f"Spotify: {msg[:160]}")
+        await self.publish()
 
-    async def on_playback_error(self, data: dict) -> None:
-        uri = str(data.get("uri") or "")
-        if self._connecting or not self._soundbar_ready():
-            # The soundbar wasn't there yet: play it again once it is.
-            load = self.last_load or {}
-            self.retry = {"uri": uri or load.get("uri", ""), "context": load.get("context", "") if load.get("uri") == uri or not uri else ""}
+    async def on_active(self) -> None:
+        """We became the active Spotify device: make sure the soundbar is on it."""
+        if self._connecting or self.speaker is None:
             return
-        why = str(data.get("message") or data.get("kind") or "unknown error")
-        if self.device.startswith("sage_surround") and self.speaker is not None and output_error(why):
-            self.speaker._surround_failed("Spotify couldn't open it")
-            await self.follow_output()
-            self.retry = {"uri": uri, "context": (self.last_load or {}).get("context", "")}
-            await self.replay()
-            return
-        self._fail(f"Spotify couldn't play that: {why[:160]}")
-
-    async def soundbar_up(self) -> None:
-        """Connect the soundbar for Spotify, then retry a song that missed it."""
-        if self.speaker is None or self._connecting:
-            return
-        try:
-            import speaker as speaker_mod
-            if not speaker_mod.get_settings()["address"]:
-                return
-        except Exception:
+        want = self.want_device()
+        if not want:
             return
         self._connecting = True
         try:
-            await self.speaker.make_room()
-            if not self._soundbar_ready():
-                if await self.speaker.ensure_connected():
-                    await asyncio.sleep(0.5)
-            await self.follow_output()
+            await self.speaker.make_room()   # stop any phone pass-through
+            await self.speaker.ensure_connected()
+            if want != self.device:
+                # Soundbar/surround changed since start: rewire and restart Soloist.
+                await self.restart()
         finally:
             self._connecting = False
-        await self.replay()
-
-    async def replay(self) -> None:
-        retry, self.retry = self.retry, None
-        if not retry or not retry.get("uri") or not self._soundbar_ready():
-            return
-        body = {"uri": retry["context"] or retry["uri"]}
-        if retry["context"]:
-            body["skip_to_uri"] = retry["uri"]
-        try:
-            await self.api("POST", "/player/play", body, timeout=15)
-            log.info("Started the song again now the soundbar is up.")
-        except Exception as e:
-            self._fail(f"Couldn't start the song again: {e}")
 
     # --- Controls ---
 
     async def control(self, action: str) -> None:
-        paths = {"playpause": "/player/playpause", "pause": "/player/pause", "resume": "/player/resume",
-                 "next": "/player/next", "prev": "/player/prev"}
-        if action not in paths:
+        if action == "playpause":
+            p = now_playing(self.state)
+            cmd = "pause" if (p and p["playing"]) else "play"
+        else:
+            cmd = {"pause": "pause", "resume": "play", "next": "skip_next", "prev": "skip_prev"}.get(action)
+        if not cmd:
             raise ValueError("Unknown control.")
-        if not self.ready:
-            raise RuntimeError("Spotify isn't running on the Pi yet.")
-        await self.api("POST", paths[action], {} if action == "next" else None)
-        self.status = await self.api("GET", "/status")
-        await self.publish()
+        await self._send({"type": "command", "command": cmd})
 
     async def set_volume(self, percent: int) -> None:
-        if not self.ready:
-            raise RuntimeError("Spotify isn't running on the Pi yet.")
-        percent = max(0, min(100, int(percent)))
-        steps = int((self.status or {}).get("volume_steps") or 100) or 100
-        await self.api("POST", "/player/volume", {"volume": round(percent * steps / 100)})
-        self.status = await self.api("GET", "/status")
-        await self.publish()
+        await self._send({"type": "command", "command": "set_volume", "volume": max(0, min(100, int(percent)))})
 
     async def shuffle(self, on: bool) -> None:
-        if not self.ready:
-            raise RuntimeError("Spotify isn't running on the Pi yet.")
-        await self.api("POST", "/player/shuffle_context", {"shuffle_context": bool(on)})
-        self.status = await self.api("GET", "/status")
-        await self.publish()
+        await self._send({"type": "command", "command": "set_shuffle", "enabled": bool(on)})
 
     async def sign_out(self) -> None:
+        """Clear Soloist's stored sign-in with its --pair reset, then restart."""
         await self.stop()
-        await asyncio.to_thread(forget_user)
-        self.user = ""
-        self.status = None
+        exe = binary()
+        settings = get_settings()
+        if exe and settings["apiKey"]:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    exe, "--device-name", settings["name"], "--api-key", settings["apiKey"],
+                    "--data-dir", str(DATA_DIR), "--pair",
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(proc.wait(), timeout=15)
+            except (OSError, asyncio.TimeoutError) as e:
+                log.info("Soloist sign-out reset failed: %s", e)
         await self.restart()
         await self.publish(force=True)
 
     def playing(self) -> bool:
-        p = now_playing(self.status)
+        p = now_playing(self.state)
         return bool(self.ready and p and p["playing"])
 
     async def hold(self) -> bool:
@@ -576,9 +571,9 @@ class SpotifyConnect:
         if not self.playing():
             return False
         try:
-            await self.api("POST", "/player/pause")
+            await self._send({"type": "command", "command": "pause"})
             self.held = True
-            await asyncio.sleep(0.4)  # go-librespot closes the ALSA device on pause
+            await asyncio.sleep(0.4)
             return True
         except Exception as e:
             log.info("Couldn't pause Spotify to speak: %s", e)
@@ -589,16 +584,22 @@ class SpotifyConnect:
             return
         self.held = False
         try:
-            await self.api("POST", "/player/resume")
+            await self._send({"type": "command", "command": "play"})
         except Exception as e:
             log.info("Couldn't resume Spotify after speaking: %s", e)
 
     async def pause_quietly(self) -> None:
         if self.playing():
             try:
-                await self.api("POST", "/player/pause")
+                await self._send({"type": "command", "command": "pause"})
             except Exception:
                 pass
+
+    async def follow_output(self) -> None:
+        """Surround switched or another soundbar picked: rewire and restart."""
+        want = self.want_device()
+        if self.alive() and want != self.device:
+            await self.restart()
 
     # --- Running ---
 
@@ -607,12 +608,11 @@ class SpotifyConnect:
         self.speaker = speaker
         speaker.music = self
         if not binary():
-            log.info("go-librespot isn't installed; Spotify Connect is off (run: sudo deploy/install_pi.sh --only audio).")
-        asyncio.ensure_future(self.events())
+            log.info("Soloist isn't installed; Spotify is off (run: sudo deploy/install_pi.sh --only audio).")
+        asyncio.ensure_future(self.ws_loop())
         while True:
             try:
                 await self.supervise()
-                await self.poll()
                 await self.publish()
             except Exception as e:
                 log.debug("Spotify check failed: %s", e)

@@ -1,11 +1,11 @@
-// spotify.ts - the Pi as a Spotify Connect speaker on the soundbar
-// (raspberry_pi/spotify.py): sign-in code, now playing and controls.
+// spotify.ts - the Pi as a Spotify Connect speaker on the soundbar via Spotify
+// Soloist (raspberry_pi/spotify.py): API key, now playing and controls.
 
 import { useCallback, useEffect, useState } from 'react';
 import { piBackendUrl, piHeaders } from './piBackend';
 import { SPOTIFY_EVENT } from './liveStream';
 
-export interface SpotifySettings { enabled: boolean; name: string; quality: 96 | 160 | 320; normalise: boolean; autoplay: boolean }
+export interface SpotifySettings { enabled: boolean; name: string; hasKey: boolean }
 
 export interface SpotifyTrack { name: string; artists: string; album: string; cover: string; duration: number; position: number; uri: string }
 
@@ -14,11 +14,10 @@ export interface SpotifyState {
   installed: boolean;
   running: boolean;
   ready: boolean;
-  user: string;
-  auth: { url: string; code: string; expires_at?: string } | null;
-  player: { playing: boolean; paused: boolean; stopped: boolean; buffering: boolean; volume: number; shuffle: boolean; context: string; track: SpotifyTrack | null } | null;
+  loggedIn: boolean;
+  expired: boolean;
+  player: { playing: boolean; paused: boolean; stopped: boolean; buffering: boolean; volume: number; shuffle: boolean; context: string; active: boolean; track: SpotifyTrack | null } | null;
   soundbar: { address: string; name: string; connected: boolean };
-  device: string;
   error: { message: string } | null;
 }
 
@@ -62,7 +61,7 @@ export function useSpotify() {
 
   return {
     state,
-    save: (update: Partial<SpotifySettings>) => run('/settings', update),
+    save: (update: Partial<SpotifySettings> & { apiKey?: string }) => run('/settings', update),
     control: (action: SpotifyControl) => run(`/${action}`),
     volume: (volume: number) => run('/volume', { volume }),
     shuffle: (on: boolean) => run('/shuffle', { on }),
