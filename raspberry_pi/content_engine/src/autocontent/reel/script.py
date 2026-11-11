@@ -20,13 +20,40 @@ HEADER_KEYS = {
     "speed": "speed", "captions": "captions", "caption_style": "captions", "subtitles": "captions",
     "music": "music", "transition": "transition", "end_hold": "end_hold",
     "format": "format", "size": "format",
+    "pace": "pace", "pauses": "pauses", "breaths": "pauses", "polish": "polish", "sound": "polish",
+    "loudness": "loudness", "lufs": "loudness", "pronounce": "pronounce", "say_as": "pronounce",
+    "pronunciation": "pronounce",
 }
 SCENE_KEYS = {
     "say": "say", "vo": "say", "voiceover": "say", "narration": "say", "speak": "say",
     "show": "show", "cue": "show", "cues": "show",
     "motion": "motion", "animation": "motion", "animate": "motion",
     "duration": "duration", "hold": "duration", "pause": "pause",
+    "speed": "speed", "tone": "tone", "delivery": "tone", "voice": "voice",
 }
+# How a slide is delivered: a speed multiplier on top of the reel's own speed.
+TONES = {"hook": 1.08, "fast": 1.1, "excited": 1.1, "energetic": 1.08, "normal": 1.0, "neutral": 1.0,
+         "calm": 0.95, "warm": 0.96, "emphasis": 0.92, "slow": 0.9, "serious": 0.93, "dramatic": 0.88}
+# `pace: auto` (default) gives these slide types a tone when the script doesn't name one.
+AUTO_TONE_BY_TYPE = {"stat": "emphasis", "quote": "calm", "cta": "emphasis"}
+PAUSE_STYLES = {"tight": 0.7, "short": 0.7, "natural": 1.0, "normal": 1.0, "relaxed": 1.35, "long": 1.35, "slow": 1.35}
+POLISH_STYLES = ("natural", "warm", "bright", "clean", "off")
+# Inline marks inside `say:` that are not spoken: [pause], [pause 0.6], [breath], [beat]
+PAUSE_MARK = re.compile(r"\[\s*(pause|breath|beat)(?:\s+(\d+(?:\.\d+)?)\s*s?)?\s*\]", re.I)
+
+
+def strip_marks(text: str) -> str:
+    return re.sub(r"\s+", " ", PAUSE_MARK.sub(" ", text)).strip()
+
+
+def parse_pronounce(value: str) -> Dict[str, str]:
+    """`NXP = N X P; lakh = laakh` → {"NXP": "N X P", "lakh": "laakh"}."""
+    out: Dict[str, str] = {}
+    for part in re.split(r"\s*[;,]\s*", value or ""):
+        m = re.match(r"^\s*(.+?)\s*(?:=|->|→|:)\s*(.+?)\s*$", part)
+        if m:
+            out[m.group(1)] = m.group(2)
+    return out
 MOTIONS = ("rise", "pop", "stagger", "wipe", "kenburns", "fade")
 MOTION_ALIASES = {"slide": "rise", "up": "rise", "rise": "rise", "pop": "pop", "zoom": "pop", "bounce": "pop",
                   "stagger": "stagger", "cascade": "stagger", "one-by-one": "stagger", "sequence": "stagger",
@@ -72,7 +99,11 @@ class Scene:
     n: int                              # 1-based, the slide it belongs to
     slide: Dict[str, Any]
     line: int = 0
-    say: str = ""
+    say: str = ""                       # what is spoken and captioned (inline marks removed)
+    say_raw: str = ""                   # as written, with any [pause] marks
+    speed: Optional[float] = None       # this slide's own speed multiplier (`speed:` or `tone:`)
+    tone: str = ""
+    voice: str = ""                     # this slide's own voice, when it differs from the reel's
     show: List[str] = field(default_factory=list)   # cue phrases, one per thing that appears, in order
     motion: str = "rise"
     motion_given: bool = False      # the author named it, so every piece of the slide uses it
@@ -115,7 +146,7 @@ class ReelScript:
         total = 0.0
         for s in self.scenes:
             n = len(s.words)
-            total += (n / (WORDS_PER_SECOND * speed) if n else (s.duration or 2.5)) + 0.45 + s.pause
+            total += (n / (WORDS_PER_SECOND * speed * (s.speed or 1.0)) if n else (s.duration or 2.5)) + 0.45 + s.pause
         return round(total + float(self.meta.get("end_hold") or 1.2), 1)
 
 
@@ -238,6 +269,28 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             reel.issues.append(SpecIssue("WARN", "FORMAT_FIXED", f"A reel is always 9:16 (1080x1920); 'format: {value}' is ignored.", line=header[key][1]))
         elif key == "music":
             reel.issues.append(SpecIssue("WARN", "MUSIC_IGNORED", "Music isn't added by the Pi; add trending audio in Instagram. The line is ignored.", line=header[key][1]))
+        elif key == "pace":
+            v = value.lower()
+            meta[key] = "steady" if v in ("steady", "flat", "off", "even", "none") else "auto"
+        elif key == "pauses":
+            v = value.lower()
+            if v in PAUSE_STYLES:
+                meta[key] = PAUSE_STYLES[v]
+            else:
+                meta[key] = _number(value, 0.3, 2.5, "pauses", line, reel.issues, 1.0)
+        elif key == "polish":
+            v = value.lower()
+            if v in ("no", "none", "false", "0", "raw"):
+                v = "off"
+            if v not in POLISH_STYLES:
+                reel.issues.append(SpecIssue("WARN", "POLISH_UNKNOWN", f"Unknown polish '{value}'; using natural.", line=line,
+                                             hint=f"Use one of: {', '.join(POLISH_STYLES)}."))
+                v = "natural"
+            meta[key] = v
+        elif key == "loudness":
+            meta[key] = -abs(_number(value, 9, 23, "loudness", line, reel.issues, 14) or 14)
+        elif key == "pronounce":
+            meta[key] = parse_pronounce(value)
         elif key == "transition":
             meta[key] = value.lower() or "fade"
         else:
@@ -247,6 +300,11 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     meta.setdefault("voice", DEFAULT_VOICE)
     meta.setdefault("speed", 1.0)
     meta.setdefault("end_hold", 1.2)
+    meta.setdefault("pace", "auto")
+    meta.setdefault("pauses", 1.0)
+    meta.setdefault("polish", "natural")
+    meta.setdefault("loudness", -14.0)
+    meta.setdefault("pronounce", {})
     meta["voice"] = str(meta["voice"]).strip() or DEFAULT_VOICE
     reel.meta = meta
 
@@ -255,7 +313,23 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         sec = sections.get(line, {})
         scene = Scene(n=i + 1, slide=slide, line=line)
         if "say" in sec:
-            scene.say = _clean(sec["say"][0])
+            scene.say_raw = _clean(sec["say"][0])
+            scene.say = strip_marks(scene.say_raw)
+        if "voice" in sec:
+            scene.voice = _clean(sec["voice"][0])
+        if "tone" in sec:
+            t = sec["tone"][0].strip().lower()
+            if t in TONES:
+                scene.tone, scene.speed = t, TONES[t]
+            else:
+                reel.issues.append(SpecIssue("WARN", "TONE_UNKNOWN", f"Unknown tone '{t}' on slide {i + 1}; ignored.",
+                                             slide=i + 1, line=sec["tone"][1], hint=f"Use one of: {', '.join(TONES)}."))
+        if "speed" in sec:
+            scene.speed = _number(sec["speed"][0], 0.7, 1.3, "speed", sec["speed"][1], reel.issues, 1.0)
+        if scene.speed is None and meta["pace"] == "auto" and scene.say:
+            auto = "hook" if i == 0 else AUTO_TONE_BY_TYPE.get(slide.get("type", ""))
+            if auto:
+                scene.tone, scene.speed = auto, TONES[auto]
         if "show" in sec:
             scene.show = [p.strip() for p in re.split(r"\s*(?:\||;|->|→)\s*", _clean(sec["show"][0])) if p.strip()]
         raw_motion = (sec.get("motion", ("", 0))[0]).strip().lower()

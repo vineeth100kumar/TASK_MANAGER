@@ -29,6 +29,8 @@ HOW A GOOD REEL WORKS
 - A headline is under 9 words. A kicker is a label under 28 characters, not a sentence. A stat's number is a number, not a sentence.
 - Write the narration the way people talk: short sentences, plain words, contractions. Read it aloud. Spell out how numbers are said ("two thirds", "five lakh rupees"), or write 65% / ₹5 lakh and the voice will say them properly.
 - For an abbreviation the voice should spell out, put spaces between the capitals in `say:` ("N X P", "A I", "U K"). The captions put it back together and show NXP, AI, UK.
+- WRITE FOR THE EAR, it is what makes the voice sound human: one idea per sentence, 6 to 14 words. Punctuation is the voice's direction — a comma is a small breath, a full stop a beat, a question rises and waits a little longer, "…" trails off, and an em dash (—) makes a short turn. Ask the viewer questions. Use `[pause]` (or `[pause 0.6]`, `[breath]`, `[beat]`) inside `say:` right before a reveal; these marks are never spoken or captioned.
+- Give each slide a `tone:` that fits it: hook for the opener, emphasis for a big number or the takeaway, calm for a quote or a soft moment, excited for a surprising turn. Leave it out and the opener is a hook, stat and cta slides get emphasis, quotes are calm.
 - The narration and the slide say the same thing in different ways: the slide shows the number or the three steps, the voice explains why it matters. Do not read the slide word for word.
 - Build curiosity slide to slide; save the best insight for the middle; end with a reason to save or comment.
 - Use only facts you were given and never invent statistics. Put `source:` on slides that state facts.
@@ -43,7 +45,8 @@ voice: af_heart
 captions: on
 tag: "#topic"
 ---
-(voice: a Kokoro voice — US women af_heart (default, warm), af_bella, af_nicole, af_sarah, af_sky; US men am_adam, am_michael, am_puck; UK women bf_emma, bf_isabella, bf_lily; UK men bm_george, bm_lewis, bm_daniel — or `voice: mine` when the author will record the narration themselves. speed: 0.6 to 1.4, 1.0 normal. captions: off removes the captions. fps: 24 to 60, 30 default. end_hold: seconds the last slide holds, 1.2 default.)
+(voice: a Kokoro voice — US women af_heart (default, warm), af_bella, af_nicole, af_sarah, af_sky; US men am_adam, am_michael, am_puck; UK women bf_emma, bf_isabella, bf_lily; UK men bm_george, bm_lewis, bm_daniel — or `voice: mine` when the author will record the narration themselves. speed: 0.6 to 1.4, 1.0 normal. captions: off removes the captions. fps: 24 to 60, 30 default. end_hold: seconds the last slide holds, 1.2 default.
+Voice controls, all optional: voice can be a BLEND of two or three voices for a warmer, less stock sound, e.g. `voice: af_heart*0.7 + af_bella*0.3` (weights or percentages; `af_heart, af_bella` is equal parts). pace: auto (default; the slide tones above) or steady (one pace throughout). pauses: tight | natural | relaxed, or a number 0.3 to 2.5 that scales every pause. polish: natural (default) | warm | bright | clean | off, the finishing EQ, de-essing and compression. loudness: 9 to 23, the target loudness in −LUFS, 14 default (Instagram's level). pronounce: words the voice gets wrong, respelled as they sound, e.g. `pronounce: Nvidia = en-vidia; Kubernetes = koo-ber-net-eez`.)
 
 Then each slide starts with `## <type>` exactly as in a post script (cover, statement, point, list, stat, compare, quote, chart, table, image, cta), with its own fields, and these extra lines:
 say: <what the voice says over this slide>            (REQUIRED on every slide; plain sentences, no symbols or links)
@@ -51,6 +54,9 @@ show: <cue> | <cue> | <cue>                            (optional: the words in `
 motion: rise | pop | stagger | wipe | kenburns | fade  (optional, best left out: each piece always arrives in the way that suits it. This is only used for a piece the reel doesn't recognise.)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
+tone: hook | emphasis | calm | excited | serious | dramatic | slow | fast | normal   (optional: how this slide is delivered; sets its pace)
+speed: 0.95                                            (optional: this slide's own pace, 0.7 to 1.3, times the reel's speed; wins over tone)
+voice: am_michael                                      (optional: a different voice for this slide only, e.g. a second speaker or a quote)
 
 WHAT APPEARS, IN ORDER (each is one "piece"; with no `show:` they are spread evenly over the narration)
 cover: headline, then the pill | point: headline, text, each bullet | list: headline, each item | stat: label, big number, explanation | compare: headline, left column, right column | quote: quote, author | chart/table: headline, then the chart or table | image: headline, picture (slow push-in), caption | cta: headline, pill, subtext
@@ -83,6 +89,12 @@ These are the reel's own lines.
 | `autocontent: reel` | header | **Required, first line inside the `---`.** Without it the file is read as a post. | `reels`, `video` |
 | `voice:` | header | A Kokoro voice name, or `mine` for your own recording. | `voiceover:` |
 | `speed:` | header | 0.6 to 1.4; 1.0 normal. | |
+| `voice:` blend | header | `af_heart*0.7 + af_bella*0.3`, `af_heart 70% + af_bella 30%` or `af_heart, af_bella` (equal). Mixes the voices into one new voice. | |
+| `pace:` | header | `auto` (default): the first slide speaks as a hook (1.08×), `stat` and `cta` slides with emphasis (0.92×), `quote` slides calm (0.95×), unless a slide names its own `tone:` or `speed:`. `steady`: one pace throughout. | |
+| `pauses:` | header | How long the breaths are: `tight` (0.7×), `natural` (1×, default), `relaxed` (1.35×), or a number 0.3 to 2.5. Scales the pauses inside a slide and between slides. | `breaths:` |
+| `polish:` | header | The finishing chain on the voice: `natural` (default: rumble cut, a touch of body and presence, de-essing, gentle compression), `warm` (more body, softer top), `bright` (more presence), `clean` (compression only), `off`. Also applied to your own recording. | `sound:` |
+| `loudness:` | header | Target loudness, 9 to 23 meaning −9 to −23 LUFS; default 14 (Instagram). | `lufs:` |
+| `pronounce:` | header | `word = how it sounds; word = how it sounds`. Respelled before speaking; captions keep the written word. Built in: UPI, GST, EV, IPO (spelled), SaaS ("sass"), Pi ("pie"). Capitalised words match exactly; lower-case ones match any case. | `say_as:`, `pronunciation:` |
 | `captions:` | header | `on` (word by word, brand marker on the word being spoken) or `off`. | `subtitles:`, `caption_style:` |
 | `fps:` | header | 24 to 60, default 30. | |
 | `end_hold:` | header | Seconds the last slide stays after the last word; 0 to 6, default 1.2. | |
@@ -94,8 +106,18 @@ These are the reel's own lines.
 | `motion:` | each slide | Only for a piece the reel doesn't recognise (see below); every known piece always gets its own. | `animation:`, `animate:` |
 | `duration:` | each slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |
 | `pause:` | each slide | Extra silence after this slide's narration; 0 to 5 seconds. | |
+| `tone:` | each slide | `hook` 1.08×, `fast`/`excited` 1.1×, `normal` 1×, `calm` 0.95×, `warm` 0.96×, `serious` 0.93×, `emphasis` 0.92×, `slow` 0.9×, `dramatic` 0.88×. The slide's pace, on top of the reel's `speed:`. | `delivery:` |
+| `speed:` | each slide | The slide's own pace multiplier, 0.7 to 1.3; wins over `tone:`. | |
+| `voice:` | each slide | A different voice (or blend) for this slide only. | |
+| `[pause]` marks | inside `say:` | `[pause]` 0.5 s, `[breath]` 0.28 s, `[beat]` 0.7 s, `[pause 0.8]` any length. Never spoken, never captioned. | |
 
-A slide with neither `say:` nor `duration:` is held for 3 seconds, and there is always a 0.38 s
+**How the voice is made natural.** Each `say:` line is spoken one sentence at a time (a mark only
+ends a sentence when a space follows it, so 2.5 and 3:30 stay whole), and the quiet after each one
+follows its punctuation: 0.30 s after a full stop, 0.34 s after "!", 0.42 s after "?", 0.48 s after
+"…", 0.24 s after ":" and 0.22 s after ";", all times `pauses:`. Commas are left to the voice, which
+already breathes on them. One-word sentences are joined to the next so they don't sound clipped.
+
+A slide with neither `say:` nor `duration:` is held for 3 seconds, and there is always a 0.38 s (times `pauses:`)
 breath between one slide's narration and the next.
 
 ### How audio and slides stay in sync

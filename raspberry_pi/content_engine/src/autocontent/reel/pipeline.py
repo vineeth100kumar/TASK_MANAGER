@@ -90,9 +90,11 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             raise ReelError(f"With your own recording every slide needs a `say:` line with the words you speak "
                             f"(slide {', '.join(map(str, silent))} has none).")
         progress("Preparing your recording...")
-        track = voice.render_recording(Path(voice_file), work)
+        track = voice.render_recording(Path(voice_file), work, polish=meta.get("polish", "natural"),
+                                       loudness=float(meta.get("loudness", -14.0)))
     else:
-        problem = voice.check_voice(meta["voice"])
+        problem = voice.check_voice(meta["voice"]) or next(
+            (f"Slide {s.n}: " + p for s in reel.scenes if s.voice for p in [voice.check_voice(s.voice)] if p), None)
         if problem:
             raise ReelError(problem)
         if engine is None:
@@ -100,7 +102,9 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             if not ok:
                 raise ReelError(f"The voice isn't ready on this Pi: {why}. Or record your own and use `voice: mine`.")
         progress(f"Speaking the narration ({meta['voice']})...")
-        track = voice.render_tts(reel.scenes, meta["voice"], float(meta["speed"]), work, say=progress, engine=engine)
+        track = voice.render_tts(reel.scenes, meta["voice"], float(meta["speed"]), work, say=progress, engine=engine,
+                                 pauses=float(meta.get("pauses", 1.0)), polish=meta.get("polish", "natural"),
+                                 loudness=float(meta.get("loudness", -14.0)), pronounce=meta.get("pronounce") or {})
 
     # --- when is each word spoken ---
     progress("Finding when each word is spoken...")
