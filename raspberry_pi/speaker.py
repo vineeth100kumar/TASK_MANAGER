@@ -4,8 +4,9 @@ speaker.py - Sage's voice on a Bluetooth soundbar.
 Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
 
 - Coming home: when the phone link sees you arrive (life_mode.ArrivalWatch,
-  15+ minutes away), the Pi connects to the soundbar and greets you, Jarvis
-  style: the time, the weather, what's left today. Groq writes the line when
+  15+ minutes away), the Pi connects to the soundbar and greets you, in the
+  manner of a devoted old-school English butler (at most once every
+  GREET_EVERY_HOURS): the time, the weather, what's left today. Groq writes the line when
   there is a key; a plain template is the fallback, so it never stays silent.
 - Reminders: while you're home, a reminder that fires is also spoken.
 - Phone audio: with pass-through on, the Pi is a Bluetooth speaker for the
@@ -76,6 +77,7 @@ DEFAULTS: Dict[str, Any] = {
     "quietStart": "22:30",
     "quietEnd": "07:00",
     "leaveAfterMinutes": 20,  # 0 = never disconnect on leaving
+    "lastGreetAt": 0,       # when the welcome-home greeting was last spoken (epoch s); not user-set
     "surround": "off",      # off | music | movie | wide (SURROUND below)
     "latency": "low",       # lowest | low | steady (LATENCY below): pass-through buffer
 }
@@ -175,6 +177,17 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     return out
 
 
+def _store_greet_time(at: float) -> None:
+    settings = get_settings()
+    settings["lastGreetAt"] = int(at)
+    conn = _connect()
+    try:
+        conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (SETTINGS_KEY, json.dumps(settings)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def save_settings(update: dict) -> dict:
     settings = clean_settings(update, get_settings())
     conn = _connect()
@@ -244,7 +257,7 @@ def greeting_facts(now: datetime.datetime, due: List[dict], overdue: List[dict],
 
 def template_greeting(f: dict) -> str:
     """The greeting without AI: short, warm, and always something to say."""
-    name = f", {f['name']}" if f.get("name") else ""
+    name = f", {f['name']}" if f.get("name") else ", sir"
     hello = "Welcome home" + name + "." if f["partOfDay"] == "night" else f"Good {f['partOfDay']}{name}. Welcome home."
     parts = [hello]
     weather = ""
@@ -266,18 +279,30 @@ def template_greeting(f: dict) -> str:
     return " ".join(parts)
 
 
-GREETING_PROMPT = """You are the voice of Sage, a home assistant in the manner of a calm, \
-quietly witty British butler AI (think J.A.R.V.I.S.). Write the one greeting spoken \
+GREETING_PROMPT = """You are the voice of Sage, speaking as a devoted, old-school \
+English butler in the manner of Alfred Pennyworth: unflappable, warm underneath, \
+impeccably polite, with a dry, gently teasing wit and a quiet concern for the \
+person's wellbeing (rest, food, not overworking). Write the one greeting spoken \
 aloud on the soundbar as the person walks in the door.
 
 Rules: at most 45 words. Plain spoken English only: no emojis, lists, quotes, \
 markdown or stage directions. Use only the facts given; never invent tasks, \
 weather or numbers. Mention the time, then the weather if given, then what is \
-left today (name at most two items). One light touch of dry wit at most. \
-Address them by the name given, or not at all if there is none.
+left today (name at most two items). One dry, affectionate aside at most, the \
+kind a butler permits himself. Never mention Batman, Gotham or any film. \
+Address them by the name given (as a butler would, e.g. "Master Vineeth" or \
+"sir"), or as "sir" if there is none.
 
 Facts (JSON):
 """
+
+
+GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
+
+
+def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> bool:
+    """One welcome-home greeting per `hours`. Pure."""
+    return not last_at or now - last_at >= hours * 3600
 
 
 def clean_line(text: str, limit: int = 420) -> str:
@@ -725,8 +750,10 @@ class Speaker:
         if not ready or wav is None:
             return
         try:
-            await self._play(wav, settings)
+            played = await self._play(wav, settings)
             self.last = {"text": text, "kind": kind, "at": int(time.time() * 1000)}
+            if played and kind == "greeting":
+                await asyncio.to_thread(_store_greet_time, time.time())
         finally:
             try:
                 os.unlink(wav)
@@ -756,7 +783,7 @@ class Speaker:
             return None
         return out
 
-    async def _play(self, wav: str, settings: dict) -> None:
+    async def _play(self, wav: str, settings: dict) -> bool:
         """Pause the phone's music and pass-through, speak, then carry on."""
         self._pass_paused += 1
         media = getattr(self.phone, "media", {}) or {}
@@ -772,6 +799,7 @@ class Speaker:
                 code, err = await self._aplay(self.device(settings), wav)
             if code:
                 self._fail("The soundbar didn't play it: " + err.strip()[-160:])
+            return not code
         finally:
             self._pass_paused -= 1
             self._pass_next = 0.0
@@ -855,8 +883,12 @@ class Speaker:
     # --- Hooks ---
 
     def on_arrival(self) -> None:
-        """life_mode calls this (from a worker thread) when you get home."""
+        """life_mode calls this (from a worker thread) when you get home.
+        At most one greeting every GREET_EVERY_HOURS."""
         settings = get_settings()
+        if not greet_due(float(settings.get("lastGreetAt") or 0), time.time()):
+            log.info("Greeted less than %s h ago; staying quiet.", GREET_EVERY_HOURS)
+            return
         if settings["address"] and settings["greet"] and self.loop:
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
 
