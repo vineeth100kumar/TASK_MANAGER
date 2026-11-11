@@ -123,6 +123,13 @@ def save_settings(update: dict) -> dict:
 
 # --- Pure helpers ---
 
+def output_error(message: str) -> bool:
+    """Whether a playback error is about the audio output (ALSA, the surround
+    device) rather than Spotify itself (audio keys, the network, the track). Pure."""
+    m = (message or "").lower()
+    return any(w in m for w in ("alsa", "pcm", "output", "audio device", "sage_surround", "ladspa", "snd_"))
+
+
 def daemon_config(settings: dict, device: str) -> dict:
     """go-librespot's config.yml (JSON is valid YAML). Pure."""
     return {
@@ -480,13 +487,13 @@ class SpotifyConnect:
             load = self.last_load or {}
             self.retry = {"uri": uri or load.get("uri", ""), "context": load.get("context", "") if load.get("uri") == uri or not uri else ""}
             return
-        if self.device.startswith("sage_surround") and self.speaker is not None:
+        why = str(data.get("message") or data.get("kind") or "unknown error")
+        if self.device.startswith("sage_surround") and self.speaker is not None and output_error(why):
             self.speaker._surround_failed("Spotify couldn't open it")
             await self.follow_output()
             self.retry = {"uri": uri, "context": (self.last_load or {}).get("context", "")}
             await self.replay()
             return
-        why = str(data.get("message") or data.get("kind") or "unknown error")
         self._fail(f"Spotify couldn't play that: {why[:160]}")
 
     async def soundbar_up(self) -> None:
