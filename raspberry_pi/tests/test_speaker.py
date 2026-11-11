@@ -40,16 +40,18 @@ class GreetingTests(unittest.TestCase):
         return f
 
     def test_template(self):
-        line = speaker.template_greeting(self.facts())
-        self.assertIn("Good evening, Vineeth", line)
-        self.assertIn("6:40 and 24 degrees, clear skies", line)
-        self.assertIn("two things left today, starting with Buy milk", line)
-        self.assertIn("Work is put away", line)
+        line = speaker.template_greeting(self.facts(), pick=lambda xs: xs[0])
+        self.assertIn("Welcome home, Vineeth!", line)
+        self.assertIn("6:40 PM and a cosy 24 degrees with clear skies", line)
+        self.assertIn("Walk is still waiting", line)
+        self.assertIn("Chill mode", line)
+        self.assertNotIn("Buy milk", line)
         self.assertNotIn("Secret", line)
 
-    def test_nothing_due(self):
-        line = speaker.template_greeting(self.facts(dueCount=0, dueToday=[], tempC=None, habitsLeft=[], chill=False))
-        self.assertIn("Nothing else is asked of you today.", line)
+    def test_twelve_hour(self):
+        self.assertEqual(speaker._clock(at(9)), "9 AM")
+        self.assertEqual(speaker._clock(at(0, 5)), "12:05 AM")
+        self.assertEqual(speaker._clock(at(20, 55)), "8:55 PM")
 
     def test_clean_line(self):
         self.assertEqual(speaker.clean_line('<think>x</think> "**Welcome** home, sir."'), "Welcome home, sir.")
@@ -57,6 +59,14 @@ class GreetingTests(unittest.TestCase):
     def test_reminder_line(self):
         self.assertEqual(speaker.reminder_line({"title": "Pay rent", "body": "Reminder"}),
                          "Pardon the interruption. A reminder: Pay rent.")
+
+
+class HelloTests(unittest.TestCase):
+    def test_hello_varies_and_names(self):
+        first = speaker.hello_line(at(19), "sir")
+        self.assertIn("sir", first)
+        for _ in range(20):
+            self.assertNotEqual(speaker.hello_line(at(19), "sir", first), first)
 
 
 class SettingsTests(unittest.TestCase):

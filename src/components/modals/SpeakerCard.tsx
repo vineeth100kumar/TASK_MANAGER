@@ -97,7 +97,9 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
       {set.address && (
         <div className="space-y-4 pt-3 border-t border-black/5 dark:border-white/5">
           <Switch on={set.greet} onChange={on => save({ greet: on })} label="Welcome me home"
-            hint="When your phone gets home, connect and greet you with the time, the weather and what's left today." />
+            hint="When your phone gets home, connect and greet you with the time, the weather and any habit still to do, with a joke or two." />
+          <Switch on={set.helloOnConnect !== false} onChange={on => save({ helloOnConnect: on })} label="Say hello when my phone connects"
+            hint={`A short friendly line every time your phone links to the Pi, at most once every ${set.helloCooldownMinutes || 10} minutes.`} />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Jarvis-style wording"
             hint="Groq writes a fresh line each time. Without a Groq key, a plain greeting is used." />
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />

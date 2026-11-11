@@ -62,6 +62,8 @@ DEFAULTS: Dict[str, Any] = {
     "address": "",          # the soundbar; empty means the speaker is off
     "name": "",             # its name, for the UI
     "greet": True,          # say hello when you get home
+    "helloOnConnect": True,  # a short hello every time the phone connects (with a cooldown)
+    "helloCooldownMinutes": 10,
     "reminders": True,      # speak reminders while you're home
     "passthrough": True,    # be a Bluetooth speaker for the phone
     "witty": True,          # let Groq write the greeting (falls back to the template)
@@ -104,7 +106,9 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "passthrough", "witty"):
+    if "helloCooldownMinutes" in update:
+        out["helloCooldownMinutes"] = int(max(1, min(240, int(update["helloCooldownMinutes"]))))
+    for key in ("greet", "helloOnConnect", "reminders", "passthrough", "witty"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:
@@ -176,8 +180,10 @@ WEATHER_WORDS = {"sun": "clear skies", "cloud": "cloudy", "rain": "rain about", 
 
 
 def _clock(now: datetime.datetime) -> str:
+    """12-hour time as it is said: "8:55 PM", "9 AM"."""
     h = now.hour % 12 or 12
-    return f"{h}:{now.minute:02d}" if now.minute else f"{h} o'clock"
+    ampm = "AM" if now.hour < 12 else "PM"
+    return f"{h}:{now.minute:02d} {ampm}" if now.minute else f"{h} {ampm}"
 
 
 def _number(n: int) -> str:
@@ -205,39 +211,46 @@ def greeting_facts(now: datetime.datetime, due: List[dict], overdue: List[dict],
     }
 
 
-def template_greeting(f: dict) -> str:
-    """The greeting without AI: short, warm, and always something to say."""
+FUN_OPENERS = [
+    "Welcome home{name}! The house missed you. Mostly the fridge.",
+    "And the legend returns{name}. Welcome home.",
+    "Welcome back{name}. I'd roll out a red carpet, but I'm a soundbar.",
+    "Home sweet home{name}. Systems online, vibes excellent.",
+    "Look who's back{name}! Welcome home, chief.",
+    "Welcome home{name}. Shoes off, feet up, mission complete.",
+    "Ah{name}, you've returned. The couch has been asking about you.",
+]
+
+
+def template_greeting(f: dict, pick: Optional[Callable[[list], str]] = None) -> str:
+    """The greeting without AI: playful and short. Time (12-hour), weather and
+    habits; tasks are left out on purpose (the person asked for that)."""
+    import random
+    choose = pick or random.choice
     name = f", {f['name']}" if f.get("name") else ""
-    hello = "Welcome home" + name + "." if f["partOfDay"] == "night" else f"Good {f['partOfDay']}{name}. Welcome home."
-    parts = [hello]
+    parts = [choose(FUN_OPENERS).format(name=name)]
     weather = ""
     if f.get("tempC") is not None:
-        weather = f" and {f['tempC']} degrees" + (f", {f['sky']}" if f.get("sky") else "")
+        weather = f" and a cosy {f['tempC']} degrees" + (f" with {f['sky']}" if f.get("sky") else "")
     parts.append(f"It's {f['time']}{weather}.")
-    n = f["dueCount"]
-    if n == 0:
-        parts.append("Nothing else is asked of you today.")
-    else:
-        first = f["dueToday"][0]
-        parts.append(f"You have {_number(n)} {'thing' if n == 1 else 'things'} left today" + (f", starting with {first}." if n > 1 else f": {first}."))
-    if f.get("overdueCount"):
-        parts.append(f"And {_number(f['overdueCount'])} overdue, when you're ready.")
     if f.get("habitsLeft"):
-        parts.append(f"Don't forget {f['habitsLeft'][0]}.")
+        parts.append(f"Quick one: {f['habitsLeft'][0]} is still waiting for you today.")
     if f.get("chill"):
-        parts.append("Work is put away for the evening." if f["partOfDay"] in ("evening", "night") else "Work is put away for now.")
+        parts.append("Work's locked away. Chill mode engaged.")
     return " ".join(parts)
 
 
-GREETING_PROMPT = """You are the voice of Sage, a home assistant in the manner of a calm, \
-quietly witty British butler AI (think J.A.R.V.I.S.). Write the one greeting spoken \
-aloud on the soundbar as the person walks in the door.
+GREETING_PROMPT = """You are the voice of Sage, a home assistant AI with a playful, \
+cheeky personality (a fun J.A.R.V.I.S.). Write the one greeting spoken aloud on \
+the soundbar as the person walks in the door.
 
-Rules: at most 45 words. Plain spoken English only: no emojis, lists, quotes, \
-markdown or stage directions. Use only the facts given; never invent tasks, \
-weather or numbers. Mention the time, then the weather if given, then what is \
-left today (name at most two items). One light touch of dry wit at most. \
-Address them by the name given, or not at all if there is none.
+Rules: at most 40 words. Make it fun: a joke, a playful line or a bit of hype, \
+different every time. Plain spoken English only: no emojis, lists, quotes, \
+markdown or stage directions. Say the time exactly as given (12-hour, like \
+"8:55 PM"), then the weather if given. If habitsLeft is not empty, give a light, \
+friendly nudge about the first one. Never mention tasks, work or to-dos. Use \
+only the facts given; never invent numbers. Address them by the name given, \
+or not at all if there is none.
 
 Facts (JSON):
 """
@@ -252,6 +265,29 @@ def clean_line(text: str, limit: int = 420) -> str:
         cut = t[:limit]
         t = cut[:cut.rfind(".") + 1] if "." in cut else cut
     return t
+
+
+HELLO_LINES = [
+    "Hello again{name}. Good to have you back.",
+    "There you are{name}. All systems at your service.",
+    "Welcome back{name}. I've kept everything just as you left it.",
+    "Ah{name}. Connected and ready when you are.",
+    "Good {part}{name}. Nice to hear from you again.",
+    "Hello{name}. The house is all yours.",
+    "Welcome back{name}. Shall we carry on?",
+    "Right on time{name}. I'm listening.",
+]
+
+
+def hello_line(now: datetime.datetime, call_me: str, last: str = "") -> str:
+    """A short hello for a phone (re)connecting, never the same as the last one. Pure."""
+    import random
+    name = f", {call_me}" if call_me else ""
+    options = [l.format(name=name, part=part_of_day(now.hour)) for l in HELLO_LINES]
+    options = [o for o in options if o != last] or options
+    if part_of_day(now.hour) == "night":
+        options = [o for o in options if not o.startswith("Good night")] or options
+    return random.choice(options)
 
 
 def reminder_line(message: dict) -> str:
@@ -390,6 +426,9 @@ class Speaker:
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self._phone_was = None      # the phone's link on the last check
+        self._hello_at = 0.0        # last hello or greeting (epoch s)
+        self._last_hello = ""
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -554,6 +593,13 @@ class Speaker:
         home = bool(self.phone and self.phone.available and self.phone.home)
         sb = links["soundbar"]
         now = time.time()
+
+        # A short hello each time the phone connects (the full greeting covers arrivals).
+        connected = bool(self.phone and self.phone.available and self.phone.connected)
+        if self._phone_was is False and connected and settings["helloOnConnect"] \
+                and now - self._hello_at > settings["helloCooldownMinutes"] * 60:
+            asyncio.ensure_future(self._hello_soon())
+        self._phone_was = connected
 
         want_pass = bool(settings["address"] and settings["passthrough"] and sb["connected"] and phone_addr)
         if want_pass and links["phoneAudio"] and not self._pass_paused:
@@ -737,8 +783,9 @@ class Speaker:
             async with httpx.AsyncClient(timeout=8) as client:
                 for m in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
                     res = await client.post(canvas_thinker.GROQ_URL, headers={"Authorization": f"Bearer {key}"}, json={
-                        "model": m, "temperature": 0.8, "max_tokens": 400,
-                        "messages": [{"role": "user", "content": GREETING_PROMPT + json.dumps(facts)}],
+                        "model": m, "temperature": 1.0, "max_tokens": 400,
+                        "messages": [{"role": "user", "content": GREETING_PROMPT + json.dumps(
+                            {k: v for k, v in facts.items() if k not in ("dueToday", "dueCount", "overdueCount")})}],
                     })
                     if res.status_code == 200:
                         line = clean_line(res.json()["choices"][0]["message"].get("content") or "")
@@ -756,7 +803,19 @@ class Speaker:
         if settings["address"] and settings["greet"] and self.loop:
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
 
+    async def _hello_soon(self) -> None:
+        # Arrival is noticed on the same reconnect; give it a moment and let the
+        # full greeting win if it is coming.
+        await asyncio.sleep(6)
+        if time.time() - self._hello_at < 60:
+            return
+        self._hello_at = time.time()
+        line = hello_line(self.now(), get_settings()["callMe"], self._last_hello)
+        self._last_hello = line
+        await self.say(line, "hello")
+
     async def greet(self, kind: str = "greeting") -> str:
+        self._hello_at = time.time()
         line = await self.greeting()
         await self.say(line, kind)
         return line

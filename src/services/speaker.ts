@@ -6,7 +6,7 @@ import { piBackendUrl, piHeaders } from './piBackend';
 import { SPEAKER_EVENT } from './liveStream';
 
 export interface SpeakerSettings {
-  address: string; name: string; greet: boolean; reminders: boolean; passthrough: boolean; witty: boolean;
+  address: string; name: string; greet: boolean; helloOnConnect: boolean; helloCooldownMinutes: number; reminders: boolean; passthrough: boolean; witty: boolean;
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
 }
 
