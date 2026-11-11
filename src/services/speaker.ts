@@ -5,19 +5,23 @@ import { useCallback, useEffect, useState } from 'react';
 import { piBackendUrl, piHeaders } from './piBackend';
 import { SPEAKER_EVENT } from './liveStream';
 
+export type SurroundMode = 'off' | 'music' | 'movie' | 'wide';
+
 export interface SpeakerSettings {
   address: string; name: string; greet: boolean; reminders: boolean; passthrough: boolean; witty: boolean;
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
+  surround?: SurroundMode;
 }
 
 export interface SpeakerState {
   settings: SpeakerSettings;
-  tools: { aplay: boolean; bluealsa: boolean; passthrough: boolean; voice: boolean };
+  tools: { aplay: boolean; bluealsa: boolean; passthrough: boolean; surround?: boolean; voice: boolean };
   voiceProblem: string;
   voices: string[];
   soundbar: { known: boolean; paired: boolean; connected: boolean; audio: boolean; name: string };
   phoneAudio: boolean;
   passing: boolean;
+  surroundOn?: boolean;
   speaking: string;
   last: { text: string; kind: string; at: number } | null;
   error: { message: string } | null;

@@ -110,3 +110,104 @@ class WifiTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class SurroundTests(unittest.TestCase):
+    def test_settings(self):
+        self.assertEqual(speaker.clean_settings({"surround": "movie"})["surround"], "movie")
+        self.assertEqual(speaker.clean_settings({"surround": ""})["surround"], "off")
+        with self.assertRaises(ValueError):
+            speaker.clean_settings({"surround": "atmos"})
+
+    def test_device(self):
+        a = "AA:BB:CC:DD:EE:FF"
+        self.assertEqual(speaker.output_device(a, "off", True), f"bluealsa:DEV={a},PROFILE=a2dp")
+        self.assertEqual(speaker.output_device(a, "movie", False), f"bluealsa:DEV={a},PROFILE=a2dp")
+        self.assertEqual(speaker.output_device(a, "movie", True),
+                         f"sage_surround:DEV={a},WIDTH=0.7,SPACE=0.5,DIALOG=4,BASS=3")
+
+    def test_failure_falls_back_until_switched(self):
+        sp = speaker.Speaker()
+        settings = dict(speaker.DEFAULTS, address="AA:BB:CC:DD:EE:FF", surround="music")
+        old = speaker.surround_ready
+        speaker.surround_ready = lambda: True
+        try:
+            self.assertTrue(sp.device(settings).startswith("sage_surround"))
+            sp._surround_failed("test")
+            self.assertTrue(sp.device(settings).startswith("bluealsa"))
+            sp.device(dict(settings, surround="off"))
+            self.assertTrue(sp.device(settings).startswith("sage_surround"))
+        finally:
+            speaker.surround_ready = old
+
+
+@unittest.skipUnless(__import__("shutil").which("gcc"), "needs gcc to build the plugin")
+class SurroundPluginTests(unittest.TestCase):
+    """Builds audio/sage_surround.c and runs it through the LADSPA API directly."""
+
+    @classmethod
+    def setUpClass(cls):
+        import ctypes
+        import subprocess
+        src = Path(__file__).resolve().parent.parent / "audio" / "sage_surround.c"
+        cls.so = Path(tempfile.mkdtemp()) / "sage_surround.so"
+        subprocess.run(["gcc", "-O2", "-fPIC", "-shared", "-o", str(cls.so), str(src), "-lm"], check=True)
+        lib = ctypes.CDLL(str(cls.so))
+        H = ctypes.c_void_p
+        F = ctypes.POINTER(ctypes.c_float)
+
+        class Desc(ctypes.Structure):
+            _fields_ = [("id", ctypes.c_ulong), ("label", ctypes.c_char_p), ("props", ctypes.c_int),
+                        ("name", ctypes.c_char_p), ("maker", ctypes.c_char_p), ("copy", ctypes.c_char_p),
+                        ("count", ctypes.c_ulong), ("pd", H), ("pn", H), ("ph", H), ("impl", H),
+                        ("instantiate", ctypes.CFUNCTYPE(H, H, ctypes.c_ulong)),
+                        ("connect", ctypes.CFUNCTYPE(None, H, ctypes.c_ulong, F)),
+                        ("activate", ctypes.CFUNCTYPE(None, H)),
+                        ("run", ctypes.CFUNCTYPE(None, H, ctypes.c_ulong)),
+                        ("run_adding", H), ("set_gain", H), ("deactivate", H),
+                        ("cleanup", ctypes.CFUNCTYPE(None, H))]
+        lib.ladspa_descriptor.restype = ctypes.POINTER(Desc)
+        cls.desc = lib.ladspa_descriptor(0)
+        cls.ctypes = ctypes
+
+    def process(self, left, right, width, space, dialog, bass):
+        ct, d = self.ctypes, self.desc.contents
+        n = len(left)
+        controls = [ct.c_float(v) for v in (width, space, dialog, bass)]
+        ins = [(ct.c_float * n)(*left), (ct.c_float * n)(*right)]
+        outs = [(ct.c_float * n)(), (ct.c_float * n)()]
+        h = d.instantiate(ct.addressof(d), 48000)
+        for i, c in enumerate(controls):
+            d.connect(h, i, ct.pointer(c))
+        for i, buf in enumerate(ins + outs):
+            d.connect(h, 4 + i, ct.cast(buf, ct.POINTER(ct.c_float)))
+        d.activate(h)
+        d.run(h, n)
+        d.cleanup(h)
+        return list(outs[0]), list(outs[1])
+
+    def signal(self):
+        import math
+        n = 9600
+        left = [0.4 * math.sin(2 * math.pi * 1000 * i / 48000) + 0.4 * math.sin(2 * math.pi * 80 * i / 48000) for i in range(n)]
+        right = [0.4 * math.sin(2 * math.pi * 440 * i / 48000) + 0.4 * math.sin(2 * math.pi * 80 * i / 48000) for i in range(n)]
+        return left, right
+
+    def test_neutral_is_untouched(self):
+        left, right = self.signal()
+        ol, orr = self.process(left, right, 0, 0, 0, 0)
+        self.assertLess(max(abs(a - b) for a, b in zip(ol + orr, left + right)), 1e-5)
+
+    def test_movie_is_wider_and_never_clips(self):
+        left, right = self.signal()
+        ol, orr = self.process(left, right, 0.7, 0.5, 4, 3)
+        tail = slice(2400, None)
+        def ratio(l, r):
+            mid = sum(((a + b) / 2) ** 2 for a, b in zip(l[tail], r[tail]))
+            side = sum(((a - b) / 2) ** 2 for a, b in zip(l[tail], r[tail]))
+            return side / mid
+        self.assertGreater(ratio(ol, orr), 1.5 * ratio(left, right))
+        self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
+        # full-scale input still stays inside the limit
+        ol, orr = self.process([1.0] * 4800, [-1.0] * 4800, 1, 0.7, 9, 9)
+        self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
