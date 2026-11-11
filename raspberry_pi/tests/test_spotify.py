@@ -94,3 +94,10 @@ class SignInTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OutputErrorTests(unittest.TestCase):
+    def test_spotify_errors_dont_blame_surround(self):
+        import spotify
+        self.assertFalse(spotify.output_error("failed creating stream for spotify:track:x: failed retrieving audio key: failed retrieving aes key with code 1"))
+        self.assertTrue(spotify.output_error("failed opening alsa device sage_surround:DEV=AA"))
