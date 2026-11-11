@@ -22,8 +22,8 @@
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
 #   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
-#      (speaker.py), and go-librespot so the Pi is a Spotify Connect speaker
-#      on that soundbar (spotify.py). Run once with --only audio,server,web.
+#      (speaker.py), and Spotify Soloist so the Pi is a Spotify Connect
+#      speaker on that soundbar (spotify.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -239,47 +239,47 @@ part_audio() {
   usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
 }
 
-# Spotify Connect (spotify.py): go-librespot, a prebuilt open-source Spotify
-# client. Sage runs it and you sign in with a code at spotify.com/pair, so no
-# Spotify developer app or keys are needed. Pinned; bump SPOTIFY_VERSION to update.
-SPOTIFY_VERSION="${SAGE_SPOTIFY_VERSION:-v0.10.5}"
+# Spotify (spotify.py): Spotify Soloist, Spotify's own player for headless
+# devices. Spotify refuses the audio key to open-source players, so we use the
+# official binary instead. It can't be redistributed, so it is downloaded from
+# Spotify at install time. You make a free Soloist key (Premium account) and
+# paste it into Sage; no developer app. Soloist plays through PipeWire, so we
+# set PipeWire up for the Sage user and Sage routes it to the soundbar.
 install_spotify() {
-  step "Spotify Connect (go-librespot $SPOTIFY_VERSION)"
-  # Runtime libraries; package names differ between Bookworm and Trixie (t64).
-  for pkg in libasound2t64:libasound2 libogg0 libvorbis0a libvorbisfile3 libflac14:libflac12 libmpg123-0t64:libmpg123-0 ca-certificates curl; do
-    apt-get install -y -qq "${pkg%%:*}" >/dev/null 2>&1 || { [ "${pkg#*:}" != "$pkg" ] && apt-get install -y -qq "${pkg#*:}" >/dev/null 2>&1; } || true
-  done
-  local variant
-  case "$(dpkg --print-architecture 2>/dev/null || uname -m)" in
-    arm64|aarch64) variant=arm64 ;;
-    armhf|armv7l) variant=armv6 ;;
-    armel|armv6l) variant=armv6_rpi ;;
-    amd64|x86_64) variant=x86_64 ;;
-    *) echo "No go-librespot build for this Pi ($(uname -m)), so Spotify stays off."; return 0 ;;
+  step "Spotify Soloist (official Spotify player)"
+  apt-get install -y -qq curl ca-certificates pipewire pipewire-pulse wireplumber \
+    dbus-user-session pulseaudio-utils libpulse0 >/dev/null 2>&1 \
+    || echo "Some audio packages didn't install; Spotify may not play. Try: sudo apt-get install pipewire pipewire-pulse wireplumber"
+  local arch
+  case "$(uname -m)" in
+    aarch64|arm64) arch=arm64 ;;
+    armv7l|armhf) arch=arm32 ;;
+    x86_64|amd64) arch=x86_64 ;;
+    *) echo "No Spotify Soloist build for this Pi ($(uname -m)), so Spotify stays off."; return 0 ;;
   esac
-  local have=""
-  [ -x /usr/local/bin/go-librespot ] && have="$(cat /usr/local/lib/sage/go-librespot.version 2>/dev/null || true)"
-  if [ "$have" = "$SPOTIFY_VERSION-$variant" ]; then
-    echo "go-librespot $SPOTIFY_VERSION is already installed."
+  # Soloist builds expire 90 days after they're built, so always fetch the
+  # current one (the download is small). Keep the old binary if the fetch fails.
+  local tmp; tmp="$(mktemp -d)"
+  if curl --fail --location --retry 3 -o "$tmp/soloist.tar.gz" \
+       "https://soloist-builds.spotifycdn.com/soloist_release_$arch.tar.gz" \
+     && tar -xzf "$tmp/soloist.tar.gz" -C "$tmp" \
+     && test -x "$tmp/soloist"; then
+    install -m 755 "$tmp/soloist" /usr/local/bin/soloist
+    echo "Installed Spotify Soloist ($arch): $(/usr/local/bin/soloist --version 2>/dev/null | head -1 || echo ok)."
+  elif [ -x /usr/local/bin/soloist ]; then
+    echo "Couldn't fetch Soloist; keeping the one already installed."
   else
-    local tmp; tmp="$(mktemp -d)"
-    if curl -fsSL --retry 3 -o "$tmp/glr.tar.gz" \
-         "https://github.com/devgianlu/go-librespot/releases/download/$SPOTIFY_VERSION/go-librespot_linux_$variant.tar.gz" \
-       && tar -xzf "$tmp/glr.tar.gz" -C "$tmp" go-librespot \
-       && "$tmp/go-librespot" --help >/dev/null 2>&1; then
-      install -m 755 "$tmp/go-librespot" /usr/local/bin/go-librespot
-      mkdir -p /usr/local/lib/sage
-      echo "$SPOTIFY_VERSION-$variant" > /usr/local/lib/sage/go-librespot.version
-      echo "Installed go-librespot $SPOTIFY_VERSION ($variant)."
-    else
-      echo "go-librespot didn't install, so Spotify stays off. Missing libraries:"
-      ldd "$tmp/go-librespot" 2>/dev/null | grep "not found" || echo "  (download failed; check the Pi's internet)"
-    fi
-    rm -rf "$tmp"
+    echo "Soloist didn't install, so Spotify stays off (check the Pi's internet)."
   fi
-  # Its sign-in and state live here; Sage writes config.yml on each start.
+  rm -rf "$tmp"
+  # PipeWire has to run in the Sage user's session even with no one logged in.
+  loginctl enable-linger "$RUN_AS" >/dev/null 2>&1 || true
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
-  as_user mkdir -p "$HOME_DIR/.config/sage-spotify"
+  as_user mkdir -p "$HOME_DIR/.config/pipewire/pipewire.conf.d" \
+    "$HOME_DIR/.local/share/sage-soloist" "$HOME_DIR/.cache/sage-soloist"
+  as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$RUN_AS")" \
+    systemctl --user enable --now pipewire pipewire-pulse wireplumber >/dev/null 2>&1 || true
+  usermod -aG audio "$RUN_AS" 2>/dev/null || true
 }
 
 part_check() {

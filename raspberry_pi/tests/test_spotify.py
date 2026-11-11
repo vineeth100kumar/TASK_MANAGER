@@ -1,9 +1,10 @@
-"""Tests for spotify.py's pure parts: settings, go-librespot's config, now playing, sign-out.
+"""Tests for spotify.py's pure parts: settings, Soloist's command, the PipeWire
+sink, now playing, and the control socket.
 
     cd raspberry_pi && python -m unittest discover -s tests
 """
 
-import json
+import asyncio
 import os
 import sys
 import tempfile
@@ -18,114 +19,137 @@ import spotify  # noqa: E402
 
 class SettingsTests(unittest.TestCase):
     def test_defaults_and_cleaning(self):
-        s = spotify.clean_settings({"name": "  Living room <3 ", "quality": "160", "normalise": 0})
+        s = spotify.clean_settings({"name": "  Living room <3 ", "apiKey": "spak_ABCdef123456"})
         self.assertEqual(s["name"], "Living room 3")
-        self.assertEqual(s["quality"], 160)
-        self.assertFalse(s["normalise"])
-        with self.assertRaises(ValueError):
-            spotify.clean_settings({"quality": 128})
+        self.assertEqual(s["apiKey"], "spak_ABCdef123456")
         with self.assertRaises(ValueError):
             spotify.clean_settings({"name": "<>"})
+        with self.assertRaises(ValueError):
+            spotify.clean_settings({"apiKey": "has spaces in it"})
+        # an empty key is allowed (clears it)
+        self.assertEqual(spotify.clean_settings({"apiKey": ""})["apiKey"], "")
 
     def test_saved(self):
         spotify.save_settings({"name": "Sage Bar", "foo": 1})
         self.assertEqual(spotify.get_settings()["name"], "Sage Bar")
         self.assertNotIn("foo", spotify.get_settings())
 
-    def test_restart_keys(self):
-        a = dict(spotify.DEFAULTS)
-        self.assertFalse(spotify.restart_keys(a, dict(a, enabled=False)))
-        self.assertTrue(spotify.restart_keys(a, dict(a, quality=96)))
+    def test_key_never_leaves(self):
+        pub = spotify.public_settings({"enabled": True, "name": "Sage", "apiKey": "secret-key-123"})
+        self.assertNotIn("apiKey", pub)
+        self.assertTrue(pub["hasKey"])
+        self.assertFalse(spotify.public_settings({"apiKey": ""})["hasKey"])
 
 
-class ConfigTests(unittest.TestCase):
-    def test_no_developer_keys(self):
-        c = spotify.daemon_config(dict(spotify.DEFAULTS), "bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp")
-        self.assertEqual(c["credentials"], {"type": "device_auth"})
-        self.assertEqual(c["audio_device"], "bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp")
-        self.assertEqual(c["server"]["address"], "127.0.0.1")
-        self.assertEqual(c["bitrate"], 320)
-        self.assertFalse(c["normalisation_disabled"])
-        self.assertEqual(spotify.daemon_config(dict(spotify.DEFAULTS), "")["audio_device"], "default")
-        # every key is one go-librespot knows (its schema refuses others)
-        known = {"log_level", "log_disable_timestamp", "device_name", "device_type", "audio_backend", "audio_device",
-                 "audio_buffer_time", "bitrate", "normalisation_disabled", "disable_autoplay", "zeroconf_enabled",
-                 "credentials", "server"}
-        self.assertEqual(set(c), known)
+class CommandTests(unittest.TestCase):
+    def test_soloist_cmd(self):
+        s = {"name": "Sage", "apiKey": "KEY", "enabled": True}
+        cmd = spotify.soloist_cmd(s, "sage-spotify")
+        self.assertEqual(cmd[0], "soloist")
+        self.assertIn("--device-name", cmd)
+        self.assertEqual(cmd[cmd.index("--device-name") + 1], "Sage")
+        self.assertEqual(cmd[cmd.index("--api-key") + 1], "KEY")
+        self.assertIn("127.0.0.1:" + str(spotify.WS_PORT), cmd)
+        self.assertEqual(cmd[cmd.index("-d") + 1], "sage-spotify")
+        # no soundbar: no -d, so Soloist uses the default output
+        self.assertNotIn("-d", spotify.soloist_cmd(s, ""))
+
+    def test_pipewire_sink(self):
+        conf = spotify.pipewire_sink_conf("sage-spotify", "bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp")
+        self.assertIn("api.alsa.pcm.sink", conf)
+        self.assertIn("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", conf)
+        self.assertIn("sage-spotify", conf)
+
+    def test_expired(self):
+        self.assertTrue(spotify.expired(10))
+        self.assertFalse(spotify.expired(0))
+        self.assertFalse(spotify.expired(None))
 
 
 class NowPlayingTests(unittest.TestCase):
-    def test_status(self):
-        st = {"stopped": False, "paused": False, "volume": 32, "volume_steps": 64, "context_name": "Chill",
-              "track": {"name": "Song", "artist_names": ["A", "B"], "album_name": "LP", "album_cover_url": "https://i/x",
-                        "duration": 1000, "position": 10, "uri": "spotify:track:1"}}
+    def test_playback_state(self):
+        st = {"status": "playing", "volume": 65, "is_active": True,
+              "options": {"shuffle": True, "repeat": "off"},
+              "context": {"decorations": {"identity": {"name": "Today's Top Hits"}}},
+              "position": {"position_ms": 45000, "timestamp_ms": 1, "speed": 1.0},
+              "item": {"uri": "spotify:track:2JRo", "decorations": {
+                  "identity": {"name": "My Song", "artists": [{"name": "A"}, {"name": "B"}]},
+                  "playback": {"duration_ms": 210000}}}}
         p = spotify.now_playing(st)
         self.assertTrue(p["playing"])
-        self.assertEqual(p["volume"], 50)
+        self.assertTrue(p["active"])
+        self.assertEqual(p["volume"], 65)
+        self.assertTrue(p["shuffle"])
+        self.assertEqual(p["context"], "Today's Top Hits")
+        self.assertEqual(p["track"]["name"], "My Song")
         self.assertEqual(p["track"]["artists"], "A, B")
-        self.assertFalse(spotify.now_playing(dict(st, paused=True))["playing"])
+        self.assertEqual(p["track"]["duration"], 210000)
+        self.assertEqual(p["track"]["position"], 45000)
+
+    def test_idle_and_none(self):
         self.assertIsNone(spotify.now_playing(None))
-        self.assertIsNone(spotify.now_playing({"stopped": True, "track": None})["track"])
+        idle = spotify.now_playing({"status": "idle", "item": None})
+        self.assertTrue(idle["stopped"])
+        self.assertIsNone(idle["track"])
 
 
-class SignInTests(unittest.TestCase):
-    def test_saved_and_forgotten(self):
-        d = Path(tempfile.mkdtemp())
-        self.assertEqual(spotify.saved_user(d), "")
-        (d / "state.json").write_text(json.dumps({"device_id": "x", "credentials": {"username": "vk", "data": "QUJD"}, "last_volume": 30}))
-        self.assertEqual(spotify.saved_user(d), "vk")
-        spotify.forget_user(d)
-        self.assertEqual(spotify.saved_user(d), "")
-        kept = json.loads((d / "state.json").read_text())
-        self.assertEqual(kept["device_id"], "x")
-        self.assertEqual(kept["last_volume"], 30)
-
-    def test_legacy_credentials_file(self):
-        d = Path(tempfile.mkdtemp())
-        (d / "credentials.json").write_text(json.dumps({"username": "vk", "data": "QUJD"}))
-        self.assertEqual(spotify.saved_user(d), "vk")
-        spotify.forget_user(d)
-        self.assertFalse((d / "credentials.json").exists())
-
-    def test_log_line(self):
-        line = 'level=error msg="failed loading \\"x\\"" error="ALSA error at snd_pcm_open: No such device"'
-        self.assertEqual(spotify.friendly_log(line), 'failed loading "x": ALSA error at snd_pcm_open: No such device')
-
-
-class RefusedTests(unittest.TestCase):
-    def test_refused(self):
-        self.assertTrue(spotify.refused("failed creating stream for x: failed retrieving audio key: failed retrieving aes key with code 1"))
-        self.assertFalse(spotify.refused("media is restricted"))
-        self.assertFalse(spotify.refused("ALSA error at snd_pcm_open: No such device"))
-
-    def test_stops_after_a_run(self):
-        import asyncio
-        calls = []
-
-        async def fake(method, path, body=None, timeout=5):
-            calls.append(path)
-
+class ControlTests(unittest.TestCase):
+    def test_commands_sent(self):
+        sent = []
         c = spotify.SpotifyConnect()
-        c.api = fake
+
+        async def fake_send(message):
+            sent.append(message)
+        c._send = fake_send
 
         async def go():
-            err = {"uri": "spotify:track:1", "message": "failed retrieving aes key with code 1"}
-            for _ in range(spotify.REFUSED_LIMIT - 1):
-                await c.on_playback_error(err)
-            self.assertNotIn("/player/stop", calls)
-            await c.on_playback_error(err)
-            self.assertIn("/player/stop", calls)
-            self.assertIn("refusing", c.error["message"])
+            c.state = {"status": "playing", "item": {"uri": "x"}}
+            await c.control("playpause")
+            self.assertEqual(sent[-1], {"type": "command", "command": "pause"})
+            c.state = {"status": "paused", "item": {"uri": "x"}}
+            await c.control("playpause")
+            self.assertEqual(sent[-1], {"type": "command", "command": "play"})
+            await c.control("next")
+            self.assertEqual(sent[-1], {"type": "command", "command": "skip_next"})
+            await c.set_volume(150)
+            self.assertEqual(sent[-1], {"type": "command", "command": "set_volume", "volume": 100})
+            await c.shuffle(True)
+            self.assertEqual(sent[-1], {"type": "command", "command": "set_shuffle", "enabled": True})
+            with self.assertRaises(ValueError):
+                await c.control("backflip")
+
+        asyncio.run(go())
+
+    def test_hold_releases_only_when_playing(self):
+        sent = []
+        c = spotify.SpotifyConnect()
+        c.ready = True
+
+        async def fake_send(message):
+            sent.append(message)
+        c._send = fake_send
+
+        async def go():
+            c.state = {"status": "paused", "item": {"uri": "x"}}
+            self.assertFalse(await c.hold())   # nothing playing: don't touch it
+            self.assertEqual(sent, [])
+            c.state = {"status": "playing", "item": {"uri": "x"}}
+            self.assertTrue(await c.hold())
+            self.assertEqual(sent[-1], {"type": "command", "command": "pause"})
+            await c.release()
+            self.assertEqual(sent[-1], {"type": "command", "command": "play"})
+
+        asyncio.run(go())
+
+    def test_auth_state_event(self):
+        c = spotify.SpotifyConnect()
+
+        async def go():
+            await c.on_event({"type": "auth_state", "logged_in": True, "is_active": False, "device_name": "Sage"})
+            self.assertTrue(c.logged_in)
 
         asyncio.run(go())
 
 
 if __name__ == "__main__":
     unittest.main()
-
-
-class OutputErrorTests(unittest.TestCase):
-    def test_spotify_errors_dont_blame_surround(self):
-        import spotify
-        self.assertFalse(spotify.output_error("failed creating stream for spotify:track:x: failed retrieving audio key: failed retrieving aes key with code 1"))
-        self.assertTrue(spotify.output_error("failed opening alsa device sage_surround:DEV=AA"))
