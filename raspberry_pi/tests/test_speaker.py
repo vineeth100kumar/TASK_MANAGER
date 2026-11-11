@@ -226,3 +226,49 @@ class LatencyTests(unittest.TestCase):
         self.assertIn("--pcm-period-time=50000", cmd)
         self.assertEqual(cmd[-1], "11:22:33:44:55:66")
         self.assertIn("--pcm-buffer-time=500000", speaker.passthrough_cmd("x", "y", "steady"))
+
+
+class ReconnectTests(unittest.TestCase):
+    """After Sage restarts while you're home, the soundbar is reconnected once,
+    so the phone sees the Pi as a speaker again."""
+
+    def run_ticks(self, phone_audio, ticks=2):
+        import asyncio
+
+        class Phone:
+            available, home, link = True, True, {"address": "11:22:33:44:55:66"}
+
+        sp = speaker.Speaker()
+        sp.phone = Phone()
+        calls = {"connect": 0, "profile": []}
+        state = {"connected": False}
+
+        async def refresh():
+            sp.links = {"soundbar": {"known": True, "paired": True, "connected": state["connected"], "audio": False, "name": "Bar"},
+                        "phoneAudio": phone_audio}
+            return sp.links
+
+        async def ensure_connected():
+            calls["connect"] += 1
+            return False  # soundbar off
+
+        async def profile(connect):
+            calls["profile"].append(connect)
+
+        async def noop(*a, **k):
+            return None
+
+        sp.refresh, sp.ensure_connected, sp._phone_profile = refresh, ensure_connected, profile
+        sp._publish = noop
+        speaker.save_settings({"address": "AA:BB:CC:DD:EE:FF", "passthrough": True})
+        for _ in range(ticks):
+            asyncio.run(sp.tick())
+        return calls
+
+    def test_once_after_start(self):
+        self.assertEqual(self.run_ticks(phone_audio=False, ticks=3)["connect"], 1)
+
+    def test_phone_playing_tries_before_dropping(self):
+        calls = self.run_ticks(phone_audio=True, ticks=1)
+        self.assertEqual(calls["connect"], 1)
+        self.assertEqual(calls["profile"], [False])  # still nowhere to play: dropped after trying
