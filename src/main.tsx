@@ -1,6 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import App from './App'
+import { CrashScreen } from './components/common/CrashScreen'
 // Imported from JS so Vite rewrites the font file URLs; an @import inside
 // index.css is inlined by Tailwind and its relative url()s break.
 import '@fontsource-variable/inter'
@@ -11,6 +12,8 @@ registerServiceWorker()
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
-    <App />
+    <CrashScreen>
+      <App />
+    </CrashScreen>
   </React.StrictMode>,
 )

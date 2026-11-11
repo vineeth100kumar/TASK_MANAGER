@@ -37,6 +37,7 @@ from pydantic import BaseModel
 import markets
 import radar
 import radar_research as rr
+import system_health
 
 DB_PATH = "sage_sync.db"
 MORNING_HOUR = 7
@@ -130,7 +131,7 @@ def edge_lines() -> List[str]:
         if value:
             lines.append(f"- {label}: {value}{' hours a week' if key == 'hours' and value.isdigit() else ''}")
     if not any(edge.get(k) for k in ("skills", "assets")):
-        names = [p.get("name") for p in _entities("projects") if p.get("name")]
+        names = [p.get("name") for p in _entities("projects") if p.get("name") and p.get("id") != "inbox"]
         if names:
             lines.append(f"- Works on: {', '.join(names[:6])}")
     if not edge.get("place") and settings["india"]:
@@ -467,6 +468,7 @@ def morning_due(now_local: datetime.datetime, runs: List[Any], now_utc: datetime
 async def run() -> None:
     await asyncio.sleep(60)  # let the first headlines arrive after a restart
     while True:
+        system_health.beat(600)
         try:
             if morning_due(_local_now(), _runs(_today()), radar._utcnow()) and not _making.locked():
                 async with _making:

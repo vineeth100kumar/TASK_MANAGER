@@ -9,6 +9,7 @@ import datetime
 import os
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from zoneinfo import ZoneInfo
@@ -55,6 +56,12 @@ class FakePhone:
         self.home = home
         self.media = {"title": "", "artist": "", "playing": False}
         self.commands = []
+        self.last_seen = 0.0
+        self.actions = []
+
+    async def perform_action(self, note_id, positive):
+        self.actions.append((note_id, positive))
+        return True
 
     async def send_command(self, command):
         self.commands.append(command)
@@ -88,6 +95,9 @@ class FakeActions:
 
     def move_to_tomorrow(self, item_id, source, day):
         return self._save("tomorrow", item_id, lambda i: i.update(dueDate=str(day + datetime.timedelta(days=1))))
+
+
+RING = {"cmd": "ALARM_RING", "label": "Wake up", "tone": "pulse", "volume": 80, "snooze": 5}
 
 
 def alarm(item_id="wake", h=7, m=0, day=7, remind=None):
@@ -236,7 +246,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.refresh()
         self.clock = at(7, 0, 0)
         await self.desk.ring()
-        self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_RING"})
+        self.assertEqual(self.link.sent[-1], RING)
         await self.desk.controller.on_button("RIGHT")
         self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_OFF"})
         self.assertEqual(self.items[1]["remindAt"], "2026-10-07T07:05")
@@ -245,7 +255,7 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.refresh()
         self.clock = at(7, 5, 0)
         await self.desk.ring()
-        self.assertEqual(self.link.sent[-1], {"cmd": "ALARM_RING"})
+        self.assertEqual(self.link.sent[-1], RING)
         await self.desk.controller.on_button("OK")
         self.assertIn({"cmd": "ALARM_OFF"}, self.link.sent[-3:])
         self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")
@@ -266,7 +276,8 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(took)
         await asyncio.sleep(0.05)
         self.assertNotIn("SCREEN", self.link.cmds())  # firmware 2 shows cards over any screen
-        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "Reminder", "title": "Gym", "body": "Due today at 7:30 AM"})
+        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "Reminder", "title": "Gym", "body": "Due today at 7:30 AM",
+                                                   "color": "#FF9F43", "kind": "sage"})
         self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Tomorrow", "ok": "Done", "right": "Snooze"})
         await self.desk.controller.on_button("OK")
         self.assertEqual(self.actions.calls, [("done", "gym")])
@@ -297,10 +308,53 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
         await self.desk.controller.show_screen("CLOCK")
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Call me"})
         self.assertEqual(self.link.last("SCREEN")["mode"], "CLOCK")
-        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "WhatsApp", "title": "Mum", "body": "Call me"})
+        self.assertEqual(self.link.last("NOTIF"), {"cmd": "NOTIF", "app": "WhatsApp", "title": "Mum", "body": "Call me",
+                                                   "color": "#FF9F43", "kind": "note"})
         await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
         await self.desk.show_notification({"app": "WhatsApp", "title": "Mum", "message": "Again"})
         self.assertEqual(self.link.last("NOTIF")["title"], "Gym")
+
+    async def test_phone_cards_clear_answer_and_go(self):
+        await self.desk.show_notification({"id": "5", "app": "WhatsApp", "title": "Mum", "message": "Call me",
+                                           "color": "#25D366", "actions": {"positive": False, "negative": True}})
+        self.assertEqual((self.link.last("NOTIF")["color"], self.link.last("NOTIF")["kind"]), ("#25D366", "note"))
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Clear", "ok": "Close"})
+        await self.desk.controller.on_button("LEFT")
+        self.assertEqual(self.phone.actions, [("5", False)])
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS"})
+        # A call: Decline and Answer, and it goes when the phone drops it.
+        await self.desk.show_notification({"id": "6", "app": "Phone", "title": "Amma", "category": "incoming call",
+                                           "message": "", "actions": {"positive": True, "negative": True}})
+        self.assertEqual((self.link.last("NOTIF")["kind"], self.link.last("NOTIF")["body"]), ("call", "Calling"))
+        self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS", "left": "Decline", "right": "Answer"})
+        # A newer message takes over the call's card; the old one's removal leaves it be.
+        await self.desk.show_notification({"id": "7", "app": "Messages", "title": "Ravi", "message": "Here"})
+        self.desk.on_event({"type": "PHONE_NOTIFICATION_REMOVED", "id": "6"})
+        await asyncio.sleep(0.05)
+        self.assertEqual(self.desk.controller.card.tag, "phone:7")
+        self.desk.on_event({"type": "PHONE_NOTIFICATION_REMOVED", "id": "7"})
+        await asyncio.sleep(0.05)
+        self.assertIsNone(self.desk.controller.card)
+
+    async def test_phone_cards_close_by_themselves(self):
+        from desk import desk as desk_module
+        was = desk_module.NOTE_CARD_SECONDS
+        desk_module.NOTE_CARD_SECONDS = 0.05
+        try:
+            await self.desk.show_notification({"id": "8", "app": "Mail", "title": "Bank", "message": "Statement"})
+            self.assertIsNotNone(self.desk.controller.card)
+            await asyncio.sleep(0.15)
+            self.assertIsNone(self.desk.controller.card)
+            self.assertEqual(self.link.last("ACTIONS"), {"cmd": "ACTIONS"})
+        finally:
+            desk_module.NOTE_CARD_SECONDS = was
+
+    async def test_playing_with_no_title_names_the_app(self):
+        await self.desk.show_media({"title": "", "artist": "", "app": "YouTube Music", "playing": True})
+        self.assertEqual((self.link.last("SPOTIFY")["title"], self.link.last("SPOTIFY")["artist"]), ("YouTube Music", "Playing"))
+        self.assertEqual(self.covers, [])  # not a song to look up
+        await self.desk.show_media({"title": "", "artist": "", "app": "YouTube Music", "playing": False})
+        self.assertEqual(self.link.last("SPOTIFY")["title"], "")
 
     async def test_music_shows_with_cover_and_buttons_control_it(self):
         media = {"title": "Clocks", "artist": "Coldplay", "playing": True}
@@ -382,18 +436,193 @@ class DeskTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_alarms_for_the_next_day_go_to_the_clock_when_they_change(self):
         await self.desk.refresh()
-        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0}], "snooze": 5})
+        # w: the day it rings next (Wednesday); d: the days it repeats on (every day), so a
+        # clock cut off for days keeps ringing it on the right ones.
+        self.assertEqual(self.link.last("ALARMS"), {"cmd": "ALARMS", "list": [{"h": 7, "m": 0, "w": 2, "d": 127}], "snooze": 5})
         await self.desk.refresh()
         self.assertEqual(self.link.cmds().count("ALARMS"), 1)  # unchanged: not sent again
         self.clock = at(7, 0)
         await self.desk.ring()
         await self.desk.controller.on_button("RIGHT")  # snooze to 7:05
         await self.desk.refresh()
-        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5}])
+        # The snooze rings once; the alarm itself is still there for tomorrow on.
+        self.assertEqual(self.link.last("ALARMS")["list"], [{"h": 7, "m": 5, "w": 2, "d": 0}, {"h": 7, "m": 0, "w": 3, "d": 127}])
+
+    async def test_alarm_deleted_or_switched_off_while_ringing_goes_quiet_and_stays_off(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.assertIsNotNone(self.desk.alarms.ringing)
+        self.items[1]["remindAt"] = None  # switched off in Sage
+        await self.desk.refresh()
+        self.assertIsNone(self.desk.alarms.ringing)
+        self.assertIn({"cmd": "ALARM_OFF"}, self.link.sent)
+        self.clock = at(7, 20)
+        await self.desk.ring()
+        self.assertIsNone(self.items[1]["remindAt"])  # not set again when its ring would have run out
+        self.assertEqual(self.actions.calls, [])
+
+    async def test_new_label_while_ringing_keeps_it_ringing(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.items[1]["title"] = "Up!"
+        await self.desk.refresh()
+        self.assertEqual(self.desk.alarms.ringing.title, "Up!")
+        self.assertNotIn("ALARM_OFF", self.link.cmds())
+
+    async def test_snooze_on_a_cut_off_clock_carries_over_after_the_pi_set_it_for_tomorrow(self):
+        # The Pi was down from before 7:00 to 7:08; the clock rang at 7:00 and was snoozed at 7:06.
+        self.clock = at(7, 8)
+        await self.desk.refresh()
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")  # missed, so set for tomorrow
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 120}])
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-07T07:11")
+        self.assertEqual(self.items[1]["startAt"], "2026-10-08T07:00")
+        # A snooze that ran out while the Pi was away changes nothing.
+        self.items[1]["remindAt"] = "2026-10-08T07:00"
+        await self.desk.refresh()
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 900}])
+        self.assertEqual(self.items[1]["remindAt"], "2026-10-08T07:00")
+
+    async def test_clock_gets_the_weekday_and_utc_offset(self):
+        await self.desk.controller.send_clock()
+        clock = self.link.last("CLOCK")
+        self.assertEqual((clock["wd"], clock["utc_off"]), (2, 330))
+
+    async def test_alarm_stopped_on_a_cut_off_clock_is_not_rung_again(self):
+        await self.desk.refresh()
+        self.clock = at(7, 0, 5)
+        await self.desk.ring()
+        self.assertIsNotNone(self.desk.alarms.ringing)
+        # The clock lost the Pi, rang it itself and was stopped; it says so on its way back.
+        await self.desk.offline_reports([{"a": "stop", "h": 7, "m": 0, "ago": 20}])
+        self.assertIsNone(self.desk.alarms.ringing)
+        self.assertEqual(self.link.last("ALARM_OFF"), {"cmd": "ALARM_OFF"})
+        self.assertTrue(self.items[1]["remindAt"].startswith("2026-10-08T07:00"))
+
+    async def test_snooze_on_a_cut_off_clock_carries_over_when_the_pi_missed_the_alarm(self):
+        await self.desk.refresh()
+        self.clock = at(7, 3)
+        # The Pi was down at 7:00; the clock rang and was snoozed at 7:01.
+        await self.desk.offline_reports([{"a": "snooze", "h": 7, "m": 0, "ago": 120}])
+        self.assertTrue(self.items[1]["remindAt"].startswith("2026-10-07T07:06"))
+        await self.desk.ring()
+        self.assertIsNone(self.desk.alarms.ringing)  # not rung a second time by the Pi
+
+    async def test_reports_about_unknown_alarms_change_nothing(self):
+        await self.desk.refresh()
+        self.clock = at(9, 0)
+        await self.desk.offline_reports([{"a": "stop", "h": 3, "m": 15, "ago": 10}, {"a": "dance"}, {"a": "timer_stop"}])
+        self.assertEqual(self.actions.calls, [])
+
+    async def test_finished_timer_stopped_on_a_cut_off_clock(self):
+        self.desk.timer.state = "done"
+        await self.desk.offline_reports([{"a": "timer_stop"}])
+        self.assertEqual(self.desk.timer.state, "idle")
 
     async def test_system_screen_gets_vitals(self):
         await self.desk.controller.show_screen("SYSTEM")
         self.assertEqual(self.link.sent[-1]["cmd"], "SYSTEM_STATS")
+
+    async def test_welcome_back_after_a_while_out(self):
+        await self.desk.refresh()
+        self.phone.last_seen = time.time() - 40 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        card = self.link.last("NOTIF")
+        self.assertEqual(card["title"], "Welcome back to your room")
+        self.assertEqual(card["body"], "Up next: 07:30 Gym, next alarm 07:00")
+
+    async def test_no_welcome_after_a_short_trip_when_off_or_after_a_restart(self):
+        self.phone.last_seen = time.time() - 6 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        await self.desk.phone_presence(True)   # Sage started with the phone already home
+        self.desk.settings["welcome"]["enabled"] = False
+        self.phone.last_seen = time.time() - 60 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        self.assertNotIn("NOTIF", self.link.cmds())
+
+    async def test_away_gallery_starts_when_out_and_stops_at_home(self):
+        self.desk.settings["gallery"]["sources"] = ["quotes"]
+        await self.desk.phone_presence(False)
+        self.assertTrue(self.desk.gallery.active)
+        self.assertIn("MEMORY_META", self.link.cmds())
+        await self.desk.phone_presence(True)
+        self.assertFalse(self.desk.gallery.active)
+        self.assertEqual(self.link.last("SCREEN")["mode"], self.desk.settings["homeScreen"])
+
+    async def test_photo_frame_mode_shows_the_gallery_while_home(self):
+        new = dict(self.desk.settings)
+        new["gallery"] = {**new["gallery"], "mode": "always", "sources": ["quotes"]}
+        await self.desk.apply_settings(new)
+        self.assertTrue(self.desk.gallery.active)
+        self.assertEqual(self.desk.state()["gallery"]["mode"], "always")
+        await self.desk.phone_presence(True)       # being home doesn't stop it
+        self.assertTrue(self.desk.gallery.active)
+        # Back to Auto: home, so the clock comes back.
+        await self.desk.apply_settings({**new, "gallery": {**new["gallery"], "mode": "away"}})
+        self.assertFalse(self.desk.gallery.active)
+
+    async def test_a_press_in_photo_frame_mode_peeks_at_the_clock(self):
+        new = dict(self.desk.settings)
+        new["gallery"] = {**new["gallery"], "mode": "always", "sources": ["quotes"]}
+        await self.desk.apply_settings(new)
+        self.link.sent.clear()
+        await self.desk.controller.on_button("OK")
+        self.assertEqual(self.link.last("SCREEN")["mode"], self.desk.controller.screen)
+        self.assertTrue(self.desk.state()["gallery"]["peeking"])
+        await self.desk.gallery_tick()             # held while peeking
+        self.assertNotIn("MEMORY_META", self.link.cmds())
+        self.desk.gallery_peek_until = 0
+        await self.desk.gallery_tick()
+        self.assertIn("MEMORY_META", self.link.cmds())
+
+    async def test_gallery_interleaves_images_and_quotes(self):
+        g = self.desk.gallery
+        g.sources = ["quotes", "photos"]
+        g.photos_dir = "/tmp/test_gallery_photos"
+        import os, tempfile
+        os.makedirs(g.photos_dir, exist_ok=True)
+        for i in range(3):
+            with open(os.path.join(g.photos_dir, f"img{i}.jpg"), "wb") as f:
+                f.write(b"\xff")
+        slides = g._build_slides()
+        # With 3 photos and quotes: pattern should be photo, quote, photo, quote, photo, quote
+        self.assertEqual(len(slides), 6)
+        for i, s in enumerate(slides):
+            if i % 2 == 0:
+                self.assertEqual(s["type"], "photo", f"slide {i} should be a photo")
+            else:
+                self.assertEqual(s["type"], "quote", f"slide {i} should be a quote")
+        import shutil
+        shutil.rmtree(g.photos_dir, ignore_errors=True)
+
+    async def test_gallery_only_quotes_when_no_images(self):
+        g = self.desk.gallery
+        g.sources = ["quotes"]
+        slides = g._build_slides()
+        self.assertTrue(all(s["type"] == "quote" for s in slides))
+        self.assertGreater(len(slides), 0)
+
+    async def test_no_firmware_update_near_an_alarm_or_while_busy(self):
+        await self.desk.refresh()
+        self.assertEqual(self.desk.update_blocker(), "")            # 6:00, alarm at 7:00
+        self.clock = at(6, 55)
+        self.assertEqual(self.desk.update_blocker(), "an alarm is due soon")
+        self.clock = at(8, 0)
+        await self.desk.timer_do("start", 60)
+        self.assertEqual(self.desk.update_blocker(), "a timer is running")
+        self.assertIn("updates", self.desk.state())
+
+    async def test_welcome_waits_for_a_reminder_card(self):
+        await self.desk.show_reminder(self.items[0], {"title": "Gym", "body": ""})
+        self.phone.last_seen = time.time() - 60 * 60
+        await self.desk.phone_presence(False)
+        await self.desk.phone_presence(True)
+        self.assertEqual(self.link.last("NOTIF")["title"], "Gym")
 
 
 if __name__ == "__main__":

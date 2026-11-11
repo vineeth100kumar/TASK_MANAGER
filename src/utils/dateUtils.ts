@@ -84,7 +84,8 @@ export function parseLocalDate(value: string): Date {
   return m && (value.length === 10) ? new Date(+m[1], +m[2] - 1, +m[3]) : new Date(value);
 }
 
-export function formatDateRange(start: string | null | undefined, due: string | null | undefined): string | null {
+/** done: a finished item is never overdue, so it shows its plain date. */
+export function formatDateRange(start: string | null | undefined, due: string | null | undefined, done = false): string | null {
   const today = getTodayString();
   const cleanStart = toInputDateValue(start);
   const cleanDue = toInputDateValue(due);
@@ -96,6 +97,7 @@ export function formatDateRange(start: string | null | undefined, due: string | 
   }
 
   if (!cleanStart && cleanDue) {
+    if (done) return formatDisplayDate(cleanDue);
     if (cleanDue < today) return `Overdue · ${formatDisplayDate(cleanDue)}`;
     if (cleanDue === today) return 'Due today';
     return `Due ${formatDisplayDate(cleanDue)}`;

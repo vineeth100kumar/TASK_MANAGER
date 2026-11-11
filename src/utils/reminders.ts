@@ -28,6 +28,13 @@ export function remindAtFor(item: Pick<WorkItem, 'entityType' | 'startAt' | 'due
   return toLocalDateTime(new Date(new Date(anchor).getTime() - item.reminderLeadMinutes * 60000));
 }
 
+/** A moment's local time the way Sage writes times: "9:30 am". */
+export function formatClock(d: Date | string | number): string {
+  const date = d instanceof Date ? d : new Date(d);
+  if (Number.isNaN(date.getTime())) return '';
+  return formatTime(`${date.getHours()}:${String(date.getMinutes()).padStart(2, '0')}`);
+}
+
 /** "6:00 pm" from "18:00". */
 export function formatTime(hhmm: string | null | undefined): string {
   if (!hhmm) return '';

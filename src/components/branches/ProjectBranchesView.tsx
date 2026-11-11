@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactElement } from 'react';
-import { GitBranch, GitMerge, Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, X } from 'lucide-react';
+import { GitBranch, GitMerge, Plus, MoreHorizontal, Pencil, Trash2, RotateCcw, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, ProjectBranch, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -7,6 +7,8 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { getTodayString } from '../../utils/dateUtils';
 import { formatShortDate } from '../../utils/quickAddParser';
 import { buildFlow, FlowRow } from './branchFlow';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
 
 const BRANCH_COLORS = ['#8b5cf6', '#f97316', '#10b981', '#ec4899', '#0ea5e9', '#eab308', '#ef4444', '#14b8a6'];
 const MAIN_COLOR = '#64748b';
@@ -21,6 +23,7 @@ interface Props {
   activeWorkspace: string;
   onSelectTask: (id: string) => void;
   onRefreshData?: () => void;
+  onTransition?: (item: WorkItem, toStatus: string) => void;
 }
 
 /**
@@ -28,7 +31,7 @@ interface Props {
  * lanes, oldest at the top, with each item placed on the day it happened (or
  * is planned) and a line marking today.
  */
-export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSelectTask, onRefreshData }: Props) {
+export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSelectTask, onRefreshData, onTransition }: Props) {
   const { showToast } = useToast();
   const [projects, setProjects] = useState<Project[]>([]);
   const [pickedId, setPickedId] = useState<string | null>(null);
@@ -156,7 +159,7 @@ export function ProjectBranchesView({ items, lifeContext, activeWorkspace, onSel
                 <RowGraph row={row} r={r} flow={flow} todayRow={todayRow} lineColor={lineColor} />
               </svg>
               <div className="flex-1 min-w-0 flex items-center pr-3 md:pr-5 border-b border-black/[0.04] dark:border-white/[0.04]">
-                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} />
+                <RowContent row={row} lineName={lineName} branches={branches} onSelectTask={onSelectTask} onMove={moveItem} onTransition={onTransition} />
               </div>
             </li>
           ))}
@@ -220,12 +223,13 @@ function RowGraph({ row, r, flow, todayRow, lineColor }: {
   return <>{parts}</>;
 }
 
-function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
+function RowContent({ row, lineName, branches, onSelectTask, onMove, onTransition }: {
   row: FlowRow;
   lineName: (id?: string | null) => string;
   branches: ProjectBranch[];
   onSelectTask: (id: string) => void;
   onMove: (item: WorkItem, branchId: string) => void;
+  onTransition?: (item: WorkItem, toStatus: string) => void;
 }) {
   if (row.kind === 'today') {
     return (
@@ -251,25 +255,35 @@ function RowContent({ row, lineName, branches, onSelectTask, onMove }: {
   }
   const { item } = row;
   const done = item.status === 'done';
-  const when = done ? `Done ${formatShortDate(row.date)}`
+  const milestone = item.entityType === 'milestone';
+  const when = milestone ? `Reached ${formatShortDate(row.date)}`
+    : done ? `Done ${formatShortDate(row.date)}`
     : (item.startDate || item.dueDate || item.startAt) ? `${row.date < getTodayString() ? 'Was due' : 'Due'} ${formatShortDate(row.date)}`
     : `Added ${formatShortDate(row.date)}`;
   return (
     <div className="group flex items-center gap-3 w-full min-w-0">
+      {onTransition && item.entityType === 'task' && (
+        <button type="button" onClick={() => onTransition(item, done ? 'todo' : 'done')}
+          aria-pressed={done} aria-label={done ? `Reopen ${item.title}` : `Mark ${item.title} done`}
+          title={done ? 'Reopen' : 'Mark done'}
+          className={`shrink-0 w-5 h-5 rounded-full border-2 flex items-center justify-center transition-colors ${done ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 text-transparent hover:border-emerald-500 hover:text-emerald-500'}`}>
+          <Check size={11} strokeWidth={3} />
+        </button>
+      )}
       <button onClick={() => onSelectTask(item.id)} className="min-w-0 flex-1 text-left">
-        <div className={`text-[14px] font-medium truncate ${done ? 'text-gray-400 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-900 dark:text-white'}`}>{item.title}</div>
+        <div className={`text-[14px] font-medium truncate ${done && !milestone ? 'text-gray-400 line-through decoration-gray-300 dark:decoration-gray-600' : 'text-gray-900 dark:text-white'}`}>{item.title}</div>
         <div className="text-[11.5px] text-gray-400 truncate">
           {when}{item.status === 'blocked' && <span className="text-red-500 font-semibold"> · Blocked</span>}
           {item.status === 'in_progress' && <span className="text-blue-500 font-semibold"> · In progress</span>}
         </div>
       </button>
       {branches.length > 0 && (
-        <select value={item.branchId && branches.some(b => b.id === item.branchId) ? item.branchId : ''} onChange={e => onMove(item, e.target.value)}
+        <Select value={item.branchId && branches.some(b => b.id === item.branchId) ? item.branchId : ''} onChange={v => onMove(item, v)}
           aria-label={`Branch for ${item.title}`}
           className="shrink-0 max-w-[8.5rem] text-[12px] font-semibold rounded-lg px-1.5 py-1 bg-transparent text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10 outline-none cursor-pointer md:opacity-0 md:group-hover:opacity-100 focus:opacity-100 transition-opacity dark:[color-scheme:dark]">
           <option value="">Main</option>
           {branches.map(b => <option key={b.id} value={b.id}>{b.name}{b.mergedAt ? ' (merged)' : ''}</option>)}
-        </select>
+        </Select>
       )}
     </div>
   );
@@ -315,14 +329,14 @@ function NewBranchForm({ project, today, onCancel, onCreate }: {
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Branch from</span>
-        <select value={parentId} onChange={e => setParentId(e.target.value)} className={field}>
+        <Select value={parentId} onChange={v => setParentId(v)} className={field}>
           <option value="">Main</option>
           {branches.filter(b => !b.mergedAt).map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-        </select>
+        </Select>
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Starts</span>
-        <input type="date" value={startDate} onChange={e => setStartDate(e.target.value || today)} className={field} />
+        <DatePicker clearable={false} value={startDate} onChange={v => setStartDate(v || today)} className={field} />
       </label>
       <div className="flex flex-col gap-1">
         <span className="text-[11.5px] font-semibold text-gray-500">Colour</span>
@@ -334,7 +348,7 @@ function NewBranchForm({ project, today, onCancel, onCreate }: {
         </div>
       </div>
       <div className="flex gap-2">
-        <button type="button" onClick={onCancel} className="h-9 px-3 rounded-xl text-[13.5px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10"><X size={16} /></button>
+        <button type="button" onClick={onCancel} aria-label="Cancel" className="h-9 px-3 rounded-xl text-[13.5px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10"><X size={16} /></button>
         <button type="submit" className="h-9 px-4 rounded-xl bg-gray-900 dark:bg-white text-white dark:text-black text-[13.5px] font-semibold">Create</button>
       </div>
     </form>
@@ -357,11 +371,11 @@ function AddItemBar({ project, branches, today, lifeContext, onAdded }: {
       onAdded(branches.find(b => b.id === branchId)?.name || 'Main');
     }}>
       <input value={title} onChange={e => setTitle(e.target.value)} placeholder={`Add a step to ${project.name}...`} className={`${field} flex-1 min-w-[12rem]`} />
-      <select value={branchId} onChange={e => setBranchId(e.target.value)} aria-label="Branch" className={field}>
+      <Select value={branchId} onChange={v => setBranchId(v)} aria-label="Branch" className={field}>
         <option value="">Main</option>
         {branches.map(b => <option key={b.id} value={b.id}>{b.name}</option>)}
-      </select>
-      <input type="date" value={date} onChange={e => setDate(e.target.value)} aria-label="Date" className={field} />
+      </Select>
+      <DatePicker value={date} onChange={v => setDate(v)} aria-label="Date" className={field} />
       <button type="submit" className="h-9 px-3.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-[13.5px] font-semibold flex items-center gap-1"><Plus size={15} /> Add</button>
     </form>
   );

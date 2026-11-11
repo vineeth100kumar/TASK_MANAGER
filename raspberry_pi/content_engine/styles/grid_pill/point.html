@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 110px;
+      top: var(--content-top, 260px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .point-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 88px;
+      line-height: 0.92;
+      letter-spacing: -0.01em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      margin-bottom: 36px;
+    }
+
+    .accent-bar {
+      width: 80px;
+      height: 6px;
+      background-color: #EE4425;
+      border-radius: 3px;
+      margin-bottom: 48px;
+    }
+
+    .point-body {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 56px;
+      line-height: 1.38;
+      letter-spacing: -0.01em;
+      color: #111111;
+      text-align: left;
+    }
+
+    .point-bullets {
+      display: flex;
+      flex-direction: column;
+      gap: 0.6em;
+    }
+
+    .bullet-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 0.55em;
+    }
+
+    .bullet-mark {
+      width: 0.42em;
+      height: 0.42em;
+      border-radius: 50%;
+      background-color: #EE4425;
+      margin-top: 0.5em;
+      flex-shrink: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="content-container">
+    <h2 class="point-headline">{{ headline }}</h2>
+    <div class="accent-bar"></div>
+    {% if bullets %}
+    <div class="point-body point-bullets">
+      {% if body %}<div>{{ body }}</div>{% endif %}
+      {% for b in bullets %}<div class="bullet-row"><span class="bullet-mark"></span><span>{{ b }}</span></div>{% endfor %}
+    </div>
+    {% else %}
+    <p class="point-body">{{ body }}</p>
+    {% endif %}
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="slide-counter">{{ counter }}</div>
+  </div>
+</body>
+</html>

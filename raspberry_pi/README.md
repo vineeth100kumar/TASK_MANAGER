@@ -30,6 +30,9 @@ data up to Google Apps Script. Install and run it with `deploy/install_pi.sh`
 | `ANTHROPIC_API_KEY` | empty | Without a Groq key, lets the Canvas panel use Claude, which reads both the board's text and a picture of it. With neither, the panel uses the local Ollama model, which is slow. |
 | `SAGE_CANVAS_MODEL` | `claude-opus-5-5` | Claude model for the Canvas panel. |
 | `SAGE_PUBLIC_URL` | found automatically | The public link Settings shows. Normally found on its own (named tunnel, quick tunnel or Tailscale Funnel); set it only to override. |
+| `SAGE_DROP_BASE_URL` | the public link above | The address Drop's share links start with, if it should differ from the public link. |
+| `SAGE_DROP_DIR` | `drops/` next to the database | Where Drop keeps the shared files. |
+| `SAGE_DROP_MAX_MB` | `50` | The biggest drop (a .zip counts by what it unpacks to). |
 
 ### Backups
 
@@ -100,6 +103,21 @@ journalctl -u sage | grep "Wrong Sage password"
 
 To take Sage off the internet: `sudo systemctl disable --now sage-tunnel`.
 
+### Drop: temporary share links
+
+The Drop page (sidebar > More > Drop, or the link button on an HTML report in
+Notes) takes an .html file, a folder or a .zip and serves it at
+`/d/<random slug>/` for 1 hour to 30 days. Those links are the only thing that
+skips the password; the upload, list and delete routes (`/api/drops`) still
+need it. Expired drops are deleted every few minutes. Pages are served with a
+CSP sandbox and no `allow-same-origin`, so a page's scripts can't read Sage's
+cookies or call `/api`; nothing in a drop ever runs on the Pi.
+
+Links start with the public link above, so they work from anywhere once a
+tunnel is up. With no tunnel they use the address the app was opened at and
+only work at home. A quick tunnel's address changes when `cloudflared`
+restarts, which breaks links already handed out; a named tunnel keeps them.
+
 ### Let Claude in
 
 `sudo deploy/claude_access.sh` gives Claude its own token, which reaches your
@@ -136,7 +154,6 @@ Tests: `cd raspberry_pi && python -m unittest discover -s tests`.
 Two endpoints use a local model through [Ollama](https://ollama.com):
 
 - `POST /api/parse-task` turns text like "call mum at 6" into tasks (LUMO's voice assistant uses it).
-- `POST /api/daily-briefing` writes the Dashboard's morning briefing.
 
 Everything else works without them. The installer does not set up Ollama; to
 enable these endpoints, install it and pull the model once:

@@ -1,0 +1,139 @@
+# Builds LUMO's firmware (lumo/esp32_client) for updates over Wi-Fi.
+#
+# Pull requests: the firmware must compile and fit the spare app partition.
+# Merged on a branch a Pi runs: the build is published as a release whose
+# notes are a JSON manifest. Sage on the Pi finds it (raspberry_pi/desk/ota.py),
+# downloads it, and sends it to the clock when it isn't busy.
+#
+# The build has no secrets.h: LUMO keeps its Wi-Fi details and pairing code in
+# flash from its last USB flash (store.cpp, storeNetLoad).
+name: LUMO firmware
+
+on:
+  pull_request:
+    paths: ['lumo/esp32_client/**', '.github/workflows/lumo-firmware.yml']
+  push:
+    branches: [main, claude/project-thread-clc1ti]
+    paths: ['lumo/esp32_client/**', '.github/workflows/lumo-firmware.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: lumo-firmware-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Built exactly like a USB flash from the laptop's Arduino IDE (board
+  # "MakerGO ESP32 C3 SuperMini", ESP32 core 3.3.5, the library versions
+  # below). FW 2.14.0 was built for the generic ESP32C3 Dev Module on core
+  # 3.0.7 instead: it ran and joined Sage, but LUMO's screen stayed blank
+  # white. Change these only together with the laptop.
+  # The flash layout comes from lumo/esp32_client/partitions.csv (two 1.9 MB
+  # app slots, so one can be written while the other runs), as on the laptop.
+  FQBN: esp32:esp32:makergo_c3_supermini
+  ESP32_CORE: '3.3.5'
+  ESP32_INDEX: https://espressif.github.io/arduino-esp32/package_esp32_index.json
+  LIBRARIES: '"Adafruit GFX Library@1.12.1" "Adafruit ILI9341@1.6.2" "Adafruit BusIO@1.17.2" "Adafruit NeoPixel@1.15.1" "ArduinoJson@7.4.3"'
+  APP_SLOT_BYTES: 1966080
+  # Compiled for speed rather than size (2.18): the drawing loops run faster
+  # and the image grows ~10%, well inside the slot. To build the same way on
+  # the laptop, put "compiler.optimization_flags=-O2" in a platform.local.txt
+  # next to the ESP32 core's platform.txt.
+  OPTIMIZE: -O2
+
+jobs:
+  build:
+    # Pinned so a new runner image can't change the build under us.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: arduino/setup-arduino-cli@v2
+        with:
+          # Pinned: on 2026-10-19 the newest 1.x couldn't load arduino.cc's package index.
+          version: 1.3.1
+
+      - name: Install the ESP32 core and libraries
+        run: |
+          # The index download sometimes fails on its own: try it a few times.
+          # On 2026-10-19 arduino.cc's package_index.tar.bz2 stopped unpacking,
+          # so after that fetch the plain JSON files by hand.
+          ok=
+          for i in 1 2 3; do
+            arduino-cli core update-index --additional-urls "$ESP32_INDEX" && { ok=1; break; }
+            sleep 10
+          done
+          if [ -z "$ok" ]; then
+            echo "::warning::arduino-cli couldn't update its index; fetching it directly"
+            mkdir -p ~/.arduino15
+            curl -fsSL --retry 3 https://downloads.arduino.cc/packages/package_index.json -o ~/.arduino15/package_index.json
+            curl -fsSL --retry 3 "$ESP32_INDEX" -o ~/.arduino15/package_esp32_index.json
+          fi
+          arduino-cli core install "esp32:esp32@$ESP32_CORE" --additional-urls "$ESP32_INDEX"
+          # --no-deps: otherwise the ILI9341 pulls in the newest GFX over the pinned one.
+          eval arduino-cli lib install --no-deps $LIBRARIES
+          arduino-cli lib list
+
+      - name: Build
+        run: |
+          test ! -e lumo/esp32_client/secrets.h
+          arduino-cli compile --fqbn "$FQBN" --additional-urls "$ESP32_INDEX" --output-dir build --warnings default \
+            --build-property "upload.maximum_size=$APP_SLOT_BYTES" \
+            --build-property "compiler.optimization_flags=$OPTIMIZE" \
+            --build-property "compiler.optimization_flags.release=$OPTIMIZE" lumo/esp32_client
+          ls -l build
+
+      - name: Check it fits and describe it
+        id: describe
+        env:
+          # What Sage shows for this build: the merged PR's title (a merge
+          # commit's message is "Merge pull request #N from ...", a blank line,
+          # then the title), or the commit's first line.
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message || github.event.pull_request.title }}
+        run: |
+          version=$(sed -n 's/^#define FW_VERSION "\(.*\)"/\1/p' lumo/esp32_client/config.h)
+          [ -n "$version" ] || { echo "::error::FW_VERSION not found in config.h"; exit 1; }
+          bin=build/esp32_client.ino.bin
+          size=$(stat -c %s "$bin")
+          echo "LUMO firmware $version: $size of $APP_SLOT_BYTES bytes"
+          [ "$size" -le "$APP_SLOT_BYTES" ] || { echo "::error::The firmware ($size bytes) is too big to update over Wi-Fi"; exit 1; }
+          if [ "${{ github.event_name }}" = "pull_request" ]; then branch="${{ github.base_ref }}"; else branch="${GITHUB_REF_NAME}"; fi
+          asset="lumo-$version.bin"
+          cp "$bin" "$asset"
+          first=$(printf '%s\n' "$COMMIT_MESSAGE" | head -n1)
+          pr=$(printf '%s' "$first" | sed -n 's/^Merge pull request #\([0-9]*\).*/\1/p')
+          if [ -n "$pr" ]; then
+            title=$(printf '%s\n' "$COMMIT_MESSAGE" | sed -n '3p')
+          else
+            title=$first
+            pr=$(printf '%s' "${{ github.event.pull_request.number }}")
+          fi
+          title=$(printf '%s' "$title" | cut -c1-120)
+          jq -n --arg version "$version" --arg branch "$branch" --arg sha "$GITHUB_SHA" \
+                --arg md5 "$(md5sum "$asset" | cut -d' ' -f1)" --argjson size "$size" --arg asset "$asset" \
+                --arg title "$title" --arg pr "$pr" \
+                '{version: $version, branch: $branch, sha: $sha, md5: $md5, size: $size, asset: $asset, title: $title}
+                 + (if $pr == "" then {} else {pr: ($pr | tonumber)} end)' > manifest.json
+          cat manifest.json
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "asset=$asset" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lumo-${{ steps.describe.outputs.version }}
+          path: |
+            ${{ steps.describe.outputs.asset }}
+            manifest.json
+
+      - name: Publish for Sage
+        if: github.event_name != 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="lumo-fw-${{ steps.describe.outputs.version }}-${GITHUB_SHA::7}"
+          gh release create "$tag" "${{ steps.describe.outputs.asset }}" \
+            --target "$GITHUB_SHA" --prerelease \
+            --title "LUMO firmware ${{ steps.describe.outputs.version }} (${GITHUB_REF_NAME})" \
+            --notes-file manifest.json

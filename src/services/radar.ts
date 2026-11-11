@@ -332,3 +332,123 @@ export function signedPct(n: number | null, digits = 2): string {
   if (n === null || n === undefined) return '–';
   return `${n > 0 ? '+' : n < 0 ? '−' : ''}${Math.abs(n).toFixed(digits)}%`;
 }
+
+// --- Industry search (raspberry_pi/industry.py) ---
+
+export interface IndustryCompany {
+  qid: string;
+  name: string;
+  country: string;
+  ticker: string;
+  exchange: string;
+  employees: number | null;
+  founded: number | null;
+  website: string;
+  // From SEC EDGAR 10-K filings, US-listed companies only.
+  revenueUsd?: number;
+  revenueYear?: number;
+  revenueGrowthPct?: number | null;
+  secUrl?: string;
+}
+
+export interface IndustryNews {
+  title: string;
+  url: string;
+  source: string;
+  published: string;
+  kind: 'radar' | 'web';
+}
+
+export interface IndustryBoardLine {
+  region: string;
+  name: string;
+  sector: string;
+  symbol: string;
+  changes: Record<'1D' | '1M' | 'YTD', number | null>;
+  closes: number[];
+}
+
+// One number as a research firm published it, with where it was said.
+export interface IndustryFigure {
+  kind: 'size' | 'forecast' | 'cagr';
+  usdB?: number;
+  year?: number | null;
+  pct?: number;
+  text: string;
+  sentence: string;
+  url: string;
+  site: string;
+}
+
+export interface IndustryMarket {
+  sizeUsdB: number | null;
+  sizeYear: number | null;
+  sizeSites: number;
+  low: number | null;
+  high: number | null;
+  forecastUsdB: number | null;
+  forecastYear: number | null;
+  forecastSites: number;
+  cagrPct: number | null;
+  cagrSites: number;
+}
+
+export interface IndustryAI {
+  trends: { title: string; text: string; news: number | null }[];
+  risks: { title: string; text: string; severity: 'High' | 'Medium' | 'Low' }[];
+  openings: { idea: string; buyer: string; why: string }[];
+  india: string;
+  fit: { score: number; why: string; firstStep: string } | null;
+}
+
+export interface IndustryBrief {
+  id: string;
+  version?: number;
+  query: string;
+  status: 'queued' | 'running' | 'done' | 'partial' | 'failed';
+  step: number;
+  steps: ResearchStep[];
+  error: string;
+  createdAt: string;
+  finishedAt: string | null;
+  name: string;
+  oneLiner: string;
+  wiki: { title: string; url: string; description: string; extract: string; thumbnail: string; qid: string } | null;
+  companies: IndustryCompany[];
+  research: { years: { year: number; count: number }[]; lastYear: number; growth5yPct: number | null; url: string } | null;
+  figures: IndustryFigure[];
+  market: IndustryMarket | null;
+  news: IndustryNews[];
+  board: IndustryBoardLine | null;
+  sources: { name: string; title: string; url: string; site: string }[];
+  ai: IndustryAI | null;
+  aiStatus: '' | 'running' | 'done' | 'failed';
+  aiError: string;
+  engine: string | null;
+  noteId: string | null;
+}
+
+export interface IndustryRecent {
+  id: string;
+  query: string;
+  name: string;
+  status: IndustryBrief['status'];
+  createdAt: string;
+  oneLiner: string;
+}
+
+export const industryApi = {
+  search: async (query: string, fresh = false): Promise<IndustryBrief> =>
+    (await post<{ brief: IndustryBrief }>('/api/radar/industry', { query, fresh })).brief,
+  get: (id: string) => call<{ brief: IndustryBrief; aiLeft: number }>(`/api/radar/industry/${id}`),
+  recent: () => call<{ recent: IndustryRecent[]; madeToday: number; dailyCap: number }>('/api/radar/industry'),
+  saveNote: async (id: string): Promise<IndustryBrief> => (await post<{ brief: IndustryBrief }>(`/api/radar/industry/${id}/note`)).brief,
+  askAI: async (id: string): Promise<IndustryBrief> => (await post<{ brief: IndustryBrief }>(`/api/radar/industry/${id}/ai`)).brief,
+};
+
+export function billions(n: number | null | undefined): string {
+  if (n === null || n === undefined) return '?';
+  if (n >= 1000) return `$${(n / 1000).toFixed(n >= 10000 ? 0 : 1)}T`;
+  if (n < 1) return `$${Math.round(n * 1000)}M`;
+  return `$${n.toFixed(n >= 100 ? 0 : 1)}B`;
+}

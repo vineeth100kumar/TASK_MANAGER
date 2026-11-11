@@ -11,7 +11,7 @@ const getAiUrl = (endpoint: string) => {
 
 export type ThinkMode = 'review' | 'summarize' | 'ask' | 'edit';
 // Which AI answered: Groq, Claude, or the Pi's own small model.
-export type ThinkEngine = 'groq' | 'claude' | 'local';
+export type ThinkEngine = 'groq' | 'claude' | 'local' | 'none';
 // How big a chart the AI draws: a short chain, the main steps, or full detail.
 export type ThinkDetail = 'simple' | 'moderate' | 'complex';
 export interface ThinkTurn { role: 'user' | 'assistant'; text: string }
@@ -59,14 +59,79 @@ export const aiEngine = {
     },
 
 
-    getDailyBriefing: async (tasksJson: string) => {
-        const res = await fetch(getAiUrl('/api/daily-briefing'), {
+    // Chat capture in New Item: only what the app couldn't place itself. Groq on the Pi,
+    // else the Pi's local model; the reply names come back as ids from the lists sent.
+    chatCaptureEngine: async (): Promise<string> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), { headers: piHeaders() });
+        if (!res.ok) throw new Error(await errorText(res));
+        return (await res.json()).engine;
+    },
+
+    chatCapture: async (payload: {
+        mode: 'split' | 'edit';
+        message: string;
+        today: string;
+        projects: { id: string; name: string; key: string; branches: { id: string; name: string }[] }[];
+        areas: { id: string; name: string }[];
+        openItems: { id: string; key: string; title: string; project: string }[];
+        tags: string[];
+        cards?: { title: string; kind: string; project: string; branch: string; area: string; context: string; when: string; priority: string }[];
+    }, signal?: AbortSignal): Promise<{ engine: string; items?: any[]; changes?: any[]; reply?: string }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
             method: 'POST',
+            signal,
             headers: piHeaders({ 'Content-Type': 'application/json' }),
-            body: JSON.stringify({ tasks_json: tasksJson })
+            body: JSON.stringify(payload)
         });
-        const json = await res.json();
-        if (!json.success) throw new Error("AI failed to generate briefing");
-        return json.data;
-    }
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
+
+    // A goal broken into a plan, or a plan changed by a follow-up. Groq only.
+    chatPlan: async (payload: {
+        mode: 'plan' | 'plan_edit';
+        message: string;
+        today: string;
+        planMode: 'new' | 'existing' | 'steps';
+        target?: string;
+        targetItems?: string[];
+        typeHint?: string;
+        days?: number | null;
+        plan?: { name: string; type: string; phases: string[]; tasks: { title: string; phase: number; days: number; priority: string }[] };
+    }, signal?: AbortSignal): Promise<{ engine: string; plan: any }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
+            method: 'POST',
+            signal,
+            headers: piHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify(payload)
+        });
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
+
+    // Tidy one task's name and add a short description, informed by the project's
+    // other tasks. Groq on the Pi, else the Pi's local model.
+    refineItem: async (payload: {
+        title: string;
+        project?: string;
+        projectType?: string;
+        pastTitles?: string[];
+        today?: string;
+    }, signal?: AbortSignal): Promise<{ engine: string; title: string; description: string }> => {
+        const res = await fetch(getAiUrl('/api/chat-capture'), {
+            method: 'POST',
+            signal,
+            headers: piHeaders({ 'Content-Type': 'application/json' }),
+            body: JSON.stringify({
+                mode: 'refine',
+                message: payload.title,
+                today: payload.today || '',
+                target: payload.project || '',
+                typeHint: payload.projectType || '',
+                targetItems: payload.pastTitles || [],
+            }),
+        });
+        if (!res.ok) throw new Error(await errorText(res));
+        return res.json();
+    },
 }

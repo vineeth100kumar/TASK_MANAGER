@@ -43,8 +43,8 @@ class Merge(unittest.TestCase):
 
     def test_untouched_fields_stay(self):
         s = settings.merge(settings.defaults(), {"alarm": {"snoozeMinutes": 9}})
-        self.assertEqual(s["alarm"], {"snoozeMinutes": 9, "ringMinutes": 10})
-        self.assertEqual(s["screens"], list(settings.SCREENS))
+        self.assertEqual(s["alarm"], {"snoozeMinutes": 9, "ringMinutes": 10, "tone": "pulse", "volume": 80})
+        self.assertEqual(s["screens"], ["CLOCK", "TASKS", "SPOTIFY", "SYSTEM"])
 
     def test_home_screen_follows_the_screens(self):
         s = settings.merge(settings.defaults(), {"screens": ["TASKS", "SPOTIFY"]})
@@ -54,6 +54,40 @@ class Merge(unittest.TestCase):
         for style in ("monolith", "stacked", "nightstand", "dial", "digital"):
             s = settings.merge(settings.defaults(), {"clock": {"style": style}})
             self.assertEqual(s["clock"]["style"], style)
+
+    def test_gallery_mode_is_away_or_always(self):
+        self.assertEqual(settings.defaults()["gallery"]["mode"], "away")
+        s = settings.merge(settings.defaults(), {"gallery": {"mode": "always"}})
+        self.assertEqual(s["gallery"]["mode"], "always")
+        self.assertTrue(s["gallery"]["enabled"])
+        with self.assertRaises(ValueError):
+            settings.merge(settings.defaults(), {"gallery": {"mode": "sometimes"}})
+
+    def test_screen_fit_defaults_and_limits(self):
+        s = settings.defaults()["screen"]
+        self.assertEqual(s, {"left": 6, "right": 0, "top": 0, "bottom": 4, "frame": False, "island": True, "brightness": 100})
+        s = settings.merge(settings.defaults(), {"screen": {"left": 9, "frame": True}})["screen"]
+        self.assertEqual((s["left"], s["right"], s["frame"], s["island"]), (9, 0, True, True))
+        for bad, why in (({"left": 41}, "0 to 40"), ({"top": -1}, "0 to 40"), ({"bottom": True}, "whole number"),
+                         ({"frame": "yes"}, "true or false")):
+            with self.assertRaises(ValueError) as caught:
+                settings.merge(settings.defaults(), {"screen": bad})
+            self.assertIn(why, str(caught.exception))
+
+    def test_update_hold_and_window(self):
+        u = settings.defaults()["updates"]
+        self.assertEqual(u, {"auto": True, "hold": "", "window": "03:00-05:00"})
+        u = settings.merge(settings.defaults(), {"updates": {"hold": "2.17.0", "window": "23:30-1:00"}})["updates"]
+        self.assertEqual((u["hold"], u["window"]), ("2.17.0", "23:30-01:00"))
+        self.assertEqual(settings.merge(settings.defaults(), {"updates": {"window": ""}})["updates"]["window"], "")
+        for bad in ({"hold": "latest"}, {"window": "3-5"}, {"window": "03:00-03:00"}, {"window": 5}):
+            with self.assertRaises(ValueError):
+                settings.merge(settings.defaults(), {"updates": bad})
+        self.assertTrue(settings.in_window("03:00-05:00", 4, 59))
+        self.assertFalse(settings.in_window("03:00-05:00", 5, 0))
+        self.assertTrue(settings.in_window("23:30-01:00", 0, 15))
+        self.assertFalse(settings.in_window("23:30-01:00", 12, 0))
+        self.assertTrue(settings.in_window("", 12, 0))
 
     def test_the_face_is_refused_now(self):
         with self.assertRaises(ValueError):
@@ -68,6 +102,10 @@ class Merge(unittest.TestCase):
             ({"alarm": {"snoozeMinutes": 0}}, "1 to 60"),
             ({"alarm": {"ringMinutes": True}}, "whole number"),
             ({"lights": {"brightness": 300}}, "0 to 255"),
+            ({"haptics": {"strength": 101}}, "0 to 100"),
+            ({"welcome": {"message": "  "}}, "1 to 27"),
+            ({"welcome": {"message": "x" * 28}}, "1 to 27"),
+            ({"welcome": {"awayMinutes": 2}}, "5 to 720"),
             ({"clock": {"secondZone": "Mars/Olympus"}}, "not a time zone"),
             ({"buttons": {"map": {"default": None}}}, "can't be removed"),
             ({"buttons": {"map": {"CLOCK": {"HOLD": "none"}}}}, "button must be one of"),
@@ -230,6 +268,55 @@ class DeskWithSettings(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(desk.controller.screen, "CLOCK")
         self.assertEqual(self.link.last("LIGHTS")["brightness"], 5)
         self.assertEqual(desk.controller.screens, ["CLOCK", "TASKS"])
+
+    async def test_haptic_strength_reaches_the_clock(self):
+        desk = self.make({"haptics": {"strength": 35}})
+        await desk.after_redraw()
+        self.assertEqual(self.link.last("HAPTICS"), {"cmd": "HAPTICS", "strength": 35, "buttons": True, "notify": True})
+        await desk.apply_settings(settings.merge(desk.settings, {"haptics": {"strength": 0}}))
+        self.assertEqual(self.link.last("HAPTICS")["strength"], 0)
+
+
+class ScreenFit(unittest.IsolatedAsyncioTestCase):
+    """The case window and the Even Frame reach firmware 2.15 and later as FIT."""
+
+    def make(self, fw="2.15.0"):
+        self.link = FakeLink()
+        self.link.fw = fw
+
+        async def broadcast(event):
+            pass
+
+        return Desk(self.link, lambda: at(9, 0), FakePhone(), broadcast, items=lambda: [], actions=FakeActions([]))
+
+    async def test_fit_reaches_the_clock(self):
+        desk = self.make()
+        await desk.after_redraw()
+        self.assertEqual(self.link.last("FIT"), {"cmd": "FIT", "l": 6, "r": 0, "t": 0, "b": 4, "frame": False, "island": True, "test": False})
+        await desk.apply_settings(settings.merge(desk.settings, {"screen": {"left": 8, "frame": True}}))
+        fit = self.link.last("FIT")
+        self.assertEqual((fit["l"], fit["frame"], fit["test"]), (8, True, False))
+
+    async def test_older_firmware_is_not_sent_it(self):
+        desk = self.make("2.14.1")
+        await desk.after_redraw()
+        self.assertNotIn("FIT", self.link.cmds())
+        with self.assertRaises(ValueError):
+            await desk.device_do("fit_test")
+
+    async def test_fit_test_goes_on_and_off(self):
+        desk = self.make()
+        self.assertTrue(await desk.device_do("fit_test"))
+        self.assertTrue(self.link.last("FIT")["test"])
+        self.assertTrue(desk.state()["fitTest"])
+        # Saving a setting while the pattern is up keeps it up.
+        await desk.apply_settings(settings.merge(desk.settings, {"screen": {"top": 2}}))
+        self.assertEqual((self.link.last("FIT")["t"], self.link.last("FIT")["test"]), (2, True))
+        self.assertTrue(await desk.device_do("fit_test_off"))
+        self.assertFalse(self.link.last("FIT")["test"])
+        self.assertFalse(desk.state()["fitTest"])
+        for task in list(desk._tasks):
+            task.cancel()
 
 
 class RunHelpers(unittest.IsolatedAsyncioTestCase):

@@ -33,14 +33,14 @@ function heat(n: number | null, range: MarketRange) {
   return { background: n >= 0 ? `rgb(16 163 110 / ${alpha})` : `rgb(214 59 59 / ${alpha})`, strong: alpha > 0.5 };
 }
 
-function Spark({ values, up, width = 64, height = 18 }: { values: number[]; up: boolean; width?: number; height?: number }) {
+function Spark({ values, up, width = 64, height = 18, fluid = false }: { values: number[]; up: boolean; width?: number; height?: number; fluid?: boolean }) {
   if (values.length < 2) return <span style={{ width }} />;
   const lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
   const x = (i: number) => 1 + (i / (values.length - 1)) * (width - 4);
   const y = (v: number) => height - 2 - ((v - lo) / span) * (height - 4);
   const last = values.length - 1;
   return (
-    <svg width={width} height={height} aria-hidden className={`shrink-0 ${up ? 'text-emerald-500' : 'text-red-500'}`}>
+    <svg {...(fluid ? { viewBox: `0 0 ${width} ${height}` } : { width, height })} aria-hidden className={`${fluid ? 'block w-full h-auto' : 'shrink-0'} ${up ? 'text-emerald-500' : 'text-red-500'}`}>
       <polyline points={values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
       <circle cx={x(last)} cy={y(values[last])} r="2" fill="currentColor" />
     </svg>
@@ -332,7 +332,7 @@ export function MarketsTab({ ideas, onOpenIdea, onResearch }: MarketsTabProps) {
             <div className="text-[10.5px] font-semibold uppercase tracking-wider text-gray-400 truncate">{g.name}{g.via && <span className="normal-case tracking-normal font-medium"> · {g.via}</span>}</div>
             <div className="text-[15px] font-semibold tabular-nums text-gray-900 dark:text-white">{g.price === null ? '–' : formatQuote({ ...g, price: g.price } as unknown as RadarQuote)}</div>
             <div className={`text-[11.5px] font-semibold tabular-nums ${tone(g.change)}`}>{arrow(g.change)} {signedPct(g.change)}</div>
-            <div className="mt-1"><Spark values={g.closes} up={(g.change ?? 0) >= 0} width={120} height={16} /></div>
+            <div className="mt-1"><Spark values={g.closes} up={(g.change ?? 0) >= 0} width={120} height={16} fluid /></div>
           </div>
         ))}
       </div>

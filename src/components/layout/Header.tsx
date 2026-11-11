@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDays, ChevronDown, GanttChartSquare, Cloud, RefreshCw, AlertTriangle, WifiOff, GitBranch } from 'lucide-react';
 import { api } from '../../services/api';
 import { SyncEngineStatus } from '../../services/syncEngine';
+import { ModeSwitch } from '../common/ModeSwitch';
 
 const VIEWS = [
   { id: 'list', icon: LayoutList, label: 'List' },
@@ -98,12 +99,22 @@ export function Header({
       setActiveTitle('Focus');
     } else if (activeView === 'waiting_for') {
       setActiveTitle('Waiting For');
+    } else if (activeView === 'hidden') {
+      setActiveTitle('Hidden');
     } else if (activeView === 'notes') {
       setActiveTitle('Notes & Docs');
     } else if (activeView === 'canvas') {
       setActiveTitle('Canvas');
     } else if (activeView === 'radar') {
       setActiveTitle('Radar');
+    } else if (activeView === 'lumo') {
+      setActiveTitle('LUMO');
+    } else if (activeView === 'drop') {
+      setActiveTitle('Drop');
+    } else if (activeView === 'posts') {
+      setActiveTitle('Posts');
+    } else if (activeView === 'reels') {
+      setActiveTitle('Reels');
     } else if (activeWorkspace === 'all') {
       setActiveTitle(lifeContext === 'personal' ? 'All Personal Items' : lifeContext === 'work' ? 'All Work Items' : 'All Items');
     } else {
@@ -141,6 +152,9 @@ export function Header({
       </div>
       
       <div className="flex items-center gap-2 md:gap-3 justify-end">
+        {/* Work or Chill: on every screen size, phones included. */}
+        <ModeSwitch />
+
         {/* Interactive Sync Diagnostics Badge */}
         <SyncBadge onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} />
 
@@ -165,7 +179,7 @@ export function Header({
 
             {/* Mobile/Tablet View Switcher Dropdown */}
             <div className="lg:hidden relative">
-              <button onClick={() => setIsViewMenuOpen(!isViewMenuOpen)} className="flex items-center gap-2 h-9 px-2.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/10 transition-colors">
+              <button onClick={() => setIsViewMenuOpen(!isViewMenuOpen)} aria-haspopup="menu" aria-expanded={isViewMenuOpen} className="flex items-center gap-2 h-9 px-2.5 rounded-xl bg-gray-100 dark:bg-white/5 text-gray-700 dark:text-gray-300 hover:bg-gray-200/70 dark:hover:bg-white/10 transition-colors">
                 <CurrentViewIcon size={16} />
                 <span className="sr-only">{currentViewObj?.label} view</span>
                 <ChevronDown size={14} />

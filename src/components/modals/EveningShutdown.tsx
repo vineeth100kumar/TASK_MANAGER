@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useCompletion } from '../../hooks/useCompletion';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 type Action = 'done' | 'tomorrow' | 'snooze' | null;
 
@@ -13,6 +14,7 @@ interface Props {
 }
 
 export function EveningShutdown({ onClose }: Props) {
+  useEscapeKey(onClose);
   const [items, setItems] = useState<WorkItem[]>([]);
   const [actions, setActions] = useState<Record<string, Action>>({});
   const [saving, setSaving] = useState(false);
@@ -69,13 +71,13 @@ export function EveningShutdown({ onClose }: Props) {
     <AnimatePresence>
       <motion.div
         initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/40 backdrop-blur-sm"
+        className="fixed inset-0 z-50 flex items-end sm:items-center justify-center scrim"
         onClick={onClose}
       >
         <motion.div
           initial={{ y: 60, opacity: 0 }} animate={{ y: 0, opacity: 1 }} exit={{ y: 60, opacity: 0 }}
           transition={{ type: 'spring', damping: 28, stiffness: 320 }}
-          className="w-full max-w-md mx-4 mb-4 sm:mb-0 bg-white dark:bg-zinc-900 rounded-2xl shadow-2xl overflow-hidden"
+          className="w-full max-w-md mx-4 mb-4 sm:mb-0 bg-white dark:bg-[#1c1c1e] rounded-3xl shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8)] ring-1 ring-black/5 dark:ring-white/10 overflow-hidden"
           onClick={e => e.stopPropagation()}
         >
           <div className="px-6 pt-6 pb-4 flex items-center gap-3">
@@ -83,20 +85,20 @@ export function EveningShutdown({ onClose }: Props) {
               <Moon className="w-6 h-6 text-indigo-500" />
             </div>
             <div>
-              <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Shutdown</h2>
-              <p className="text-sm text-zinc-500">Clear today's slate before tomorrow.</p>
+              <h2 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">Shutdown</h2>
+              <p className="text-sm text-gray-500">Clear today's slate before tomorrow.</p>
             </div>
           </div>
 
           <div className="px-6 pb-2 max-h-[50vh] overflow-y-auto">
             {items.length === 0 && (
-              <p className="text-sm text-zinc-400 py-8 text-center">Everything's done — great day.</p>
+              <p className="text-sm text-gray-400 py-8 text-center">Everything's done — great day.</p>
             )}
             {items.map(item => {
               const chosen = actions[item.id];
               return (
-                <div key={item.id} className="py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100 mb-2 truncate">{item.title}</p>
+                <div key={item.id} className="py-3 border-b border-gray-100 dark:border-white/5 last:border-0">
+                  <p className="text-sm font-medium text-gray-900 dark:text-white mb-2 truncate">{item.title}</p>
                   <div className="flex gap-2">
                     {buttons.map(b => (
                       <button
@@ -104,8 +106,8 @@ export function EveningShutdown({ onClose }: Props) {
                         onClick={() => setAction(item.id, chosen === b.action ? null : b.action)}
                         className={`flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
                           chosen === b.action
-                            ? 'bg-indigo-500 text-white'
-                            : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700'
+                            ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/25'
+                            : 'bg-gray-100 dark:bg-white/[0.06] text-gray-600 dark:text-gray-300 hover:bg-gray-200 dark:hover:bg-white/10'
                         }`}
                       >
                         {b.icon} {b.label}
@@ -117,14 +119,14 @@ export function EveningShutdown({ onClose }: Props) {
             })}
           </div>
 
-          <div className="px-6 py-4 border-t border-zinc-100 dark:border-zinc-800 flex items-center justify-between">
-            <button onClick={onClose} className="text-sm text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300">
+          <div className="px-6 py-4 border-t border-gray-100 dark:border-white/5 flex items-center justify-between">
+            <button onClick={onClose} className="text-sm text-gray-500 hover:text-gray-700 dark:hover:text-gray-300">
               Skip
             </button>
             <button
               onClick={apply}
               disabled={saving}
-              className="px-4 py-2 rounded-xl text-sm font-medium bg-indigo-500 text-white hover:bg-indigo-600 disabled:opacity-40 transition-colors"
+              className="px-4 py-2 rounded-xl text-sm bg-blue-600 text-white hover:bg-blue-700 shadow-sm shadow-blue-600/25 disabled:opacity-40 font-semibold transition-colors"
             >
               {saving ? 'Saving…' : items.length === 0 ? 'Done' : 'Wrap up'}
             </button>

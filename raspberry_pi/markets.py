@@ -45,6 +45,7 @@ from fastapi import APIRouter
 
 import prices
 import radar
+import system_health
 
 RANGES = ["1D", "1W", "1M", "YTD"]
 # Trading days back for each range (YTD is worked out from the calendar).
@@ -541,7 +542,7 @@ def board(region: str = "US", rng: str = "1D", now: Optional[datetime.datetime] 
     def proxy(symbol: str) -> Optional[str]:
         """The fund standing in for an index, e.g. SPY for the S&P 500."""
         source, via = origin.get(symbol, (None, None))
-        return via if source == "twelve" and via and via != symbol else None
+        return via if source == "twelve" and via and via != symbol and "/" not in via else None  # a pair like XAU/USD is the price itself
 
     gauges = []
     for symbol, label, unit in GAUGES[region]:
@@ -804,6 +805,7 @@ class Collector:
     async def run(self) -> None:
         await asyncio.sleep(20)  # after Radar's own first fetch
         while True:
+            system_health.beat(60)
             try:
                 await self.tick(radar._utcnow())
             except Exception as e:

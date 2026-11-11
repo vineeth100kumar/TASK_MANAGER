@@ -25,11 +25,11 @@ def db_with(rows_sql: str) -> str:
     return path
 
 
-def report(path, clock=None, backups=None, radar=True):
+def report(path, clock=None, backups=None, radar=True, phone=None):
     return system_health.report(
         path, web_app=True, auth=True, password_gate=True, radar_enabled=radar,
         backups=lambda: backups or {"lastBackupAt": RECENT, "count": 3},
-        phone=lambda: {"available": True, "connected": False, "notifications": ["private"]},
+        phone=lambda: phone or {"available": True, "connected": False, "notifications": ["private"]},
         clock=lambda: clock or {"enabled": True, "connected": True, "token": "secret", "firmware": "2.8.0"},
     )
 
@@ -37,6 +37,28 @@ def report(path, clock=None, backups=None, radar=True):
 class Report(unittest.TestCase):
     def setUp(self):
         system_health.workers.clear()
+
+    def test_depth_face_cutout_error_is_a_problem(self):
+        data = system_health.report(
+            db_with(""), web_app=True, auth=True, password_gate=True, radar_enabled=True,
+            backups=lambda: {"lastBackupAt": RECENT, "count": 3},
+            phone=lambda: {"available": True, "connected": False},
+            clock=lambda: {"enabled": True, "connected": True},
+            depth_face=lambda: {"hasPhoto": True, "cutout": False, "cutoutError": "MemoryError: out of memory"},
+        )
+        self.assertEqual(data["depthFace"]["cutoutError"], "MemoryError: out of memory")
+        self.assertIn("The depth face's photo has no cutout: MemoryError: out of memory.", data["problems"])
+
+    def test_phone_connected_without_ble_is_a_problem(self):
+        phone = {"available": True, "connected": True, "deviceName": "VK", "notifications": [{"message": "private"}],
+                 "link": {"ble": False, "nowPlaying": "not asked", "subscribed": [], "lastError": None},
+                 "media": {"title": "Song", "artist": "A", "app": "Music", "playing": True}, "mediaAt": 5}
+        data = report(db_with(""), phone=phone)
+        self.assertIn("BLE link to the Pi is not", "\n".join(data["problems"]))
+        self.assertEqual(data["phone"]["song"]["title"], "Song")
+        self.assertNotIn("private", str(data["phone"]))
+        phone["link"] = {"ble": True, "nowPlaying": "asked"}
+        self.assertEqual(report(db_with(""), phone=phone)["problems"], [])
 
     def test_all_well_has_no_problems(self):
         data = report(db_with("INSERT INTO radar_sources VALUES ('TechCrunch', 'feed', 1, 5, '', 'x', 'x');"
@@ -56,6 +78,24 @@ class Report(unittest.TestCase):
         self.assertIn("desk clock", text)
         self.assertIn("No nightly backup", text)
         self.assertEqual(data["radar"]["down"], ["Yahoo markets"])
+
+    def test_a_shaky_clock_link_is_named(self):
+        drop = {"at": 1, "event": "dropped", "detail": "the clock stopped answering pings"}
+        link = {"state": "flaky", "drops24h": 4, "lastDrop": drop, "quietSeconds": 90,
+                "history": [drop] * 9}
+        data = report(db_with(""), clock={"enabled": True, "connected": True, "token": "secret",
+                                          "link": link, "wifi": {"rssi": -82}})
+        text = "\n".join(data["problems"])
+        self.assertIn("dropped 4 times in the last day (last: the clock stopped answering pings)", text)
+        self.assertIn("hasn't been heard from for 90 s", text)
+        self.assertIn("weak (-82 dBm)", text)
+        self.assertEqual(len(data["clock"]["link"]["history"]), 5)
+        self.assertNotIn("token", data["clock"])
+
+    def test_a_disconnected_clock_says_why(self):
+        drop = {"at": 1, "event": "dropped", "detail": "the connection broke without a goodbye (Wi-Fi or power)"}
+        data = report(db_with(""), clock={"enabled": True, "connected": False, "link": {"state": "down", "lastDrop": drop}})
+        self.assertIn("(last drop: the connection broke without a goodbye (Wi-Fi or power)).", "\n".join(data["problems"]))
 
     def test_missing_tables_and_broken_parts(self):
         path = str(Path(tempfile.mkdtemp()) / "empty.db")

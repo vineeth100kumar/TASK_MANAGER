@@ -3,6 +3,7 @@ workers, Radar's sources, the Markets board, backups, the phone link and the
 desk clock. Claude reads it through the `sage_health` tool and
 GET /api/claude/health; it carries no secrets (the clock's token stays out)."""
 
+import asyncio
 import datetime
 import os
 import sqlite3
@@ -15,6 +16,8 @@ STARTED = time.time()
 REPO = Path(__file__).resolve().parent.parent
 # Workers started with db_server._background(): name -> {"startedAt", "error"}.
 workers: Dict[str, Dict[str, Any]] = {}
+# Heartbeats: worker name -> {"at": epoch seconds, "expect": seconds until its next beat}.
+beats: Dict[str, Dict[str, float]] = {}
 
 
 def _git(*args: str) -> Optional[str]:
@@ -37,7 +40,47 @@ def worker_name(coro) -> str:
     return f"{module}.{name}" if module else name
 
 
+def beat(expect: float = 300, name: Optional[str] = None) -> None:
+    """A worker's "I'm still going". Call it once per turn of the loop, with
+    `expect` set to how long the loop sleeps; with no name it uses the running
+    task's (db_server._background names each task after its worker). A worker
+    that has not beaten for twice its `expect` plus a minute shows as stale.
+    Never raises: a heartbeat must not break the worker."""
+    try:
+        key = name
+        if key is None:
+            task = asyncio.current_task()
+            key = task.get_name() if task else None
+        if key:
+            beats[key] = {"at": time.time(), "expect": float(expect)}
+    except Exception:
+        pass
+
+
+def service_rows(now: Optional[float] = None) -> List[Dict[str, Any]]:
+    """Every background worker with a status:
+    down (died with an error), stopped (finished or switched itself off),
+    stale (was beating, has stopped), ok (beating on time), or
+    running (alive, but this worker doesn't send heartbeats)."""
+    now = time.time() if now is None else now
+    rows = []
+    for name, info in sorted(workers.items()):
+        row: Dict[str, Any] = {"name": name, **info}
+        b = beats.get(name)
+        if info.get("stoppedAt"):
+            row["status"] = "down" if info.get("error") else "stopped"
+        elif b:
+            age = now - b["at"]
+            row.update(lastBeatAt=_iso(b["at"]), secondsSinceBeat=int(age), expectEverySeconds=int(b["expect"]))
+            row["status"] = "ok" if age <= b["expect"] * 2 + 60 else "stale"
+        else:
+            row["status"] = "running"
+        rows.append(row)
+    return rows
+
+
 def worker_started(name: str) -> None:
+    beats.pop(name, None)
     workers[name] = {"startedAt": _iso(time.time()), "error": None, "stoppedAt": None}
 
 
@@ -102,6 +145,23 @@ def _twelve() -> Optional[dict]:
         return None
 
 
+def phone_part(state: dict) -> dict:
+    """The phone link without notification text: is the BLE link up, what it
+    subscribed to, the last error, and the song with when it last changed."""
+    out = {k: state.get(k) for k in ("available", "connected", "home", "deviceName", "lastSeen", "lifeMode", "error") if k in state}
+    link = state.get("link") or {}
+    if link:
+        out["ble"] = link.get("ble")
+        out["nowPlaying"] = link.get("nowPlaying")
+        out["subscribed"] = link.get("subscribed")
+        out["lastError"] = link.get("lastError")
+    media = state.get("media") or {}
+    if media:
+        out["song"] = {k: media.get(k) for k in ("title", "artist", "app", "playing")}
+        out["songUpdatedAt"] = state.get("mediaAt")
+    return out
+
+
 def report(
     db_path: str,
     *,
@@ -112,6 +172,11 @@ def report(
     backups: Callable[[], dict],
     phone: Callable[[], dict],
     clock: Callable[[], dict],
+    depth_face: Optional[Callable[[], dict]] = None,
+    slide_maker: Optional[Callable[[], dict]] = None,
+    reel_maker: Optional[Callable[[], dict]] = None,
+    diagnostics: Optional[Callable[[], dict]] = None,
+    storage: Optional[Callable[[], dict]] = None,
 ) -> dict:
     def safe(part: Callable[[], dict]) -> dict:
         try:
@@ -137,15 +202,50 @@ def report(
             "passwordGate": password_gate,
             "databaseMb": db_mb,
         },
-        "workers": [{"name": name, **info} for name, info in sorted(workers.items())],
+        "workers": service_rows(),
         "radar": safe(lambda: radar_part(db_path, radar_enabled)),
         "markets": safe(lambda: markets_part(db_path)) if radar_enabled else {"enabled": False},
         "backups": safe(backups),
-        "phone": {k: phone_state.get(k) for k in ("available", "connected", "deviceName", "lastSeen", "error") if k in phone_state},
-        "clock": {k: clock_state.get(k) for k in ("enabled", "connected", "firmware", "connectedAt", "error") if k in clock_state},
+        "phone": phone_part(phone_state),
+        "clock": clock_part(clock_state),
     }
+    if depth_face:
+        data["depthFace"] = safe(depth_face)
+    if storage:
+        data["storage"] = safe(storage)
+    if slide_maker:
+        data["slideMaker"] = safe(slide_maker)
+    if reel_maker:
+        data["reelMaker"] = safe(reel_maker)
+    if diagnostics:
+        data["diagnostics"] = safe(diagnostics)
     data["problems"] = problems(data)
     return data
+
+
+def clock_part(state: dict) -> dict:
+    """The desk clock: connected or not, its firmware, and how steady its
+    link has been (desk/link.py's health, with the last few events)."""
+    out = {k: state.get(k) for k in ("enabled", "connected", "firmware", "screenFit", "connectedAt", "error") if k in state}
+    link = state.get("link")
+    if isinstance(link, dict):
+        out["link"] = {**link, "history": (link.get("history") or [])[:5]}
+    wifi = state.get("wifi")
+    if isinstance(wifi, dict) and wifi.get("rssi") is not None:
+        out["rssi"] = wifi["rssi"]
+    if isinstance(wifi, dict) and isinstance(wifi.get("perf"), dict):
+        # Firmware 2.18's frame meter: fps, slowest frame and longest stall since its last STATUS.
+        out["screen"] = {**wifi["perf"], "on": (state.get("state") or {}).get("screen")}
+    updates = (state.get("state") or {}).get("updates")
+    if isinstance(updates, dict):
+        # Firmware updates over Wi-Fi (desk/ota.py): the newest GitHub build and how the last install went.
+        out["updates"] = {k: updates.get(k) for k in ("latest", "latestSha", "latestTitle", "ready", "newer", "canUpdate", "state",
+                                                      "target", "error", "waiting", "checkError", "hold", "progress")}
+    return out
+
+
+# A clock that's been quiet this long while "connected" has likely gone.
+CLOCK_QUIET_SECONDS = 75
 
 
 def problems(data: dict) -> List[str]:
@@ -159,17 +259,73 @@ def problems(data: dict) -> List[str]:
     for w in data["workers"]:
         if w.get("stoppedAt"):
             out.append(f"Worker {w['name']} stopped" + (f": {w['error']}" if w.get("error") else "."))
+        elif w.get("status") == "stale":
+            out.append(f"Worker {w['name']} has not reported for {w['secondsSinceBeat']} s (it should every {w['expectEverySeconds']} s); it may be stuck.")
     for s in data["radar"].get("sources", []):
         if not s["ok"]:
             out.append(f"Radar source {s['name']} is down: {s['error'] or 'no reason given'}.")
     markets = data["markets"]
     if markets.get("symbols") and markets.get("failing"):
         out.append(f"Markets board: {markets['failing']} of {markets['symbols']} symbols failing.")
+    card = data.get("storage") or {}
+    if card.get("mode") in ("fallback", "unmounted"):
+        out.append(f"Sage is NOT on the SD card: {card.get('reason')}")
+    if card.get("readOnly"):
+        out.append(f"The SD card at {card.get('mount')} is mounted read-only (disk errors?); saves will fail.")
+    if card.get("freePercent") is not None and (card["freePercent"] < 10 or card.get("freeBytes", 1 << 60) < 2_000_000_000):
+        out.append(f"The SD card is almost full: {round(card['freeBytes'] / 1e9, 1)} GB free ({card['freePercent']}%).")
     last_backup = data["backups"].get("lastBackupAt")
     if "lastBackupAt" in data["backups"]:
         when = datetime.datetime.fromisoformat(last_backup) if last_backup else None
         if not when or time.time() - when.timestamp() > 48 * 3600:
             out.append(f"No nightly backup in the last 2 days (last: {last_backup or 'never'}).")
-    if data["clock"].get("enabled") and not data["clock"].get("connected"):
-        out.append("The desk clock is on in settings but not connected.")
+    maker = data.get("slideMaker") or {}
+    for line in maker.get("problems") or []:
+        out.append(f"Slide maker (Posts): {line}")
+    reel_maker_state = data.get("reelMaker") or {}
+    for line in reel_maker_state.get("problems") or []:
+        out.append(f"Reel maker (Reels): {line}")
+    if reel_maker_state.get("ready") and reel_maker_state.get("voiceProblem"):
+        out.append(f"Reel maker: the built-in voice can't speak yet ({reel_maker_state['voiceProblem']})")
+    phone = data["phone"]
+    if phone.get("connected") and phone.get("ble") is False:
+        out.append(f"The phone ({phone.get('deviceName') or 'unnamed'}) is connected but its BLE link to the Pi is not, "
+                   "so now playing and notifications can't be read.")
+    elif phone.get("connected") and phone.get("ble") and phone.get("nowPlaying") not in (None, "asked"):
+        out.append(f"Now playing from the phone isn't subscribed ({phone.get('nowPlaying')}).")
+    clock = data["clock"]
+    link = clock.get("link") or {}
+    if clock.get("enabled") and not clock.get("connected"):
+        last = (link.get("lastDrop") or {}).get("detail")
+        out.append("The desk clock is on in settings but not connected" + (f" (last drop: {last})." if last else "."))
+    elif clock.get("connected"):
+        if link.get("state") == "flaky":
+            last = (link.get("lastDrop") or {}).get("detail") or "no reason kept"
+            out.append(f"The desk clock's link dropped {link.get('drops24h')} times in the last day (last: {last}).")
+        if (link.get("quietSeconds") or 0) > CLOCK_QUIET_SECONDS:
+            out.append(f"The desk clock hasn't been heard from for {link['quietSeconds']} s although it counts as connected.")
+        updates = clock.get("updates") or {}
+        if updates.get("state") == "failed":
+            out.append(f"The desk clock's update to {updates.get('target')} failed: {updates.get('error')}.")
+        if updates.get("checkError"):
+            out.append(f"Checking for LUMO firmware: {updates['checkError']}.")
+        stall = (clock.get("screen") or {}).get("stallMs")
+        if isinstance(stall, (int, float)) and stall > 2000:
+            out.append(f"The desk clock's screen stood still for {stall / 1000:.1f} s at once in its last half minute.")
+        if isinstance(clock.get("rssi"), (int, float)) and clock["rssi"] < -78:
+            out.append(f"The desk clock's Wi-Fi signal is weak ({clock['rssi']} dBm), which can drop the link.")
+    diag = data.get("diagnostics") or {}
+    if diag.get("enabled"):
+        if diag.get("blackoutOngoing"):
+            out.append("A blackout is happening now: the public URL isn't answering. " + (diag.get("verdict") or ""))
+        elif diag.get("blackouts24h"):
+            longest = diag.get("longestDownSeconds") or 0
+            out.append(f"{diag['blackouts24h']} blackout(s) in the last 24h (longest {longest}s). {diag.get('verdict') or ''}".strip())
+        if diag.get("underVoltageNow"):
+            out.append("The Pi is under-voltage right now — check the power supply and cable.")
+        elif diag.get("underVoltageEver"):
+            out.append("The Pi has seen under-voltage since boot — the power supply or cable may be dipping.")
+    face = data.get("depthFace", {})
+    if face.get("hasPhoto") and not face.get("cutout"):
+        out.append(f"The depth face's photo has no cutout: {face.get('cutoutError') or face.get('cutoutProblem') or 'no reason kept'}.")
     return out

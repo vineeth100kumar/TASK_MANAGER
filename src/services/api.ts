@@ -7,15 +7,19 @@
  * - Versioned Backup Export / Import
  */
 
-import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, LifeContext } from './types';
+import { WorkItem, Project, ProjectBranch, Area, Goal, Habit, Note, Comment, Subtask, Activity, Board, Dossier, Idea, Thought, ThoughtStatus, LifeContext, DEFAULT_HABIT_REMIND_TIME } from './types';
 import { LABELS, uuid, FOCUS_LIMIT } from './constants';
 import { INITIAL_PROJECTS, INITIAL_AREAS, INITIAL_GOALS, INITIAL_HABITS, INITIAL_NOTES } from './sampleData';
 import { toInputDateValue, toInputDateTimeValue, parseEstimateMinutes, localDateString } from '../utils/dateUtils';
 import { nextOccurrence, shiftByDays, daysBetween, toDateKey } from '../utils/recurrence';
 import { remindAtFor, toLocalDateTime, timeOfDay } from '../utils/reminders';
 import { dateEntries, streakOf } from '../utils/habits';
+import { normalizeDoses, doneDoses, toggleDose, trimLog } from '../utils/doses';
 import { getAllFromStore, putToStore, putBatchToStore, deleteFromStore, clearAllStores, getMeta, setMeta, migrateFromLocalStorage, getOrCreateClientId } from './db';
 import { syncEngine, SyncEngineStatus, getGasUrl, syncHeaders } from './syncEngine';
+import { needsPlace, suggestPlace, INBOX_PROJECT_ID, INBOX_PROJECT_NAME } from './placement';
+import { normalizeItem, nextKey, selectItems, isLive, isHidden, type ItemFilters, type Selection } from './items';
+import { contextOf, inContext, isAlarm, isOpen, isSnoozedNow, isOnToday, compareToday, compareInbox, checkVisibility, VisibilityCheck } from '../utils/taskLists';
 
 export interface LocalState {
   workItems: WorkItem[];
@@ -30,6 +34,7 @@ export interface LocalState {
   boards: Board[];
   dossiers: Dossier[];
   ideas: Idea[];
+  thoughts: Thought[];
 }
 
 let state: LocalState = {
@@ -44,7 +49,8 @@ let state: LocalState = {
   activities: [],
   boards: [],
   dossiers: [],
-  ideas: []
+  ideas: [],
+  thoughts: []
 };
 
 let isInitialized = false;
@@ -60,7 +66,7 @@ async function initializeStore(): Promise<void> {
 
     // 2. Load all entities instantly from IndexedDB
     const [
-      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards, dossiers, ideas
+      workItems, projects, areas, goals, habits, notes, comments, subtasks, activities, boards, dossiers, ideas, thoughts
     ] = await Promise.all([
       getAllFromStore<WorkItem>('workItems'),
       getAllFromStore<Project>('projects'),
@@ -73,7 +79,8 @@ async function initializeStore(): Promise<void> {
       getAllFromStore<Activity>('activities'),
       getAllFromStore<Board>('boards'),
       getAllFromStore<Dossier>('dossiers'),
-      getAllFromStore<Idea>('ideas')
+      getAllFromStore<Idea>('ideas'),
+      getAllFromStore<Thought>('thoughts')
     ]);
 
     // Sample data for local testing only (`npm run dev`). A real install starts
@@ -105,7 +112,8 @@ async function initializeStore(): Promise<void> {
         activities,
         boards,
         dossiers,
-        ideas
+        ideas,
+        thoughts
       };
     }
 
@@ -119,6 +127,8 @@ async function initializeStore(): Promise<void> {
       });
     });
 
+    sweepLooseItems().catch(err => console.warn('[placement] sweep failed:', err));
+
     syncEngine.init().catch(err => {
       console.warn('[SyncEngine] Background initialization warning:', err);
     });
@@ -130,29 +140,71 @@ async function initializeStore(): Promise<void> {
 // Start async initialization immediately
 initializeStore().catch(console.error);
 
-function hydrateWorkItem(item: WorkItem): WorkItem {
-  if (!item) return item;
-  
+// The Inbox project is the home of anything that names no project or area.
+async function ensureInboxProject(): Promise<void> {
+  if (state.projects.some(p => p && p.id === INBOX_PROJECT_ID)) return;
+  const now = new Date().toISOString();
+  const project: Project = {
+    id: INBOX_PROJECT_ID, name: INBOX_PROJECT_NAME, key: 'INBOX', color: 'bg-slate-500',
+    sequence: state.projects.length + 1, type: 'other', description: 'Tasks that were added without a project.',
+    createdAt: now, updatedAt: now,
+  };
+  state.projects.push(project);
+  await persist('projects', project);
+}
+
+// Gives a loose task a project or area; returns whether it changed.
+async function placeItem(item: WorkItem): Promise<boolean> {
+  if (!needsPlace(item, state.projects, state.areas)) return false;
+  // A project or area that no longer exists counts as none.
+  if (item.projectId && !state.projects.some(p => p && p.id === item.projectId)) item.projectId = null;
+  if (item.areaId && !state.areas.some(a => a && a.id === item.areaId)) item.areaId = null;
+  if (item.projectId || item.areaId) return true;
+  const guess = suggestPlace(item.title || '', state.projects.filter(Boolean), state.areas.filter(Boolean), state.workItems);
+  if (guess) {
+    item.projectId = guess.projectId || null;
+    item.branchId = guess.projectId ? guess.branchId || null : null;
+    item.areaId = guess.areaId || null;
+  } else {
+    await ensureInboxProject();
+    item.projectId = INBOX_PROJECT_ID;
+    item.branchId = null;
+  }
+  return true;
+}
+
+// Existing loose tasks (added before this rule, or by another device) get a home too.
+async function sweepLooseItems(): Promise<void> {
+  const now = new Date().toISOString();
+  for (const item of state.workItems) {
+    if (!item || !(await placeItem(item))) continue;
+    item.updatedAt = now;
+    item.version = (item.version || 1) + 1;
+    await persist('workItems', item);
+  }
+}
+
+// Every live item, read into the one shape (see items.ts). Lists start here.
+// LUMO alarms are reminders underneath but not tasks: they live on the LUMO
+// page, so no list, count, board, calendar or export starts with them.
+// Hidden tasks are the same: they live on the locked Hidden page.
+function liveItems(): WorkItem[] {
+  const projects = state.projects.filter(Boolean);
+  return state.workItems.filter(i => isLive(i) && !isAlarm(i) && !isHidden(i)).map(i => normalizeItem(i, projects));
+}
+
+function hydrateWorkItem(raw: WorkItem): WorkItem {
+  if (!raw) return raw;
+  const item = normalizeItem(raw, state.projects.filter(Boolean));
+
   const project = item.projectId ? (state.projects || []).find(p => p && p.id === item.projectId) || null : null;
   const area = item.areaId ? (state.areas || []).find(a => a && a.id === item.areaId) || null : null;
   const labelsList = Array.isArray(item.labels) ? item.labels.map(lId => LABELS.find(l => l.id === lId)).filter(Boolean) : [];
   const subtasksForItem = (state.subtasks || []).filter(s => s && s.workItemId === item.id);
   const commentsForItem = (state.comments || []).filter(c => c && c.workItemId === item.id && !c.deletedAt);
 
-  const cleanStartDate = toInputDateValue(item.startDate);
-  const cleanDueDate = toInputDateValue(item.dueDate);
-  const cleanStartAt = toInputDateTimeValue(item.startAt);
-  const cleanEndAt = toInputDateTimeValue(item.endAt);
-  const cleanRemindAt = toInputDateTimeValue(item.remindAt);
-
   return {
     ...item,
-    status: (item.status as string) === 'in_review' ? 'in_progress' : item.status,
-    startDate: cleanStartDate || null,
-    dueDate: cleanDueDate || null,
-    startAt: cleanStartAt || null,
-    endAt: cleanEndAt || null,
-    remindAt: cleanRemindAt || null,
     project,
     area,
     labelsList,
@@ -177,6 +229,15 @@ async function removeRecord(table: Table, id: string): Promise<void> {
   syncEngine.cancelDebounced(table, id);
   await deleteFromStore(table, id);
   syncEngine.enqueueOperation(table, id, 'delete', { id });
+}
+
+// Moves a note to the top of the Notes list, e.g. when a thought on its map changes.
+async function touchNote(id: string): Promise<void> {
+  const n = state.notes.find(n => n && n.id === id);
+  if (!n) return;
+  n.updatedAt = new Date().toISOString();
+  await putToStore('notes', n);
+  syncEngine.enqueueNoteDebounced(n.id, n);
 }
 
 // The next copy of a repeating item: every date moved to the next occurrence,
@@ -206,6 +267,7 @@ async function createNextOccurrence(item: WorkItem): Promise<WorkItem | null> {
     waitingFor: null,
     blockedReason: null,
     spawnedNextId: null,
+    dosesDone: [],
     spawnedFromId: item.id
   });
 }
@@ -258,7 +320,7 @@ export const api = {
           if (json.success && json.data) {
             const data = json.data;
             const unsynced = await syncEngine.getUnsyncedKeys();
-            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas'] as const;
+            const tables = ['workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas', 'thoughts'] as const;
             for (const table of tables) {
               const rows = data[table];
               if (!Array.isArray(rows) || rows.length === 0) continue;
@@ -297,65 +359,38 @@ export const api = {
     allTags: async (lifeContext?: LifeContext): Promise<{ tag: string; count: number }[]> => {
       await initializeStore();
       const counts = new Map<string, number>();
-      for (const item of state.workItems) {
-        if (!item || item.deletedAt || (lifeContext && (item.lifeContext || 'work') !== lifeContext)) continue;
+      for (const item of liveItems()) {
+        if (lifeContext && contextOf(item) !== lifeContext) continue;
         for (const tag of item.labels || []) counts.set(tag, (counts.get(tag) || 0) + 1);
       }
       return [...counts.entries()].map(([tag, count]) => ({ tag, count })).sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag));
     },
-    list: async (filters?: {
-      projectId?: string;
-      lifeContext?: LifeContext;
-      status?: string;
-      search?: string;
-      entityType?: string;
-      priority?: string;
-      tag?: string;
-    }): Promise<WorkItem[]> => {
-      await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt);
-
-      if (filters?.tag) {
-        items = items.filter(i => (i.labels || []).includes(filters.tag as string));
-      }
-
-      if (filters?.lifeContext) {
-        items = items.filter(i => i && (i.lifeContext || 'work') === filters.lifeContext);
-      }
-
-      if (filters?.projectId && filters.projectId !== 'all') {
-        items = items.filter(i => i.projectId === filters.projectId || i.areaId === filters.projectId);
-      }
-
-      if (filters?.entityType && filters.entityType !== 'all') {
-        items = items.filter(i => (i.entityType || 'task') === filters.entityType);
-      }
-
-      if (filters?.priority && filters.priority !== 'all') {
-        items = items.filter(i => i.priority === filters.priority);
-      }
-
-      if (filters?.status && filters.status !== 'all') {
-        if (filters.status === 'open') {
-          items = items.filter(i => i.status !== 'done');
-        } else if (filters.status === 'done') {
-          items = items.filter(i => i.status === 'done');
-        } else {
-          items = items.filter(i => i.status === filters.status);
-        }
-      }
-
-      if (filters?.search) {
-        const q = filters.search.toLowerCase();
-        items = items.filter(i =>
-          (i.title || '').toLowerCase().includes(q) ||
-          (i.key || '').toLowerCase().includes(q) ||
-          (i.description && i.description.toLowerCase().includes(q))
-        );
-      }
-
-      return items.map(hydrateWorkItem);
+    list: async (filters?: ItemFilters & { projectId?: string; lifeContext?: LifeContext }): Promise<WorkItem[]> => {
+      return (await api.workItems.query(filters)).items;
     },
+
+    /** What a project page (or All Items) shows, and how many were left out and why. */
+    query: async (filters?: ItemFilters & { projectId?: string; lifeContext?: LifeContext }): Promise<Selection> => {
+      await initializeStore();
+      const { projectId, lifeContext, ...rest } = filters || {};
+      const sel = selectItems(liveItems(), { projectId, lifeContext, filters: rest }, state.projects.filter(Boolean));
+      return { ...sel, items: sel.items.map(hydrateWorkItem) };
+    },
+
+    /** Every live item in the one shape, right now (for strips and counts that can't wait). */
+    snapshot: (): WorkItem[] => liveItems(),
+
+    /** The hidden tasks, open ones first, for the locked Hidden page. */
+    hidden: async (): Promise<WorkItem[]> => {
+      await initializeStore();
+      const projects = state.projects.filter(Boolean);
+      return state.workItems.filter(i => isLive(i) && !isAlarm(i) && isHidden(i))
+        .map(i => hydrateWorkItem(normalizeItem(i, projects)))
+        .sort((a, b) => Number(a.status === 'done') - Number(b.status === 'done') || (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    },
+
+    /** Hides a task from every list (or brings it back). */
+    setHidden: async (id: string, hidden: boolean): Promise<WorkItem> => api.workItems.updateDetails(id, { isHidden: hidden }),
 
     getDeleted: async (): Promise<WorkItem[]> => {
       await initializeStore();
@@ -374,6 +409,12 @@ export const api = {
       const now = new Date().toISOString();
       const id = uuid();
 
+      if (needsPlace(payload, state.projects, state.areas)) {
+        const loose = { ...payload, title: payload.title || '' } as WorkItem;
+        await placeItem(loose);
+        payload = { ...payload, projectId: loose.projectId, branchId: loose.branchId, areaId: loose.areaId };
+      }
+
       let prefix = 'TASK';
       if (payload.projectId) {
         const proj = state.projects.find(p => p && p.id === payload.projectId);
@@ -382,9 +423,8 @@ export const api = {
         prefix = 'LIFE';
       }
 
-      // Items added through the Claude connector may have no key.
-      const count = state.workItems.filter(i => i && (i.key || '').startsWith(prefix)).length + 1;
-      const key = `${prefix}-${count}`;
+      // One past the highest number in use; older items may have no key at all.
+      const key = nextKey(state.workItems, prefix);
 
       // Auto-infer quick wins from action verbs if not explicitly set
       // Whole words only, so "task", "context" or "checkout" don't count.
@@ -392,6 +432,8 @@ export const api = {
       const estimatedMinutes = payload.estimatedMinutes !== undefined ? payload.estimatedMinutes : (isShortAction ? 10 : null);
       const energy = payload.energy || (isShortAction ? 'low' : 'medium');
 
+      // A milestone is logged once the work is done, so it is always done.
+      const isMilestone = (payload.entityType || payload.type) === 'milestone';
       const newItem: WorkItem = {
         id,
         key,
@@ -400,7 +442,7 @@ export const api = {
         entityType: payload.entityType || 'task',
         lifeContext: payload.lifeContext || 'work',
         type: payload.type || 'task',
-        status: payload.status || 'todo',
+        status: isMilestone ? 'done' : (payload.status || 'todo'),
         priority: payload.priority || 'medium',
         projectId: payload.projectId || null,
         branchId: payload.projectId ? payload.branchId || null : null,
@@ -417,6 +459,7 @@ export const api = {
           ? payload.isInbox
           : !(payload.dueDate || payload.startDate || payload.startAt || payload.isFocus || payload.waitingFor),
         isFocus: payload.isFocus || false,
+        ...(payload.isHidden ? { isHidden: true } : {}),
         focusOrder: payload.focusOrder || null,
         snoozedUntil: payload.snoozedUntil || null,
         snoozeCount: payload.snoozeCount || 0,
@@ -428,12 +471,16 @@ export const api = {
         remindAt: toInputDateTimeValue(payload.remindAt) || null,
         reminderLeadMinutes: payload.reminderLeadMinutes ?? null,
         repeatRule: payload.repeatRule || null,
+        ...(normalizeDoses(payload.doseTimes).length ? { doseTimes: normalizeDoses(payload.doseTimes), dosesDone: [] } : {}),
         spawnedFromId: payload.spawnedFromId || null,
         location: payload.location || null,
         labels: payload.labels || [],
         customFields: payload.customFields || {},
+        // A planned task names the one before it, and starts in its project type's first status.
+        ...(payload.dependsOn?.length ? { dependsOn: payload.dependsOn } : {}),
+        ...((payload as any).stage && !isMilestone ? { stage: (payload as any).stage } : {}),
         version: 1,
-        completedAt: null,
+        completedAt: isMilestone || payload.status === 'done' ? (payload.completedAt || now) : null,
         deletedAt: null,
         createdAt: now,
         updatedAt: now,
@@ -463,6 +510,12 @@ export const api = {
         updates = { ...updates, estimatedMinutes: parseEstimateMinutes(updates.estimated) };
       }
 
+      // Doses start fresh when the times change.
+      if (updates.doseTimes !== undefined) {
+        const doses = normalizeDoses(updates.doseTimes);
+        updates = { ...updates, doseTimes: doses.length ? doses : null, dosesDone: doneDoses(doses, existing.dosesDone) };
+      }
+
       const updated: WorkItem = {
         ...existing,
         ...updates,
@@ -486,7 +539,8 @@ export const api = {
       return hydrateWorkItem(updated);
     },
 
-    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number): Promise<WorkItem> => {
+    /** stage: the project type's own status (see projectTypes.ts); left out, the stored one stays. */
+    transitionStatus: async (id: string, toStatus: string, expectedVersion?: number, stage?: string | null): Promise<WorkItem> => {
       await initializeStore();
       const index = state.workItems.findIndex(i => i && i.id === id);
       if (index === -1) throw new Error('Item not found');
@@ -499,6 +553,7 @@ export const api = {
       const updated: WorkItem = {
         ...existing,
         status: toStatus as any,
+        stage: stage !== undefined ? stage : (existing.stage ?? null),
         blockedReason: isNowBlocked ? (existing.blockedReason || 'Waiting on external input') : (toStatus === 'done' ? null : existing.blockedReason),
         // Kept through "done", so undoing it still knows who you were waiting on.
         waitingFor: isNowBlocked && !existing.waitingFor ? {
@@ -508,6 +563,10 @@ export const api = {
           sinceDate: now.split('T')[0]
         } : existing.waitingFor,
         completedAt: toStatus === 'done' ? now : null,
+        // Finishing an item with doses ticks them all; reopening starts them over.
+        ...(normalizeDoses(existing.doseTimes).length
+          ? { dosesDone: toStatus === 'done' ? normalizeDoses(existing.doseTimes) : (existing.status === 'done' ? [] : existing.dosesDone || []) }
+          : {}),
         version: nextVersion,
         updatedAt: now,
         lastTouchedAt: now
@@ -531,6 +590,31 @@ export const api = {
       await persist('workItems', updated, nextVersion);
 
       return hydrateWorkItem(updated);
+    },
+
+    /**
+     * Ticks (or unticks) one dose of a task with several times a day. The task
+     * is finished by ticking the last one, and reopens if one is unticked.
+     */
+    toggleDose: async (id: string, time: string): Promise<{ item: WorkItem; done: number; total: number }> => {
+      await initializeStore();
+      const existing = state.workItems.find(i => i && i.id === id);
+      if (!existing) throw new Error('Item not found');
+      const times = normalizeDoses(existing.doseTimes);
+      if (!times.includes(time)) throw new Error('That time is not one of this task\'s doses');
+      const ticked = toggleDose(doneDoses(times, existing.dosesDone), time);
+      const allDone = ticked.length === times.length;
+      let item: WorkItem;
+      if (allDone && existing.status !== 'done') {
+        await api.workItems.updateDetails(id, { dosesDone: ticked });
+        item = await api.workItems.transitionStatus(id, 'done');
+      } else if (!allDone && existing.status === 'done') {
+        item = await api.workItems.transitionStatus(id, 'todo');
+        item = await api.workItems.updateDetails(id, { dosesDone: ticked });
+      } else {
+        item = await api.workItems.updateDetails(id, { dosesDone: ticked });
+      }
+      return { item, done: ticked.length, total: times.length };
     },
 
     duplicate: async (id: string): Promise<WorkItem> => {
@@ -612,7 +696,8 @@ export const api = {
         key: (payload.key || 'PROJ').toUpperCase(),
         color: payload.color || 'bg-indigo-500',
         sequence: state.projects.length + 1,
-        type: 'standard',
+        type: payload.type || 'other',
+        ...(payload.autoContent ? { autoContent: true } : {}),
         description: payload.description || '',
         createdAt: now,
         updatedAt: now
@@ -746,7 +831,14 @@ export const api = {
   habits: {
     list: async (): Promise<Habit[]> => {
       await initializeStore();
-      return state.habits.filter(h => h);
+      // A habit written with "title" instead of "name" (as Claude once did) still
+      // shows its name, and one missing a target or history counts as daily, unticked.
+      return state.habits.filter(h => h).map(h => ({
+        ...h,
+        name: h.name || String((h as { title?: string }).title || '').trim() || 'Untitled habit',
+        targetCount: h.targetCount || 7,
+        history: Array.isArray(h.history) ? h.history : [],
+      }));
     },
     create: async (payload: Partial<Habit>): Promise<Habit> => {
       await initializeStore();
@@ -759,6 +851,12 @@ export const api = {
         history: [],
         areaId: payload.areaId || null,
         streak: 0,
+        // New habits remind by default; null turns it off, and it can be turned off on the habit.
+        remindTime: payload.remindTime === null ? null
+          : /^\d{2}:\d{2}$/.test(payload.remindTime || '') ? payload.remindTime : DEFAULT_HABIT_REMIND_TIME,
+        remindPush: payload.remindPush !== false,
+        remindEmail: !!payload.remindEmail,
+        ...(normalizeDoses(payload.doseTimes).length ? { doseTimes: normalizeDoses(payload.doseTimes), doseLog: {} } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -774,17 +872,55 @@ export const api = {
       const history = dateEntries(h.history);
       const has = history.includes(day);
       h.history = has ? history.filter(d => d !== day) : [...history, day];
+      // A habit with doses: ticking a whole day ticks every dose, unticking clears them.
+      if (normalizeDoses(h.doseTimes).length) {
+        h.doseLog = trimLog({ ...(h.doseLog || {}), [day]: has ? [] : normalizeDoses(h.doseTimes) });
+      }
       h.streak = streakOf(h.history, localDateString());
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
       return h;
     },
-    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount'>): Promise<Habit> => {
+    /**
+     * Ticks one dose of a habit with several times a day. The day goes into the
+     * history (so streaks count it) only when every dose is ticked.
+     */
+    toggleDose: async (id: string, day: string, time: string): Promise<Habit> => {
+      await initializeStore();
+      const h = state.habits.find(h => h && h.id === id);
+      if (!h) throw new Error('Habit not found');
+      const times = normalizeDoses(h.doseTimes);
+      if (!times.includes(time)) throw new Error('That time is not one of this habit\'s doses');
+      const ticked = toggleDose(doneDoses(times, h.doseLog?.[day]), time);
+      h.doseLog = trimLog({ ...(h.doseLog || {}), [day]: ticked });
+      const history = dateEntries(h.history).filter(d => d !== day);
+      h.history = ticked.length === times.length ? [...history, day] : history;
+      h.streak = streakOf(h.history, localDateString());
+      h.updatedAt = new Date().toISOString();
+      await persist('habits', h);
+      return h;
+    },
+    update: async (id: string, updates: Pick<Partial<Habit>, 'name' | 'targetCount' | 'remindTime' | 'remindPush' | 'remindEmail' | 'doseTimes'>): Promise<Habit> => {
       await initializeStore();
       const h = state.habits.find(h => h && h.id === id);
       if (!h) throw new Error('Habit not found');
       if (updates.name !== undefined) h.name = updates.name.trim() || h.name;
-      if (updates.targetCount !== undefined) h.targetCount = Math.min(7, Math.max(1, Math.round(updates.targetCount)));
+      if (updates.remindTime !== undefined) h.remindTime = /^\d{2}:\d{2}$/.test(updates.remindTime || '') ? updates.remindTime : null;
+      if (updates.remindPush !== undefined) h.remindPush = !!updates.remindPush;
+      if (updates.remindEmail !== undefined) h.remindEmail = !!updates.remindEmail;
+      if (updates.doseTimes !== undefined) {
+        const doses = normalizeDoses(updates.doseTimes);
+        h.doseTimes = doses.length ? doses : null;
+        if (!doses.length) h.doseLog = null;
+        else {
+          // Changing the times: a day already in the history stays fully done; today's partial ticks are kept where the time still exists.
+          const today = localDateString();
+          h.doseLog = trimLog(Object.fromEntries(Object.entries(h.doseLog || {}).map(([d, t]) => [d, d === today ? doneDoses(doses, t) : t])));
+          const full = dateEntries(h.history).includes(today);
+          if (full) h.doseLog[today] = doses;
+        }
+      }
+      h.targetCount = updates.targetCount !== undefined ? Math.min(7, Math.max(1, Math.round(updates.targetCount))) : (h.targetCount || 7);
       h.frequency = h.targetCount >= 7 ? 'daily' : `${h.targetCount}/week`;
       h.updatedAt = new Date().toISOString();
       await persist('habits', h);
@@ -811,6 +947,7 @@ export const api = {
         areaId: payload.areaId || null,
         projectId: payload.projectId || null,
         ...(payload.lifeContext ? { lifeContext: payload.lifeContext } : {}),
+        ...(payload.kind ? { kind: payload.kind } : {}),
         createdAt: now,
         updatedAt: now
       };
@@ -858,7 +995,61 @@ export const api = {
     },
     delete: async (id: string): Promise<void> => {
       await initializeStore();
+      // A map takes its thoughts with it.
+      for (const t of state.thoughts.filter(t => t && t.mapId === id)) await removeRecord('thoughts', t.id);
       await removeRecord('notes', id);
+    }
+  },
+
+  // Thoughts on a thought map (a note with kind 'map'), oldest first.
+  thoughts: {
+    list: async (mapId?: string): Promise<Thought[]> => {
+      await initializeStore();
+      return state.thoughts
+        .filter(t => t && t.mapId && (!mapId || t.mapId === mapId))
+        .sort((a, b) => a.createdAt.localeCompare(b.createdAt) || a.id.localeCompare(b.id));
+    },
+    create: async (mapId: string, payload: { text: string; status?: ThoughtStatus; topic?: string; parentId?: string | null; note?: string }): Promise<Thought> => {
+      await initializeStore();
+      const now = new Date().toISOString();
+      const thought: Thought = {
+        id: uuid(),
+        mapId,
+        text: payload.text.trim().slice(0, 500),
+        status: payload.status || 'open',
+        topic: (payload.topic || '').trim().slice(0, 40),
+        parentId: payload.parentId || null,
+        ...(payload.note ? { note: payload.note } : {}),
+        source: 'you',
+        createdAt: now,
+        updatedAt: now
+      };
+      state.thoughts.push(thought);
+      await persist('thoughts', thought);
+      await touchNote(mapId);
+      return thought;
+    },
+    update: async (id: string, updates: Partial<Pick<Thought, 'text' | 'status' | 'topic' | 'parentId' | 'note'>>): Promise<Thought> => {
+      await initializeStore();
+      const t = state.thoughts.find(t => t && t.id === id);
+      if (!t) throw new Error('Thought not found');
+      Object.assign(t, updates, { updatedAt: new Date().toISOString() });
+      await persist('thoughts', t);
+      await touchNote(t.mapId);
+      return t;
+    },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      const t = state.thoughts.find(t => t && t.id === id);
+      if (!t) return;
+      // Thoughts under it move up to its parent rather than vanishing.
+      for (const child of state.thoughts.filter(c => c && c.parentId === id)) {
+        child.parentId = t.parentId || null;
+        child.updatedAt = new Date().toISOString();
+        await persist('thoughts', child);
+      }
+      await removeRecord('thoughts', id);
+      await touchNote(t.mapId);
     }
   },
 
@@ -969,6 +1160,10 @@ export const api = {
       s.completed = completed;
       await persist('subtasks', s);
       return s;
+        },
+    delete: async (id: string): Promise<void> => {
+      await initializeStore();
+      await removeRecord('subtasks', id);
     }
   },
 
@@ -982,11 +1177,25 @@ export const api = {
   inbox: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => needsSorting(i) && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => i && (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => i && contextOf(i) === lifeContext);
       }
       return items.map(hydrateWorkItem);
+    },
+
+    // Everything open, across every project, area and section. Snoozed items
+    // stay listed (marked) so nothing open is ever out of sight.
+    all: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; done: WorkItem[]; check: VisibilityCheck }> => {
+      await initializeStore();
+      const today = localDateString();
+      const live = liveItems().map(hydrateWorkItem);
+      const items = live.filter(i => isOpen(i) && inContext(i, lifeContext)).sort(compareInbox(today));
+      const done = live.filter(i => i.status === 'done' && inContext(i, lifeContext))
+        .sort((a, b) => (b.completedAt || b.updatedAt || '').localeCompare(a.completedAt || a.updatedAt || ''));
+      const alarms = state.workItems.filter(i => isLive(i) && isAlarm(i) && isOpen(i) && inContext(i, lifeContext)).length;
+      const check = checkVisibility(live, new Set(items.map(i => i.id)), lifeContext, alarms);
+      return { items, done, check };
     },
 
     clarify: async (id: string, updates: Partial<WorkItem>): Promise<WorkItem> => {
@@ -1001,9 +1210,9 @@ export const api = {
   focus: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => i.isFocus && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => contextOf(i) === lifeContext);
       }
       return items.sort((a, b) => (a.focusOrder || 0) - (b.focusOrder || 0)).map(hydrateWorkItem);
     },
@@ -1014,7 +1223,7 @@ export const api = {
       if (!item) throw new Error('Item not found');
 
       const nextFocus = !item.isFocus;
-      if (nextFocus && state.workItems.filter(i => i && !i.deletedAt && i.isFocus && i.status !== 'done').length >= FOCUS_LIMIT) {
+      if (nextFocus && liveItems().filter(i => i.isFocus && i.status !== 'done').length >= FOCUS_LIMIT) {
         throw new Error(`Focus is full (${FOCUS_LIMIT}). Finish one or take one out first.`);
       }
       return api.workItems.updateDetails(id, {
@@ -1060,9 +1269,9 @@ export const api = {
   waitingFor: {
     list: async (lifeContext?: LifeContext): Promise<WorkItem[]> => {
       await initializeStore();
-      let items = state.workItems.filter(i => i && !i.deletedAt && i.waitingFor && i.status !== 'done' && !isSnoozed(i));
+      let items = liveItems().filter(i => i.waitingFor && i.status !== 'done' && !isSnoozed(i));
       if (lifeContext) {
-        items = items.filter(i => (i.lifeContext || 'work') === lifeContext);
+        items = items.filter(i => contextOf(i) === lifeContext);
       }
       return items.map(hydrateWorkItem);
     },
@@ -1085,6 +1294,32 @@ export const api = {
     }
   },
 
+  // Today: one list of everything due, overdue, starting today or starred,
+  // ordered overdue first, then priority, then time.
+  today: {
+    list: async (lifeContext?: LifeContext): Promise<{ items: WorkItem[]; snoozed: WorkItem[] }> => {
+      await initializeStore();
+      const today = localDateString();
+      const candidates = liveItems()
+        .filter(i => isOpen(i) && inContext(i, lifeContext))
+        .map(hydrateWorkItem)
+        .filter(i => isOnToday(i, today))
+        .sort(compareToday(today));
+      return {
+        items: candidates.filter(i => !isSnoozedNow(i)),
+        snoozed: candidates.filter(i => isSnoozedNow(i))
+      };
+    },
+
+    // What Chill mode hides: open work items, and those of them on Today.
+    hiddenWork: async (): Promise<{ today: number; open: number }> => {
+      await initializeStore();
+      const today = localDateString();
+      const work = liveItems().filter(i => isOpen(i) && contextOf(i) === 'work').map(hydrateWorkItem);
+      return { today: work.filter(i => isOnToday(i, today)).length, open: work.length };
+    }
+  },
+
   attention: {
     getTodayAttention: async (lifeContext?: LifeContext): Promise<any> => {
       await initializeStore();
@@ -1092,10 +1327,7 @@ export const api = {
       const today = localDateString(now);
       const nowIso = now.toISOString();
 
-      const items = state.workItems.filter(i => 
-        i && !i.deletedAt && 
-        (!lifeContext || (i.lifeContext || 'work') === lifeContext)
-      );
+      const items = liveItems().filter(i => !lifeContext || contextOf(i) === lifeContext);
 
       // Filter active (not completed, not actively snoozed past now)
       const activeItems = items.filter(i => {
@@ -1252,7 +1484,8 @@ export const api = {
         activities: Array.isArray(parsed.data.activities) ? parsed.data.activities : [],
         boards: Array.isArray(parsed.data.boards) ? parsed.data.boards : [],
         dossiers: Array.isArray(parsed.data.dossiers) ? parsed.data.dossiers : [],
-        ideas: Array.isArray(parsed.data.ideas) ? parsed.data.ideas : []
+        ideas: Array.isArray(parsed.data.ideas) ? parsed.data.ideas : [],
+        thoughts: Array.isArray(parsed.data.thoughts) ? parsed.data.thoughts : []
       };
 
       await Promise.all([
@@ -1267,7 +1500,8 @@ export const api = {
         putBatchToStore('activities', state.activities),
         putBatchToStore('boards', state.boards),
         putBatchToStore('dossiers', state.dossiers),
-        putBatchToStore('ideas', state.ideas)
+        putBatchToStore('ideas', state.ideas),
+        putBatchToStore('thoughts', state.thoughts)
       ]);
 
       // Upload everything restored, not just tasks, so other devices get it too.
@@ -1310,7 +1544,7 @@ export const api = {
 
     await clearAllStores();
     state = {
-      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: [], dossiers: [], ideas: []
+      workItems: [], projects: [], areas: [], goals: [], habits: [], notes: [], comments: [], subtasks: [], activities: [], boards: [], dossiers: [], ideas: [], thoughts: []
     };
     try {
       localStorage.removeItem('sage_solo_v5');

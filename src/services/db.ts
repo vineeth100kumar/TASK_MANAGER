@@ -6,7 +6,7 @@
 
 
 const DB_NAME = 'sage_local_db';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 export interface SyncOpRecord {
   operationId: string;       // Unique UUID/ULID
@@ -117,6 +117,11 @@ export async function getDB(): Promise<IDBDatabase> {
       }
       if (!db.objectStoreNames.contains('ideas')) {
         db.createObjectStore('ideas', { keyPath: 'id' });
+      }
+
+      // 15. thoughts Store (one record per thought on a thought map)
+      if (!db.objectStoreNames.contains('thoughts')) {
+        db.createObjectStore('thoughts', { keyPath: 'id' });
       }
     };
 
@@ -305,7 +310,7 @@ export async function migrateFromLocalStorage(): Promise<boolean> {
 export async function clearAllStores(): Promise<void> {
   const stores = [
     'workItems', 'projects', 'areas', 'goals', 'habits', 'notes', 
-    'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas', 'syncOperations', 'meta'
+    'comments', 'subtasks', 'activities', 'boards', 'dossiers', 'ideas', 'thoughts', 'syncOperations', 'meta'
   ];
   for (const s of stores) {
     try {

@@ -16,15 +16,20 @@ copies of the web app update straight away and /api/claude/history lists what
 Claude changed. Deletes leave the usual marker row holding the last copy.
 """
 
+import asyncio
 import datetime
 import hmac
 import json
 import os
+import re
 import sqlite3
-from html import escape
+from html import escape, unescape
 from typing import Any, Awaitable, Callable, List, Optional
 
 from fastapi import APIRouter, Request
+
+import item_shape
+import placement
 from fastapi.responses import JSONResponse, Response
 
 TOKEN = os.getenv("SAGE_CLAUDE_TOKEN", "").strip()
@@ -48,12 +53,21 @@ _quick_add: Optional[Callable[[str], Awaitable[dict]]] = None
 _today: Callable[[], datetime.date] = datetime.date.today
 _health: Optional[Callable[[], dict]] = None
 _logs: Optional[Callable[..., dict]] = None
+# drop.py, for publishing reports as share links.
+_drop: Any = None
+# posts.py, the Auto Content slide maker (Posts).
+_posts: Any = None
+# reels.py, the reel maker (Reels).
+_reels: Any = None
+# diagnostics.py, the blackout probe (summary + raw recent samples).
+_diagnostics: Any = None
 
 
-def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None) -> None:
-    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs
+def connect(db_path: str, tables: set, apply, quick_add, today, health=None, logs=None, drops=None, posts=None, diagnostics=None, reels=None) -> None:
+    global DB_PATH, TABLES, _apply, _quick_add, _today, _health, _logs, _drop, _posts, _diagnostics, _reels
     DB_PATH, TABLES, _apply, _quick_add, _today, _health = db_path, set(tables), apply, quick_add, today, health
-    _logs = logs
+    _logs, _drop, _posts, _diagnostics = logs, drops, posts, diagnostics
+    _reels = reels
 
 
 def token_matches(candidate: Optional[str]) -> bool:
@@ -123,15 +137,24 @@ def _joined(record: dict, count_key: str, prefix: str) -> Optional[str]:
     return "".join(str(record.get(f"{prefix}{i}") or "").removeprefix("~") for i in range(parts))
 
 
-def list_records(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50) -> dict:
+def list_records(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50, hidden: str = "") -> dict:
     _check_table(table)
     records = _rows(table)
+    if table == "workItems":
+        # Hidden tasks stay out unless asked for, as in the app.
+        hidden = (hidden or "exclude").strip().lower()
+        if hidden == "only":
+            records = [r for r in records if item_shape.is_hidden(r)]
+        elif hidden != "include":
+            records = [r for r in records if not item_shape.is_hidden(r)]
     if q:
         needle = q.lower()
         records = [r for r in records if needle in json.dumps(r, ensure_ascii=False).lower()]
     if status:
+        # Compared in the one shape, so "in_review" counts as in_progress, as in the app.
         wanted = {s.strip() for s in status.split(",") if s.strip()}
-        records = [r for r in records if r.get("status") in wanted]
+        types = item_shape.project_types(_rows("projects")) if table == "workItems" else {}
+        records = [r for r in records if (item_shape.normalize_item(r, types.get(r.get("projectId")))["status"] if table == "workItems" else r.get("status")) in wanted]
     if due_by:
         records = [r for r in records if r.get("dueDate") and str(r["dueDate"]) <= due_by]
     records.sort(key=lambda r: str(r.get("updatedAt") or r.get("createdAt") or ""), reverse=True)
@@ -155,13 +178,23 @@ def get_record(table: str, record_id: str) -> dict:
     return record
 
 
+def _project_type(p: dict) -> str:
+    """Older projects hold 'standard' or nothing, which the app shows as Other."""
+    t = (p.get("type") or "").strip()
+    return "other" if t in ("", "standard") else t
+
+
 def overview() -> dict:
     today = _today().isoformat()
     counts = {}
     for table in sorted(TABLES):
         counts[table] = len(_rows(table))
-    items = _rows("workItems") if "workItems" in TABLES else []
-    open_items = [i for i in items if i.get("status") != "done" and not i.get("deletedAt")]
+    types = item_shape.project_types(_rows("projects")) if "projects" in TABLES else {}
+    items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in _rows("workItems")] if "workItems" in TABLES else []
+    # LUMO alarms are reminders underneath but not tasks; hidden tasks are
+    # counted but not listed (sage_list with hidden "only" shows them).
+    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and not item_shape.is_hidden(i)]
+    hidden_open = sum(1 for i in items if item_shape.is_open(i) and item_shape.is_hidden(i))
 
     def brief(i: dict) -> dict:
         return {k: i.get(k) for k in ("id", "title", "status", "priority", "dueDate", "dueTime", "projectId") if i.get(k) is not None}
@@ -172,10 +205,11 @@ def overview() -> dict:
         "today": today,
         "counts": counts,
         "openItems": len(open_items),
+        "hiddenOpenItems": hidden_open,
         "dueTodayOrOverdue": [brief(i) for i in due[:50]],
         "focus": [brief(i) for i in open_items if i.get("isFocus")][:20],
         "inbox": [brief(i) for i in open_items if i.get("isInbox")][:20],
-        "projects": [{"id": p.get("id"), "name": p.get("name")} for p in (_rows("projects") if "projects" in TABLES else [])],
+        "projects": [{"id": p.get("id"), "name": p.get("name"), "type": _project_type(p)} for p in (_rows("projects") if "projects" in TABLES else [])],
     }
 
 
@@ -189,6 +223,22 @@ def logs(since: str = "", level: str = "", source: str = "", q: str = "", limit:
     if _logs is None:
         raise ApiError(503, "The log isn't connected")
     return _logs(since=since, level=level, source=source, q=q, limit=limit)
+
+
+def diagnostics(hours: float = 24, samples: int = 0) -> dict:
+    """Blackout diagnostics: the 'blackouts in the last N hours' summary, and
+    optionally the raw recent samples when ``samples`` is given."""
+    if _diagnostics is None:
+        raise ApiError(503, "Diagnostics isn't connected")
+    out = _diagnostics.summary(hours or 24)
+    if samples:
+        out["recent"] = _diagnostics.recent(samples)["samples"]
+    try:  # which disk Sage is writing to; a failing card shows up as slow writes
+        import data_dir
+        out["storage"] = data_dir.status()
+    except Exception as e:  # never let this hide the blackout story
+        out["storage"] = {"error": f"{e.__class__.__name__}: {e}"[:200]}
+    return out
 
 
 def history(limit: int = 50) -> dict:
@@ -210,13 +260,35 @@ def _now() -> str:
     return datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z")
 
 
-def _note_body(fields: dict) -> None:
+RAW_NOTE_KINDS = ("html", "code")
+MAX_PUSH_CHARS = 2_000_000
+
+
+def _html_text(html: str) -> str:
+    """Plain words of an HTML page, for the Notes list preview and search."""
+    html = re.sub(r"(?is)<(script|style|head)\b.*?</\1>", " ", html)
+    text = unescape(re.sub(r"(?s)<[^>]+>", " ", html))
+    return re.sub(r"\s+", " ", text).strip()[:40000]
+
+
+def looks_like_html_page(text: Any) -> bool:
+    return bool(re.match(r"\s*(<!doctype html|<html[\s>])", str(text or ""), re.I))
+
+
+def _note_body(fields: dict, kind: Optional[str] = None) -> None:
     """The web app shows a note's body parts when it has any, so plain text
-    sent as `content` is written there too, the way the editor would save it."""
+    sent as `content` is written there too, the way the editor would save it.
+    HTML reports and code notes keep their source as sent: the app shows them
+    in a sandboxed frame or a code view, never in the editor."""
     if "content" not in fields or any(k.startswith("body") for k in fields):
         return
     text = str(fields["content"] or "")
-    html = "".join(f"<div>{escape(line) if line else '<br>'}</div>" for line in text.split("\n")) if text else ""
+    kind = fields.get("kind", kind)
+    if kind in RAW_NOTE_KINDS:
+        html = text
+        fields["content"] = _html_text(text) if kind == "html" else text[:40000]
+    else:
+        html = "".join(f"<div>{escape(line) if line else '<br>'}</div>" for line in text.split("\n")) if text else ""
     parts = max(1, -(-len(html) // NOTE_PART_SIZE))
     for i in range(parts):
         fields[f"body{i}"] = "~" + html[i * NOTE_PART_SIZE:(i + 1) * NOTE_PART_SIZE]
@@ -241,9 +313,97 @@ async def _write(table: str, record_id: str, operation: str, payload: Optional[d
 
 
 _DEFAULTS = {
-    "workItems": {"entityType": "task", "type": "task", "status": "todo", "priority": "medium",
+    # entityType and type are worked out from what was sent (item_shape.kind_of).
+    "workItems": {"status": "todo", "priority": "medium",
                   "description": "", "isFocus": False, "version": 1},
 }
+
+
+def project_key(name: str, taken) -> str:
+    """Same as projectKey in src/services/ideaProject.ts: initials, or the
+    first four letters of a one-word name, made unique with a number."""
+    words = re.sub(r"[^A-Z0-9 ]", " ", str(name or "").upper()).split()
+    key = "".join(w[0] for w in words)[:4] if len(words) > 1 else (words[0] if words else "PROJ")[:4]
+    if len(key) < 2:
+        key = ("".join(words) + "PROJ")[:3]
+    used = {str(k or "").upper() for k in taken}
+    if key not in used:
+        return key
+    n = 2
+    while f"{key}{n}" in used:
+        n += 1
+    return f"{key}{n}"
+
+
+# Reminder time every new habit starts with (same as src/services/types.ts).
+DEFAULT_HABIT_REMIND_TIME = "20:00"
+
+
+def _habit_target(record: dict) -> int:
+    """targetCount (days a week, 1-7) from targetCount or a frequency like
+    "daily" or "5/week"."""
+    try:
+        target = int(record.get("targetCount") or 0)
+    except (TypeError, ValueError):
+        target = 0
+    if not target:
+        m = re.match(r"\s*(\d+)\s*/\s*week", str(record.get("frequency") or ""))
+        target = int(m.group(1)) if m else 7
+    return min(7, max(1, target))
+
+
+def _shape_named(table: str, record: dict, creating: bool) -> None:
+    """Projects, habits and goals in the shape the web app reads
+    (src/services/api.ts create). A habit or project sent with "title" gets it
+    as its "name" (and a goal sent with "name" gets a "title"), so it never
+    shows up blank."""
+    if table in ("habits", "projects") and "title" in record:
+        title = str(record.pop("title") or "").strip()
+        if title and not str(record.get("name") or "").strip():
+            record["name"] = title
+    if table == "goals" and "name" in record:
+        name = str(record.pop("name") or "").strip()
+        if name and not str(record.get("title") or "").strip():
+            record["title"] = name
+    if table == "habits":
+        if "name" in record or creating:
+            if not str(record.get("name") or "").strip():
+                raise ApiError(400, "A habit needs a name")
+            record["name"] = str(record["name"]).strip()
+        if creating or "targetCount" in record or "frequency" in record:
+            record["targetCount"] = _habit_target(record)
+            record["frequency"] = "daily" if record["targetCount"] >= 7 else f"{record['targetCount']}/week"
+        if creating:
+            history = record.get("history")
+            record["history"] = [d for d in history if isinstance(d, str)] if isinstance(history, list) else []
+            record.setdefault("areaId", None)
+            record.setdefault("streak", 0)
+            # New habits remind by default (an explicit None keeps it off).
+            record.setdefault("remindTime", DEFAULT_HABIT_REMIND_TIME)
+            if record["remindTime"] is not None and not re.match(r"^\d{2}:\d{2}$", str(record["remindTime"])):
+                record["remindTime"] = DEFAULT_HABIT_REMIND_TIME
+            record.setdefault("remindPush", True)
+            record.setdefault("remindEmail", False)
+    if table == "projects" and creating:
+        if not str(record.get("name") or "").strip():
+            raise ApiError(400, "A project needs a name")
+        others = [p for p in _rows("projects") if p.get("id") != record.get("id")]
+        if not str(record.get("key") or "").strip():
+            record["key"] = project_key(record["name"], [p.get("key") for p in others])
+        record["key"] = str(record["key"]).strip().upper()
+        record.setdefault("color", "bg-indigo-500")
+        record.setdefault("sequence", len(others) + 1)
+        record.setdefault("type", "other")
+        record.setdefault("description", "")
+    if table == "goals" and creating:
+        if not str(record.get("title") or "").strip():
+            raise ApiError(400, "A goal needs a title")
+        record.setdefault("progress", 0)
+        record.setdefault("targetDate", "")
+        record.setdefault("areaId", None)
+        record.setdefault("projectId", None)
+        record.setdefault("category", "personal")
+        record.setdefault("description", "")
 
 
 def _next_key(record: dict) -> str:
@@ -255,8 +415,7 @@ def _next_key(record: dict) -> str:
             prefix = project["key"]
     elif record.get("areaId"):
         prefix = "LIFE"
-    count = sum(1 for i in _rows("workItems") if str(i.get("key") or "").startswith(prefix))
-    return f"{prefix}-{count + 1}"
+    return item_shape.next_key(_rows("workItems"), prefix)
 
 
 async def create_record(table: str, fields: dict) -> dict:
@@ -268,16 +427,55 @@ async def create_record(table: str, fields: dict) -> dict:
         raise ApiError(409, f"{table} {record_id} already exists; update it instead")
     now = _now()
     record = {**_DEFAULTS.get(table, {}), **fields, "id": record_id, "createdAt": fields.get("createdAt") or now, "updatedAt": now}
+    _shape_named(table, record, creating=True)
     if table == "workItems":
         if not str(record.get("title") or "").strip():
             raise ApiError(400, "A work item needs a title")
         record.setdefault("isInbox", not record.get("dueDate") and not record.get("projectId"))
+        project_ids = {p.get("id") for p in _rows("projects")}
+        area_ids = {a.get("id") for a in _rows("areas")}
+        if placement.needs_place(record, project_ids, area_ids):
+            # Drop a project/area that doesn't exist, then place by words, else the Inbox project.
+            if record.get("projectId") not in project_ids:
+                record["projectId"] = None
+            if record.get("areaId") not in area_ids:
+                record["areaId"] = None
+            if not record["projectId"] and not record["areaId"]:
+                record["projectId"] = placement.choose_project(record.get("title"), _rows("projects"), _rows("workItems"))
+                if not record["projectId"]:
+                    record["projectId"] = placement.INBOX_PROJECT_ID
+                    if _find("projects", placement.INBOX_PROJECT_ID) is None:
+                        await _write("projects", placement.INBOX_PROJECT_ID, "save", placement.inbox_project(now))
         record.setdefault("source", CLIENT_ID)
+        # Written in the one shape the app reads (item_shape.py), so a milestone
+        # isn't stored with type "task" and every item has its context and labels.
+        record["entityType"] = item_shape.kind_of(record)
+        if "type" not in fields:
+            record["type"] = record["entityType"]
+        record["lifeContext"] = item_shape.context_of(record)
+        record.setdefault("labels", [])
+        record.setdefault("branchId", None)
+        # A milestone is logged after the work is done, so it is always done.
+        if record["entityType"] == "milestone":
+            record["status"] = "done"
+            if record.get("stage") and record["stage"] not in ("done", "shipped", "published"):
+                record["stage"] = None
+        if record.get("status") == "done" and not record.get("completedAt"):
+            record["completedAt"] = now
         if not record.get("key"):
             record["key"] = _next_key(record)
+    if table == "thoughts":
+        if not str(record.get("text") or "").strip() or not record.get("mapId"):
+            raise ApiError(400, "A thought needs text and the mapId of its map")
+        record["status"] = thought_status(record.get("status"))
+        record.setdefault("topic", "")
+        record.setdefault("source", CLIENT_ID)
     if table == "notes":
         record.setdefault("title", "Untitled")
         record.setdefault("content", "")
+        # A whole HTML page sent with sage_create becomes a report, not text.
+        if not record.get("kind") and looks_like_html_page(record["content"]):
+            record["kind"] = "html"
         _note_body(record)
     await _write(table, record_id, "save", record)
     return get_record(table, record_id)
@@ -290,10 +488,15 @@ async def update_record(table: str, record_id: str, fields: dict) -> dict:
     if _find(table, record_id) is None:
         raise ApiError(404, f"No {table} record {record_id}")
     fields = {k: v for k, v in fields.items() if k not in ("id", "revision", "createdAt")}
+    if table == "workItems" and "status" in fields and item_shape.kind_of({**_find(table, record_id), **fields}) == "milestone":
+        fields["status"] = "done"  # a milestone can't be reopened; it was logged as done
     if table == "workItems" and fields.get("status") == "done" and "completedAt" not in fields:
         fields["completedAt"] = _now()
+    _shape_named(table, fields, creating=False)
     if table == "notes":
-        _note_body(fields)
+        _note_body(fields, _find(table, record_id).get("kind"))
+    if table == "thoughts" and "status" in fields:
+        fields["status"] = thought_status(fields["status"])
     fields["updatedAt"] = _now()
     await _write(table, record_id, "patch", fields)
     return get_record(table, record_id)
@@ -311,6 +514,705 @@ async def quick_add(text: str) -> dict:
     if not str(text or "").strip():
         raise ApiError(400, "text is required")
     return await _quick_add(text)
+
+
+# --- Thought maps: a note with kind "map", its thoughts in the thoughts table ---
+
+THOUGHT_STATUSES = ("open", "unsure", "good", "bad")
+# Words Claude (or a person) might use for each icon.
+_STATUS_WORDS = {
+    "open": "open", "?": "open", "unsorted": "open", "question": "open", "todo": "open",
+    "unsure": "unsure", "confused": "unsure", "confusing": "unsure", "maybe": "unsure", "ongoing": "unsure", "researching": "unsure",
+    "good": "good", "pro": "good", "holds": "good", "holds up": "good", "valid": "good", "yes": "good", "tick": "good",
+    "bad": "bad", "con": "bad", "doesn't hold": "bad", "invalid": "bad", "no": "bad", "dropped": "bad", "ruled out": "bad",
+}
+
+
+def thought_status(word: Any) -> str:
+    key = str(word or "open").strip().lower()
+    if key not in _STATUS_WORDS:
+        raise ApiError(400, f"Unknown status {word!r}. Use open, unsure, good or bad (pro and con work too)")
+    return _STATUS_WORDS[key]
+
+
+def _maps() -> List[dict]:
+    return [n for n in _rows("notes") if n.get("kind") == "map"]
+
+
+def _thoughts_of(map_id: str) -> List[dict]:
+    rows = [t for t in _rows("thoughts") if t.get("mapId") == map_id]
+    rows.sort(key=lambda t: (str(t.get("createdAt") or ""), str(t.get("id"))))
+    return rows
+
+
+def _counts(thoughts: List[dict]) -> dict:
+    counts = {s: 0 for s in THOUGHT_STATUSES}
+    for t in thoughts:
+        counts[t.get("status") if t.get("status") in counts else "open"] += 1
+    return counts
+
+
+def _find_map(ref: str) -> Optional[dict]:
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    maps = _maps()
+    for m in maps:
+        if m.get("id") == ref:
+            return m
+    lower = ref.lower()
+    exact = [m for m in maps if str(m.get("title") or "").strip().lower() == lower]
+    if exact:
+        return exact[0]
+    partial = [m for m in maps if lower in str(m.get("title") or "").lower()]
+    if len(partial) > 1:
+        raise ApiError(400, "More than one map matches: " + ", ".join(repr(m.get("title")) for m in partial) + ". Use the map's id")
+    return partial[0] if partial else None
+
+
+def list_maps() -> dict:
+    out = []
+    for m in sorted(_maps(), key=lambda m: str(m.get("updatedAt") or ""), reverse=True):
+        thoughts = _thoughts_of(m["id"])
+        topics = []
+        for t in thoughts:
+            if t.get("topic") and t["topic"] not in topics:
+                topics.append(t["topic"])
+        out.append({"id": m["id"], "title": m.get("title"), "thoughts": len(thoughts), "counts": _counts(thoughts),
+                    "topics": topics, "updatedAt": m.get("updatedAt")})
+    return {"maps": out}
+
+
+def get_map(ref: str) -> dict:
+    m = _find_map(ref)
+    if not m:
+        raise ApiError(404, f"No thought map called {ref!r}. sage_maps lists them")
+    thoughts = _thoughts_of(m["id"])
+    keep = ("id", "text", "status", "topic", "parentId", "note", "source", "createdAt")
+    return {
+        "map": {"id": m["id"], "title": m.get("title"), "lifeContext": m.get("lifeContext")},
+        "counts": _counts(thoughts),
+        "thoughts": [{k: t.get(k) for k in keep if t.get(k) not in (None, "")} for t in thoughts],
+    }
+
+
+async def add_thoughts(ref: str, thoughts: Any, create_map: bool = False) -> dict:
+    if not isinstance(thoughts, list) or not thoughts:
+        raise ApiError(400, "Send thoughts as a list of {text, status, topic, under, note}")
+    m = _find_map(ref)
+    if not m:
+        if not create_map or not str(ref or "").strip():
+            raise ApiError(404, f"No thought map called {ref!r}. sage_maps lists them, or pass create_map true")
+        m = await create_record("notes", {"title": str(ref).strip(), "kind": "map", "content": ""})
+    existing = _thoughts_of(m["id"])
+    added = []
+    base = datetime.datetime.now(datetime.timezone.utc)
+    for i, raw in enumerate(thoughts):
+        if isinstance(raw, str):
+            raw = {"text": raw}
+        if not isinstance(raw, dict) or not str(raw.get("text") or "").strip():
+            raise ApiError(400, f"Thought {i + 1} needs some text")
+        parent = None
+        under = str(raw.get("under") or raw.get("parentId") or "").strip()
+        if under:
+            pool = existing + added
+            parent = next((t for t in pool if t["id"] == under), None) or \
+                next((t for t in pool if str(t.get("text") or "").strip().lower() == under.lower()), None)
+            if not parent:
+                raise ApiError(400, f"No thought {under!r} in {m.get('title')!r} to put thought {i + 1} under")
+        topic = str(raw.get("topic") or "").strip()
+        if not topic and parent:
+            topic = parent.get("topic") or ""
+        # A millisecond apart, so a batch keeps the order it was sent in.
+        at = (base + datetime.timedelta(milliseconds=i)).isoformat().replace("+00:00", "Z")
+        fields = {
+            "mapId": m["id"], "text": str(raw["text"]).strip()[:500], "status": thought_status(raw.get("status")),
+            "topic": topic[:40], "parentId": parent["id"] if parent else None, "source": CLIENT_ID, "createdAt": at,
+        }
+        if str(raw.get("note") or "").strip():
+            fields["note"] = str(raw["note"]).strip()[:2000]
+        added.append(await create_record("thoughts", fields))
+    await update_record("notes", m["id"], {"title": m.get("title")})  # bumps the map up the Notes list
+    return {"map": {"id": m["id"], "title": m.get("title")}, "added": added, "counts": _counts(existing + added)}
+
+
+# --- Reports and code pushed into Notes ---
+
+def _find_note(ref: str) -> Optional[dict]:
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    notes = [n for n in _rows("notes") if n.get("kind") != "map"]
+    return next((n for n in notes if n.get("id") == ref), None) or \
+        next((n for n in notes if str(n.get("title") or "").strip().lower() == ref.lower()), None)
+
+
+async def push_note(args: Any) -> dict:
+    """Saves an HTML report or a piece of code as a note. Sending the same title
+    (or the note's id as `replace`) again updates that note instead of adding one."""
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {title, html} or {title, code, language}")
+    title = str(args.get("title") or "").strip()[:200]
+    html, code = args.get("html"), args.get("code")
+    if not title or (html is None) == (code is None):
+        raise ApiError(400, "Send a title and exactly one of html or code")
+    body = str(html if html is not None else code)
+    if not body.strip():
+        raise ApiError(400, "The html or code is empty")
+    if len(body) > MAX_PUSH_CHARS:
+        raise ApiError(413, f"That is {len(body)} characters; a note holds at most {MAX_PUSH_CHARS}")
+    fields = {
+        "title": title, "kind": "html" if html is not None else "code", "content": body,
+        # Who sent it, e.g. claude, gemini or chatgpt, shown on the note.
+        "source": re.sub(r"[^a-z0-9 ._-]", "", str(args.get("source") or CLIENT_ID).lower())[:30] or CLIENT_ID,
+    }
+    if code is not None:
+        fields["language"] = re.sub(r"[^a-z0-9+#._-]", "", str(args.get("language") or "").lower())[:20]
+    if args.get("projectId"):
+        fields["projectId"] = str(args["projectId"])
+    if args.get("lifeContext") in ("work", "personal"):
+        fields["lifeContext"] = args["lifeContext"]
+    old = _find_note(args.get("replace") or title)
+    if old and old.get("kind") in RAW_NOTE_KINDS:
+        record = await update_record("notes", old["id"], fields)
+        return {"updated": True, "note": _short(record)}
+    record = await create_record("notes", fields)
+    return {"updated": False, "note": _short(record)}
+
+
+# --- Web page reports shared through Drop (drop.py) ---
+
+# A page sent as body HTML only gets this around it: readable type, light and dark.
+DROP_PAGE = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>{title}</title>
+<style>
+:root{{color-scheme:light dark;--bg:#fbfbfd;--text:#1c1c1e;--muted:#6b7280;--border:#e5e7eb;--accent:#1f3a5f}}
+@media (prefers-color-scheme:dark){{:root{{--bg:#111316;--text:#ececf1;--muted:#9ca3af;--border:#2c3036;--accent:#8fb4e3}}}}
+body{{margin:0;background:var(--bg);color:var(--text);font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif}}
+main{{max-width:860px;margin:0 auto;padding:32px 16px 64px}}
+h1,h2,h3{{line-height:1.25}} a{{color:var(--accent)}} img,svg,video{{max-width:100%;height:auto}}
+table{{border-collapse:collapse;width:100%;display:block;overflow-x:auto}} th,td{{border:1px solid var(--border);padding:6px 10px;text-align:left}}
+code,pre{{font-family:ui-monospace,Menlo,Consolas,monospace;font-size:.9em}} pre{{overflow-x:auto;padding:12px;border:1px solid var(--border);border-radius:8px}}
+</style></head>
+<body><main>
+{body}
+</main></body></html>
+"""
+
+
+def _need_drop() -> Any:
+    if _drop is None:
+        raise ApiError(503, "Drop isn't connected")
+    return _drop
+
+
+def _drop_link(d: dict, base: Optional[str]) -> dict:
+    """A drop as Claude sees it, with the full link to hand over."""
+    out = {k: d.get(k) for k in ("id", "name", "kind", "permanent", "disabled", "views", "bytes", "source")}
+    out["url"] = f"{base}{d['path']}" if base else None
+    out["path"] = d["path"]
+    out["expiresAt"] = None if d.get("permanent") else datetime.datetime.fromtimestamp(
+        d["expiresAt"], datetime.timezone.utc).isoformat(timespec="seconds")
+    return out
+
+
+async def _drop_base() -> tuple:
+    """(base URL or None, a note to pass on when links only work at home)."""
+    found = await asyncio.to_thread(_need_drop().base_url)
+    base = (found or {}).get("url")
+    note = None if base else ("Sage has no public address right now, so this link only opens on the home "
+                              "network (Sage's own address + path). Turn on the public link in Settings to share it.")
+    return base, note
+
+
+async def publish_drop(args: Any) -> dict:
+    """Publishes an HTML page as a Drop share link. Sending replace (a drop's
+    id) swaps that page's contents and keeps its link."""
+    drop = _need_drop()
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {title, html}")
+    title = str(args.get("title") or "").strip()[:120]
+    page = str(args.get("html") or "")
+    if not title or not page.strip():
+        raise ApiError(400, "Send a title and the page's html")
+    if not looks_like_html_page(page):
+        page = DROP_PAGE.format(title=escape(title), body=page)
+    data = page.encode("utf-8")
+    replace = str(args.get("replace") or "").strip()
+    try:
+        if replace:
+            made = await asyncio.to_thread(drop.replace_page, replace, data, title)
+        else:
+            hours = args.get("hours")
+            made = await asyncio.to_thread(drop.create, [("index.html", data)], title,
+                                           float(hours) if hours else drop.DEFAULT_HOURS, CLIENT_ID)
+            made.pop("warnings", None)
+            if args.get("permanent", True) and not hours:
+                made = await asyncio.to_thread(drop.set_permanent, made["id"], True)
+    except (drop.DropError, ValueError) as e:
+        raise ApiError(400, str(e))
+    base, note = await _drop_base()
+    out = {"replaced": bool(replace), "drop": _drop_link(made, base)}
+    if note:
+        out["note"] = note
+    return out
+
+
+async def list_drops() -> dict:
+    drops = await asyncio.to_thread(_need_drop().list_drops)
+    base, note = await _drop_base()
+    out = {"drops": [_drop_link(d, base) for d in drops]}
+    if note:
+        out["note"] = note
+    return out
+
+
+async def change_drop(args: Any) -> dict:
+    """Turns a link off or on, makes it permanent or temporary, or gives it more hours."""
+    drop = _need_drop()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, "Send the drop's id")
+    slug = str(args["id"])
+    try:
+        made = None
+        if "enabled" in args:
+            made = await asyncio.to_thread(drop.set_enabled, slug, bool(args["enabled"]))
+        if "permanent" in args:
+            made = await asyncio.to_thread(drop.set_permanent, slug, bool(args["permanent"]))
+        if args.get("hours"):
+            made = await asyncio.to_thread(drop.extend, slug, float(args["hours"]))
+            if made is None:
+                raise ApiError(404, "No drop has that id")
+    except (drop.DropError, ValueError) as e:
+        raise ApiError(400, str(e))
+    if made is None:
+        raise ApiError(400, "Send enabled, permanent or hours")
+    base, _ = await _drop_base()
+    return {"drop": _drop_link(made, base)}
+
+
+async def delete_drop(slug: str) -> dict:
+    if not await asyncio.to_thread(_need_drop().remove, str(slug or "")):
+        raise ApiError(404, "No drop has that id")
+    return {"deleted": str(slug)}
+
+
+# --- Instagram carousel posts made on the Pi (posts.py) ---
+
+POST_WAIT_MAX = 120  # seconds a tool call may wait for a post to finish
+_UNFINISHED = ("queued", "running")
+
+
+def _need_posts() -> Any:
+    if _posts is None:
+        raise ApiError(503, "Posts isn't connected")
+    return _posts
+
+
+def post_format() -> dict:
+    """The script format, cut from the engine's own POST_FORMAT.md, plus a full example."""
+    posts = _need_posts()
+    guide = (posts.ENGINE_DIR / "POST_FORMAT.md").read_text(encoding="utf-8")
+    m = re.search(r"<!-- PROMPT START -->(.*?)<!-- PROMPT END -->", guide, re.S)
+    rules = (m.group(1) if m else guide).strip()
+    rules = re.sub(r"\n*NOW WRITE the script for the topic and facts below\.\s*$", "", rules).strip()
+    example = (posts.ENGINE_DIR / "example_script.md").read_text(encoding="utf-8")
+    return {"format": rules, "example": example, "styles": list(posts.STYLES), "sizes": list(posts.FORMATS)}
+
+
+def _content_projects() -> List[dict]:
+    return [p for p in _rows("projects") if _project_type(p) == "content"]
+
+
+def _post_project(ref: Any) -> Optional[dict]:
+    """The project a post goes into, by id or name. It has to be a content
+    project with Use Auto Content switched on, the same rule as the app's
+    New post screen."""
+    ref = str(ref or "").strip()
+    if not ref:
+        return None
+    projects = [p for p in _rows("projects") if isinstance(p, dict)]
+    lower = ref.lower()
+    found = next((p for p in projects if p.get("id") == ref), None) \
+        or next((p for p in projects if str(p.get("name") or "").strip().lower() == lower), None) \
+        or next((p for p in projects if str(p.get("key") or "").strip().lower() == lower), None)
+    if not found:
+        partial = [p for p in projects if lower in str(p.get("name") or "").lower()]
+        if len(partial) == 1:
+            found = partial[0]
+        elif partial:
+            raise ApiError(400, "More than one project matches that: " + ", ".join(str(p.get("name")) for p in partial)
+                           + ". Send the exact name or the id.")
+    ready = [str(p.get("name")) for p in _content_projects() if p.get("autoContent")]
+    choices = (" Projects that can take posts: " + ", ".join(ready) + ".") if ready else \
+        " No project has it switched on yet."
+    if not found:
+        raise ApiError(404, f"No project called {ref}.{choices}")
+    name = found.get("name") or ref
+    if _project_type(found) != "content":
+        raise ApiError(400, f"{name} isn't a content project, so it can't take posts. Make the post without a "
+                       f"project, or pick a content project with Use Auto Content on.{choices}")
+    if not found.get("autoContent"):
+        raise ApiError(400, f"{name} has Use Auto Content switched off, so posts can't go into it. Vineeth can "
+                       f"switch it on in the project's settings (Sidebar > the project's edit button), or make the "
+                       f"post without a project.{choices}")
+    return found
+
+
+def _post_view(post: dict, full: bool = True) -> dict:
+    """A post as Claude sees it: where it is, the link to open it, and the caption."""
+    posts = _need_posts()
+    keys = ("id", "title", "status", "error", "style", "format", "projectId", "taskId", "slideCount", "audit",
+            "auditNote", "seconds", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
+    out = {k: post.get(k) for k in keys}
+    out["progress"] = post.get("progress") or {}
+    out["link"] = posts.post_link(post) or None
+    if full:
+        out["caption"] = post.get("caption") or ""
+        out["hashtags"] = post.get("hashtags") or []
+        out["log"] = [line.get("text") for line in (post.get("log") or [])[-8:]]
+    else:
+        out["captionStart"] = post.get("captionStart") if "captionStart" in post else (post.get("caption") or "")[:140]
+    return out
+
+
+def _post_note(post: dict) -> Optional[str]:
+    status = post.get("status")
+    if status in _UNFINISHED:
+        return ("The Pi is drawing the slides (about 30 to 60 seconds). Call sage_post_get with this id and wait "
+                "to get the finished link and caption.")
+    if status == "failed":
+        return "It failed; fix the script and call sage_post_redo with the id, or read the error."
+    if status == "done":
+        bits = []
+        if post.get("emailed"):
+            bits.append("The post-ready email has been sent.")
+        elif post.get("emailError"):
+            bits.append(f"The email didn't go: {post['emailError']}")
+        elif notifier_on(post):
+            bits.append("The post-ready email is on its way.")
+        if not _need_posts().post_link(post):
+            bits.append("Sage has no public address right now, so open it from Sage > Posts on the home network.")
+        if post.get("audit") == "fail":
+            bits.append("The audit flagged something; tell Vineeth to check the slides.")
+        return " ".join(bits) or None
+    return None
+
+
+def notifier_on(post: dict) -> bool:
+    """Is the post-ready email still to come? (done is saved just before it goes)"""
+    try:
+        import notifier
+        prefs = notifier.get_prefs()
+        return bool(prefs["email"].get("postReady", True)) and notifier.email_ready(prefs)
+    except Exception:
+        return False
+
+
+async def _wait_for(post_id: str, seconds: Any) -> dict:
+    posts = _need_posts()
+    try:
+        limit = max(0.0, min(float(seconds or 0), POST_WAIT_MAX))
+    except (TypeError, ValueError):
+        limit = 0.0
+    loop = asyncio.get_running_loop()
+    end = loop.time() + limit
+    post = await asyncio.to_thread(posts.get, post_id)
+    while post and post.get("status") in _UNFINISHED and loop.time() < end:
+        await asyncio.sleep(1)
+        post = await asyncio.to_thread(posts.get, post_id)
+    if not post:
+        raise ApiError(404, "No post has that id")
+    return post
+
+
+def _post_answer(post: dict, **extra) -> dict:
+    out = {**extra, "post": _post_view(post)}
+    note = _post_note(post)
+    if note:
+        out["note"] = note
+    return out
+
+
+def check_post(args: Any) -> dict:
+    posts = _need_posts()
+    script = str((args or {}).get("script") or "") if isinstance(args, dict) else ""
+    if not script.strip():
+        raise ApiError(400, "Send the script")
+    if len(script) > posts.MAX_SCRIPT:
+        raise ApiError(400, f"That script is {len(script):,} characters; the limit is {posts.MAX_SCRIPT:,}.")
+    try:
+        return {"check": posts.check(posts._clean_script(script))}
+    except Exception as e:
+        raise ApiError(400, f"Couldn't read that script: {str(e)[:200]}")
+
+
+async def create_post(args: Any) -> dict:
+    """Queues a script on the Pi's slide maker, the same as pressing Make in
+    Posts: it draws the slides, emails when done and, with a project, adds the
+    post's task there."""
+    posts = _need_posts()
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {script}")
+    project = _post_project(args.get("project"))
+    state = await asyncio.to_thread(posts.status)
+    if not state["ready"]:
+        raise ApiError(503, "The slide maker isn't ready on the Pi: " + " ".join(state["problems"]))
+    try:
+        post = posts.start(str(args.get("script") or ""), str(args.get("title") or ""),
+                           str(args.get("style") or ""), str(args.get("size") or args.get("format") or ""),
+                           project["id"] if project else "")
+    except posts.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(400, f"{e} Run sage_post_check for every issue with its line.")
+    if args.get("wait"):
+        post = await _wait_for(post["id"], args["wait"])
+    extra = {"project": project.get("name") if project else None}
+    if not state["emailReady"]:
+        extra["emailSetUp"] = False
+    return _post_answer(post, **extra)
+
+
+async def get_post(args: Any) -> dict:
+    post_id = str((args or {}).get("id") or "").strip() if isinstance(args, dict) else ""
+    if not post_id:
+        raise ApiError(400, "Send the post's id")
+    return _post_answer(await _wait_for(post_id, args.get("wait")))
+
+
+async def list_posts(args: Any) -> dict:
+    posts = _need_posts()
+    args = args if isinstance(args, dict) else {}
+    project_id = ""
+    if args.get("project"):
+        ref = str(args["project"]).strip()
+        found = next((p for p in _rows("projects") if p.get("id") == ref or
+                      str(p.get("name") or "").strip().lower() == ref.lower()), None)
+        if not found:
+            raise ApiError(404, f"No project called {ref}")
+        project_id = found["id"]
+    try:
+        limit = max(1, min(int(args.get("limit") or 20), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    rows = await asyncio.to_thread(posts.recent, project_id)
+    state = await asyncio.to_thread(posts.status)
+    ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
+    return {
+        "posts": [_post_view(p, full=False) for p in rows[:limit]],
+        "slideMaker": {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"],
+                       "emailReady": state["emailReady"], "emailOn": state["emailOn"]},
+        "projectsWithAutoContent": ready,
+    }
+
+
+async def redo_post(args: Any) -> dict:
+    """Draws a post again, with an edited script, style or size if sent."""
+    posts = _need_posts()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, "Send the post's id")
+    post = await asyncio.to_thread(posts.get, str(args["id"]))
+    if not post:
+        raise ApiError(404, "No post has that id")
+    style = str(args.get("style") or "")
+    size = str(args.get("size") or args.get("format") or "")
+    if style and style not in posts.STYLES:
+        raise ApiError(400, f"Style must be one of {', '.join(posts.STYLES)}.")
+    if size and size not in posts.FORMATS:
+        raise ApiError(400, f"Size must be one of {', '.join(posts.FORMATS)}.")
+    try:
+        post = posts.restart(post, str(args.get("script") or ""), style, size)
+    except posts.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(409 if "still being made" in str(e) else 400, str(e))
+    if args.get("wait"):
+        post = await _wait_for(post["id"], args["wait"])
+    return _post_answer(post)
+
+
+# --- Instagram reels made on the Pi (reels.py) ---
+
+def _need_reels() -> Any:
+    if _reels is None:
+        raise ApiError(503, "Reels isn't connected")
+    return _reels
+
+
+def reel_format() -> dict:
+    """The reel script format, cut from the engine's own REEL_FORMAT.md, plus a full example."""
+    reels = _need_reels()
+    guide = (reels.ENGINE_DIR / "REEL_FORMAT.md").read_text(encoding="utf-8")
+    m = re.search(r"<!-- PROMPT START -->(.*?)<!-- PROMPT END -->", guide, re.S)
+    rules = (m.group(1) if m else guide).strip()
+    example = (reels.ENGINE_DIR / "example_reel.md").read_text(encoding="utf-8")
+    return {"format": rules, "example": example, "styles": list(reels.STYLES), "voices": reels._voices()}
+
+
+def _reel_view(reel: dict, full: bool = True) -> dict:
+    reels = _need_reels()
+    keys = ("id", "title", "status", "error", "style", "voice", "needsRecording", "projectId", "taskId", "scenes", "seconds",
+            "estimate", "madeIn", "size", "wordTiming", "createdAt", "finishedAt", "posted", "postedAt", "emailed", "emailError")
+    out = {k: reel.get(k) for k in keys}
+    out["progress"] = reel.get("progress") or {}
+    out["link"] = reels.reel_link(reel) or None
+    if full:
+        out["caption"] = reel.get("caption") or ""
+        out["hashtags"] = reel.get("hashtags") or []
+        out["warnings"] = reel.get("warnings") or []
+        out["log"] = [line.get("text") for line in (reel.get("log") or [])[-8:]]
+    else:
+        out["captionStart"] = reel.get("captionStart") if "captionStart" in reel else (reel.get("caption") or "")[:140]
+    return out
+
+
+def _reel_note(reel: dict) -> Optional[str]:
+    status = reel.get("status")
+    if status == "waiting":
+        return ("This reel uses `voice: mine`, so it is waiting for Vineeth's recording. Tell him to open the link, "
+                "press Record or Upload, and the Pi will make it. (Or redo it with a Kokoro voice such as af_heart.)")
+    if status in _UNFINISHED:
+        return ("The Pi is making the video (a few minutes; it shows progress). Call sage_reel_get with this id and "
+                "wait to get the finished link and caption.")
+    if status == "failed":
+        return "It failed; read the error, fix the script and call sage_reel_redo with the id."
+    if status == "done":
+        bits = []
+        if reel.get("emailed"):
+            bits.append("The reel-ready email has been sent.")
+        elif reel.get("emailError"):
+            bits.append(f"The email didn't go: {reel['emailError']}")
+        if not _need_reels().reel_link(reel):
+            bits.append("Sage has no public address right now, so open it from Sage > Reels on the home network.")
+        if reel.get("warnings"):
+            bits.append("Warnings: " + " | ".join(str(w) for w in reel["warnings"][:3]))
+        return " ".join(bits) or None
+    return None
+
+
+async def _wait_for_reel(reel_id: str, seconds: Any) -> dict:
+    reels = _need_reels()
+    try:
+        limit = max(0.0, min(float(seconds or 0), POST_WAIT_MAX))
+    except (TypeError, ValueError):
+        limit = 0.0
+    loop = asyncio.get_running_loop()
+    end = loop.time() + limit
+    reel = await asyncio.to_thread(reels.get, reel_id)
+    while reel and reel.get("status") in _UNFINISHED and loop.time() < end:
+        await asyncio.sleep(1)
+        reel = await asyncio.to_thread(reels.get, reel_id)
+    if not reel:
+        raise ApiError(404, "No reel has that id")
+    return reel
+
+
+def _reel_answer(reel: dict, **extra) -> dict:
+    out = {**extra, "reel": _reel_view(reel)}
+    note = _reel_note(reel)
+    if note:
+        out["note"] = note
+    return out
+
+
+def check_reel(args: Any) -> dict:
+    reels = _need_reels()
+    script = str((args or {}).get("script") or "") if isinstance(args, dict) else ""
+    if not script.strip():
+        raise ApiError(400, "Send the script")
+    if len(script) > reels.MAX_SCRIPT:
+        raise ApiError(400, f"That script is {len(script):,} characters; the limit is {reels.MAX_SCRIPT:,}.")
+    try:
+        return {"check": reels.check(reels._clean_script(script))}
+    except Exception as e:
+        raise ApiError(400, f"Couldn't read that script: {str(e)[:200]}")
+
+
+async def create_reel(args: Any) -> dict:
+    """Queues a script on the Pi's reel maker, the same as pressing Make in Reels: it speaks the
+    narration (Kokoro), draws and animates the slides, captions them and encodes the mp4, then emails
+    when done. With `voice: mine` it waits for Vineeth's recording instead."""
+    reels = _need_reels()
+    if not isinstance(args, dict):
+        raise ApiError(400, "Send {script}")
+    project = _post_project(args.get("project"))
+    state = await asyncio.to_thread(reels.status)
+    if not state["ready"]:
+        raise ApiError(503, "The reel maker isn't ready on the Pi: " + " ".join(state["problems"]))
+    try:
+        reel = reels.start(str(args.get("script") or ""), str(args.get("title") or ""), str(args.get("style") or ""),
+                           project["id"] if project else "")
+    except reels.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(400, f"{e} Run sage_reel_check for every issue with its line.")
+    if reel["status"] == "queued" and not state["voiceReady"]:
+        reel.update(status="failed", error=state["voiceProblem"])
+        await asyncio.to_thread(reels.save, reel)
+    elif args.get("wait") and reel["status"] != "waiting":
+        reel = await _wait_for_reel(reel["id"], args["wait"])
+    extra = {"project": project.get("name") if project else None}
+    if not state["emailReady"]:
+        extra["emailSetUp"] = False
+    return _reel_answer(reel, **extra)
+
+
+async def get_reel(args: Any) -> dict:
+    reel_id = str((args or {}).get("id") or "").strip() if isinstance(args, dict) else ""
+    if not reel_id:
+        raise ApiError(400, "Send the reel's id")
+    return _reel_answer(await _wait_for_reel(reel_id, args.get("wait")))
+
+
+async def list_reels(args: Any) -> dict:
+    reels = _need_reels()
+    args = args if isinstance(args, dict) else {}
+    project_id = ""
+    if args.get("project"):
+        ref = str(args["project"]).strip()
+        found = next((p for p in _rows("projects") if p.get("id") == ref or
+                      str(p.get("name") or "").strip().lower() == ref.lower()), None)
+        if not found:
+            raise ApiError(404, f"No project called {ref}")
+        project_id = found["id"]
+    try:
+        limit = max(1, min(int(args.get("limit") or 20), 100))
+    except (TypeError, ValueError):
+        limit = 20
+    rows = await asyncio.to_thread(reels.recent, project_id)
+    state = await asyncio.to_thread(reels.status)
+    ready = [{"id": p.get("id"), "name": p.get("name")} for p in _content_projects() if p.get("autoContent")]
+    return {
+        "reels": [_reel_view(r, full=False) for r in rows[:limit]],
+        "reelMaker": {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"],
+                      "voiceReady": state["voiceReady"], "voiceProblem": state["voiceProblem"],
+                      "emailReady": state["emailReady"], "emailOn": state["emailOn"]},
+        "projectsWithAutoContent": ready,
+    }
+
+
+async def redo_reel(args: Any) -> dict:
+    """Makes a reel again, with an edited script or style if sent (a kept recording is reused)."""
+    reels = _need_reels()
+    if not isinstance(args, dict) or not args.get("id"):
+        raise ApiError(400, "Send the reel's id")
+    reel = await asyncio.to_thread(reels.get, str(args["id"]))
+    if not reel:
+        raise ApiError(404, "No reel has that id")
+    style = str(args.get("style") or "")
+    if style and style not in reels.STYLES:
+        raise ApiError(400, f"Style must be one of {', '.join(reels.STYLES)}.")
+    try:
+        reel = reels.restart(reel, str(args.get("script") or ""), style)
+    except reels.Busy as e:
+        raise ApiError(429, str(e))
+    except ValueError as e:
+        raise ApiError(409 if "still being made" in str(e) else 400, str(e))
+    if args.get("wait") and reel["status"] != "waiting":
+        reel = await _wait_for_reel(reel["id"], args["wait"])
+    return _reel_answer(reel)
 
 
 # --- Plain HTTP: /api/claude/... (the token is checked by db_server's middleware) ---
@@ -350,15 +1252,132 @@ async def http_history(limit: int = 50):
     return await _answer(lambda: history(limit))
 
 
+@router.get("/diagnostics")
+async def http_diagnostics(hours: float = 24, samples: int = 0):
+    return await _answer(lambda: diagnostics(hours, samples))
+
+
 @router.post("/quick-add")
 async def http_quick_add(request: Request):
     body = await _body(request) or {}
     return await _answer(lambda: quick_add(body.get("text", "") if isinstance(body, dict) else ""))
 
 
+@router.get("/maps")
+async def http_maps():
+    return await _answer(list_maps)
+
+
+@router.get("/maps/{ref}")
+async def http_map(ref: str):
+    return await _answer(lambda: get_map(ref))
+
+
+@router.post("/maps/{ref}/thoughts")
+async def http_add_thoughts(ref: str, request: Request):
+    body = await _body(request) or {}
+    if not isinstance(body, dict):
+        body = {}
+    return await _answer(lambda: add_thoughts(ref, body.get("thoughts"), bool(body.get("createMap"))))
+
+
+@router.post("/notes/push")
+async def http_push_note(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: push_note(body))
+
+
+@router.get("/drops")
+async def http_drops():
+    return await _answer(list_drops)
+
+
+@router.post("/drops")
+async def http_publish_drop(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: publish_drop(body))
+
+
+@router.post("/drops/{slug}")
+async def http_change_drop(slug: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: change_drop({**(body if isinstance(body, dict) else {}), "id": slug}))
+
+
+@router.delete("/drops/{slug}")
+async def http_delete_drop(slug: str):
+    return await _answer(lambda: delete_drop(slug))
+
+
+@router.get("/posts/format")
+async def http_post_format():
+    return await _answer(post_format)
+
+
+@router.post("/posts/check")
+async def http_post_check(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: check_post(body))
+
+
+@router.get("/posts")
+async def http_posts(project: str = "", limit: int = 20):
+    return await _answer(lambda: list_posts({"project": project, "limit": limit}))
+
+
+@router.post("/posts")
+async def http_create_post(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: create_post(body))
+
+
+@router.get("/posts/{post_id}")
+async def http_get_post(post_id: str, wait: float = 0):
+    return await _answer(lambda: get_post({"id": post_id, "wait": wait}))
+
+
+@router.post("/posts/{post_id}/redo")
+async def http_redo_post(post_id: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: redo_post({**(body if isinstance(body, dict) else {}), "id": post_id}))
+
+
+@router.get("/reels/format")
+async def http_reel_format():
+    return await _answer(reel_format)
+
+
+@router.post("/reels/check")
+async def http_reel_check(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: check_reel(body))
+
+
+@router.get("/reels")
+async def http_reels(project: str = "", limit: int = 20):
+    return await _answer(lambda: list_reels({"project": project, "limit": limit}))
+
+
+@router.post("/reels")
+async def http_create_reel(request: Request):
+    body = await _body(request)
+    return await _answer(lambda: create_reel(body))
+
+
+@router.get("/reels/{reel_id}")
+async def http_get_reel(reel_id: str, wait: float = 0):
+    return await _answer(lambda: get_reel({"id": reel_id, "wait": wait}))
+
+
+@router.post("/reels/{reel_id}/redo")
+async def http_redo_reel(reel_id: str, request: Request):
+    body = await _body(request)
+    return await _answer(lambda: redo_reel({**(body if isinstance(body, dict) else {}), "id": reel_id}))
+
+
 @router.get("/{table}")
-async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50):
-    return await _answer(lambda: list_records(table, q, status, due_by, limit))
+async def http_list(table: str, q: str = "", status: str = "", due_by: str = "", limit: int = 50, hidden: str = ""):
+    return await _answer(lambda: list_records(table, q, status, due_by, limit, hidden))
 
 
 @router.get("/{table}/{record_id}")
@@ -392,17 +1411,33 @@ async def http_delete(table: str, record_id: str):
 PROTOCOL_VERSIONS = ("2025-06-18", "2025-03-26", "2024-11-05")
 
 INSTRUCTIONS = """Sage is Vineeth's task manager. Its data is a set of tables of JSON records:
-workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, priority low|medium|high|urgent,
-dueDate YYYY-MM-DD, dueTime HH:mm, projectId, areaId, labels, isInbox, isFocus, description),
-projects (name, key, color), areas, goals, habits (name, frequency, history of YYYY-MM-DD days),
-notes (title, content), comments and subtasks (workItemId), activities, boards (drawings),
+workItems (tasks, events, reminders: title, status todo|in_progress|done|blocked, stage (the project type's own status, e.g. idea|scripting|recording|editing|published for content, backlog|procurement|building|testing|shipped for technical; it must sit on the same status), priority low|medium|high|urgent,
+dueDate YYYY-MM-DD, dueTime HH:mm, doseTimes ["08:00","20:00"] (done several times a day, each ticked on its own; also on habits), projectId, areaId, labels, isInbox, isFocus, isHidden, description).
+A hidden work item (isHidden true) is private: the app keeps it out of every list and shows it only on its
+password-locked Hidden page. sage_list leaves hidden items out unless hidden is "include" or "only"; hide or
+unhide one with sage_update {isHidden: true|false}, and don't repeat a hidden item's title unless asked.
+projects (name, key, color, type technical|nontech|content|other or a custom name), areas, goals (title, targetDate, projectId), habits (name, targetCount days a week 1-7, history of YYYY-MM-DD days),
+notes (title, content; kind html for a report, code for code), comments and subtasks (workItemId), activities, boards (drawings),
 dossiers (Radar research on a theme: summary, macro, whyNow, valueChain, claims citing sources by number,
 sources, ideaIds, noteId) and ideas (startup ideas from a dossier: name, oneLiner, icp, pain, score out of 100,
 acvUsd and other estimates, moat 0-10, risks, playbook, starred, projectId once turned into a project).
+Thought maps are notes with kind "map" (Notes > Maps in the app): Vineeth's thinking on a decision, one
+record per thought in the thoughts table (mapId, text, status open|unsure|good|bad, topic, parentId, note,
+source). When he talks a decision through, put each point into his map with sage_thought_add: good for a
+point that holds up (a pro), bad for one that doesn't (a con), unsure for confusion, open for unsorted
+questions. Re-sort a thought by changing its status with sage_update. Use sage_maps and sage_map to read them.
+To hand Vineeth a report, plan or snippet to keep, push it into Notes with sage_note_push. When he wants a
+web page to open or share with others, publish it with sage_drop_publish and give him the url it returns.
+To make an Instagram carousel post, read the script format with sage_post_format, write the script, check it with
+sage_post_check, then send it with sage_post_create: the Pi draws the slides, emails Vineeth when they're ready and
+gives back a link and the caption (wait for it with sage_post_get). A post can go into a content project only when
+that project has Use Auto Content switched on.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
-why something failed. Changes appear in the open web app straight away. Prefer updating
-over deleting, and say what you changed."""
+why something failed. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
+explains it: a probe on the Pi tracks whether the server answered on localhost and on the public Funnel URL, event-
+loop lag, under-voltage and the system, and sorts outages into network/Funnel vs server vs power. Changes appear in
+the open web app straight away. Prefer updating over deleting, and say what you changed."""
 
 
 def _table_prop() -> dict:
@@ -420,10 +1455,11 @@ def _tools() -> List[dict]:
              "q": {"type": "string", "description": "Text to search for anywhere in the record"},
              "status": {"type": "string", "description": "Only these statuses, comma separated (work items)"},
              "due_by": {"type": "string", "description": "Only records due on or before this YYYY-MM-DD"},
+             "hidden": {"type": "string", "enum": ["exclude", "include", "only"], "description": "Work items: hidden ones are left out (exclude, the default), listed too (include), or listed alone (only)"},
              "limit": {"type": "integer", "description": "At most this many (default 50, max 500)"}}}},
         {"name": "sage_get", "description": "One full record by id.",
          "inputSchema": {"type": "object", "required": ["table", "id"], "properties": {"table": _table_prop(), "id": {"type": "string"}}}},
-        {"name": "sage_create", "description": "Create a record. Work items need a title; sensible defaults fill the rest.",
+        {"name": "sage_create", "description": "Create a record. Work items and goals need a title; projects and habits need a name. Sensible defaults fill the rest; a new habit reminds at 20:00 by push unless remindTime is sent (null for no reminder).",
          "inputSchema": {"type": "object", "required": ["table", "fields"], "properties": {"table": _table_prop(), "fields": obj}}},
         {"name": "sage_update", "description": "Change some fields of a record; fields not sent stay as they are.",
          "inputSchema": {"type": "object", "required": ["table", "id", "fields"], "properties": {"table": _table_prop(), "id": {"type": "string"}, "fields": obj}}},
@@ -432,9 +1468,145 @@ def _tools() -> List[dict]:
         {"name": "sage_quick_add", "description": "Add a work item from a sentence, the way Siri quick add does, e.g. 'Call the bank tomorrow 5pm !high #money'.",
          "inputSchema": {"type": "object", "required": ["text"], "properties": {"text": {"type": "string"}}}},
         {"name": "sage_health", "description": "Is the Pi working? Server version and uptime, background workers, "
-         "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, plus a "
+         "Radar sources (with why any are down), the Markets board, backups, phone link and desk clock, a short "
+         "blackout/under-voltage summary from the probe (see sage_diagnostics for the full story), plus a "
          "plain list of problems.",
          "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_maps", "description": "Vineeth's thought maps (mind maps in Notes): title, how many thoughts are "
+         "open, unsure, good (holds up) or bad (doesn't hold), and their topics.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_map", "description": "One thought map with every thought in time order: id, text, status, topic, "
+         "parentId (the thought it sits under), note and who added it.",
+         "inputSchema": {"type": "object", "required": ["map"], "properties": {
+             "map": {"type": "string", "description": "The map's id or title (part of the title works)"}}}},
+        {"name": "sage_thought_add", "description": "Add thoughts to a thought map while talking a decision through: "
+         "pros as good, cons as bad, confusions as unsure, unsorted questions as open. They appear in the app at once, "
+         "marked as from Claude.",
+         "inputSchema": {"type": "object", "required": ["map", "thoughts"], "properties": {
+             "map": {"type": "string", "description": "The map's id or title"},
+             "create_map": {"type": "boolean", "description": "Make a new map with this title if none matches"},
+             "thoughts": {"type": "array", "items": {"type": "object", "required": ["text"], "properties": {
+                 "text": {"type": "string", "description": "One short point"},
+                 "status": {"type": "string", "enum": list(THOUGHT_STATUSES), "description": "Default open"},
+                 "topic": {"type": "string", "description": "A short topic name such as Money or People; reuse the map's topics"},
+                 "under": {"type": "string", "description": "Id or exact text of the thought this one belongs under"},
+                 "note": {"type": "string"}}}}}}},
+        {"name": "sage_note_push", "description": "Put an HTML report or a piece of code into Sage Notes. HTML shows "
+         "in a sandboxed frame that already carries Sage's look (font, colours, light and dark, tables, code blocks), so "
+         "send plain semantic HTML without your own theme; it may use the CSS variables --sage-bg, --sage-surface, "
+         "--sage-text, --sage-muted, --sage-border, --sage-accent, --sage-good, --sage-warn, --sage-bad. Scripts run "
+         "but cannot reach the app or the network except for scripts and styles from cdnjs, jsdelivr or unpkg. "
+         "Sending the same title again replaces that note.",
+         "inputSchema": {"type": "object", "required": ["title"], "properties": {
+             "title": {"type": "string"},
+             "html": {"type": "string", "description": "A full page or just body HTML. Send this or code"},
+             "code": {"type": "string", "description": "Source code, shown highlighted with a copy button"},
+             "language": {"type": "string", "description": "For code: python, ts, js, html, css, json, bash, cpp, sql..."},
+             "source": {"type": "string", "description": "Which AI sent it, e.g. claude, gemini, chatgpt (default claude)"},
+             "replace": {"type": "string", "description": "Id or title of an existing report or code note to overwrite"},
+             "projectId": {"type": "string"},
+             "lifeContext": {"type": "string", "enum": ["work", "personal"]}}}},
+        {"name": "sage_drop_publish", "description": "Publish an HTML web page (a report, dashboard, summary) "
+         "as a Drop share link and get its url back to give Vineeth. Anyone with the link can open it without "
+         "Sage's password. Send a full self-contained page, or just body HTML and it gets a clean readable layout "
+         "with light and dark. Scripts run in a sandbox; styles and scripts may load from cdnjs, jsdelivr or unpkg. "
+         "Links are permanent by default (they stay until deleted); send hours for a link that expires. To revise "
+         "a page and keep its link, send the drop's id as replace.",
+         "inputSchema": {"type": "object", "required": ["title", "html"], "properties": {
+             "title": {"type": "string", "description": "The page's name, shown in Sage's Drop list"},
+             "html": {"type": "string", "description": "A full page or just body HTML"},
+             "permanent": {"type": "boolean", "description": "Default true; false makes a 24-hour link"},
+             "hours": {"type": "number", "description": "Make it temporary: expires after this many hours (0.25 to 720)"},
+             "replace": {"type": "string", "description": "Id of an existing page drop to overwrite, keeping its url"}}}},
+        {"name": "sage_drop_list", "description": "Every live Drop link: id, name, url, kind (site or clip), "
+         "permanent, turned off, views and when it expires.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_drop_set", "description": "Change a Drop link: turn it off or back on (enabled), make it "
+         "permanent or temporary, or give a temporary one more hours.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "enabled": {"type": "boolean"},
+             "permanent": {"type": "boolean"},
+             "hours": {"type": "number", "description": "Expire this many hours from now"}}}},
+        {"name": "sage_drop_delete", "description": "Delete a Drop link and its files. Only when asked; it can't be undone.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {"id": {"type": "string"}}}},
+        {"name": "sage_post_format", "description": "How to write a script for an Instagram carousel post: "
+         "the header, every slide type and its fields, caption and hashtags, plus a full example. Read it before "
+         "writing a script for sage_post_create. Includes how to ask for a free, credited stock photo "
+         "(an image slide with search: and a short description).",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_post_check", "description": "Check a post script without drawing it: every error and warning "
+         "with its line and slide number, and the slides, caption and hashtags it found.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
+        {"name": "sage_post_create", "description": "Send a script to Sage to be made into an Instagram carousel "
+         "post. The Pi draws the slides (about 30 to 60 seconds), emails Vineeth the slides and caption when done, "
+         "and the post appears in Sage > Posts. With a project it also becomes a task there that moves Script > "
+         "Ready > Posted; the project must be a content project with Use Auto Content switched on. Returns the "
+         "post's id, status, link and caption; send wait (seconds) to wait for it to finish.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {
+             "script": {"type": "string", "description": "The whole script in the sage_post_format format"},
+             "title": {"type": "string", "description": "Name in Sage; default the script's title"},
+             "project": {"type": "string", "description": "Content project id or name (needs Use Auto Content on)"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"], "description": "Default: the script's style, else grid_pill"},
+             "size": {"type": "string", "enum": ["portrait", "square"], "description": "Default: the script's format, else portrait"},
+             "wait": {"type": "number", "description": f"Seconds to wait for the slides (0 to {POST_WAIT_MAX}); default 0 returns at once"}}}},
+        {"name": "sage_post_get", "description": "One post: status (queued, running, done, failed), progress, the "
+         "error if it failed, the link that opens it in Sage (with the Share-to-Instagram button), caption, "
+         "hashtags, slide count, audit result and whether the email went. Send wait to wait until it finishes.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "wait": {"type": "number", "description": f"Seconds to wait while it is still being drawn (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_post_list", "description": "Recent posts, newest first, with status, link and the start of "
+         "the caption; whether the slide maker and email are ready; and which projects have Use Auto Content on.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "Only this project's posts (id or name)"},
+             "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
+        {"name": "sage_post_redo", "description": "Draw a post again, keeping its id and link: send an edited "
+         "script to fix it, or a new style or size. Emails again when done.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "script": {"type": "string", "description": "The fixed script; leave out to draw the same one"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
+             "size": {"type": "string", "enum": ["portrait", "square"]},
+             "wait": {"type": "number", "description": f"Seconds to wait for the slides (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_reel_format", "description": "How to write a script for an Instagram reel (a 1080x1920 video "
+         "with a voice-over): the post script format plus a `say:` line per slide for the narration, optional `show:` "
+         "cues, `motion:`, and the header lines voice, captions and fps; with a full example and the list of voices. "
+         "Read it before writing a script for sage_reel_create.",
+         "inputSchema": {"type": "object", "properties": {}}},
+        {"name": "sage_reel_check", "description": "Check a reel script without making it: every error and warning "
+         "with its line and slide, the scenes with their narration, about how long the video will run and which voice it asks for.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
+        {"name": "sage_reel_create", "description": "Send a script to Sage to be made into an Instagram reel. The Pi speaks "
+         "the narration with a free voice (Kokoro; no cost), draws the slides like a post's, makes each piece appear in time "
+         "with the voice, adds word-by-word captions and encodes an mp4 (a few minutes), then emails Vineeth and the reel "
+         "appears in Sage > Reels. Music is not added; he adds trending audio in Instagram. With `voice: mine` in the "
+         "script it waits for his own recording instead. With a project it becomes a task there (a content project with "
+         "Use Auto Content on). Returns the reel's id, status, link and caption; send wait (seconds) to wait for it.",
+         "inputSchema": {"type": "object", "required": ["script"], "properties": {
+             "script": {"type": "string", "description": "The whole script in the sage_reel_format format"},
+             "title": {"type": "string", "description": "Name in Sage; default the script's title"},
+             "project": {"type": "string", "description": "Content project id or name (needs Use Auto Content on)"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"], "description": "Default: the script's style, else grid_pill"},
+             "wait": {"type": "number", "description": f"Seconds to wait (0 to {POST_WAIT_MAX}); default 0 returns at once, since a reel takes minutes"}}}},
+        {"name": "sage_reel_get", "description": "One reel: status (waiting for a recording, queued, running, done, failed), "
+         "progress, the error if it failed, the link that opens it in Sage (with the Share button), caption, hashtags, "
+         "length and whether the email went. Send wait to wait while it is being made.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "wait": {"type": "number", "description": f"Seconds to wait while it is being made (max {POST_WAIT_MAX})"}}}},
+        {"name": "sage_reel_list", "description": "Recent reels, newest first, with status, link and the start of the "
+         "caption; whether the reel maker, its voice and email are ready; and which projects have Use Auto Content on.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "Only this project's reels (id or name)"},
+             "limit": {"type": "integer", "description": "At most this many (default 20, max 100)"}}}},
+        {"name": "sage_reel_redo", "description": "Make a reel again, keeping its id and link: send an edited script to "
+         "fix it, or a new style. A recording Vineeth already gave is reused. Emails again when done.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string"},
+             "script": {"type": "string", "description": "The fixed script; leave out to make the same one"},
+             "style": {"type": "string", "enum": ["grid_pill", "beige_grain"]},
+             "wait": {"type": "number", "description": f"Seconds to wait (max {POST_WAIT_MAX})"}}}},
         {"name": "sage_history", "description": "Recent changes Claude made to Sage.",
          "inputSchema": {"type": "object", "properties": {"limit": {"type": "integer"}}}},
         {"name": "sage_logs", "description": "Sage's own running record: errors, HTTP requests, sync, backup, "
@@ -443,9 +1615,19 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "properties": {
              "since": {"type": "string", "description": "Only entries at or after this ISO-8601 time, e.g. 2026-10-29T00:00:00Z"},
              "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Only this level or louder"},
-             "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier"},
+             "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier, slow (requests that took 800 ms or more, each with its request id)"},
              "q": {"type": "string", "description": "Only entries whose message contains this text"},
              "limit": {"type": "integer", "description": "At most this many (default 100, max 1000)"}}}},
+        {"name": "sage_diagnostics", "description": "Explain Sage blackouts (the public URL showing "
+         "\"took too long to respond\"). A running probe on the Pi records, every ~30s, whether the server "
+         "answers on localhost and on the public Funnel URL, plus event-loop lag, requests in flight and the "
+         "slowest request, load/memory/CPU temperature, disk I/O wait, under-voltage (power dips), Wi-Fi signal, "
+         "and Tailscale/kernel state. This returns the 'blackouts in the last N hours' story (each outage with how "
+         "long it lasted and a likely cause: network/Funnel vs the server itself vs power), the current snapshot, "
+         "and a plain verdict. Use it when Sage was unreachable to find out why.",
+         "inputSchema": {"type": "object", "properties": {
+             "hours": {"type": "number", "description": "How far back to summarise (default 24)"},
+             "samples": {"type": "integer", "description": "Also return this many raw recent samples, newest first (0 = none)"}}}},
     ]
 
 
@@ -453,7 +1635,7 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "sage_overview":
         return overview()
     if name == "sage_list":
-        return list_records(args.get("table", ""), args.get("q", ""), args.get("status", ""), args.get("due_by", ""), args.get("limit", 50))
+        return list_records(args.get("table", ""), args.get("q", ""), args.get("status", ""), args.get("due_by", ""), args.get("limit", 50), args.get("hidden", ""))
     if name == "sage_get":
         return get_record(args.get("table", ""), str(args.get("id", "")))
     if name == "sage_create":
@@ -466,11 +1648,53 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await quick_add(args.get("text", ""))
     if name == "sage_health":
         return health()
+    if name == "sage_maps":
+        return list_maps()
+    if name == "sage_map":
+        return get_map(args.get("map", ""))
+    if name == "sage_thought_add":
+        return await add_thoughts(args.get("map", ""), args.get("thoughts"), bool(args.get("create_map")))
+    if name == "sage_note_push":
+        return await push_note(args)
+    if name == "sage_drop_publish":
+        return await publish_drop(args)
+    if name == "sage_drop_list":
+        return await list_drops()
+    if name == "sage_drop_set":
+        return await change_drop(args)
+    if name == "sage_drop_delete":
+        return await delete_drop(args.get("id", ""))
+    if name == "sage_post_format":
+        return post_format()
+    if name == "sage_post_check":
+        return check_post(args)
+    if name == "sage_post_create":
+        return await create_post(args)
+    if name == "sage_post_get":
+        return await get_post(args)
+    if name == "sage_post_list":
+        return await list_posts(args)
+    if name == "sage_post_redo":
+        return await redo_post(args)
+    if name == "sage_reel_format":
+        return reel_format()
+    if name == "sage_reel_check":
+        return check_reel(args)
+    if name == "sage_reel_create":
+        return await create_reel(args)
+    if name == "sage_reel_get":
+        return await get_reel(args)
+    if name == "sage_reel_list":
+        return await list_reels(args)
+    if name == "sage_reel_redo":
+        return await redo_reel(args)
     if name == "sage_history":
         return history(args.get("limit", 50))
     if name == "sage_logs":
         return logs(args.get("since", ""), args.get("level", ""), args.get("source", ""),
                     args.get("q", ""), args.get("limit", 100))
+    if name == "sage_diagnostics":
+        return diagnostics(args.get("hours", 24), args.get("samples", 0))
     raise ApiError(404, f"Unknown tool {name}")
 
 

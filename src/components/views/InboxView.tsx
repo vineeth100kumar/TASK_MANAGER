@@ -1,21 +1,26 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { withTime } from '../../utils/reminders';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Plus, Trash2, Target, Sparkles, ChevronRight, Check, X, Play } from 'lucide-react';
+import { Inbox, CheckCircle2, Plus, Sparkles, ChevronRight, Check, X, Play, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useCompletion } from '../../hooks/useCompletion';
-import { CompleteButton } from '../common/CompleteButton';
+import { TaskRow } from '../common/TaskRow';
+import { ProjectGroups } from '../common/ProjectGroups';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
-import { ContextTag } from '../common/ContextTag';
 import { timeAgo } from '../../utils/progress';
+import { VisibilityCheck } from '../../utils/taskLists';
+import { getTodayString } from '../../utils/dateUtils';
 import { api } from '../../services/api';
 import { WorkItem, LifeContext, Project, Area } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
-import { SnoozeMenu } from '../common/SnoozeMenu';
 import { useDataChanges } from '../../hooks/useDataChanges';
-import { formatDateRange } from '../../utils/dateUtils';
+import { useCachedState } from '../../hooks/useCachedState';
 import { SwipeRow, tomorrowMorning } from '../common/SwipeRow';
 import { InboxTriage } from './InboxTriage';
+import { Select } from '../common/Select';
+import { DatePicker } from '../common/DatePicker';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
+import { HiddenWorkLine } from '../common/HiddenWorkLine';
+import { useLifeMode } from '../../services/lifeMode';
 
 interface InboxViewProps {
   lifeContext?: LifeContext;
@@ -23,11 +28,19 @@ interface InboxViewProps {
 }
 
 export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
-  const [items, setItems] = useState<WorkItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  // Celebrate inbox zero only when it was reached during this visit.
+  const chill = useLifeMode().mode === 'chill';
+  // The Inbox lists every open item in every project, area and section.
+  const [items, setItems, loaded] = useCachedState<WorkItem[]>(`inbox-all:${lifeContext || 'all'}`, []);
+  const [done, setDone] = useState<WorkItem[]>([]);
+  const [check, setCheck] = useState<VisibilityCheck | null>(null);
+  // Captured but not given a date, project or star yet. Process inbox walks these.
+  const [unsorted, setUnsorted] = useState<WorkItem[]>([]);
+  const [showDone, setShowDone] = useState(false);
+  // Celebrate an empty list only when it was emptied during this visit.
   const hadItems = useRef(false);
   const [clarifyingItem, setClarifyingItem] = useState<WorkItem | null>(null);
+  const closeClarify = React.useCallback(() => setClarifyingItem(null), []);
+  useEscapeKey(closeClarify, !!clarifyingItem);
   const [isTriaging, setIsTriaging] = useState(false);
   const [projects, setProjects] = useState<Project[]>([]);
   const [areas, setAreas] = useState<Area[]>([]);
@@ -43,10 +56,12 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
   const loadInbox = async () => {
     try {
-      const inboxItems = await api.inbox.list(lifeContext);
-      setItems(inboxItems);
-      if (inboxItems.length > 0) hadItems.current = true;
-      setLoaded(true);
+      const [all, toSort] = await Promise.all([api.inbox.all(lifeContext), api.inbox.list(lifeContext)]);
+      if (all.items.length > 0) hadItems.current = true;
+      setItems(all.items);
+      setDone(all.done);
+      setCheck(all.check);
+      setUnsorted(toSort);
       const [projs, ars] = await Promise.all([
         api.projects.list(),
         api.areas.list()
@@ -95,28 +110,30 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
   const { complete: handleComplete, isCompleting, isSaving } = useCompletion(loadInbox);
 
-  const handleToggleFocus = async (item: WorkItem, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const handleStar = async (item: WorkItem) => {
     try {
       await api.focus.toggle(item.id);
-      showToast(item.isFocus ? 'Removed from Focus' : 'Added to Focus');
+      if (!item.isFocus && item.isInbox) await api.inbox.clarify(item.id, {});
+      showToast(item.isFocus ? 'Unstarred' : 'Starred. It shows on Today');
       loadInbox();
     } catch (err: any) {
-      console.error(err);
-      showToast(err.message || 'Could not change Focus', 'error');
+      showToast(err.message || 'Could not change the star', 'error');
     }
   };
 
-  const handleDelete = async (itemId: string, e?: React.MouseEvent) => {
-    e?.stopPropagation();
+  const handleReopen = async (item: WorkItem) => {
     try {
-      await api.workItems.softDelete(itemId);
-      showToast('Moved to trash', 'info', { label: 'Undo', onAction: async () => { await api.workItems.restore(itemId); loadInbox(); } });
+      await api.workItems.updateDetails(item.id, { status: 'todo', completedAt: null } as any);
+      showToast('Reopened');
       loadInbox();
-    } catch (err) {
-      console.error(err);
+    } catch (err: any) {
+      showToast('Could not reopen: ' + err.message, 'error');
     }
   };
+
+  const unsortedIds = new Set(unsorted.map(i => i.id));
+  const todayIso = getTodayString();
+  const projectCount = new Set(items.map(i => i.projectId || i.areaId || 'none')).size;
 
   const handleSnoozeTomorrow = async (item: WorkItem) => {
     try {
@@ -135,23 +152,23 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
         <div>
           <div className="eyebrow text-blue-600 dark:text-blue-400 mb-2">
             <Inbox size={14} />
-            <span>Universal Inbox</span>
+            <span>Inbox · every task</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {items.length === 0 ? 'Inbox zero' : `${items.length} ${items.length === 1 ? 'thing' : 'things'} to sort`}
+            {!loaded ? 'Inbox' : items.length === 0 ? 'Nothing open' : `${items.length} open ${items.length === 1 ? 'task' : 'tasks'}`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
-            {items.length === 0 ? 'Everything you captured has a home.' : items.length > 3 ? 'Process inbox takes them one at a time. Most take a few seconds each.' : 'Decide what each one is, or keep it here for later.'}
+            {!loaded ? '\u00a0' : items.length === 0 ? 'Everything is done.' : `Across ${projectCount} ${projectCount === 1 ? 'place' : 'places'}. Overdue first, then by date and priority.`}
           </p>
         </div>
 
         <div className="flex items-center gap-2">
-        {items.length > 0 && (
+        {unsorted.length > 0 && (
           <button
             onClick={() => setIsTriaging(true)}
             className="px-4 py-2.5 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 text-white dark:text-black font-semibold text-[12.5px] rounded-xl shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5 flex items-center gap-2 active:scale-[0.97] transition-all"
           >
-            <Play size={13} className="fill-current" /> Process inbox
+            <Play size={13} className="fill-current" /> Sort {unsorted.length} new
           </button>
         )}
         <button 
@@ -161,13 +178,47 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           }}
           className="px-4 py-2.5 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
-          <Plus size={14} /> Add Item (N)
+          <Plus size={14} /> Add item <kbd className="ml-0.5 px-1.5 rounded-md bg-white/20 text-[10.5px] font-semibold leading-[18px]">N</kbd>
         </button>
         </div>
       </div>
 
-      {/* Inbox Items List */}
-      {!loaded ? null : items.length === 0 ? (
+      {/* Chill mode: work is out of sight, never lost. */}
+      {!showDone && <HiddenWorkLine scope="open" />}
+
+      {/* Open / Done */}
+      {loaded && (
+        <div className="flex items-center gap-1 p-1 rounded-xl bg-gray-100 dark:bg-white/5 w-fit text-[12.5px] font-semibold" role="tablist">
+          {[{ id: false, label: `Open ${items.length}` }, { id: true, label: `Done ${done.length}` }].map(t => (
+            <button key={String(t.id)} role="tab" aria-selected={showDone === t.id} onClick={() => setShowDone(t.id)}
+              className={`px-3 py-1.5 rounded-lg transition-colors ${showDone === t.id ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {!loaded ? null : showDone ? (
+        done.length === 0 ? (
+          <p className="text-center py-12 text-[13px] text-gray-400">Nothing finished yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {done.slice(0, 100).map(item => (
+              <div key={item.id} className="px-4 py-3 rounded-2xl surface-item flex items-center gap-3">
+                <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
+                <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
+                  <p className="text-[13.5px] font-medium text-gray-500 line-through truncate">{item.title || 'Untitled'}</p>
+                  <p className="text-[11px] text-gray-400">{item.project?.name || item.area?.name || 'No project'}{item.completedAt ? ` · done ${timeAgo(item.completedAt)}` : ''}</p>
+                </div>
+                <button onClick={() => handleReopen(item)} className="px-2.5 py-1.5 rounded-lg text-[12px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1">
+                  <RotateCcw size={12} /> Reopen
+                </button>
+              </div>
+            ))}
+            {done.length > 100 && <p className="text-center text-[12px] text-gray-400">Showing the latest 100 of {done.length}. All Items has the rest.</p>}
+          </div>
+        )
+      ) : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
           {hadItems.current ? (
             <Celebrate className="mx-auto">
@@ -186,76 +237,59 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           </p>
         </div>
       ) : (
-        <div className="stagger -mb-3">
+        <div className="relative has-[[aria-expanded=true]]:z-30 stagger -mb-2">
           <AnimatePresence initial={false}>
-          {items.map((item) => (
-            <Fold key={item.id} gap={12}>
+          <ProjectGroups items={items}>
+          {(item, grouped) => (
+            <Fold key={item.id}>
             <SwipeRow onSwipeRight={() => handleComplete(item)} onSwipeLeft={() => handleSnoozeTomorrow(item)}>
-            <div
-              className={`${isCompleting(item.id) ? 'is-completing' : ''} p-4 rounded-2xl surface-item is-interactive hover:border-blue-200 dark:hover:border-blue-500/30 flex flex-col md:flex-row items-start md:items-center justify-between gap-3 group`}
-            >
-              <div className="flex items-center gap-3.5 flex-1 min-w-0">
-                <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
-
-                <div className="min-w-0 flex-1 cursor-pointer" onClick={() => startClarify(item)}>
-                  <h4 className="row-title inline font-semibold text-[14px] tracking-[-0.005em] text-gray-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-blue-400 transition-colors leading-snug">
-                    {item.title}
-                  </h4>
-                  <div className="flex items-center gap-2 mt-1 text-[11px] text-gray-400">
-                    <ContextTag item={item} combined={!lifeContext} />
-                    <span>Captured {timeAgo(item.createdAt)}</span>
-                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
-                    {item.isFocus && <span className="text-amber-500 font-bold">· In Focus</span>}
-                  </div>
-                </div>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-                <button 
-                  onClick={(e) => handleToggleFocus(item, e)}
-                  className={`px-3 py-1.5 rounded-xl font-semibold text-xs flex items-center gap-1.5 transition-colors ${
-                    item.isFocus 
-                      ? 'bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400' 
-                      : 'bg-gray-100 dark:bg-white/5 text-gray-500 hover:text-gray-900 dark:hover:text-white'
-                  }`}
-                  title="Toggle Focus"
-                >
-                  <Target size={13} />
-                  <span>{item.isFocus ? 'In Focus' : '+ Focus'}</span>
-                </button>
-
-                <div className="md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100 transition-opacity">
-                  <SnoozeMenu itemId={item.id} onSnoozed={() => loadInbox()} />
-                </div>
-
-                <button 
-                  onClick={() => startClarify(item)}
-                  className="px-3.5 py-1.5 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 font-semibold text-xs rounded-xl flex items-center gap-1 transition-colors"
-                >
-                  <span>Clarify</span>
-                  <ChevronRight size={13} />
-                </button>
-
-                <button 
-                  onClick={(e) => handleDelete(item.id, e)}
-                  className="p-1.5 text-gray-300 hover:text-red-500 rounded-lg hover:bg-black/5 dark:hover:bg-white/5 transition-all md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100"
-                  aria-label="Delete"
-                >
-                  <Trash2 size={15} />
-                </button>
-              </div>
-            </div>
+              <TaskRow
+                item={item} today={todayIso} combined={!lifeContext} hideHome={grouped}
+                completing={isCompleting(item.id)} saving={isSaving(item.id)}
+                onComplete={() => handleComplete(item)}
+                onOpen={() => unsortedIds.has(item.id) ? startClarify(item) : onSelectTask(item.id)}
+                onStar={() => handleStar(item)} onSnoozed={loadInbox}
+                extra={unsortedIds.has(item.id) ? (
+                  <button onClick={(e) => { e.stopPropagation(); startClarify(item); }}
+                    className="shrink-0 px-2.5 py-1 bg-blue-50 dark:bg-blue-950/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 font-semibold text-[11.5px] rounded-lg flex items-center gap-0.5 transition-colors">
+                    New <ChevronRight size={12} />
+                  </button>
+                ) : null}
+              />
             </SwipeRow>
             </Fold>
-          ))}
+          )}
+          </ProjectGroups>
           </AnimatePresence>
+        </div>
+      )}
+
+      {/* Visible vs total: proves no open task is out of sight. */}
+      {loaded && check && !showDone && (
+        <div className={`flex items-start gap-2 px-4 py-3 rounded-2xl text-[12.5px] ${check.missing.length ? 'bg-red-50 dark:bg-red-950/20 text-red-700 dark:text-red-300' : 'bg-emerald-50/70 dark:bg-emerald-950/20 text-emerald-700 dark:text-emerald-300'}`}>
+          {check.missing.length ? <AlertTriangle size={15} className="shrink-0 mt-px" /> : <ShieldCheck size={15} className="shrink-0 mt-px" />}
+          <div className="space-y-0.5">
+            <p className="font-semibold">
+              {check.missing.length
+                ? `${check.missing.length} open ${check.missing.length === 1 ? 'task is' : 'tasks are'} not listed: ${check.missing.slice(0, 3).map(i => i.title || 'Untitled').join(', ')}`
+                : `All ${check.listed} open ${check.listed === 1 ? 'task is' : 'tasks are'} listed above.`}
+            </p>
+            {(check.alarms > 0 || check.otherContext > 0) && (
+              <p className="opacity-80">
+                {[check.alarms > 0 && `${check.alarms} LUMO ${check.alarms === 1 ? 'alarm lives' : 'alarms live'} on the LUMO page`,
+                  check.otherContext > 0 && (chill
+                    ? `${check.otherContext} more in Work, hidden in Chill (switch to Work to see them)`
+                    : `${check.otherContext} more ${lifeContext === 'work' ? 'in Personal' : 'in Work'} (switch to All to see them)`)]
+                  .filter(Boolean).join('. ')}.
+              </p>
+            )}
+          </div>
         </div>
       )}
 
       <AnimatePresence>
         {isTriaging && (
-          <InboxTriage items={items} onChanged={loadInbox} onClose={() => { setIsTriaging(false); loadInbox(); }} />
+          <InboxTriage items={unsorted} onChanged={loadInbox} onClose={() => { setIsTriaging(false); loadInbox(); }} />
         )}
       </AnimatePresence>
 
@@ -275,7 +309,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <Sparkles size={15} />
                   <span>Quick Clarify</span>
                 </div>
-                <button onClick={() => setClarifyingItem(null)} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+                <button type="button" onClick={() => setClarifyingItem(null)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
               </div>
 
               <div>
@@ -311,10 +345,10 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Project / Area</label>
-                    <select 
+                    <Select 
                       value={targetProjectId || targetAreaId}
-                      onChange={e => {
-                        const val = e.target.value;
+                      onChange={v => {
+                        const val = v;
                         const isProj = projects.some(p => p.id === val);
                         if (isProj) {
                           setTargetProjectId(val);
@@ -333,15 +367,14 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                       <optgroup label="Life Areas">
                         {areas.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                       </optgroup>
-                    </select>
+                    </Select>
                   </div>
 
                   <div>
                     <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1.5">Target Date</label>
-                    <input 
-                      type="date"
+                    <DatePicker
                       value={targetDueDate}
-                      onChange={e => setTargetDueDate(e.target.value)}
+                      onChange={v => setTargetDueDate(v)}
                       className="w-full px-3 py-2 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/10 text-xs font-semibold outline-none dark:text-white"
                     />
                   </div>

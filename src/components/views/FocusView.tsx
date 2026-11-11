@@ -7,9 +7,12 @@ import { FOCUS_LIMIT } from '../../services/constants';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { useCachedState } from '../../hooks/useCachedState';
 import { SnoozeMenu } from '../common/SnoozeMenu';
 import { formatDateRange } from '../../utils/dateUtils';
 import { countDoneToday } from '../../utils/progress';
+import { normalizeDoses } from '../../utils/doses';
+import { DoseChips } from '../common/DoseChips';
 import { useCompletion } from '../../hooks/useCompletion';
 import { CompleteButton } from '../common/CompleteButton';
 import { Celebrate } from '../common/Celebrate';
@@ -24,17 +27,15 @@ interface FocusViewProps {
 }
 
 export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
-  const [focusItems, setFocusItems] = useState<WorkItem[]>([]);
-  const [loaded, setLoaded] = useState(false);
-  const [doneToday, setDoneToday] = useState(0);
+  const [focusItems, setFocusItems, loaded] = useCachedState<WorkItem[]>(`focus:${lifeContext || 'all'}`, []);
+  const [doneToday, setDoneToday] = useState(() => countDoneToday(lifeContext));
   const { showToast } = useToast();
 
   const loadFocus = async () => {
     try {
       const items = await api.focus.list(lifeContext);
-      setFocusItems(items);
       setDoneToday(countDoneToday(lifeContext));
-      setLoaded(true);
+      setFocusItems(items);
     } catch (e) {
       console.error(e);
     }
@@ -81,10 +82,10 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
             <span>Active Focus Queue</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {focusItems.length === 0 ? (doneToday > 0 ? 'Focus cleared' : 'Nothing in focus') : focusItems.length === 1 ? 'One thing to finish' : `${focusItems.length} things to finish`}
+            {!loaded ? 'Focus' : focusItems.length === 0 ? (doneToday > 0 ? 'Focus cleared' : 'Nothing in focus') : focusItems.length === 1 ? 'One thing to finish' : `${focusItems.length} things to finish`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
-            {focusItems.length === 0 && doneToday > 0 ? `${doneToday} done today. Nice work.` : `${doneToday > 0 ? `${doneToday} done today. ` : ''}A small working set. Finish what's here before adding more.`}
+            {!loaded ? '\u00a0' : focusItems.length === 0 && doneToday > 0 ? `${doneToday} done today. Nice work.` : `${doneToday > 0 ? `${doneToday} done today. ` : ''}A small working set. Finish what's here before adding more.`}
           </p>
           {/* The slot limit, shown rather than told. */}
           <div className="flex items-center gap-1.5 mt-3" aria-label={`${focusItems.length} of ${FOCUS_SLOTS} focus slots used`}>
@@ -154,6 +155,10 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                     {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
                     {item.project && <span>· {item.project.name}</span>}
                   </div>
+                  {normalizeDoses(item.doseTimes).length > 1 && (
+                    <DoseChips className="mt-1.5" times={normalizeDoses(item.doseTimes)} ticked={item.dosesDone} label={item.title}
+                      onToggle={async t => { await api.workItems.toggleDose(item.id, t); loadFocus(); }} />
+                  )}
                 </div>
               </div>
 

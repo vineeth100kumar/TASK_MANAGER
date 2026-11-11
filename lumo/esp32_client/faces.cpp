@@ -10,7 +10,27 @@
 // row of that design into the visible band (VIS_T..VIS_B).
 static inline int VY(int y) { return VIS_T + (y * VIS_H + 108) / 216; }
 
-bool faceIsPremium(ClockStyle style) { return style >= CLOCK_MONOLITH && style <= CLOCK_DIAL; }
+// The clock faces draw on the card (display.h, fitCard): the window's rows
+// and full width, or with the Even Frame on, a smaller card inside a black
+// frame. FX/FY map a column/row of the 320x216 design into it; with the frame
+// off they match the old window mapping exactly.
+static inline int FX(int x) { FitCard c = fitCard(); return c.x + (x * c.w + 160) / 320; }
+static inline int FY(int y) { FitCard c = fitCard(); return c.y + (y * c.h + 108) / 216; }
+static inline bool framed() { return screenFit.frame; }
+// On the card every face but Nightstand (black) takes one charcoal, and hairlines lift to stay visible.
+static inline uint16_t cardBg(uint16_t own) { return framed() ? aaRGB(28, 30, 36) : own; }
+static inline uint8_t lift() { return framed() ? 20 : 0; }
+
+// The island (below, 2.15) covers the details column while it is big.
+static bool detailsHidden = false;
+static bool detailsDirty  = false;   // the column is free again: draw it
+static bool islandDirty   = false;   // a face drew over the island: paint it again
+static float faceK        = 1.0f;    // the face's brightness, for the island's colours
+static void islandReset();
+
+// The depth face draws as Monolith until the Pi's picture arrives.
+bool faceIsPremium(ClockStyle style) { return style >= CLOCK_MONOLITH && style <= CLOCK_DEPTH; }
+static ClockStyle drawnStyle(ClockStyle style) { return style == CLOCK_DEPTH ? CLOCK_MONOLITH : style; }
 
 static bool  needAll    = true;
 static int   lastMinute = -1;
@@ -35,6 +55,7 @@ struct FaceAnim {
 };
 
 void faceReset() {
+  islandReset();
   needAll = true;
   enterMs = millis();
   entryDone = false;
@@ -125,7 +146,7 @@ static const uint16_t MONO_BG = 0x0841;   // (8,9,11)
 static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
   float k = a.k;
   bool minute = a.all;
-  uint16_t bg = MONO_BG;
+  uint16_t bg = cardBg(MONO_BG);
   uint16_t mute = aaRGB(120, 124, 130, k), acc = aaRGB(214, 170, 110, k);
   AASurface sf;
   char buf[48], hs[4], ms[8], day[4], mon[8];
@@ -134,8 +155,8 @@ static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
     dateParts(s, day, sizeof(day), mon, sizeof(mon));
     snprintf(buf, sizeof(buf), "%s  %s %s", fullName(s.weekday, DAYS, 7), day, fullName(mon, MONTHS, 12));
     upper(buf);
-    if (band(sf, 0, 320, VY(34), AA_CAPS9, bg)) {
-      aaTextCentered(sf, 160, VY(34), buf, AA_CAPS9, mute, 2);
+    if (band(sf, FX(0), FX(320), FY(34), AA_CAPS9, bg)) {
+      aaTextCentered(sf, FX(160), FY(34), buf, AA_CAPS9, mute, 2);
       aaEnd(sf);
     }
 
@@ -147,37 +168,37 @@ static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
     hourText(s, old ? prevH : c.h, hs, sizeof(hs));
     snprintf(ms, sizeof(ms), "%02d", old ? prevM : c.m);
     snprintf(buf, sizeof(buf), "%s:%s", hs, ms);
-    if (band(sf, 0, 320, VY(130), AA_MONO_TIME, bg)) {
-      aaTextCentered(sf, 160, VY(130), buf, AA_MONO_TIME, aaRGB(238, 236, 230, k * fk));
+    if (band(sf, FX(0), FX(320), FY(130), AA_MONO_TIME, bg)) {
+      aaTextCentered(sf, FX(160), FY(130), buf, AA_MONO_TIME, aaRGB(238, 236, 230, k * fk));
       aaEnd(sf);
     }
   }
 
   if (minute) {
-    if (band(sf, 0, 320, VY(190), AA_BODY11, bg)) {
+    if (band(sf, FX(0), FX(320), FY(190), AA_BODY11, bg)) {
       if (!zone2Text(s, c, buf, sizeof(buf))) {
         char cond[16];
         conditionText(s, cond, sizeof(cond));
         snprintf(buf, sizeof(buf), "%.0f\x7F  %s", s.temp_c, cond);
       }
       fitText(buf, AA_BODY11, 100);
-      aaText(sf, 70, VY(190), buf, AA_BODY11, mute);
+      aaText(sf, FX(70), FY(190), buf, AA_BODY11, mute);
       if (s.alarm_set) {
         char a[16], line[24];
         alarmText(s, a, sizeof(a), false);
         snprintf(line, sizeof(line), "Alarm %s", a);
-        aaTextRight(sf, 250, VY(190), line, AA_BODY11, acc);
+        aaTextRight(sf, FX(250), FY(190), line, AA_BODY11, acc);
       }
       aaEnd(sf);
     }
   }
 
   // Seconds: a dot travelling along a hairline.
-  int y = VY(160);
-  if (aaBegin(sf, 64, y - 4, 192, 9, bg)) {
+  int y = FY(160);
+  if (aaBegin(sf, FX(64), y - 4, FX(256) - FX(64), 9, bg)) {
     if (s.show_seconds && c.synced) {
-      aaLine(sf, 70, y + 0.5f, 250, y + 0.5f, 1.0f, aaRGB(40, 42, 46, k));
-      aaDisc(sf, 70 + 180.0f * (c.s + c.secFrac) / 60.0f, y + 0.5f, 2.3f, acc);
+      aaLine(sf, FX(70), y + 0.5f, FX(250), y + 0.5f, 1.0f, aaRGB(40 + lift(), 42 + lift(), 46 + lift(), k));
+      aaDisc(sf, FX(70) + (FX(250) - FX(70)) * (c.s + c.secFrac) / 60.0f, y + 0.5f, 2.3f, acc);
     }
     aaEnd(sf);
   }
@@ -186,7 +207,13 @@ static void monolith(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
 // ------------------------------------------------------------- Stacked
 // Hours over minutes, big and bold, with a column of details on the right.
 
-static const uint16_t STACK_BG = 0x0021;  // (6,6,8)
+// True black, framed or not (2.24): the panel shows the most contrast against
+// black, so the digits look as bright as the update screen's white. On the
+// Even Frame a hairline keeps the card's shape (see faceTickInner).
+static const uint16_t STACK_BG = 0x0000;
+static const uint16_t STACK_EDGE = 0x31A7;   // (48,52,56): the card's hairline
+// No night dimming on Stacked (2.24.1): it stays at full brightness all day.
+static float stackedK(float) { return 1.0f; }
 
 // The minute turns over by rolling: the old number slides up and out as the
 // new one rises in behind it (the hour too, when it changes).
@@ -203,8 +230,8 @@ static void stacked(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
   if (!a.all && !a.timeBand) return;
   float k = a.k;
   uint16_t bg = STACK_BG;
-  uint16_t ink = aaRGB(245, 243, 238, k), acc = aaRGB(255, 159, 67, k), mute = aaRGB(128, 132, 140, k);
-  uint16_t rule = aaRGB(34, 36, 40, k);
+  uint16_t ink = aaRGB(255, 255, 255, k), acc = aaRGB(255, 166, 72, k), mute = aaRGB(172, 176, 184, k);
+  uint16_t rule = aaRGB(56, 60, 66, k);
   AASurface sf;
   char buf[32], hs[4], ms[8];
 
@@ -213,51 +240,51 @@ static void stacked(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
   snprintf(ms, sizeof(ms), "%02d", c.m);
   hourText(s, prevH >= 0 ? prevH : c.h, phs, sizeof(phs));
   snprintf(pms, sizeof(pms), "%02d", prevM >= 0 ? prevM : c.m);
-  int top = VY(14), base = VY(94);
+  int top = FY(14), base = FY(94);
   int hBandH = base + AA_STACK_TIME.descent + 3 - top;
-  if ((a.all || strcmp(phs, hs)) && aaBegin(sf, 0, top, 186, hBandH, bg)) {
-    rollText(sf, 18, base, hBandH, phs, hs, a.tr, AA_STACK_TIME, ink);
-    int x = 18 + aaTextWidth(AA_STACK_TIME, hs);
-    if (!s.hour24) aaText(sf, x + 8, VY(28), c.h >= 12 ? "PM" : "AM", AA_SEMI11, mute);
+  if ((a.all || strcmp(phs, hs)) && aaBegin(sf, FX(0), top, FX(186) - FX(0), hBandH, bg)) {
+    rollText(sf, FX(18), base, hBandH, phs, hs, a.tr, AA_STACK_TIME, ink);
+    int x = FX(18) + aaTextWidth(AA_STACK_TIME, hs);
+    if (!s.hour24) aaText(sf, x + 8, FY(28), c.h >= 12 ? "PM" : "AM", AA_SEMI11, mute);
     aaEnd(sf);
   }
-  if (band(sf, 0, 186, VY(194), AA_STACK_TIME, bg)) {
-    rollText(sf, 18, VY(194), sf.h, pms, ms, a.tr, AA_STACK_TIME, acc);
+  if (band(sf, FX(0), FX(186), FY(194), AA_STACK_TIME, bg)) {
+    rollText(sf, FX(18), FY(194), sf.h, pms, ms, a.tr, AA_STACK_TIME, acc);
     aaEnd(sf);
   }
 
-  if (!a.all) return;
+  if (!a.all || detailsHidden) return;        // (the island is covering the column)
   // The details column.
-  const int x = 196, right = 304;
-  if (!aaBegin(sf, 186, VY(26), 320 - 186, VY(196) - VY(26), bg)) return;
+  const int x = FX(196), right = FX(304);
+  if (!aaBegin(sf, FX(186), FY(26), FX(320) - FX(186), FY(196) - FY(26), bg)) return;
   char day[4], mon[8];
   dateParts(s, day, sizeof(day), mon, sizeof(mon));
   snprintf(buf, sizeof(buf), "%s", s.weekday);
   upper(buf);
-  aaText(sf, x, VY(44), buf, AA_SEMI11, mute, 2);
+  aaText(sf, x, FY(44), buf, AA_SEMI11, mute, 2);
   snprintf(buf, sizeof(buf), "%s %s", day, mon);
-  aaText(sf, x, VY(69), buf, AA_DISP20, ink);
-  aaLine(sf, x, VY(86) + 0.5f, right, VY(86) + 0.5f, 1.0f, rule);
+  aaText(sf, x, FY(69), buf, AA_DISP20, ink);
+  aaLine(sf, x, FY(86) + 0.5f, right, FY(86) + 0.5f, 1.0f, rule);
 
   if (zone2Text(s, c, buf, sizeof(buf))) {
     char* sp = strrchr(buf, ' ');               // "London 09:50": time big, place small
-    if (sp) { *sp = '\0'; aaText(sf, x, VY(113), sp + 1, AA_DISP20, ink); }
+    if (sp) { *sp = '\0'; aaText(sf, x, FY(113), sp + 1, AA_DISP20, ink); }
     fitText(buf, AA_BODY11, right - x);
-    aaText(sf, x, VY(130), buf, AA_BODY11, mute);
+    aaText(sf, x, FY(130), buf, AA_BODY11, mute);
   } else {
     snprintf(buf, sizeof(buf), "%.0f\x7F", s.temp_c);
-    aaText(sf, x, VY(113), buf, AA_DISP20, ink);
+    aaText(sf, x, FY(113), buf, AA_DISP20, ink);
     conditionText(s, buf, sizeof(buf));
     fitText(buf, AA_BODY11, right - x);
-    aaText(sf, x, VY(130), buf, AA_BODY11, mute);
+    aaText(sf, x, FY(130), buf, AA_BODY11, mute);
   }
-  aaLine(sf, x, VY(146) + 0.5f, right, VY(146) + 0.5f, 1.0f, rule);
+  aaLine(sf, x, FY(146) + 0.5f, right, FY(146) + 0.5f, 1.0f, rule);
 
   if (s.alarm_set) {
-    aaDisc(sf, x + 3, VY(162), 3, acc);
+    aaDisc(sf, x + 3, FY(162), 3, acc);
     alarmText(s, buf, sizeof(buf), true);
-    aaText(sf, x + 12, VY(167), buf, AA_DISP14, ink);
-    aaText(sf, x + 12, VY(184), "Alarm", AA_BODY11, mute);
+    aaText(sf, x + 12, FY(167), buf, AA_DISP14, ink);
+    aaText(sf, x + 12, FY(184), "Alarm", AA_BODY11, mute);
   }
   aaEnd(sf);
 }
@@ -289,16 +316,16 @@ static void nightstand(const LumoState& s, const ClockNow& c, const FaceAnim& a)
   hourText(s, old ? prevH : c.h, hs, sizeof(hs));
   snprintf(buf, sizeof(buf), "%s:%02d", hs, old ? prevM : c.m);
   const AAFont& f = AA_NIGHT_TIME;
-  int base = VY(136), pad = f.glowPad;
+  int base = FY(136), pad = f.glowPad;
   int top = base - f.ascent - pad - 1;
-  if (aaBegin(sf, 0, top, 320, f.ascent + f.descent + 2 * pad + 3, bg)) {
-    int x = 160 - aaTextWidth(f, buf) / 2;
+  if (aaBegin(sf, FX(0), top, FX(320) - FX(0), f.ascent + f.descent + 2 * pad + 3, bg)) {
+    int x = FX(160) - aaTextWidth(f, buf) / 2;
     aaGlow(sf, x, base, buf, f, aaRGB(190, 85, 25, k * halo), 210);
     aaText(sf, x, base, buf, f, aaRGB(255, 150, 60, k * ink));
     aaEnd(sf);
   }
 
-  if (minute && band(sf, 0, 320, VY(170), AA_BODY11, bg)) {
+  if (minute && band(sf, FX(0), FX(320), FY(170), AA_BODY11, bg)) {
     char day[4], mon[8], date[24];
     dateParts(s, day, sizeof(day), mon, sizeof(mon));
     snprintf(date, sizeof(date), "%s %s %s", s.weekday, day, mon);
@@ -307,11 +334,11 @@ static void nightstand(const LumoState& s, const ClockNow& c, const FaceAnim& a)
       alarmText(s, a, sizeof(a), false);
       snprintf(line, sizeof(line), "Alarm %s", a);
       int gap = 26, w = aaTextWidth(AA_BODY11, date) + gap + aaTextWidth(AA_BODY11, line);
-      int x = aaText(sf, 160 - w / 2, VY(170), date, AA_BODY11, info);
-      aaDisc(sf, x + gap / 2.0f, VY(170) - 3.5f, 1.3f, info);
-      aaText(sf, x + gap, VY(170), line, AA_BODY11, info);
+      int x = aaText(sf, FX(160) - w / 2, FY(170), date, AA_BODY11, info);
+      aaDisc(sf, x + gap / 2.0f, FY(170) - 3.5f, 1.3f, info);
+      aaText(sf, x + gap, FY(170), line, AA_BODY11, info);
     } else {
-      aaTextCentered(sf, 160, VY(170), date, AA_BODY11, info);
+      aaTextCentered(sf, FX(160), FY(170), date, AA_BODY11, info);
     }
     aaEnd(sf);
   }
@@ -331,15 +358,16 @@ static void dialHand(AASurface& sf, float cx, float cy, float turns, float len, 
 static void dial(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
   float k = a.k;
   bool minute = a.all, second = a.second;
-  uint16_t bg = DIAL_BG;
+  uint16_t bg = cardBg(DIAL_BG);
   uint16_t face = aaRGB(17, 19, 22), ink = aaRGB(236, 234, 228, k), mute = aaRGB(120, 124, 130, k);
   uint16_t orange = aaRGB(255, 122, 60, k);
   AASurface sf;
   char buf[32], day[4], mon[8];
   dateParts(s, day, sizeof(day), mon, sizeof(mon));
 
-  const float R = 94.0f * VIS_H / 216;
-  const float cx = 108, cy = VIS_T + VIS_H / 2.0f;
+  const FitCard card = fitCard();
+  const float R = 94.0f * card.h / 216;
+  const float cx = FX(108), cy = card.y + card.h / 2.0f;
   bool sweep = s.show_seconds && c.synced;
   if (minute || (second && sweep)) {
     int x0 = (int)(cx - R) - 2, y0 = (int)(cy - R) - 2, n = (int)(2 * R) + 5;
@@ -369,36 +397,38 @@ static void dial(const LumoState& s, const ClockNow& c, const FaceAnim& a) {
     }
   }
 
-  if (!minute) return;
-  const int x = 226, right = 316;
-  if (!aaBegin(sf, 212, VY(30), 320 - 212, VY(196) - VY(30), bg)) return;
+  if (!minute || detailsHidden) return;       // (the island is covering the column)
+  // With the island's dot on the right edge the column gives it room.
+  const int pull = framed() && screenFit.island ? 14 : 0;
+  const int x = FX(226) - pull, right = FX(316) - (pull ? 22 : 0);
+  if (!aaBegin(sf, FX(212) - pull, FY(30), FX(320) - FX(212) + pull, FY(196) - FY(30), bg)) return;
   snprintf(buf, sizeof(buf), "%s", fullName(s.weekday, DAYS, 7));
   upper(buf);
-  aaText(sf, x, VY(47), buf, AA_CAPS9, mute, 2);
+  aaText(sf, x, FY(47), buf, AA_CAPS9, mute, 2);
   snprintf(buf, sizeof(buf), "%s %s", day, mon);
-  aaText(sf, x, VY(71), buf, AA_DISP20, ink);
+  aaText(sf, x, FY(71), buf, AA_DISP20, ink);
 
   if (zone2Text(s, c, buf, sizeof(buf))) {
     char* sp = strrchr(buf, ' ');
-    aaText(sf, x, VY(107), "ELSEWHERE", AA_CAPS9, mute, 2);
+    aaText(sf, x, FY(107), "ELSEWHERE", AA_CAPS9, mute, 2);
     if (sp) *sp = '\0';
     char line[40];
     snprintf(line, sizeof(line), "%s %s", sp ? sp + 1 : "", buf);
     fitText(line, AA_DISP14, right - x);
-    aaText(sf, x, VY(129), line, AA_DISP14, ink);
+    aaText(sf, x, FY(129), line, AA_DISP14, ink);
   } else {
-    aaText(sf, x, VY(107), "WEATHER", AA_CAPS9, mute, 2);
+    aaText(sf, x, FY(107), "WEATHER", AA_CAPS9, mute, 2);
     char cond[16];
     conditionText(s, cond, sizeof(cond));
     snprintf(buf, sizeof(buf), "%.0f\x7F %s", s.temp_c, cond);
     fitText(buf, AA_DISP14, right - x);
-    aaText(sf, x, VY(129), buf, AA_DISP14, ink);
+    aaText(sf, x, FY(129), buf, AA_DISP14, ink);
   }
 
   if (s.alarm_set) {
-    aaText(sf, x, VY(165), "ALARM", AA_CAPS9, mute, 2);
+    aaText(sf, x, FY(165), "ALARM", AA_CAPS9, mute, 2);
     alarmText(s, buf, sizeof(buf), true);
-    aaText(sf, x, VY(187), buf, AA_DISP14, orange);
+    aaText(sf, x, FY(187), buf, AA_DISP14, orange);
   }
   aaEnd(sf);
 }
@@ -409,26 +439,39 @@ static uint16_t faceBg(ClockStyle st) {
   switch (st) {
     case CLOCK_STACKED:    return STACK_BG;
     case CLOCK_NIGHTSTAND: return NIGHT_BG;
-    case CLOCK_DIAL:       return DIAL_BG;
-    default:               return MONO_BG;
+    case CLOCK_DIAL:       return cardBg(DIAL_BG);
+    default:               return cardBg(MONO_BG);
   }
 }
 
-void faceTick(const LumoState& s, const ClockNow& c) {
-  static unsigned long lastDraw = 0;
+bool faceAnimating() { return !entryDone || !transDone; }
+
+static void faceTickInner(const LumoState& s, const ClockNow& c) {
+  static uint32_t nextDraw = 0;
+  static int lastEnterStep = -1;
   unsigned long now = millis();
   float enter = entryDone ? 1.0f : animProgress(enterMs, now, ENTER_MS);
-  unsigned long turn = turnMs(s.clock_style);
+  const ClockStyle style = drawnStyle(s.clock_style);
+  unsigned long turn = turnMs(style);
   bool turning = !transDone;
   bool animating = enter < 1 || turning;
-  if (!needAll && now - lastDraw < (animating ? 33UL : 50UL)) return;
-  lastDraw = now;
+  if (!framePace(nextDraw, now, animating ? FRAME_FAST_MS : 50UL, needAll)) return;
+  // The fade-in redraws every band, so it moves in 24 visible steps and a
+  // frame on the same step as the last is skipped (2.18).
+  // (Not the Dial: its hands spin in, and every frame of that shows.)
+  if (enter < 1 && !needAll && !turning && style != CLOCK_DIAL) {
+    int step = (int)(easeInOutCubic(enter) * 24 + 0.5f);
+    if (step == lastEnterStep) return;
+    lastEnterStep = step;
+  } else if (enter >= 1) {
+    lastEnterStep = -1;
+  }
 
   // Same day-phase dimming as the classic clock: calm at night, never dark.
   float k = 0.5f + 0.5f * clockPhase(c.minuteOfDay).level;
-  bool minute = needAll || c.m != lastMinute || fabsf(k - lastDim) > 0.03f;
+  bool minute = needAll || detailsDirty || c.m != lastMinute || fabsf(k - lastDim) > 0.03f;
   bool second = minute || c.s != lastSecond;
-  bool smooth = s.clock_style == CLOCK_MONOLITH && s.show_seconds;   // the dot glides
+  bool smooth = style == CLOCK_MONOLITH && s.show_seconds;   // the dot glides
 
   // A new minute (not the first one drawn) starts the face's turn-over.
   if (shownM >= 0 && c.m != shownM && turn && enter >= 1) {
@@ -447,26 +490,229 @@ void faceTick(const LumoState& s, const ClockNow& c) {
   if (enter < 1) minute = true;
   if (!minute && !second && !smooth && !turning) return;
 
+  detailsDirty = false;
   FaceAnim an;
   an.enter = enter;
-  an.k = k * easeInOutCubic(enter);
+  an.k = (style == CLOCK_STACKED ? stackedK(k) : k) * (enter >= 1 ? 1.0f : style == CLOCK_DIAL ? easeInOutCubic(enter)
+                                   : (int)(easeInOutCubic(enter) * 24 + 0.5f) / 24.0f);
+  faceK = an.k;
   an.all = minute;
   an.timeBand = turning;
   an.second = second;
   an.tr = tr;
 
-  if (needAll) tft.fillScreen(faceBg(s.clock_style));
-  switch (s.clock_style) {
+  if (needAll) {
+    if (framed()) {
+      FitCard card = fitCard();
+      tft.fillScreen(0x0000);
+      tft.fillRect(card.x, card.y, card.w, card.h, faceBg(style));
+      // Stacked's card is black like the frame: a hairline just outside it
+      // (left, top, bottom; the right is the glass) keeps its shape.
+      if (style == CLOCK_STACKED) {
+        tft.drawFastVLine(card.x - 1, card.y - 1, card.h + 2, STACK_EDGE);
+        tft.drawFastHLine(card.x - 1, card.y - 1, card.w + 1, STACK_EDGE);
+        tft.drawFastHLine(card.x - 1, card.y + card.h, card.w + 1, STACK_EDGE);
+      }
+    } else {
+      tft.fillScreen(faceBg(style));
+    }
+  }
+  switch (style) {
     case CLOCK_MONOLITH:   monolith(s, c, an); break;
     case CLOCK_STACKED:    stacked(s, c, an); break;
     case CLOCK_NIGHTSTAND: nightstand(s, c, an); break;
     case CLOCK_DIAL:       dial(s, c, an); break;
     default: break;
   }
+  islandDirty = true;
   needAll = false;
   lastMinute = c.m;
   lastSecond = c.s;
   if (minute && enter >= 1) lastDim = k;
+}
+
+// ------------------------------------------------------------- Island
+// With the Even Frame on, a black capsule docks on the card's right edge, the
+// way a phone's island grows out of its camera. Idle it is a small dot when
+// something is going on (an alarm set, music, a timer). On Stacked and Dial
+// music and the timer grow it into a capsule that covers the details column
+// (which comes back when it shrinks); Monolith keeps just the dot, and
+// Nightstand nothing, to stay dark. Sage can switch it off (Screen fit).
+
+enum IsKind { IS_NONE, IS_ALARM, IS_MUSIC, IS_TIMER };
+static const int IS_DOT_W = 22, IS_DOT_H = 40, IS_BIG_W = 104, IS_BIG_H = 168;   // big: nearly the card's full height
+static float isW = 0, isH = 0;               // the size drawn, easing towards the target
+static int   isDrawW = -1, isDrawH = -1;     // what the panel shows now
+static unsigned long isLast = 0, isLastBars = 0;
+static int   isLastSec = -1;
+static bool  isBlank = false;
+static uint16_t isLastArt = 0;               // the cover the island last showed (display.cpp's artSerial)
+
+static void islandReset() {
+  isW = isH = 0;
+  isDrawW = isDrawH = -1;
+  isLastSec = -1;
+  isLastArt = artSerial;
+  isBlank = false;
+  detailsHidden = false;
+}
+
+static IsKind islandWant(const LumoState& s, ClockStyle style) {
+  if (!framed() || !screenFit.island || style == CLOCK_NIGHTSTAND) return IS_NONE;
+  if (s.tm_state == TOOL_RUNNING || s.tm_state == TOOL_PAUSED) return IS_TIMER;
+  if (s.sp_playing && s.sp_title[0]) return IS_MUSIC;
+  if (s.alarm_set) return IS_ALARM;
+  return IS_NONE;
+}
+
+static int islandTimerLeft(const LumoState& s) {           // milliseconds
+  if (s.tm_state == TOOL_PAUSED) return (int)s.tm_left_ms;
+  int32_t left = (int32_t)(s.tm_end - millis());
+  return left < 0 ? 0 : left;
+}
+
+// The cover, n x n with rounded corners, averaged down from the 100 x 100 frame.
+static void islandArt(AASurface& sf, int ox, int oy, int n, float rad) {
+  const uint16_t* px = (const uint16_t*)artBuf;
+  const uint8_t k = (uint8_t)(faceK * 255);
+  for (int y = 0; y < n; y++) {
+    int sy0 = y * 100 / n, sy1 = max(sy0 + 1, (y + 1) * 100 / n);
+    for (int x = 0; x < n; x++) {
+      float dx = x < rad ? rad - x - 0.5f : (x >= n - rad ? x - (n - rad) + 0.5f : 0);
+      float dy = y < rad ? rad - y - 0.5f : (y >= n - rad ? y - (n - rad) + 0.5f : 0);
+      float cov = 1;
+      if (dx > 0 && dy > 0) cov = constrain(rad + 0.5f - sqrtf(dx * dx + dy * dy), 0.0f, 1.0f);
+      if (cov <= 0) continue;
+      int sx0 = x * 100 / n, sx1 = max(sx0 + 1, (x + 1) * 100 / n);
+      int r = 0, g = 0, b = 0, cnt = 0;
+      for (int yy = sy0; yy < sy1; yy++)
+        for (int xx = sx0; xx < sx1; xx++) {
+          uint16_t c = px[yy * 100 + xx];
+          r += c >> 11; g += (c >> 5) & 63; b += c & 31; cnt++;
+        }
+      uint16_t c = (uint16_t)(((r / cnt) << 11) | ((g / cnt) << 5) | (b / cnt));
+      sf.buf[(oy - sf.y + y) * sf.w + (ox - sf.x + x)] = aaMix(0x0000, c, (uint8_t)(k * cov));
+    }
+  }
+}
+
+static void islandPaint(const LumoState& s, IsKind kind, bool big) {
+  FitCard card = fitCard();
+  const int x1 = card.x + card.w, cy = card.y + card.h / 2;
+  const uint16_t bg = faceBg(drawnStyle(s.clock_style));
+  AASurface sf;
+  const int W = (int)(isW + 0.5f), H = (int)(isH + 0.5f);
+  if (isBlank) {                                    // the column the island is about to cover
+    isBlank = false;
+    int left = drawnStyle(s.clock_style) == CLOCK_DIAL ? FX(212) - 10 : FX(186);
+    if (aaBegin(sf, left, FY(26), x1 - left, FY(196) - FY(26), bg)) aaEnd(sf);
+  }
+  int rw = max(W, isDrawW) + 2, rh = max(H, isDrawH) + 2;
+  if (rw <= 2 || rh <= 2) { isDrawW = W; isDrawH = H; return; }
+  if (!aaBegin(sf, x1 - rw, cy - rh / 2, rw, rh, bg)) return;
+  isDrawW = W; isDrawH = H;
+  if (W > 2 && H > 2) {
+    float r = min(H / 2.0f, 18.0f);
+    // On a black card (Stacked) a hairline shows the island's shape.
+    if (drawnStyle(s.clock_style) == CLOCK_STACKED && framed())
+      aaRoundRect(sf, x1 - W - 1, cy - H / 2.0f - 1, W + r + 1, H + 2, r + 1, STACK_EDGE);
+    aaRoundRect(sf, x1 - W, cy - H / 2.0f, W + r, H, r, 0x0000);
+    uint16_t white = aaRGB(238, 238, 238, faceK), muted = aaRGB(140, 144, 152, faceK);
+    uint16_t amber = aaRGB(255, 159, 67, faceK), green = aaRGB(120, 200, 140, faceK);
+    int x0 = x1 - W;
+    if (big && W >= IS_BIG_W - 6 && H >= min(IS_BIG_H, fitCard().h - 16) - 4) {
+      const int mid = x0 + W / 2, top = cy - H / 2;
+      if (kind == IS_MUSIC) {
+        const int n = 76, ax = mid - n / 2, ay = top + 14;
+        if (artSerial) islandArt(sf, ax, ay, n, 9);
+        else {
+          uint8_t cr, cg, cb;
+          displayArtTint(cr, cg, cb);
+          aaRoundRect(sf, ax, ay, n, n, 9, aaRGB(cr, cg, cb, faceK));
+        }
+        char t[28];
+        strlcpy(t, s.sp_title, sizeof(t));
+        fitText(t, AA_BODY11, W - 16);
+        aaTextCentered(sf, mid, ay + n + 18, t, AA_BODY11, white);
+        if (s.sp_artist[0]) {
+          char a[28];
+          strlcpy(a, s.sp_artist, sizeof(a));
+          fitText(a, AA_BODY11, W - 16);
+          aaTextCentered(sf, mid, ay + n + 34, a, AA_BODY11, muted);
+        }
+        unsigned long now = millis();
+        for (int i = 0; i < 5; i++) {
+          float h = s.sp_playing ? 3.0f + 9.0f * fabsf(sinf(now * 0.008f + i * 1.4f)) : 2.0f;
+          aaRoundRect(sf, mid - 15 + i * 6, top + H - 14 - h, 3, h, 1.0f, green);
+        }
+      } else if (kind == IS_TIMER) {
+        int left = islandTimerLeft(s);
+        float frac = s.tm_total_ms ? constrain(left / (float)s.tm_total_ms, 0.0f, 1.0f) : 0.0f;
+        const int dots = 28, ringY = top + 62;
+        for (int i = 0; i < dots; i++) {
+          float a = i * 6.2831853f / dots;
+          aaDisc(sf, mid + sinf(a) * 36, ringY - cosf(a) * 36, 2.2f, i < (int)(frac * dots + 0.5f) ? amber : aaRGB(70, 56, 40, faceK));
+        }
+        char t[12];
+        int secs = (left + 999) / 1000;
+        if (secs >= 3600) snprintf(t, sizeof(t), "%d:%02d", secs / 3600, secs / 60 % 60);
+        else snprintf(t, sizeof(t), "%02d:%02d", secs / 60, secs % 60);
+        aaTextCentered(sf, mid, ringY + 6, t, AA_DISP14, white);
+        char lab[25];
+        strlcpy(lab, s.tm_label[0] ? s.tm_label : (s.tm_state == TOOL_PAUSED ? "Paused" : "Timer"), sizeof(lab));
+        fitText(lab, AA_BODY11, W - 16);
+        aaTextCentered(sf, mid, top + H - 22, lab, AA_BODY11, muted);
+      }
+    } else if (!big || W < 40) {
+      // The dot: the colour says what it stands for.
+      if (W >= 12) aaDisc(sf, x0 + 9, cy, 4, kind == IS_MUSIC ? green : amber);
+    }
+  }
+  aaEnd(sf);
+}
+
+static void islandTick(const LumoState& s) {
+  const ClockStyle style = drawnStyle(s.clock_style);
+  unsigned long now = millis();
+  if (!islandDirty && now - isLast < 33) return;
+  IsKind kind = islandWant(s, style);
+  bool grows = style == CLOCK_STACKED || style == CLOCK_DIAL;
+  bool big = grows && (kind == IS_MUSIC || kind == IS_TIMER);
+  float tw = kind == IS_NONE ? 0 : big ? IS_BIG_W : IS_DOT_W;
+  // A Fit test with big top or bottom margins shortens the card: the island stays inside it.
+  float th = kind == IS_NONE ? 0 : big ? min(IS_BIG_H, fitCard().h - 16) : IS_DOT_H;
+
+  if (big && !detailsHidden) { detailsHidden = true; isBlank = true; }
+  bool moving = fabsf(tw - isW) > 0.01f || fabsf(th - isH) > 0.01f;
+  if (moving) {
+    isW += (tw - isW) * 0.3f; isH += (th - isH) * 0.3f;
+    if (fabsf(tw - isW) < 0.6f) isW = tw;
+    if (fabsf(th - isH) < 0.6f) isH = th;
+  }
+  if (!big && detailsHidden && isW <= IS_DOT_W + 1) {          // shrunk: the column comes back
+    detailsHidden = false;
+    detailsDirty = true;
+  }
+
+  bool content = false;
+  if (big && !moving) {
+    if (kind == IS_TIMER) {
+      int sec = (islandTimerLeft(s) + 999) / 1000;
+      if (sec != isLastSec) { isLastSec = sec; content = true; }
+    } else if (kind == IS_MUSIC && (now - isLastBars >= 100 || isLastArt != artSerial)) {
+      isLastBars = now; isLastArt = artSerial; content = true;
+    }
+  }
+  int W = (int)(isW + 0.5f), H = (int)(isH + 0.5f);
+  if (!islandDirty && !content && !isBlank && W == isDrawW && H == isDrawH) { isLast = now; return; }
+  isLast = now;
+  islandDirty = false;
+  islandPaint(s, kind, big);
+}
+
+void faceTick(const LumoState& s, const ClockNow& c) {
+  faceTickInner(s, c);
+  islandTick(s);
 }
 
 // =====================================================================
@@ -817,8 +1063,9 @@ static void npBars(const LumoState& s, float k, float t, float dt) {
 
 void nowPlayingTick(const LumoState& s) {
   static unsigned long lastDraw = 0;
+  static uint32_t nextDraw = 0;
   unsigned long now = millis();
-  if (!npNeedAll && now - lastDraw < 33) return;
+  if (!framePace(nextDraw, now, FRAME_CALM_MS, npNeedAll)) return;
   float dt = (now - lastDraw) / 1000.0f;
   if (dt > 0.2f || dt <= 0) dt = 0.033f;
   lastDraw = now;
@@ -902,4 +1149,406 @@ void nowPlayingTick(const LumoState& s) {
   npLastBars = now;
   npBars(s, k, t, bdt);
   npNeedAll = false;
+}
+
+// ------------------------------------------------------------- Timer, stopwatch, world
+// Firmware 2.7. Sage keeps the timer and stopwatch (desk/tools.py) and says
+// where they stand; these screens count between its messages. Each band is
+// redrawn only when what it shows changes.
+
+static const uint16_t TOOL_BG = 0x0841;
+static bool toolAll = true;
+static char toolTitleShown[32], toolBigShown[24], toolHintShown[64];
+static int  toolBarShown = -1, toolLapsShown = -1, toolMinuteShown = -1;
+static uint16_t toolInkShown = 0;
+
+void toolScreenReset() {
+  toolAll = true;
+  toolTitleShown[0] = toolBigShown[0] = toolHintShown[0] = '\0';
+  toolBarShown = toolLapsShown = toolMinuteShown = -1;
+}
+
+// "4:59", or past an hour "1:02" with the seconds apart (":34"); the
+// stopwatch adds tenths (".7") under an hour.
+static void splitTime(uint32_t ms, bool tenths, char* big, size_t bn, char* small, size_t sn) {
+  unsigned long secs = ms / 1000;
+  unsigned long h = secs / 3600, m = (secs / 60) % 60, sec = secs % 60;
+  if (h) {
+    snprintf(big, bn, "%lu:%02lu", h, m);
+    snprintf(small, sn, ":%02lu", sec);
+  } else {
+    snprintf(big, bn, "%lu:%02lu", m, sec);
+    if (tenths) snprintf(small, sn, ".%lu", (unsigned long)(ms / 100) % 10);
+    else small[0] = '\0';
+  }
+}
+
+static void toolLine(const char* text, int baseline, const AAFont& f, uint16_t color, char* shown, size_t n) {
+  if (!toolAll && strcmp(text, shown) == 0) return;
+  strlcpy(shown, text, n);
+  AASurface sf;
+  if (band(sf, 0, 320, baseline, f, TOOL_BG)) {
+    char fitted[64];
+    strlcpy(fitted, text, sizeof(fitted));
+    fitText(fitted, f, 300);
+    aaTextCentered(sf, 160, baseline, fitted, f, color);
+    aaEnd(sf);
+  }
+}
+
+// The big time, with its small part (seconds past an hour, or tenths) after it.
+static void toolBig(uint32_t ms, bool tenths, uint16_t ink) {
+  char big[12], small[8], key[24];
+  splitTime(ms, tenths, big, sizeof(big), small, sizeof(small));
+  snprintf(key, sizeof(key), "%s%s", big, small);
+  if (!toolAll && ink == toolInkShown && strcmp(key, toolBigShown) == 0) return;
+  strlcpy(toolBigShown, key, sizeof(toolBigShown));
+  toolInkShown = ink;
+  const AAFont& f = AA_MONO_TIME;
+  const int base = VY(124);
+  AASurface sf;
+  if (!aaBegin(sf, 0, base - f.ascent - 1, 320, f.ascent + f.descent + 3, TOOL_BG)) return;
+  int wb = aaTextWidth(f, big), ws = small[0] ? aaTextWidth(AA_DISP20, small) + 4 : 0;
+  int x = 160 - (wb + ws) / 2;
+  x = aaText(sf, x, base, big, f, ink);
+  if (small[0]) aaText(sf, x + 4, base, small, AA_DISP20, aaMix(ink, TOOL_BG, 70));
+  aaEnd(sf);
+}
+
+static void timerScreen(const LumoState& s) {
+  uint32_t left = 0;
+  if (s.tm_state == TOOL_RUNNING) left = (int32_t)(s.tm_end - millis()) > 0 ? s.tm_end - millis() : 0;
+  else if (s.tm_state == TOOL_PAUSED) left = s.tm_left_ms;
+  else if (s.tm_state == TOOL_IDLE) left = s.tm_total_ms;
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), amber = aaRGB(255, 166, 64);
+
+  toolLine(s.tm_label[0] ? s.tm_label : "Timer", VY(34), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+
+  uint16_t ink = white;
+  if (s.tm_state == TOOL_PAUSED) ink = muted;
+  else if (s.tm_state == TOOL_IDLE) ink = aaRGB(70, 76, 86);
+  else if (s.tm_state == TOOL_DONE) {
+    float k = 0.5f + 0.5f * sinf(millis() / 1000.0f * 6.2831853f * 1.2f);
+    ink = aaMix(amber, white, (uint8_t)(k * 200));
+  }
+  // Rounded up, so "0:00" shows only when it has run out.
+  toolBig(s.tm_state == TOOL_RUNNING || s.tm_state == TOOL_PAUSED ? ((left + 999) / 1000) * 1000 : left, false, ink);
+
+  // What's left, as a bar.
+  int fill = s.tm_total_ms && s.tm_state != TOOL_IDLE ? (int)(240.0f * left / s.tm_total_ms + 0.5f) : 0;
+  if (toolAll || fill != toolBarShown) {
+    toolBarShown = fill;
+    AASurface sf;
+    const int y = VY(150);
+    if (aaBegin(sf, 36, y - 4, 248, 9, TOOL_BG)) {
+      aaRoundRect(sf, 40, y - 2, 240, 4, 2, aaRGB(32, 36, 44));
+      if (fill > 1) aaRoundRect(sf, 40, y - 2, fill, 4, 2, amber);
+      aaEnd(sf);
+    }
+  }
+
+  const char* hint = s.tm_state == TOOL_RUNNING ? "OK pause    < cancel    > 1 more min"
+                   : s.tm_state == TOOL_PAUSED  ? "OK carry on    < cancel"
+                   : s.tm_state == TOOL_DONE    ? "Time's up. Press any button."
+                   : "OK starts it again. Set timers in Sage.";
+  toolLine(hint, VY(196), AA_BODY11, s.tm_state == TOOL_DONE ? amber : muted, toolHintShown, sizeof(toolHintShown));
+}
+
+static void stopwatchScreen(const LumoState& s) {
+  uint32_t ms = s.sw_base_ms + (s.sw_running ? millis() - s.sw_mark : 0);
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), teal = aaRGB(70, 220, 190);
+  toolLine("Stopwatch", VY(34), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+  toolBig(ms, true, s.sw_running || ms == 0 ? white : muted);
+
+  // The last laps, newest first, numbered as Sage counts them.
+  int laps = s.sw_lap_count * 8 + s.sw_lap_shown;
+  if (toolAll || laps != toolLapsShown) {
+    toolLapsShown = laps;
+    AASurface sf;
+    const int top = VY(140), h = VY(188) - top;
+    if (aaBegin(sf, 0, top, 320, h, TOOL_BG)) {
+      int rows = min((int)s.sw_lap_shown, 3);
+      for (int i = 0; i < rows; i++) {
+        int idx = s.sw_lap_shown - 1 - i;
+        char name[12], big[12], small[8], t[24];
+        snprintf(name, sizeof(name), "Lap %u", (unsigned)(s.sw_lap_count - i));
+        splitTime(s.sw_laps[idx], true, big, sizeof(big), small, sizeof(small));
+        snprintf(t, sizeof(t), "%s%s", big, small);
+        int base = top + 13 + i * 16;
+        uint16_t c = i == 0 ? teal : muted;
+        aaText(sf, 96, base, name, AA_BODY11, c);
+        aaTextRight(sf, 224, base, t, AA_BODY11, c);
+      }
+      aaEnd(sf);
+    }
+  }
+
+  const char* hint = s.sw_running ? "OK pause    > lap" : ms ? "OK carry on    < reset" : "OK start";
+  toolLine(hint, VY(204), AA_BODY11, muted, toolHintShown, sizeof(toolHintShown));
+}
+
+static void worldScreen(const LumoState& s, const ClockNow& c) {
+  if (!toolAll && c.m == toolMinuteShown) return;
+  toolMinuteShown = c.m;
+  const uint16_t white = aaRGB(236, 239, 244), muted = aaRGB(120, 128, 140), line = aaRGB(30, 34, 42);
+  toolLine("World", VY(26), AA_SEMI11, muted, toolTitleShown, sizeof(toolTitleShown));
+  if (!s.wc_count) {
+    toolLine("Add places on the LUMO page in Sage", VY(118), AA_BODY11, muted, toolHintShown, sizeof(toolHintShown));
+    toolAll = false;
+    return;
+  }
+  int here = c.h * 60 + c.m;
+  int rows = s.wc_count + 1;
+  int rowH = (VY(210) - VY(40)) / rows;
+  for (int r = 0; r < rows; r++) {
+    int mins = here + (r ? s.wc_offset[r - 1] : 0);
+    int dayShift = mins < 0 ? -1 : mins >= 1440 ? 1 : 0;
+    mins = (mins % 1440 + 1440) % 1440;
+    char hs[4], t[16], sub[32];
+    hourText(s, mins / 60, hs, sizeof(hs));
+    if (s.hour24) snprintf(t, sizeof(t), "%s:%02d", hs, mins % 60);
+    else snprintf(t, sizeof(t), "%s:%02d %s", hs, mins % 60, mins >= 720 ? "PM" : "AM");
+    if (r == 0) {
+      snprintf(sub, sizeof(sub), "%s", s.weekday);
+    } else {
+      int off = s.wc_offset[r - 1], a = abs(off);
+      const char* day = dayShift < 0 ? "Yesterday" : dayShift > 0 ? "Tomorrow" : "Today";
+      if (!off) snprintf(sub, sizeof(sub), "%s, same time", day);
+      else if (a % 60) snprintf(sub, sizeof(sub), "%s, %d:%02d %s", day, a / 60, a % 60, off > 0 ? "ahead" : "behind");
+      else snprintf(sub, sizeof(sub), "%s, %d h %s", day, a / 60, off > 0 ? "ahead" : "behind");
+    }
+    AASurface sf;
+    int top = VY(40) + r * rowH;
+    if (aaBegin(sf, 0, top, 320, rowH, TOOL_BG)) {
+      if (r) aaLine(sf, 24, top + 0.5f, 296, top + 0.5f, 1, line);
+      int mid = top + rowH / 2;
+      aaText(sf, 24, mid - 2, r ? s.wc_name[r - 1] : "Here", AA_SEMI11, r ? white : muted);
+      aaText(sf, 24, mid + 14, sub, AA_BODY11, muted);
+      aaTextRight(sf, 296, mid + 8, t, AA_DISP20, r ? white : muted);
+      aaEnd(sf);
+    }
+  }
+}
+
+void toolScreenTick(ScreenMode screen, const LumoState& s) {
+  static uint32_t nextDraw = 0;
+  if (!framePace(nextDraw, millis(), 40, toolAll)) return;   // ~25 fps is plenty
+  if (screen == SCREEN_TIMER) timerScreen(s);
+  else if (screen == SCREEN_STOPWATCH) stopwatchScreen(s);
+  else if (screen == SCREEN_WORLD) {
+    ClockNow c = clockNow();
+    if (!c.synced) { c.h = s.h; c.m = s.m; }
+    worldScreen(s, c);
+  }
+  toolAll = false;
+}
+
+// ------------------------------------------------------------- Cards
+// A phone notification: who (with a disc in the app's colour holding their
+// initial), the app, then the message wrapped over a few lines. An incoming
+// call: the disc in the middle with rings going out, the name under it, and
+// Decline / Answer in red and green. Sage's own (a reminder, the welcome) take
+// Sage's orange. Each part is drawn in its own small band, so the shared
+// buffer stays small.
+
+static const uint16_t CARD_BG_PLAIN = 0x18C3;   // (24,24,28) with the frame off
+static int cardRingFrame = -1;
+
+struct CardBox { int x, y, w, h; };
+static CardBox cardBox() {
+  if (framed()) { FitCard c = fitCard(); return { c.x, c.y, c.w, c.h }; }
+  int x = screenFit.l;
+  return { x, VIS_T, 320 - screenFit.r - x, VIS_H };
+}
+static uint16_t cardBgColor() { return framed() ? aaRGB(28, 30, 36) : CARD_BG_PLAIN; }
+
+static bool lightColor(uint8_t r, uint8_t g, uint8_t b) {
+  return 0.299f * r + 0.587f * g + 0.114f * b > 150;
+}
+
+// The first letter or digit of the sender, upper case; "?" when there is none.
+static void initialOf(const char* name, char* out) {
+  out[0] = '?'; out[1] = '\0';
+  for (const char* p = name; *p; p++) {
+    if (isalnum((unsigned char)*p)) { out[0] = toupper(*p); return; }
+  }
+}
+
+// Wraps `text` into at most maxLines lines of maxW pixels; when it doesn't all
+// fit, the last line ends in "...". Returns the number of lines.
+static int wrapLines(const char* text, const AAFont& f, int maxW, char lines[][64], int maxLines) {
+  int n = 0;
+  const char* p = text;
+  char tmp[64];
+  while (*p && n < maxLines) {
+    while (*p == ' ') p++;
+    if (!*p) break;
+    int best = 0;
+    const char* q = p;
+    while (true) {                       // add a word at a time while it fits
+      while (*q == ' ') q++;
+      const char* e = q;
+      while (*e && *e != ' ') e++;
+      int take = min((int)(e - p), 63);
+      memcpy(tmp, p, take); tmp[take] = '\0';
+      if (aaTextWidth(f, tmp) > maxW) break;
+      best = take;
+      if (!*e || take == 63) break;
+      q = e;
+    }
+    if (best == 0) {                     // one long word: cut it by letters
+      best = 1;
+      while (best < 63 && p[best]) {
+        memcpy(tmp, p, best + 1); tmp[best + 1] = '\0';
+        if (aaTextWidth(f, tmp) > maxW) break;
+        best++;
+      }
+    }
+    memcpy(lines[n], p, best); lines[n][best] = '\0';
+    n++;
+    p += best;
+  }
+  while (*p == ' ') p++;
+  if (*p && n > 0) {                     // more than fits: end on "..."
+    char* last = lines[n - 1];
+    while (true) {
+      snprintf(tmp, sizeof(tmp), "%s...", last);
+      if (aaTextWidth(f, tmp) <= maxW || !last[0]) break;
+      last[strlen(last) - 1] = '\0';
+    }
+    size_t len = strlen(last);
+    while (len && last[len - 1] == ' ') last[--len] = '\0';
+    strlcat(last, "...", 64);
+  }
+  return n;
+}
+
+static void cardText(int x0, int x1, int baseline, const char* txt, const AAFont& f, uint16_t color, uint16_t bg, bool centered) {
+  AASurface sf;
+  if (!band(sf, x0, x1, baseline, f, bg)) return;
+  if (centered) aaTextCentered(sf, (x0 + x1) / 2, baseline, txt, f, color);
+  else aaText(sf, x0, baseline, txt, f, color);
+  aaEnd(sf);
+}
+
+// The sender's disc: the app's colour with their initial on it. A call's has
+// rings going out from it (phase 0..1).
+static void cardDisc(const LumoState& s, int cx, int cy, int r, bool rings, float phase) {
+  uint16_t bg = cardBgColor();
+  int half = rings ? r + 22 : r + 2;
+  AASurface sf;
+  if (!aaBegin(sf, cx - half, cy - half, 2 * half, 2 * half, bg)) return;
+  uint16_t col = aaRGB(s.notif_r, s.notif_g, s.notif_b);
+  if (rings) {
+    for (int i = 0; i < 2; i++) {
+      float u = fmodf(phase + i * 0.5f, 1.0f);
+      float rr = r + 3 + u * 17;
+      uint8_t fade = (uint8_t)(255 * (1 - u) * 0.55f);
+      aaRing(sf, cx, cy, rr, 2.0f, aaMix(bg, col, fade));
+    }
+  }
+  aaDisc(sf, cx, cy, r, col);
+  char ini[2];
+  initialOf(s.notif_title, ini);
+  uint16_t ink = lightColor(s.notif_r, s.notif_g, s.notif_b) ? aaRGB(18, 18, 22) : aaRGB(250, 250, 250);
+  const AAFont& f = r >= 24 ? AA_DISP20 : AA_DISP14;
+  aaTextCentered(sf, cx, cy + f.ascent / 2, ini, f, ink);
+  aaEnd(sf);
+}
+
+// LEFT, OK and RIGHT along the bottom: OK filled in the card's colour; a call's
+// Decline and Answer filled red and green; the rest outlined.
+static void cardButtons(const LumoState& s, const CardBox& b) {
+  const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
+  if (!labels[0][0] && !labels[1][0] && !labels[2][0]) return;
+  uint16_t bg = cardBgColor();
+  const int pad = 12, gap = 8, h = 28;
+  int w = (b.w - 2 * pad - 2 * gap) / 3;
+  int y = b.y + b.h - h - 12;
+  AASurface sf;
+  if (!aaBegin(sf, b.x, y - 1, b.w, h + 2, bg)) return;
+  for (int i = 0; i < 3; i++) {
+    if (!labels[i][0]) continue;
+    int x = b.x + pad + i * (w + gap);
+    bool call = s.notif_kind == CARD_CALL && i != 1;
+    bool filled = i == 1 || call;
+    uint8_t r = s.notif_r, g = s.notif_g, bl = s.notif_b;
+    if (call && i == 0) { r = 255; g = 69;  bl = 58; }
+    if (call && i == 2) { r = 52;  g = 199; bl = 89; }
+    if (filled) {
+      aaRoundRect(sf, x, y, w, h, 8, aaRGB(r, g, bl));
+    } else {
+      aaRoundRect(sf, x, y, w, h, 8, aaRGB(92, 96, 108));
+      aaRoundRect(sf, x + 1.5f, y + 1.5f, w - 3, h - 3, 6.5f, bg);
+    }
+    char text[20];
+    if (i == 0) snprintf(text, sizeof(text), "< %s", labels[i]);
+    else if (i == 1) snprintf(text, sizeof(text), "OK  %s", labels[i]);
+    else snprintf(text, sizeof(text), "%s >", labels[i]);
+    uint16_t ink = filled ? (lightColor(r, g, bl) ? aaRGB(18, 18, 22) : aaRGB(250, 250, 250)) : aaRGB(235, 236, 240);
+    aaTextCentered(sf, x + w / 2, y + 18, text, AA_SEMI11, ink);
+  }
+  aaEnd(sf);
+}
+
+static void callCard(const LumoState& s, const CardBox& b) {
+  uint16_t bg = cardBgColor();
+  int cx = b.x + b.w / 2;
+  cardDisc(s, cx, b.y + 58, 26, true, 0);
+  cardText(b.x + 12, b.x + b.w - 12, b.y + 126, s.notif_title, AA_DISP20, aaRGB(245, 243, 238), bg, true);
+  char sub[64];
+  snprintf(sub, sizeof(sub), "%s  -  %s", s.notif_body[0] ? s.notif_body : "Calling", s.notif_app);
+  fitText(sub, AA_BODY11, b.w - 24);
+  cardText(b.x + 12, b.x + b.w - 12, b.y + 144, sub, AA_BODY11, aaRGB(140, 145, 155), bg, true);
+  cardRingFrame = -1;
+}
+
+static void noteCard(const LumoState& s, const CardBox& b) {
+  uint16_t bg = cardBgColor();
+  const int left = b.x + 16, right = b.x + b.w - 14;
+  cardDisc(s, left + 16, b.y + 30, 16, false, 0);
+  char title[32];
+  strlcpy(title, s.notif_title, sizeof(title));
+  fitText(title, AA_DISP20, right - (left + 42));
+  cardText(left + 42, right, b.y + 31, title, AA_DISP20, aaRGB(245, 243, 238), bg, false);
+  char app[24];
+  strlcpy(app, s.notif_app, sizeof(app));
+  cardText(left + 42, right, b.y + 48, app, AA_SEMI11, aaRGB(s.notif_r, s.notif_g, s.notif_b), bg, false);
+  // The message, as many lines as there is room for above the buttons.
+  bool buttons = s.act_left[0] || s.act_ok[0] || s.act_right[0];
+  int bottom = b.y + b.h - (buttons ? 48 : 10);
+  int first = b.y + 78, step = 20;
+  int room = (bottom - first) / step + 1;
+  if (room > 5) room = 5;
+  char lines[5][64];
+  int n = room > 0 ? wrapLines(s.notif_body, AA_DISP14, right - left, lines, room) : 0;
+  for (int i = 0; i < n; i++)
+    cardText(left, right, first + i * step, lines[i], AA_DISP14, aaRGB(214, 218, 226), bg, false);
+}
+
+void cardDraw(const LumoState& s) {
+  CardBox b = cardBox();
+  uint16_t bg = cardBgColor();
+  if (framed()) {
+    tft.fillScreen(0x0000);
+    tft.fillRect(b.x, b.y, b.w, b.h, bg);
+  } else {
+    tft.fillScreen(bg);
+  }
+  if (s.notif_kind == CARD_CALL) callCard(s, b);
+  else noteCard(s, b);
+  cardButtons(s, b);
+}
+
+void cardTick(const LumoState& s) {
+  if (s.notif_kind != CARD_CALL) return;
+  static unsigned long last = 0;
+  if (millis() - last < 50) return;      // the rings, at 20 fps
+  last = millis();
+  CardBox b = cardBox();
+  float phase = fmodf(millis() / 1600.0f, 1.0f);
+  int frame = (int)(phase * 32);
+  if (frame == cardRingFrame) return;
+  cardRingFrame = frame;
+  cardDisc(s, b.x + b.w / 2, b.y + 58, 26, true, phase);
 }

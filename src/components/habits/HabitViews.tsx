@@ -1,7 +1,12 @@
-import { Check, X, Flame, Trash2 } from 'lucide-react';
+import { Check, X, Flame, Trash2, Bell, Globe, Mail } from 'lucide-react';
 import { Habit } from '../../services/types';
 import { formatShortDate } from '../../utils/quickAddParser';
 import { HabitDay, bestStreakOf, doneThisWeek, habitDay, lastNDays, recentWeeks, streakOf } from '../../utils/habits';
+import { Select } from '../common/Select';
+import { TimePicker } from '../common/TimePicker';
+import { DoseTimesPicker } from '../common/DoseTimesPicker';
+import { DoseChips } from '../common/DoseChips';
+import { doseProgress, habitDosesOn, normalizeDoses } from '../../utils/doses';
 
 const DAY_LETTERS = ['M', 'T', 'W', 'T', 'F', 'S', 'S'];
 
@@ -27,13 +32,14 @@ interface TodayProps {
   habits: Habit[];
   today: string;
   onToggle: (habitId: string, date: string) => void;
+  onToggleDose?: (habitId: string, date: string, time: string) => void;
 }
 
 /**
  * Today's entry for each habit. Ticking it marks today only; tomorrow brings a
  * fresh entry and an unticked day stays in the history as missed.
  */
-export function HabitTodayCard({ habits, today, onToggle }: TodayProps) {
+export function HabitTodayCard({ habits, today, onToggle, onToggleDose }: TodayProps) {
   const done = habits.filter(h => habitDay(h, today, today) === 'done').length;
   const week = lastNDays(today, 7).reverse();
   return (
@@ -48,11 +54,19 @@ export function HabitTodayCard({ habits, today, onToggle }: TodayProps) {
         {habits.map(habit => {
           const isDone = habitDay(habit, today, today) === 'done';
           const streak = streakOf(habit.history, today);
+          const doses = normalizeDoses(habit.doseTimes);
+          const ticked = habitDosesOn(habit, today);
+          const progress = doseProgress(doses, ticked);
+          // With several doses a day the big tick takes the next dose; once all are in, it takes the day back.
+          const tick = () => {
+            if (doses.length > 1 && onToggleDose) onToggleDose(habit.id, today, progress.next || doses[doses.length - 1]);
+            else onToggle(habit.id, today);
+          };
           return (
             <li key={habit.id} className="flex flex-wrap sm:flex-nowrap items-center gap-x-3 gap-y-2 p-2.5 md:p-3 rounded-2xl surface-item">
               <button
                 type="button"
-                onClick={() => onToggle(habit.id, today)}
+                onClick={tick}
                 aria-pressed={isDone}
                 aria-label={`${habit.name}, today`}
                 className={`shrink-0 w-8 h-8 rounded-full flex items-center justify-center transition-all active:scale-90 ${
@@ -66,6 +80,10 @@ export function HabitTodayCard({ habits, today, onToggle }: TodayProps) {
                   {streak > 0 && <span className="inline-flex items-center gap-0.5 text-orange-500 font-semibold"><Flame size={11} />{streak}</span>}
                   <span>{doneThisWeek(habit.history, today)} of {Math.min(7, habit.targetCount || 7)} this week</span>
                 </div>
+                {doses.length > 1 && onToggleDose && (
+                  <DoseChips className="mt-1.5" times={doses} ticked={ticked} label={habit.name}
+                    onToggle={t => onToggleDose(habit.id, today, t)} />
+                )}
               </div>
               <div className="flex gap-1 w-full sm:w-auto pl-11 sm:pl-0" aria-label={`${habit.name}, last 7 days`}>
                 {week.map(date => {
@@ -93,7 +111,7 @@ interface HistoryProps {
   habit: Habit;
   today: string;
   onToggle: (date: string) => void;
-  onUpdate: (updates: { name?: string; targetCount?: number }) => void;
+  onUpdate: (updates: { name?: string; targetCount?: number; remindTime?: string | null; remindPush?: boolean; remindEmail?: boolean; doseTimes?: string[] }) => void;
   onDelete: (e: React.MouseEvent) => void;
 }
 
@@ -116,10 +134,10 @@ export function HabitHistory({ habit, today, onToggle, onUpdate, onDelete }: His
           onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur(); }}
           className="flex-1 min-w-0 bg-transparent font-semibold text-[15px] text-gray-900 dark:text-white outline-none rounded-lg px-1 -mx-1 focus:bg-white dark:focus:bg-white/10"
         />
-        <select value={target} onChange={e => onUpdate({ targetCount: Number(e.target.value) })} aria-label="How often"
+        <Select value={target} onChange={v => onUpdate({ targetCount: Number(v) })} aria-label="How often"
           className="shrink-0 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10 rounded-lg px-2 py-1 text-[12px] font-semibold text-gray-600 dark:text-gray-300 outline-none dark:[color-scheme:dark]">
           {[7, 6, 5, 4, 3, 2, 1].map(n => <option key={n} value={n}>{targetLabel(n)}</option>)}
-        </select>
+        </Select>
         <button onClick={onDelete} className="p-1.5 text-gray-400 hover:text-red-500 rounded-lg transition-colors" title="Delete habit">
           <Trash2 size={15} />
         </button>
@@ -138,6 +156,16 @@ export function HabitHistory({ habit, today, onToggle, onUpdate, onDelete }: His
           </div>
         ))}
       </div>
+
+      <div className="space-y-1.5">
+        <span className="text-[12px] font-semibold text-gray-500 dark:text-gray-400">Times per day</span>
+        <DoseTimesPicker value={habit.doseTimes} onChange={times => onUpdate({ doseTimes: times })} />
+        {normalizeDoses(habit.doseTimes).length > 0 && (
+          <p className="text-[11.5px] text-gray-400">Each time is ticked on its own. A day counts for the streak once all are done, and each time gets its own reminder.</p>
+        )}
+      </div>
+
+      <HabitReminder habit={habit} onUpdate={onUpdate} />
 
       <div role="grid" aria-label={`${habit.name}, last six weeks`} className="space-y-1">
         <div role="row" className="grid grid-cols-7 gap-1">
@@ -167,6 +195,41 @@ export function HabitHistory({ habit, today, onToggle, onUpdate, onDelete }: His
         <span className="inline-flex items-center gap-1"><span className="w-2.5 h-2.5 rounded border-2 border-dashed border-emerald-400/70" />Today</span>
         <span>Tap a day to change it.</span>
       </div>
+    </div>
+  );
+}
+
+/**
+ * When to nudge about a habit, and where: the website (push to the home-screen
+ * app and browsers) and/or email. The Pi sends it on days the habit isn't
+ * ticked yet, and skips the rest of the week once the weekly target is met.
+ */
+function HabitReminder({ habit, onUpdate }: { habit: Habit; onUpdate: HistoryProps['onUpdate'] }) {
+  // With several doses a day each time is its own reminder, so there is no single time to pick.
+  const perDose = normalizeDoses(habit.doseTimes).length > 0;
+  const on = perDose || !!habit.remindTime;
+  const push = habit.remindPush !== false;
+  const email = !!habit.remindEmail;
+  const chip = (active: boolean) => `inline-flex items-center gap-1 px-2 py-1 rounded-lg text-[12px] font-semibold border transition-colors disabled:opacity-40 ${
+    active ? 'bg-blue-50 border-blue-200 text-blue-700 dark:bg-blue-500/15 dark:border-blue-500/30 dark:text-blue-300'
+      : 'bg-white border-gray-200 text-gray-500 dark:bg-white/5 dark:border-white/10 dark:text-gray-400'}`;
+  return (
+    <div className="flex flex-wrap items-center gap-2" aria-label={`${habit.name} reminder`}>
+      <span className="inline-flex items-center gap-1 text-[12px] font-semibold text-gray-500 dark:text-gray-400"><Bell size={13} />Remind me</span>
+      {perDose
+        ? <span className="text-[12px] text-gray-500 dark:text-gray-400">at each time</span>
+        : <TimePicker aria-label="Reminder time" placeholder="Off" value={habit.remindTime || null}
+            className="field !w-[6.5rem] !min-h-0 !py-1 !px-2 text-[12px]"
+            onChange={t => onUpdate({ remindTime: t || null })} />}
+      <button type="button" disabled={!on} aria-pressed={on && push} onClick={() => onUpdate({ remindPush: !push })}
+        className={chip(on && push)} title="Notification on the website and the home-screen app">
+        <Globe size={12} />Website
+      </button>
+      <button type="button" disabled={!on} aria-pressed={on && email} onClick={() => onUpdate({ remindEmail: !email })}
+        className={chip(on && email)} title="Email to the address in Settings > Notifications">
+        <Mail size={12} />Email
+      </button>
+      {on && !push && !email && <span className="text-[11px] text-amber-600 dark:text-amber-400">Pick Website or Email</span>}
     </div>
   );
 }

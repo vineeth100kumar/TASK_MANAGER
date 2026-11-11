@@ -108,12 +108,13 @@ class Controller(unittest.IsolatedAsyncioTestCase):
         async def mark_done():
             done.append("done")
 
-        await desk.show_card("Sage", "Call the plumber about the leak", "Due now", {
+        await desk.show_card("Sage", "Call the plumber about the leak in the attic", "Due now", {
             "OK": ("Done", mark_done),
             "UP": ("ignored", mark_done),  # only LEFT, OK and RIGHT can carry actions
         })
         notif, actions = self.link.sent
-        self.assertEqual(notif["title"], "Call the plumber about the")
+        self.assertEqual(notif["title"], "Call the plumber about the leak")
+        self.assertEqual((notif["color"], notif["kind"]), ("#FF9F43", "sage"))
         self.assertEqual(actions, {"cmd": "ACTIONS", "ok": "Done"})
 
         await desk.on_button("LEFT")  # not on this card: nothing happens
@@ -233,6 +234,77 @@ class Pairing(unittest.IsolatedAsyncioTestCase):
                 await self.link.send({"cmd": "HAPTIC"})
                 self.assertEqual(await self.receive(new, 1), [{"cmd": "HAPTIC"}])
 
+    async def test_what_the_clock_did_offline_is_settled_before_the_redraw(self):
+        order = []
+
+        async def offline(reports):
+            order.append(("offline", reports))
+
+        real_redraw = self.link.on_ready
+
+        async def redraw():
+            order.append(("redraw",))
+            await real_redraw()
+
+        self.link.on_offline, self.link.on_ready = offline, redraw
+        report = {"a": "stop", "h": 7, "m": 0, "ago": 40}
+        async with connect(self.url) as clock:
+            await clock.send(json.dumps({"evt": "HELLO", "token": "123456", "fw": "2.10.0",
+                                         "drop": "no reply to pings", "reconnects": 3, "boot": "power on",
+                                         "offline": [report, "junk"]}))
+            await self.receive(clock, 4)
+            self.assertEqual(order, [("offline", [report]), ("redraw",)])
+            # Said while already back (the clock hadn't noticed it was cut off).
+            await clock.send(json.dumps({"evt": "OFFLINE", "a": "timer_stop"}))
+            await asyncio.sleep(0.1)
+            self.assertEqual(order[-1], ("offline", [{"evt": "OFFLINE", "a": "timer_stop"}]))
+            health = self.link.status()["link"]
+            self.assertEqual(health["state"], "steady")
+            self.assertEqual((health["clockReconnects"], health["clockLastDrop"], health["lastBoot"]),
+                             (3, "no reply to pings", "power on"))
+            self.assertEqual(health["history"][0]["event"], "connected")
+            self.assertIn("no reply to pings", health["history"][0]["detail"])
+
+    async def test_drops_are_counted_and_explained(self):
+        hello = json.dumps({"evt": "HELLO", "token": "123456", "fw": "2.10.0"})
+        for _ in range(3):
+            async with connect(self.url) as clock:
+                await clock.send(hello)
+                await self.receive(clock, 4)
+            for _ in range(50):
+                if not self.link.connected:
+                    break
+                await asyncio.sleep(0.02)
+        health = self.link.health()
+        self.assertEqual((health["state"], health["drops24h"]), ("down", 3))
+        self.assertEqual(health["lastDrop"]["event"], "dropped")
+        self.assertIn("the clock closed it", health["lastDrop"]["detail"])
+        async with connect(self.url) as clock:
+            await clock.send(hello)
+            await self.receive(clock, 4)
+            self.assertEqual(self.link.health()["state"], "flaky")  # three drops today
+
+    async def test_a_quietly_dead_connection_counts_as_a_drop(self):
+        hello = json.dumps({"evt": "HELLO", "token": "123456", "fw": "2.10.0"})
+        async with connect(self.url) as old:
+            await old.send(hello)
+            await self.receive(old, 4)
+            async with connect(self.url) as new:
+                await new.send(hello)
+                await self.receive(new, 4)
+                health = self.link.health()
+                self.assertEqual(health["drops24h"], 1)
+                self.assertIn("before the old one timed out", health["lastDrop"]["detail"])
+
+    def test_why_a_link_broke(self):
+        class Sock:
+            def __init__(self, code, reason=""):
+                self.close_code, self.close_reason = code, reason
+        self.assertEqual(ClockLink._why(Sock(1011, "keepalive ping timeout"), None), "the clock stopped answering pings")
+        self.assertIn("without a goodbye", ClockLink._why(Sock(None), None))
+        self.assertEqual(ClockLink._why(Sock(4000, "odd"), None), "closed with code 4000 (odd)")
+        self.assertIn("update to 2.12", ClockLink._why(Sock(1002), None))
+
     async def test_a_failing_handler_keeps_the_connection(self):
         async def broken(_button):
             raise RuntimeError("boom")
@@ -266,6 +338,70 @@ class Listening(unittest.IsolatedAsyncioTestCase):
             await clock.send(json.dumps({"evt": "HELLO", "token": "123456"}))
             self.assertEqual(json.loads(await asyncio.wait_for(clock.recv(), 2))["cmd"], "PAIRED")
         link._serving.cancel()
+
+
+class StuckOldConnection:
+    """A connection that died quietly: closing it takes the whole close timeout."""
+    close_code = None
+    close_reason = ""
+
+    def __init__(self):
+        self.closed = asyncio.Event()
+
+    async def close(self, code=1000, reason=""):
+        await asyncio.sleep(5)
+        self.closed.set()
+
+    async def send(self, data):
+        await asyncio.sleep(5)
+
+
+class LinkRecovery(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        import socket
+
+        with socket.socket() as s:
+            s.bind(("127.0.0.1", 0))
+            self.port = s.getsockname()[1]
+        self.tmp = tempfile.TemporaryDirectory()
+        self.store = Path(self.tmp.name) / "desk_link.json"
+        self.link = ClockLink("123456", store=self.store)
+        asyncio.get_running_loop().create_task(self.link.serve("127.0.0.1", self.port))
+        await asyncio.sleep(0.2)
+
+    async def asyncTearDown(self):
+        self.link._serving.cancel()
+        self.tmp.cleanup()
+
+    async def test_pairs_at_once_while_the_old_connection_is_still_closing(self):
+        """The clock gives up on a pairing that isn't answered in 10 s; a dead
+        old connection must not hold the new one's PAIRED for its close timeout."""
+        self.link.socket = StuckOldConnection()
+        async with connect(f"ws://127.0.0.1:{self.port}") as clock:
+            await clock.send(json.dumps({"evt": "HELLO", "token": "123456", "fw": "2.14.0"}))
+            reply = json.loads(await asyncio.wait_for(clock.recv(), 1))
+            self.assertEqual(reply, {"cmd": "PAIRED", "ok": True})
+
+    async def test_reports_the_failed_tries_and_keeps_the_history(self):
+        hello = {"evt": "HELLO", "token": "123456", "fw": "2.14.0", "drop": "the link broke",
+                 "tries": 4, "tryFail": "the Pi didn't answer at 192.168.1.5", "kicks": 1,
+                 "boot": "watchdog (stuck in connect)"}
+        async with connect(f"ws://127.0.0.1:{self.port}") as clock:
+            await clock.send(json.dumps(hello))
+            await asyncio.wait_for(clock.recv(), 1)
+        await asyncio.sleep(0.1)
+        health = self.link.health()
+        self.assertEqual(health["clockTries"], 4)
+        self.assertEqual(health["clockWifiRejoins"], 1)
+        connected = next(h for h in health["history"] if h["event"] == "connected")
+        self.assertIn("4 failed tries", connected["detail"])
+        self.assertIn("stuck in connect", connected["detail"])
+
+        # A Sage restart starts from the saved history.
+        again = ClockLink("123456", store=self.store)
+        events = [h["event"] for h in again.health()["history"]]
+        self.assertEqual(events[:3], ["sage started", "dropped", "connected"])
+        self.assertEqual(again.health()["drops24h"], 1)
 
 
 if __name__ == "__main__":

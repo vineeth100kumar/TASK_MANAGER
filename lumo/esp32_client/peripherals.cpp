@@ -10,116 +10,382 @@ Adafruit_NeoPixel pixels(NUMPIXELS, NEOPIXEL_PIN, NEO_GRB + NEO_KHZ800);
 // =====================================================================
 //  Haptics
 //
-//  The buzzer on BUZZER_PIN (active low) has two voices. On a 50 kHz PWM
-//  it is silent and only knocks, which is the haptic: every button press, and
-//  a double knock for a notification or reminder. Only the alarm switches it
-//  to an audible tone (ALARM_TONE_HZ), so the alarm is the one thing that
-//  makes a sound. A pattern is a short list of steps, each a strength
-//  (0 = rest) and a length, played without blocking. Every knock starts with
-//  a 6 ms kick at full power so it spins up crisply. At night everything but
-//  a button press and the alarm is softer.
+//  One pin (BUZZER_PIN, active low through a BC557) feeds the buzzer and the
+//  vibration motor in parallel, so every effect is a choice of what the two
+//  of them hear (see HAPTICS in config.h):
+//
+//   - Silent effects (every button press, notifications, reminders, the Pi's
+//     patterns) hold the motor fully on, then fully off (HAPTIC_MOTOR_DC):
+//     on this board, with no flyback diode, PWM starves the motor and its
+//     off-times leak brush noise into the buzzer (see config.h). A steady
+//     pin is silent, so strength sets how long each knock runs. Each effect
+//     is a short list of frames; with HAPTIC_MOTOR_DC 0 (a diode fitted)
+//     the same frames glide smoothly in strength on a 50 kHz carrier.
+//   - The alarm switches the carrier to the notes of its sound (tones.h),
+//     around ALARM_TONE_HZ, the buzzer's own pitch, and is the only thing
+//     LUMO ever lets you hear. Nothing else plays over a ringing alarm.
+//
+//  The envelope runs on an esp_timer, not in loop(), so a slow screen redraw
+//  can't stretch a glide into a step (which you would hear). The timer only
+//  runs while an effect plays. Strength (0-100, from Sage) scales every
+//  silent effect; 0 turns them off. At night notifications are softer.
 // =====================================================================
 
-struct HapStep { uint8_t strength; uint16_t ms; };
-static bool nightTime();                  // the sleep schedule, set from Sage
+#include <esp_timer.h>
 
-static const HapStep HP_TAP[]      = { {255, 24} };
-static const HapStep HP_HOLD[]     = { {180, 18}, {0, 80}, {255, 34} };
-// Notifications and reminders knock twice; a reminder a little harder.
-static const HapStep HP_NOTIFY[]   = { {210, 40}, {0, 130}, {230, 40} };
-static const HapStep HP_REMINDER[] = { {240, 55}, {0, 150}, {255, 55} };
-static const HapStep HP_SUCCESS[]  = { {150, 16}, {0, 60}, {230, 22} };
-// "beep-beep ... beep-beep", the same rhythm the light beats to.
-static const HapStep HP_ALARM[]    = { {255, 130}, {0, 130}, {255, 130}, {0, 910} };
+#include "tones.h"                                  // HapFrame, and the alarm sounds
+static bool nightTime();                            // the sleep schedule, set from Sage
 
-#define HAP_LEN(p) (sizeof(p) / sizeof((p)[0]))
+#define EDGE  HAPTIC_EDGE_MS
+#define FALL  HAPTIC_FALL_MS
+// A knock: rise, hold, let go.
+#define KNOCK(peak, hold)  {peak, EDGE}, {peak, hold}, {0, FALL}
+#define REST(ms)           {0, ms}
 
-static const HapStep* hapSteps = nullptr;
-static uint8_t  hapCount = 0, hapIndex = 0;
-static bool     hapLoop = false, hapNight = false;
-static bool     hapTone = false;          // true while the buzzer is on the alarm's audible tone
-static unsigned long hapStepAt = 0, hapLoopStart = 0;
-static int      hapLevel = -1;            // what the pin is set to, -1 = unknown
+// A tick opens at full power for a few ms to spin the motor up (an ERM is
+// slow to start), eases down to its peak, and lets go.
+static const HapFrame FX_TICK[]     = { {255, EDGE}, {255, HFX_KICK_MS}, {HFX_TICK_PEAK, EDGE},
+                                        {HFX_TICK_PEAK, HFX_TICK_HOLD_MS}, {0, FALL} };
+static const HapFrame FX_TAP[]      = { {255, EDGE}, {HFX_KNOCK_PEAK, EDGE}, {HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS}, {0, FALL} };
+static const HapFrame FX_HOLD[]     = { KNOCK(HFX_HOLD_PEAK * 2 / 3, 16), REST(70),
+                                        {255, EDGE}, {HFX_HOLD_PEAK, EDGE}, {HFX_HOLD_PEAK, 30}, {0, FALL} };
+// Notifications and reminders knock exactly twice; a reminder harder and longer.
+static const HapFrame FX_NOTIFY[]   = { KNOCK(HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS), REST(HFX_KNOCK_GAP_MS),
+                                        KNOCK(HFX_KNOCK_PEAK, HFX_KNOCK_HOLD_MS) };
+static const HapFrame FX_REMINDER[] = { KNOCK(HFX_REMIND_PEAK, HFX_REMIND_HOLD_MS), REST(HFX_REMIND_GAP_MS),
+                                        KNOCK(HFX_REMIND_PEAK, HFX_REMIND_HOLD_MS) };
+// Soft, then firm: something went through.
+static const HapFrame FX_SUCCESS[]  = { KNOCK(HFX_KNOCK_PEAK / 2, 14), REST(60), KNOCK(HFX_KNOCK_PEAK, 24) };
+// Three short knocks: something didn't.
+static const HapFrame FX_WARNING[]  = { KNOCK(HFX_KNOCK_PEAK, 18), REST(70), KNOCK(HFX_KNOCK_PEAK, 18), REST(70),
+                                        KNOCK(HFX_KNOCK_PEAK, 18) };
+static const HapFrame FX_PULSE[]    = { {HFX_PULSE_PEAK, HFX_PULSE_MS * 2 / 5}, {0, HFX_PULSE_MS * 3 / 5} };
+static const HapFrame FX_RAMP_UP[]  = { {HFX_RAMP_PEAK, HFX_RAMP_MS}, {0, FALL} };
+static const HapFrame FX_RAMP_DOWN[]= { {HFX_RAMP_PEAK, EDGE * 2}, {0, HFX_RAMP_MS} };
+static const HapFrame FX_HEARTBEAT[]= { KNOCK(HFX_BEAT_PEAK, 26), REST(90), KNOCK(HFX_BEAT_PEAK * 3 / 4, 20) };
+#define FX(p) { p, (uint8_t)(sizeof(p) / sizeof((p)[0])) }
+#define FX_ALARM TONE_PULSE_F
+static const struct { const HapFrame* f; uint8_t n; } FX_LIB[HAP_COUNT] = {
+  FX(FX_TICK), FX(FX_HOLD), FX(FX_TAP), FX(FX_NOTIFY), FX(FX_REMINDER), FX(FX_SUCCESS),
+  FX(FX_WARNING), FX(FX_PULSE), FX(FX_RAMP_UP), FX(FX_RAMP_DOWN), FX(FX_HEARTBEAT), FX(FX_ALARM),   // HAP_ALARM: the Pulse sound
+};
+#undef FX_ALARM
 
-static void hapWrite(int strength) {
-  if (strength == hapLevel) return;
-  hapLevel = strength;
-  ledcWrite(BUZZER_PIN, 255 - strength);  // active low
+static const struct { const char* name; Haptic h; } FX_NAMES[] = {
+  {"tick", HAP_TICK}, {"hold", HAP_HOLD}, {"tap", HAP_TAP}, {"notify", HAP_NOTIFY},
+  {"double", HAP_NOTIFY}, {"reminder", HAP_REMINDER}, {"success", HAP_SUCCESS},
+  {"warning", HAP_WARNING}, {"error", HAP_WARNING}, {"pulse", HAP_PULSE},
+  {"ramp_up", HAP_RAMP_UP}, {"ramp_down", HAP_RAMP_DOWN}, {"heartbeat", HAP_HEARTBEAT},
+};
+
+// --- What loop() asks for (guarded by hapMux) ---
+static portMUX_TYPE hapMux = portMUX_INITIALIZER_UNLOCKED;
+static volatile bool hapAsk = false;
+static const HapFrame* askFrames = nullptr;
+static uint8_t  askCount = 0;
+static bool     askLoop = false, askTone = false, askRing = false;
+static float    askScale = 1;
+static uint32_t askBuildMs = 0, askStopMs = 0;
+static HapFrame pulseOne[3];                 // the Pi's plain HAPTIC {ms}
+
+// --- The engine (only the timer touches these) ---
+static esp_timer_handle_t hapTimer = nullptr;
+static uint32_t hapPeriod = 0;               // the timer's period while it runs
+static uint32_t hapMaxDuty = 255;            // (1 << resolution) - 1
+static uint32_t hapFreq = HAPTIC_FREQ;       // knock carrier, changeable from the serial monitor
+static float    hapOnDuty = HAPTIC_ON_DUTY / 100.0f;
+
+// The most duty bits LEDC can give at `hz` from its 80 MHz clock.
+static uint8_t hapResFor(uint32_t hz) {
+  uint8_t r = HAPTIC_RES;
+  while (r > 4 && (80000000UL >> r) < hz) r--;
+  return r;
 }
 
-// Silent knocks or the alarm's audible tone.
-static void hapVoice(bool tone) {
-  if (tone == hapTone) return;
-  hapTone = tone;
-  hapLevel = -1;
-  ledcChangeFrequency(BUZZER_PIN, tone ? ALARM_TONE_HZ : HAPTIC_FREQ, HAPTIC_RES);
+static void hapSetCarrier(uint32_t hz) {
+  uint8_t res = hapResFor(hz);
+  ledcChangeFrequency(BUZZER_PIN, hz, res);
+  hapMaxDuty = (1u << res) - 1;
+}
+static const HapFrame* hf = nullptr;
+static uint8_t  hn = 0, hi = 0;
+static bool     hLoop = false, hTone = false, hOnTone = false;
+static bool     hRing = false;               // a ringing alarm: silent start, build-up, then urgency
+static bool     hUrgent = false;             // rung a long while: pauses run at half length
+static uint32_t hToneHz = 0;                 // the tone carrier now playing
+static float    hScale = 1, hFrom = 0;      // on a tone, hScale is the loudest duty
+static uint32_t hBuildMs = 0, hStopMs = 0;   // a tone's build-up, and a preview's length (0: until off)
+static int64_t  hSegAt = 0, hStartAt = 0;
+static int32_t  hDuty = -1;                  // the on-time last written, -1 = unknown
+
+static uint8_t  hapStrength = HAPTIC_STRENGTH;
+static bool     hapAlarm = false;            // loop()'s view: an alarm is ringing
+
+static void hapWrite(uint32_t on) {          // on-time, 0..hapMaxDuty
+  if ((int32_t)on == hDuty) return;
+  hDuty = on;
+  ledcWrite(BUZZER_PIN, hapMaxDuty - on);    // active low
 }
 
-void hapticOff() {
-  hapSteps = nullptr;
-  hapCount = 0;
-  hapLoop = false;
-  hapWrite(0);
-  hapVoice(false);
+static void hapCarrier(bool tone, uint32_t hz = ALARM_TONE_HZ) {
+  if (tone == hOnTone && (!tone || hz == hToneHz)) return;
+  hOnTone = tone;
+  hToneHz = tone ? hz : 0;
+  hDuty = -1;
+  hapSetCarrier(tone ? hz : hapFreq);
+}
+
+// How long a frame lasts. With on/off drive, strength (hScale) stretches the
+// parts where the motor runs; rests keep their length.
+static int64_t hapSegUs(const HapFrame& f) {
+  int64_t us = (int64_t)f.ms * 1000;
+  if (HAPTIC_MOTOR_DC && !hTone && f.level > 0) us = (int64_t)(us * hScale);
+  if (hUrgent && f.level == 0 && f.ms >= 300) us /= 2;
+  return us;
+}
+
+static void hapTick(void*) {
+  int64_t now = esp_timer_get_time();
+  if (hapAsk) {
+    portENTER_CRITICAL(&hapMux);
+    hf = askFrames; hn = askCount; hLoop = askLoop; hTone = askTone; hScale = askScale;
+    hBuildMs = askBuildMs; hStopMs = askStopMs; hRing = askRing;
+    hapAsk = false;
+    portEXIT_CRITICAL(&hapMux);
+    hi = 0;
+    hSegAt = hStartAt = now;
+    // Glide on from wherever the motor is now, so a new effect never jumps.
+    if (HAPTIC_MOTOR_DC) hFrom = (!hOnTone && hDuty > 0) ? 255 : 0;
+    else hFrom = (hOnTone || hDuty <= 0) ? 0 : 255.0f * hDuty / hapMaxDuty / (hScale > 0 ? hScale : 1);
+    if (hFrom > 255) hFrom = 255;
+    if (hOnTone != hTone) { hapWrite(0); hapCarrier(hTone); hFrom = 0; }
+  }
+  if (hf && hStopMs && now - hStartAt >= (int64_t)hStopMs * 1000) hf = nullptr;   // a preview is over
+  int64_t ringing = now - hStartAt;
+  hUrgent = hRing && ringing > ((int64_t)ALARM_SILENT_MS + ALARM_URGENT_MS) * 1000;
+  if (!hf) {
+    hapCarrier(false);
+    hapWrite(0);
+    esp_timer_stop(hapTimer);                // idle: no ticks until the next effect
+    return;
+  }
+
+  // Walk past every frame that has finished.
+  while (now - hSegAt >= hapSegUs(hf[hi])) {
+    hSegAt += hapSegUs(hf[hi]);
+    hFrom = hf[hi].level;
+    if (++hi >= hn) {
+      if (!hLoop) { hf = nullptr; hapWrite(0); return; }   // the next tick goes idle
+      hi = 0;
+    }
+  }
+  const HapFrame& f = hf[hi];
+  int64_t len = hapSegUs(f);
+  float t = len ? (float)(now - hSegAt) / len : 1;
+  t = t * t * (3 - 2 * t);                   // S-curve: no corners to click
+  float level = (hFrom + (f.level - hFrom) * t) / 255.0f;
+
+  float on;
+  if (hRing && ringing < (int64_t)ALARM_SILENT_MS * 1000) {
+    // A gentle start: the alarm's rhythm on the motor alone (the silent
+    // knock carrier), before any sound. Soft notes count too.
+    if (hOnTone) { hapWrite(0); hapCarrier(false); }
+    on = level >= 0.2f ? hapOnDuty : 0;
+  } else if (hTone) {
+    // Each note names its pitch; a rest keeps the last one.
+    if (f.hz) hapCarrier(true, f.hz);
+    else if (!hOnTone) hapCarrier(true, ALARM_TONE_HZ);
+    // A ringing alarm starts quieter and builds to its volume; a preview
+    // plays at the volume chosen.
+    float vol = 1;
+    if (hRing) {
+      ringing -= (int64_t)ALARM_SILENT_MS * 1000;
+      float k = hBuildMs ? (float)ringing / (hBuildMs * 1000.0f) : 1;
+      if (k > 1) k = 1;
+      vol = ALARM_START_PCT / 100.0f + (1 - ALARM_START_PCT / 100.0f) * k;
+    }
+    on = level * vol * hScale;
+  } else if (HAPTIC_MOTOR_DC) {
+    on = level >= 0.5f ? hapOnDuty : 0;      // a knock is on at one fixed duty: see config.h
+  } else {
+    on = level * hScale;
+  }
+  hapWrite((uint32_t)(on * hapMaxDuty + 0.5f));
+}
+
+// What strength `pct` does (0 = off): with on/off drive, how much longer or
+// shorter each knock runs; with PWM, the share of full power.
+static float hapTop(uint8_t pct) {
+  if (pct == 0) return 0;
+  if (pct > 100) pct = 100;
+  if (HAPTIC_MOTOR_DC) return (HAPTIC_MIN_LEN_PCT + (HAPTIC_MAX_LEN_PCT - HAPTIC_MIN_LEN_PCT) * (pct - 1) / 99.0f) / 100.0f;
+  return (HAPTIC_MIN_DUTY + (HAPTIC_MAX_DUTY - HAPTIC_MIN_DUTY) * (pct - 1) / 99.0f) / 100.0f;
+}
+
+static void hapAskFor(const HapFrame* f, uint8_t n, bool loop, bool tone, float scale,
+                      uint32_t buildMs = 0, uint32_t stopMs = 0, bool ring = false) {
+  portENTER_CRITICAL(&hapMux);
+  askFrames = f; askCount = n; askLoop = loop; askTone = tone; askScale = scale;
+  askBuildMs = buildMs; askStopMs = stopMs; askRing = ring;
+  hapAsk = true;
+  portEXIT_CRITICAL(&hapMux);
+  // The timer task outranks loop() on the C3's one core, so it can't be
+  // stopping itself halfway through this; an already running timer just
+  // picks the request up on its next tick. The alarm is audible anyway, so
+  // it, like on/off drive, moves 1000 times a second; PWM glides 10000.
+  if (!hapTimer) return;
+  uint32_t period = (tone || HAPTIC_MOTOR_DC) ? 1000 : HAPTIC_TICK_US;
+  if (esp_timer_is_active(hapTimer)) {
+    if (period == hapPeriod) return;
+    esp_timer_stop(hapTimer);
+  }
+  hapPeriod = period;
+  esp_err_t err = esp_timer_start_periodic(hapTimer, period);
+  if (err != ESP_OK) Serial.printf("[HAPTIC] timer didn't start (error %d)\n", (int)err);
+}
+
+void hapticInit(uint8_t strength) {
+  hapStrength = strength > 100 ? 100 : strength;
+  uint8_t res = hapResFor(hapFreq);
+  if (!ledcAttach(BUZZER_PIN, hapFreq, res)) {
+    res = 8;
+    ledcAttach(BUZZER_PIN, hapFreq, res);
+  }
+  hapMaxDuty = (1u << res) - 1;
+  ledcWrite(BUZZER_PIN, hapMaxDuty);         // off (active low)
+  hDuty = 0;
+  esp_timer_create_args_t args = {};
+  args.callback = &hapTick;
+  args.name = "haptics";
+  esp_err_t err = esp_timer_create(&args, &hapTimer);
+  if (err != ESP_OK) hapTimer = nullptr;     // hapticUpdate() drives it instead
+  Serial.printf("[HAPTIC] pin %d, %u Hz, %u-bit, on-duty %d%%, timer %s, strength %u%%\n", BUZZER_PIN,
+                (unsigned)hapFreq, res, (int)(hapOnDuty * 100 + 0.5f), hapTimer ? "ok" : "FAILED (loop fallback)", hapStrength);
 }
 
 void hapticPlay(Haptic h) {
-  if (hapLoop && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
-  switch (h) {
-    case HAP_TAP:      hapSteps = HP_TAP;      hapCount = HAP_LEN(HP_TAP); break;
-    case HAP_HOLD:     hapSteps = HP_HOLD;     hapCount = HAP_LEN(HP_HOLD); break;
-    case HAP_NOTIFY:   hapSteps = HP_NOTIFY;   hapCount = HAP_LEN(HP_NOTIFY); break;
-    case HAP_REMINDER: hapSteps = HP_REMINDER; hapCount = HAP_LEN(HP_REMINDER); break;
-    case HAP_SUCCESS:  hapSteps = HP_SUCCESS;  hapCount = HAP_LEN(HP_SUCCESS); break;
-    case HAP_ALARM:    hapSteps = HP_ALARM;    hapCount = HAP_LEN(HP_ALARM); break;
-  }
-  hapLoop = (h == HAP_ALARM);
-  hapVoice(hapLoop);
-  hapNight = nightTime() && h != HAP_TAP && h != HAP_HOLD && h != HAP_ALARM;
-  hapIndex = 0;
-  hapStepAt = hapLoopStart = millis();
-  hapLevel = -1;
+  if (h >= HAP_COUNT) return;
+  if (hapAlarm && h != HAP_ALARM) return;   // nothing talks over a ringing alarm
+  if (h == HAP_ALARM) { hapticRing(TONE_PULSE, 100); return; }
+  float scale = hapTop(hapStrength);
+  if (scale <= 0) { Serial.println("[HAPTIC] off (strength 0 in Sage)"); return; }
+  bool press = (h == HAP_TICK || h == HAP_HOLD);
+  if (!press && nightTime()) scale *= HAPTIC_NIGHT_PCT / 100.0f;
+  Serial.printf(HAPTIC_MOTOR_DC ? "[HAPTIC] effect %d, on/off, length %d%%\n" : "[HAPTIC] effect %d at %d%% duty\n",
+                (int)h, (int)(scale * 100));
+  hapAskFor(FX_LIB[h].f, FX_LIB[h].n, false, false, scale);
 }
 
-// A single pulse of `ms`, for the Pi's HAPTIC command without a pattern.
+bool hapticPlayNamed(const char* name) {
+  for (const auto& e : FX_NAMES) {
+    if (!strcmp(name, e.name)) { hapticPlay(e.h); return true; }
+  }
+  return false;
+}
+
+// A single knock of `ms`, for the Pi's HAPTIC command without a pattern.
 void hapticPulse(uint16_t ms) {
-  if (hapLoop) return;
-  static HapStep one[1];
-  one[0].strength = 220;
-  one[0].ms = ms;
-  hapSteps = one;
-  hapCount = 1;
-  hapLoop = false;
-  hapNight = false;
-  hapIndex = 0;
-  hapStepAt = millis();
-  hapLevel = -1;
+  if (hapAlarm) return;
+  float scale = hapTop(hapStrength);
+  if (scale <= 0) return;
+  if (ms < EDGE) ms = EDGE;
+  pulseOne[0] = {HFX_KNOCK_PEAK, EDGE};
+  pulseOne[1] = {HFX_KNOCK_PEAK, ms};
+  pulseOne[2] = {0, FALL};
+  hapAskFor(pulseOne, 3, false, false, scale);
 }
 
-void hapticUpdate() {
-  if (!hapSteps) return;
-  unsigned long now = millis();
-  while (now - hapStepAt >= hapSteps[hapIndex].ms) {
-    hapStepAt += hapSteps[hapIndex].ms;
-    if (++hapIndex >= hapCount) {
-      if (!hapLoop) { hapticOff(); return; }
-      hapIndex = 0;
-    }
-  }
-  int strength = hapSteps[hapIndex].strength;
-  if (strength > 0) {
-    if (hapTone) {
-      // The alarm starts quieter and builds to full over 20 s. A square
-      // wave is loudest at half duty, so 255 maps to 50%.
-      float k = (now - hapLoopStart) / 20000.0f;
-      strength = (int)(strength * (0.25f + 0.75f * (k > 1 ? 1 : k))) / 2;
-    } else {
-      if (hapNight) strength = strength * 6 / 10;
-      if (now - hapStepAt < 6) strength = 255;   // the kick
-    }
-  }
-  hapWrite(strength);
+// Volume 0..100 to the tone's duty: a square wave is loudest at half duty
+// (ALARM_TONE_DUTY) and gets about 20 dB quieter for every tenfold drop below
+// that, so 100 is full, 50 a tenth of that and 0 silent.
+static float toneDuty(uint8_t volume) {
+  if (volume == 0) return 0;
+  if (volume > 100) volume = 100;
+  return ALARM_TONE_DUTY / 100.0f * powf(10.0f, (volume - 100) / 50.0f);
 }
+
+static const ToneDef& toneDef(AlarmTone tone) {
+  return TONE_LIB[tone < TONE_COUNT ? tone : TONE_PULSE];
+}
+
+AlarmTone hapticToneNamed(const char* name, AlarmTone fallback) {
+  for (uint8_t i = 0; i < TONE_COUNT; i++) {
+    if (name && !strcmp(name, TONE_LIB[i].name)) return (AlarmTone)i;
+  }
+  return fallback;
+}
+
+void hapticRing(AlarmTone tone, uint8_t volume) {
+  const ToneDef& t = toneDef(tone);
+  hapAlarm = true;
+  hapAskFor(t.f, t.n, true, true, toneDuty(volume), t.buildMs, 0, true);
+}
+
+// A sound at its chosen volume, to pick one in Sage: exactly one cycle of
+// it (once), or a few seconds of it (firmware before 2.11 always did that).
+// A button press cuts it short; a ringing alarm isn't interrupted.
+void hapticPreview(AlarmTone tone, uint8_t volume, uint16_t seconds, bool once) {
+  if (hapAlarm) return;
+  const ToneDef& t = toneDef(tone);
+  Serial.printf("[HAPTIC] preview %s at %u%%%s\n", t.name, volume, once ? ", one cycle" : "");
+  hapAskFor(t.f, t.n, !once, true, toneDuty(volume), 0, once ? 0 : seconds * 1000UL);
+}
+
+void hapticSetStrength(uint8_t pct) {
+  hapStrength = pct > 100 ? 100 : pct;
+}
+
+uint8_t hapticStrength() { return hapStrength; }
+
+void hapticOff() {
+  hapAlarm = false;
+  hapAskFor(nullptr, 0, false, false, 1);
+}
+
+// Only needed if the timer couldn't be made: then loop() drives the engine
+// (coarser, but still glides).
+void hapticUpdate() {
+  if (!hapTimer) hapTick(nullptr);
+
+  // Tuning from the serial monitor (see HAPTICS in config.h).
+  if (!Serial.available()) return;
+  String line = Serial.readStringUntil('\n');
+  line.trim();
+  if (line == "buzz") { hapticSelfTest(); return; }
+  if (line == "tick")  { hapticPlay(HAP_TICK); return; }
+  if (line == "knock") { hapticPlay(HAP_NOTIFY); return; }
+  if (line.startsWith("hz ")) {
+    long hz = line.substring(3).toInt();
+    if (hz < 1000 || hz > 300000 || hapAlarm) { Serial.println("[HAPTIC] hz must be 1000-300000 (and not while the alarm rings)"); return; }
+    hapFreq = hz;
+    hapticOff();
+    if (!hOnTone) { hapSetCarrier(hapFreq); hDuty = -1; hapWrite(0); }
+  } else if (line.startsWith("duty ")) {
+    long d = line.substring(5).toInt();
+    if (d < 1 || d > 100) { Serial.println("[HAPTIC] duty must be 1-100"); return; }
+    hapOnDuty = d / 100.0f;
+  } else if (line != "haptic") {
+    return;
+  }
+  Serial.printf("[HAPTIC] carrier %u Hz (%u-bit), on-duty %d%%. Type tick or knock to feel it.\n",
+                (unsigned)hapFreq, (unsigned)hapResFor(hapFreq), (int)(hapOnDuty * 100 + 0.5f));
+}
+
+// Serial "buzz" plays a plain full-power 300 ms buzz with no shaping, to tell
+// a wiring problem from a tuning one.
+// It bypasses the engine and its timer: the pin is held fully on (low) by
+// hand, exactly as 2.6.4 did at full strength.
+void hapticSelfTest() {
+  Serial.printf("[HAPTIC] self test: pin %d held on for 300 ms, no engine\n", BUZZER_PIN);
+  ledcWrite(BUZZER_PIN, 0);
+  delay(300);
+  ledcWrite(BUZZER_PIN, hapMaxDuty);
+  hDuty = 0;
+  Serial.println("[HAPTIC] self test done");
+}
+
+#undef EDGE
+#undef FALL
 
 // =====================================================================
 //  NeoPixel scene engine
@@ -172,6 +438,13 @@ static unsigned long alarmSince;
 static unsigned long pingStart = 0;
 static Rgb      pingColor  = {1, 1, 1};
 static bool     pingActive = false;
+// A card's light (neoNotify): when it started, its colour, and how much of it
+// shows (1 while the card is up, easing to 0 after it goes).
+static unsigned long notifyStart = 0;
+static Rgb      notifyColor  = {1, 1, 1};
+static bool     notifyCall   = false;
+static bool     notifyActive = false;
+static float    notifyHold   = 0;
 
 static Rgb      frameCur[NUMPIXELS];            // smoothed, perceptual
 static uint8_t  lastOut[NUMPIXELS][3];
@@ -222,6 +495,14 @@ void neoPing(uint8_t r, uint8_t g, uint8_t b) {
   pingColor  = rgb(r / 255.0f, g / 255.0f, b / 255.0f);
   pingStart  = millis();
   pingActive = true;
+}
+void neoNotify(uint8_t r, uint8_t g, uint8_t b, bool call) {
+  notifyColor  = rgb(r / 255.0f, g / 255.0f, b / 255.0f);
+  notifyStart  = millis();
+  notifyCall   = call;
+  notifyActive = true;
+  notifyHold   = 1;
+  pingActive   = false;
 }
 void neoClear() {
   for (int i = 0; i < NUMPIXELS; i++) frameCur[i] = rgb(0, 0, 0);
@@ -307,14 +588,6 @@ static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rg
   k.mark = MARK_NONE; k.markColor = rgb(1, 1, 1); k.count = 0; k.minuteSwell = false;
   switch (screen) {    // the clock faces have their own lights: renderFace
 
-    case SCREEN_SPOTIFY: {
-      uint8_t r, g, b;
-      displayArtTint(r, g, b);
-      k.color = rgb8(r, g, b);
-      k.breathe = false;                          // the song's pulse is its motion (sceneAuto)
-      if (!s.sp_playing) k.level = day * 0.5f;
-      break;
-    }
     case SCREEN_SYSTEM: {
       float heat = clamp01((s.cpu_temp - 45.0f) / 30.0f);
       k.color = heat < 0.5f ? mixc(rgb8(60, 220, 190), rgb8(255, 176, 50), heat * 2)
@@ -341,7 +614,8 @@ static Look lookFor(ScreenMode screen, const LumoState& s, const ClockNow& c, Rg
       k.color = rgb8(255, 170, 120);
       break;
     case SCREEN_CARD:
-      k.color = rgb8(80, 200, 255);
+      k.color = rgb8(s.notif_r, s.notif_g, s.notif_b);   // the card's own light rides on top (notifyLight)
+      k.level = day * 0.35f;
       break;
     default:
       break;
@@ -497,9 +771,90 @@ static void renderFace(ClockStyle style, const LumoState& s, const ClockNow& c, 
 
 // One screen's light, whatever the screen: the clock faces above, the
 // rest from their Look.
+// The timer's ring is what's left of it: amber, emptying as it runs down
+// (still while paused). The stopwatch's is a teal dot going round once a
+// minute, like a second hand, standing still when it's stopped.
+static void renderTool(ScreenMode screen, const LumoState& s, float t, float day, Rgb* out) {
+  const float N = (float)NUMPIXELS;
+  float b = 1.0f - BREATH * breathe(t, BREATH_S);
+  if (screen == SCREEN_TIMER) {
+    Rgb amber = rgb8(255, 160, 50);
+    float left = 0;
+    if (s.tm_state == TOOL_RUNNING) left = (float)(int32_t)(s.tm_end - millis());
+    else if (s.tm_state == TOOL_PAUSED) left = s.tm_left_ms;
+    float frac = s.tm_total_ms ? clamp01(left / s.tm_total_ms) : 0;
+    bool idle = s.tm_state == TOOL_IDLE;
+    for (int i = 0; i < NUMPIXELS; i++) {
+      float lit = idle ? 0.35f : fillAt(frac * N, i, 0.06f);
+      out[i] = scalec(amber, (GLOW + 0.15f) * day * (s.tm_state == TOOL_PAUSED ? 1.0f : b) * lit);
+    }
+    return;
+  }
+  Rgb teal = rgb8(60, 220, 190);
+  uint32_t ms = s.sw_base_ms + (s.sw_running ? millis() - s.sw_mark : 0);
+  float pos = fmodf(ms / 60000.0f, 1.0f) * N;
+  for (int i = 0; i < NUMPIXELS; i++) {
+    Rgb o = scalec(teal, GLOW * 0.6f * day * b);
+    if (ms) o = addc(o, scalec(teal, MARK_GAIN * day * blobAt(pos, i, MARK_W)));
+    out[i] = o;
+  }
+}
+
+// ---- Now playing: the cover's two colours as a gradient (2.19) --------
+//
+// The six LEDs sit in a row along the top of the case, LED 0 on the left.
+// The cover's main colour lights the left end and its second colour the
+// right end. While the song plays, the blend glides
+// across to the other side and back, and a soft band of light travels with
+// it: there in MUSIC_SWEEP_S, back in as long again, easing at each end. It
+// keeps no tempo (the clock can't hear the music), so it never fights the
+// song; pausing holds it still where it is, at half the glow. A new cover's
+// colours fade in over about a second instead of jumping.
+
+static const float MUSIC_SWEEP_S  = 6.0f;    // one side to the other
+static const float MUSIC_SOFT     = 0.80f;   // how wide the blend between the colours is
+static const float MUSIC_TRAVEL   = 0.70f;   // how far the blend's middle moves either side (the row is -1..1)
+static const float MUSIC_BAND_W   = 0.60f;   // the light band's width
+static const float MUSIC_BAND     = 0.30f;   // how much brighter the band is than the rest
+
+static float musicPhase = 0;                  // 0..2: there (0..1) and back (1..2)
+static Rgb   musicA = {0.12f, 0.84f, 0.38f}, musicB = {0.63f, 0.94f, 0.75f};   // as shown, easing to the cover's
+
+static void musicTick(float t, bool playing) {
+  static float lastT = 0;
+  float dt = t - lastT;
+  lastT = t;
+  if (dt <= 0 || dt > 0.5f) return;
+  if (playing) musicPhase = fmodf(musicPhase + dt / MUSIC_SWEEP_S, 2.0f);
+  uint8_t r, g, b;
+  float e = 1 - expf(-dt / 0.35f);
+  displayArtTint(r, g, b);
+  musicA = mixc(musicA, rgb8(r, g, b), e);
+  displayArtTint2(r, g, b);
+  musicB = mixc(musicB, rgb8(r, g, b), e);
+}
+
+static void renderMusic(const LumoState& s, float day, Rgb* out) {
+  float u = 0.5f - 0.5f * cosf(3.14159f * musicPhase);   // 0 -> 1 -> 0, easing at the ends
+  float mid  = MUSIC_TRAVEL * (2 * u - 1);
+  float band = 1.25f * (2 * u - 1);                        // the light runs just past each edge
+  float level = GLOW * (s.sp_playing ? day : day * 0.5f);
+  for (int i = 0; i < NUMPIXELS; i++) {
+    float x = 2.0f * i / (NUMPIXELS - 1) - 1;                   // -1 left .. 1 right
+    float m = clamp01((x - mid) / (2 * MUSIC_SOFT) + 0.5f);
+    m = m * m * (3 - 2 * m);
+    Rgb c = mixc(musicA, musicB, m);
+    float d = (x - band) / MUSIC_BAND_W;
+    float lift = 1 + MUSIC_BAND * expf(-d * d);
+    out[i] = scalec(c, level * (1 - MUSIC_BAND * 0.5f) * lift);
+  }
+}
+
 static void renderScreen(ScreenMode screen, const LumoState& s, const ClockNow& c, float t, float since,
                          Rgb dayColor, float day, Rgb* out) {
   if (screen == SCREEN_CLOCK) renderFace(s.clock_style, s, c, t, since, dayColor, day, out);
+  else if (screen == SCREEN_SPOTIFY) renderMusic(s, day, out);
+  else if (screen == SCREEN_TIMER || screen == SCREEN_STOPWATCH) renderTool(screen, s, t, day, out);
   else renderLook(lookFor(screen, s, c, dayColor, day), t, c, out);
 }
 
@@ -520,6 +875,7 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
   }
   const LumoState& s = *ctx;
   float since = (millis() - ctxSince) / 1000.0f;
+  musicTick(t, s.sp_playing);
   renderScreen(ctxScreen, s, c, t, since, dayColor, day, out);
 
   // A new face or screen cross-fades from the last one.
@@ -542,23 +898,7 @@ static void sceneAuto(float t, Rgb* out, float& tau) {
       tintSeen[0] = r; tintSeen[1] = g; tintSeen[2] = b;
     }
     float sw = tintSwellAt ? swellAt((millis() - tintSwellAt) / 1000.0f, SWELL_S) : 0;
-    // While it plays, the cover's colour flows slowly round the ring: a
-    // lighter tint drifts through the deeper one, like light through stained
-    // glass. It keeps no tempo (the clock can't hear the music), so it never
-    // fights the song; pausing holds it still where it is.
-    static float flow = 0, lastT = 0;
-    float dt = t - lastT;
-    lastT = t;
-    if (s.sp_playing && dt > 0 && dt < 0.5f) flow += dt / 14.0f;      // once round every 14 s
-    for (int i = 0; i < NUMPIXELS; i++) {
-      Rgb deep = scalec(out[i], 0.75f), light = mixc(out[i], rgb(1, 1, 1), 0.35f);
-      float a = (flow + (float)i / NUMPIXELS) * TWO_PI_F;
-      float w = 0.5f + 0.5f * sinf(a);                                // one light crest going round
-      w = w * w * (3 - 2 * w);
-      float shimmer = 0.5f + 0.5f * sinf(flow * TWO_PI_F * 2.3f - i * 1.1f);   // a second, slower layer
-      Rgb c = mixc(deep, light, 0.75f * w + 0.25f * shimmer * w);
-      out[i] = scalec(c, 1 + SWELL_GAIN * 1.5f * sw);
-    }
+    for (int i = 0; i < NUMPIXELS; i++) out[i] = scalec(out[i], 1 + SWELL_GAIN * 1.5f * sw);
   }
 }
 
@@ -636,6 +976,45 @@ static void sceneVoice(float t, Rgb* out, float& tau) {
   }
 }
 
+// How much of a card's colour each LED takes (0..1), `el` seconds after it
+// came up. A message: the light opens out from the middle pair (0.5 s), swells
+// twice, then settles to a soft glow in the middle that breathes slowly. A
+// call: all six ring, two quick swells every 1.6 s, like a phone.
+static void notifyWeights(float el, float* w) {
+  for (int i = 0; i < NUMPIXELS; i++) {
+    float x = 2.0f * i / (NUMPIXELS - 1) - 1;                 // -1 left .. 1 right
+    if (notifyCall) {
+      float u = fmodf(el, 1.6f);
+      float ring = swellAt(u, 0.5f) + 0.8f * swellAt(u - 0.42f, 0.55f);
+      float edge = clamp01(el / 0.4f);                       // fades in over the first beat
+      w[i] = edge * (0.30f + 0.65f * clamp01(ring));
+      continue;
+    }
+    float r = clamp01(el / 0.5f);
+    r = r * r * (3 - 2 * r);
+    float open = clamp01((r * 1.25f - fabsf(x)) / 0.3f);
+    float intro = 0.55f + 0.45f * clamp01(swellAt(el - 0.35f, 0.8f) + swellAt(el - 1.15f, 0.9f));
+    float rest = (0.16f + 0.62f * expf(-(x / 0.5f) * (x / 0.5f))) * (1 - 0.12f * breathe(el, 4.0f));
+    float m = clamp01((el - 1.9f) / 0.7f);
+    m = m * m * (3 - 2 * m);
+    w[i] = open * (intro + (rest - intro) * m);
+  }
+}
+
+static void notifyLight(Rgb* target, float dt) {
+  if (!notifyActive) return;
+  float el = (millis() - notifyStart) / 1000.0f;
+  // The card takes a moment to come up, and a plain one goes after 4.5 s.
+  bool up = ctxScreen == SCREEN_CARD || el < 1.0f;
+  notifyHold += ((up ? 1.0f : 0.0f) - notifyHold) * (1 - expf(-dt / 0.3f));
+  if (!up && notifyHold < 0.01f) { notifyActive = false; return; }
+  float w[NUMPIXELS];
+  notifyWeights(el, w);
+  float night = sleeping ? 0.5f : 1.0f;
+  for (int i = 0; i < NUMPIXELS; i++)
+    target[i] = mixc(target[i], scalec(notifyColor, night), clamp01(w[i] * notifyHold) * 0.95f);
+}
+
 void neoTick() {
   unsigned long ms = millis();
   if (ms - lastFrameMs < 16) return;
@@ -669,6 +1048,9 @@ void neoTick() {
       default:          sceneAuto(t, target, tau);    break;
     }
   }
+
+  // A card's light rides on top of whatever is playing (not a ringing alarm's).
+  if (!alarmOn) notifyLight(target, dt);
 
   // Notification ping rides on top of whatever is playing.
   if (pingActive) {

@@ -7,7 +7,32 @@ import { CaptureGuide } from './CaptureGuide';
 import { BluetoothSettings } from './BluetoothSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
+import { PostPictureKeys } from './PostPictureKeys';
+import { ModeSettings } from './ModeSettings';
+import { HolidaySettings } from './HolidaySettings';
+import { SecuritySettings } from './SecuritySettings';
 import { downloadICSFile } from '../../utils/calendarExport';
+
+const SETTINGS_TABS = [
+  { id: 'attention', label: 'Notifications' },
+  { id: 'modes', label: 'Modes' },
+  { id: 'holidays', label: 'Holidays' },
+  { id: 'capture', label: 'Shortcuts' },
+  { id: 'security', label: 'Sign-in' },
+  { id: 'bluetooth', label: 'Bluetooth' },
+  { id: 'clock', label: 'Desk Clock' },
+  { id: 'radar', label: 'Radar' },
+  { id: 'data', label: 'Data & Migration' },
+  { id: 'system', label: 'Server & Reset' },
+] as const;
+
+// Four groups, so the first look is four choices instead of eight.
+const SETTINGS_GROUPS = [
+  { label: 'Daily', tabs: ['attention', 'modes', 'holidays'] },
+  { label: 'Capture', tabs: ['capture'] },
+  { label: 'Devices', tabs: ['security', 'clock', 'bluetooth'] },
+  { label: 'Advanced', tabs: ['radar', 'data', 'system'] },
+] as const;
 import { importCSVData } from '../../utils/dataImporter';
 import { useToast } from '../../context/ToastContext';
 import { LifeContext } from '../../services/types';
@@ -18,23 +43,78 @@ interface SettingsModalProps {
   onClose: () => void;
   lifeContext?: LifeContext;
   onDataChanged?: () => void;
+  initialTab?: string;
 }
 
-export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsModalProps) {
+type SettingsTabId = 'attention' | 'modes' | 'holidays' | 'capture' | 'security' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system';
+
+function fmtBytes(bytes: number): string {
+  if (!bytes) return '0 B';
+  const u = ['B', 'KB', 'MB', 'GB', 'TB'];
+  const i = Math.min(u.length - 1, Math.floor(Math.log(bytes) / Math.log(1024)));
+  const n = bytes / Math.pow(1024, i);
+  return `${n.toFixed(i === 0 ? 0 : n < 10 ? 1 : 0)} ${u[i]}`;
+}
+
+export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab }: SettingsModalProps) {
   useEscapeKey(onClose);
-  const [activeTab, setActiveTab] = useState<'attention' | 'capture' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system'>('attention');
+  const validTab = (SETTINGS_TABS as readonly { id: string }[]).some(t => t.id === initialTab) ? (initialTab as SettingsTabId) : 'attention';
+  const [activeTab, setActiveTab] = useState<SettingsTabId>(validTab);
   const [resurfacingDays, setResurfacingDays] = useState<number>(14);
   const [csvInput, setCsvInput] = useState<string>('');
   const [isImporting, setIsImporting] = useState<boolean>(false);
   const [isConfirmingClear, setIsConfirmingClear] = useState<boolean>(false);
   const [confirmText, setConfirmText] = useState<string>('');
   const [piKey, setPiKey] = useState<string>(() => getPiApiKey());
+  const [showPiKey, setShowPiKey] = useState(false);
+  const [fetchingPiKey, setFetchingPiKey] = useState(false);
+
+  // Asks the Pi for its own key. It answers a browser that is logged in with the
+  // password, one that already holds the key, or the Pi's own screen.
+  const fetchPiKey = async () => {
+    setFetchingPiKey(true);
+    try {
+      const res = await fetch(`${piBackendUrl()}/api/settings/api-secret`, { headers: piHeaders(), credentials: 'include' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(res.status === 401 ? 'Log in with your Sage password first, or open Sage on the Pi itself.' : json.detail || `The Pi said ${res.status}`);
+      if (!json.set || !json.secret) {
+        showToast('This Pi has no server key set, so none is needed.');
+        return;
+      }
+      setPiKey(json.secret);
+      setPiApiKey(json.secret);
+      setShowPiKey(true);
+      showToast('Got the key from the Pi and saved it on this device');
+      api.sync.forceSync();
+    } catch (err: any) {
+      showToast(err.message || "Couldn't reach the Pi", 'error');
+    } finally {
+      setFetchingPiKey(false);
+    }
+  };
+
+  const copyPiKey = async () => {
+    try {
+      await navigator.clipboard.writeText(piKey);
+      showToast('Key copied');
+    } catch {
+      setShowPiKey(true);
+      showToast('Press and hold the key to copy it', 'error');
+    }
+  };
   // The Cloudflare Tunnel address, when the Pi has one. undefined = still asking.
   const [publicUrl, setPublicUrl] = useState<string | null | undefined>(undefined);
   const [publicKind, setPublicKind] = useState<string | null>(null);
   // Nightly copy of the Pi's database. undefined = still asking, null = Pi not reachable.
   const [backup, setBackup] = useState<{ lastBackupAt: string | null; count: number; time: string } | null | undefined>(undefined);
   const [backingUp, setBackingUp] = useState(false);
+  // What the Pi is holding on disk. undefined = still asking, null = Pi not reachable.
+  const [storage, setStorage] = useState<{
+    disk: { total: number; used: number; free: number };
+    db: { bytes: number };
+    backups: { bytes: number; count: number };
+    drop: { bytes: number; sites: number; clips: number; permanent: number };
+  } | null | undefined>(undefined);
   const [groqStatus, setGroqStatus] = useState<{ set: boolean; source: string | null; last4: string | null } | null>(null);
   const [groqKey, setGroqKey] = useState('');
   const [savingGroq, setSavingGroq] = useState(false);
@@ -121,6 +201,15 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   };
   useEffect(loadBackup, []);
 
+  useEffect(() => {
+    const base = piBackendUrl();
+    if (!base) { setStorage(null); return; }
+    fetch(`${base}/api/storage`, { headers: piHeaders() })
+      .then(res => (res.ok ? res.json() : null))
+      .then(json => setStorage(json?.success ? json : null))
+      .catch(() => setStorage(null));
+  }, []);
+
   const backUpNow = async () => {
     setBackingUp(true);
     try {
@@ -149,8 +238,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
   };
 
   const handleExportICS = () => {
-    const state = api.sync.getState();
-    downloadICSFile(state.workItems);
+    downloadICSFile(api.workItems.snapshot());
     showToast('iCalendar (.ics) downloaded');
   };
 
@@ -191,75 +279,42 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         initial={{ opacity: 0, scale: 0.95, y: 15 }} 
         animate={{ opacity: 1, scale: 1, y: 0 }} 
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
-        className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-3xl shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
+        className="bg-white dark:bg-[#1c1c1e] w-full max-w-[46rem] rounded-3xl shadow-2xl p-6 md:p-8 relative z-10 border border-gray-100 dark:border-white/10 space-y-6 max-h-[90vh] overflow-y-auto custom-scrollbar"
       >
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-500">
-            <Settings size={16} />
-            <span>Sage System Settings</span>
-          </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18}/></button>
+          <h2 className="flex items-center gap-2.5 text-[18px] font-semibold tracking-tight text-gray-900 dark:text-white">
+            <span className="w-8 h-8 rounded-xl bg-gray-100 dark:bg-white/10 grid place-items-center text-gray-500 dark:text-gray-300"><Settings size={16} /></span>
+            Settings
+          </h2>
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
         </div>
 
-        {/* Tab Navigation */}
-        <div className="flex overflow-x-auto bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
-          <button
-            onClick={() => setActiveTab('attention')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'attention' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Notifications
-          </button>
-          <button
-            onClick={() => setActiveTab('capture')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'capture' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Shortcuts
-          </button>
-          <button
-            onClick={() => setActiveTab('bluetooth')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'bluetooth' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Bluetooth
-          </button>
-          <button
-            onClick={() => setActiveTab('clock')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'clock' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Desk Clock
-          </button>
-          <button
-            onClick={() => setActiveTab('radar')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'radar' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Radar
-          </button>
-          <button
-            onClick={() => setActiveTab('data')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'data' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Data & Migration
-          </button>
-          <button
-            onClick={() => setActiveTab('system')}
-            className={`flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${
-              activeTab === 'system' ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500'
-            }`}
-          >
-            Server & Reset
-          </button>
-        </div>
+        {/* Four groups, then the sections inside the chosen group. */}
+        {(() => {
+          const group = SETTINGS_GROUPS.find(g => (g.tabs as readonly string[]).includes(activeTab)) || SETTINGS_GROUPS[0];
+          const seg = (active: boolean) => `flex-1 whitespace-nowrap px-3 py-2 text-xs font-semibold rounded-xl transition-all ${active ? 'bg-white dark:bg-[#2c2c2e] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`;
+          return (
+            <div className="space-y-2">
+              <div role="tablist" aria-label="Settings groups" className="flex gap-0.5 bg-gray-100 dark:bg-white/5 p-1 rounded-2xl">
+                {SETTINGS_GROUPS.map(g => (
+                  <button key={g.label} role="tab" aria-selected={g === group} onClick={() => setActiveTab(g.tabs[0])} className={seg(g === group)}>
+                    {g.label}
+                  </button>
+                ))}
+              </div>
+              {group.tabs.length > 1 && (
+                <div role="tablist" aria-label="Settings sections" className="flex gap-1.5">
+                  {group.tabs.map(id => (
+                    <button key={id} role="tab" aria-selected={activeTab === id} onClick={() => setActiveTab(id)}
+                      className={`px-3 py-1.5 text-[12px] font-semibold rounded-full transition-colors ${activeTab === id ? 'bg-blue-600 text-white' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-white/5'}`}>
+                      {SETTINGS_TABS.find(t => t.id === id)?.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          );
+        })()}
 
         {/* Tab 1: Attention & Notifications */}
         {activeTab === 'attention' && (
@@ -296,7 +351,16 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
         )}
 
         {/* Tab 2: Setup guide for Siri, Share Sheet, Home Screen and email capture */}
-        {activeTab === 'capture' && <CaptureGuide publicUrl={publicUrl} />}
+        {activeTab === 'capture' && (<div className="space-y-4"><PostPictureKeys /><CaptureGuide publicUrl={publicUrl} /></div>)}
+
+        {/* Work and Chill: what shows, and switching by home and away */}
+        {activeTab === 'modes' && <ModeSettings />}
+
+        {/* India holidays on Calendar, Timeline and Today */}
+        {activeTab === 'holidays' && <HolidaySettings />}
+
+        {/* Sign-in: trusted devices (Face ID / Touch ID / Windows Hello) */}
+        {activeTab === 'security' && <SecuritySettings />}
 
         {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
         {activeTab === 'bluetooth' && <BluetoothSettings />}
@@ -407,6 +471,57 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               );
             })()}
 
+            {/* What the Pi is holding on disk */}
+            {piBackendUrl() && storage !== undefined && (() => {
+              if (storage === null) {
+                return (
+                  <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5">
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300 mb-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-gray-400" aria-hidden="true" />
+                      <span>Pi storage</span>
+                    </div>
+                    <p className="text-xs text-gray-600 dark:text-gray-400">Couldn't reach the Pi to read its storage.</p>
+                  </div>
+                );
+              }
+              const { disk, db, backups, drop } = storage;
+              const pct = disk.total ? Math.min(100, Math.round((disk.used / disk.total) * 100)) : 0;
+              const state = pct >= 90 ? 'bad' : pct >= 75 ? 'warn' : 'good';
+              const dot = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500' }[state];
+              const bar = { good: 'bg-emerald-500', warn: 'bg-amber-500', bad: 'bg-red-500' }[state];
+              const rows: { label: string; value: string; note?: string }[] = [
+                { label: 'Database', value: fmtBytes(db.bytes) },
+                { label: 'Backups', value: fmtBytes(backups.bytes), note: `${backups.count} kept` },
+                { label: 'Drop', value: fmtBytes(drop.bytes), note: `${drop.sites} site${drop.sites === 1 ? '' : 's'}${drop.permanent ? ` (${drop.permanent} permanent)` : ''}, ${drop.clips} text clip${drop.clips === 1 ? '' : 's'}` },
+              ];
+              return (
+                <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                    <span className={`inline-block w-2.5 h-2.5 rounded-full ${dot}`} aria-hidden="true" />
+                    <span>Pi storage</span>
+                  </div>
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-400">
+                      <span>{fmtBytes(disk.used)} used of {fmtBytes(disk.total)}</span>
+                      <span className="font-semibold">{fmtBytes(disk.free)} free</span>
+                    </div>
+                    <div className="h-2.5 rounded-full bg-black/[0.07] dark:bg-white/10 overflow-hidden" role="progressbar" aria-valuenow={pct} aria-valuemin={0} aria-valuemax={100} aria-label="Disk used">
+                      <div className={`h-full rounded-full ${bar} transition-[width]`} style={{ width: `${pct}%` }} />
+                    </div>
+                  </div>
+                  <dl className="divide-y divide-black/5 dark:divide-white/5">
+                    {rows.map(r => (
+                      <div key={r.label} className="flex items-baseline justify-between gap-3 py-1.5">
+                        <dt className="text-xs text-gray-600 dark:text-gray-400">{r.label}{r.note && <span className="text-gray-400 dark:text-gray-500"> · {r.note}</span>}</dt>
+                        <dd className="text-xs font-semibold tabular-nums text-gray-800 dark:text-gray-200">{r.value}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                  <p className="text-[11px] text-gray-500 dark:text-gray-400">Sage's own files are a small part of the card; the rest is Raspberry Pi OS and anything else on it.</p>
+                </div>
+              );
+            })()}
+
             {/* Public link through the Cloudflare Tunnel */}
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
               <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
@@ -503,18 +618,30 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged }: SettingsM
               </label>
               <p className="text-xs text-gray-600 dark:text-gray-400">
                 The API_SECRET from /etc/sage/sage.env on your Pi. It is stored in this browser only.
+                No terminal needed: tap <span className="font-semibold">Get it from the Pi</span> after you have logged in with your password, or when Sage is open on the Pi itself.
               </p>
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   id="pi-api-key"
-                  type="password"
+                  type={showPiKey ? 'text' : 'password'}
                   autoComplete="off"
                   value={piKey}
                   onChange={e => setPiKey(e.target.value)}
-                  className="flex-1 px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
+                  className="flex-1 min-w-[10rem] px-3 py-2 rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs font-mono outline-none dark:text-white"
                 />
                 <button type="submit" className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm">
                   Save
+                </button>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button type="button" onClick={fetchPiKey} disabled={fetchingPiKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  {fetchingPiKey ? 'Asking the Pi…' : 'Get it from the Pi'}
+                </button>
+                <button type="button" onClick={() => setShowPiKey(v => !v)} disabled={!piKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  {showPiKey ? 'Hide' : 'Show'}
+                </button>
+                <button type="button" onClick={copyPiKey} disabled={!piKey} className="px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50">
+                  Copy
                 </button>
               </div>
             </form>

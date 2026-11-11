@@ -2,6 +2,13 @@
 # One installer for Sage on the Raspberry Pi, desk clock (LUMO) included.
 #
 #   sudo deploy/install_pi.sh [--user vk] [--no-autosync] [--no-desk]
+#   sudo deploy/install_pi.sh --only web          # one part at a time
+#   sudo deploy/install_pi.sh --skip depth,web    # everything except these
+#   sudo deploy/install_pi.sh --list              # show the parts
+#
+# The parts, in the order they run: packages settings server depth web
+# autosync services audio check. On a small Pi, run them one by one
+# (the heavy ones are server, depth and web) rather than all together.
 #
 # Run it from the checkout you want the Pi to serve. It is safe to run again:
 # existing settings in /etc/sage/sage.env, the database and the venv are kept.
@@ -14,8 +21,8 @@
 #   4. Installs the sage and sage-autosync systemd units for one user and this
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
-#   5. Stops the Pi offering itself as Bluetooth audio, so your phone's sound
-#      stays on the phone (the Pi has no speaker).
+#   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
+#      (speaker.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -23,114 +30,251 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 RUN_AS="${SUDO_USER:-$(stat -c %U "$REPO")}"
 AUTOSYNC=1
 DESK=1
+PARTS=(packages settings server depth web autosync services audio check)
+ONLY=""
+SKIP=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --user) RUN_AS="$2"; shift 2 ;;
     --no-autosync) AUTOSYNC=0; shift ;;
     --no-desk|--no-lumo) DESK=0; shift ;;
+    --only) ONLY="$2"; shift 2 ;;
+    --skip) SKIP="$2"; shift 2 ;;
+    --list) echo "${PARTS[*]}"; exit 0 ;;
     *) echo "Unknown option: $1" >&2; exit 2 ;;
   esac
 done
 
 [ "$(id -u)" -eq 0 ] || { echo "Run with sudo." >&2; exit 1; }
 id "$RUN_AS" >/dev/null 2>&1 || { echo "No such user: $RUN_AS" >&2; exit 1; }
+ENV_FILE=/etc/sage/sage.env
+for p in ${ONLY//,/ } ${SKIP//,/ }; do
+  [[ " ${PARTS[*]} " == *" $p "* ]] || { echo "Unknown part: $p (parts: ${PARTS[*]})" >&2; exit 2; }
+done
+wanted() {
+  [ -z "$ONLY" ] || [[ ",$ONLY," == *",$1,"* ]] || return 1
+  [[ ",$SKIP," != *",$1,"* ]]
+}
 as_user() { sudo -u "$RUN_AS" -H "$@"; }
 step() { echo; echo "==> $*"; }
 
 echo "Installing Sage from $REPO for user $RUN_AS"
 
-step "System packages"
-apt-get update -qq
-apt-get install -y -qq python3-venv python3-pip sqlite3 git >/dev/null
 
-step "Settings in /etc/sage/sage.env"
-install -d -m 755 /etc/sage
-ENV_FILE=/etc/sage/sage.env
-touch "$ENV_FILE"
-chmod 600 "$ENV_FILE"
-set_default() {  # add NAME=value only when NAME is not already set
-  grep -q "^$1=" "$ENV_FILE" || echo "$1=$2" >> "$ENV_FILE"
+
+part_packages() {
+  step "System packages"
+  apt-get update -qq
+  apt-get install -y -qq python3-venv python3-pip sqlite3 git ffmpeg >/dev/null
 }
-if ! grep -q '^API_SECRET=.\+' "$ENV_FILE"; then
-  sed -i '/^API_SECRET=/d' "$ENV_FILE"
-  echo "API_SECRET=$(openssl rand -hex 24)" >> "$ENV_FILE"
-  echo "Generated a new API_SECRET."
-fi
-set_default SAGE_DB_PATH "$REPO/raspberry_pi/sage_sync.db"
-set_default SAGE_DIST_DIR "$REPO/dist"
-set_default SAGE_CORS_ORIGINS "*"
-set_default VITE_PI_BACKEND_URL "/"
-if [ "$DESK" -eq 1 ]; then
-  set_default SAGE_DESK 1
-fi
 
-step "Sage server venv"
-as_user python3 -m venv "$REPO/raspberry_pi/venv"
-as_user "$REPO/raspberry_pi/venv/bin/pip" install -q --upgrade pip
-as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt"
-command -v ollama >/dev/null || echo "Ollama is not installed, so AI task parsing will fail. See raspberry_pi/README.md."
-
-step "Web app"
-if command -v npm >/dev/null; then
-  BACKEND_URL="$(grep '^VITE_PI_BACKEND_URL=' "$ENV_FILE" | cut -d= -f2-)"
-  (cd "$REPO" && as_user npm ci --silent && as_user env VITE_PI_BACKEND_URL="${BACKEND_URL:-/}" npm run build --silent)
-else
-  echo "npm is not installed, so the web app was not built. Install Node.js 20+ and re-run."
-fi
-
-if [ "$AUTOSYNC" -eq 1 ]; then
-  step "Letting auto-sync restart sage (and nothing else) without root"
-  SUDOERS=/etc/sudoers.d/sage-autosync
-  printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart sage\n' "$RUN_AS" > "$SUDOERS.tmp"
-  chmod 440 "$SUDOERS.tmp"
-  if visudo -cf "$SUDOERS.tmp" >/dev/null; then mv "$SUDOERS.tmp" "$SUDOERS"; else rm -f "$SUDOERS.tmp"; echo "Couldn't install the sudoers rule; auto-sync won't be able to restart services." >&2; fi
-fi
-
-step "systemd units"
-UNITS=(sage)
-[ "$AUTOSYNC" -eq 1 ] && UNITS+=(sage-autosync)
-for unit in "${UNITS[@]}"; do
-  sed -e "s|@USER@|$RUN_AS|g" -e "s|@REPO@|$REPO|g" \
-    "$REPO/deploy/systemd/$unit.service" > "/etc/systemd/system/$unit.service"
-done
-# Retired units: the old backend (backend/app is gone), and LUMO's own
-# server and photo inbox, whose jobs Sage does now. lumo would also hold the
-# clock's port (8765) that Sage needs.
-for old in sage-backend lumo lumo-obex; do
-  if systemctl list-unit-files "$old.service" >/dev/null 2>&1; then
-    systemctl disable --now "$old.service" 2>/dev/null || true
-    rm -f "/etc/systemd/system/$old.service"
+part_settings() {
+  step "Settings in /etc/sage/sage.env"
+  install -d -m 755 /etc/sage
+  touch "$ENV_FILE"
+  chmod 600 "$ENV_FILE"
+  set_default() {  # add NAME=value only when NAME is not already set
+    grep -q "^$1=" "$ENV_FILE" || echo "$1=$2" >> "$ENV_FILE"
+  }
+  if ! grep -q '^API_SECRET=.\+' "$ENV_FILE"; then
+    sed -i '/^API_SECRET=/d' "$ENV_FILE"
+    echo "API_SECRET=$(openssl rand -hex 24)" >> "$ENV_FILE"
+    echo "Generated a new API_SECRET."
   fi
-done
-systemctl daemon-reload
-for unit in "${UNITS[@]}"; do
-  systemctl enable --quiet "$unit.service"
-  systemctl restart "$unit.service"
-done
+  set_default SAGE_DB_PATH "$REPO/raspberry_pi/sage_sync.db"
+  set_default SAGE_DIST_DIR "$REPO/dist"
+  set_default SAGE_CORS_ORIGINS "*"
+  set_default VITE_PI_BACKEND_URL "/"
+  if [ "$DESK" -eq 1 ]; then
+    set_default SAGE_DESK 1
+  fi
+}
 
-step "No Bluetooth audio"
-# Without this, a paired iPhone can route its sound to the Pi, which has no
-# speaker. The phone link (notifications, now playing) doesn't use audio.
-# Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
-HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
-as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
-echo 'bluez_monitor.enabled = false' | as_user tee "$HOME_DIR/.config/wireplumber/bluetooth.lua.d/51-sage-no-audio.lua" >/dev/null
-printf 'wireplumber.profiles = {\n  main = {\n    monitor.bluez = disabled\n  }\n}\n' | as_user tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/51-sage-no-audio.conf" >/dev/null
-as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$RUN_AS")" systemctl --user restart wireplumber 2>/dev/null || true
+part_server() {
+  step "Sage server venv"
+  as_user python3 -m venv "$REPO/raspberry_pi/venv"
+  as_user "$REPO/raspberry_pi/venv/bin/pip" install -q --upgrade pip
+  as_user "$REPO/raspberry_pi/venv/bin/pip" install -q -r "$REPO/raspberry_pi/requirements.txt"
+  # Posts (slide maker): headless Chromium for the carousel PNGs. Playwright's own
+  # build first; if that can't install on this Pi, the system chromium is used.
+  step "Slide maker browser (Posts)"
+  "$REPO/raspberry_pi/venv/bin/playwright" install-deps chromium >/dev/null 2>&1 || true
+  as_user "$REPO/raspberry_pi/venv/bin/playwright" install chromium \
+    || { echo "Playwright's Chromium didn't install; trying the system one."; apt-get install -y -qq chromium >/dev/null 2>&1 || apt-get install -y -qq chromium-browser >/dev/null 2>&1 \
+         || echo "No Chromium installed, so Posts can't draw slides. Run: playwright install chromium"; }
+  # Reels (vertical videos): ffmpeg encodes them, and Kokoro + Whisper give them a voice and word
+  # timing. Best effort: without them Reels still work from your own recording.
+  step "Reel maker (ffmpeg, voice models)"
+  apt-get install -y -qq ffmpeg >/dev/null 2>&1 || echo "ffmpeg didn't install, so Reels can't encode video. Run: sudo apt-get install ffmpeg"
+  as_user "$REPO/deploy/install_reels.sh" "$REPO" \
+    || echo "The reel voice didn't fully install; Reels work from your own recording. Re-run: sudo deploy/install_pi.sh --only server"
+  echo "AI (voice, chat capture, canvas, radar) uses Groq. Add a key in Settings > Server & Reset, or set GROQ_API_KEY in $ENV_FILE."
+}
 
-step "Checking"
-sleep 3
-if curl -fsS http://127.0.0.1:8000/api/health; then echo; else echo "Sage did not answer; see: journalctl -u sage -n 50"; fi
-echo
-echo "Sage listens on this Pi only (127.0.0.1:8000). Reach it through your tunnel or Tailscale link."
-echo "To also open it on the home network, add SAGE_BIND=0.0.0.0 to $ENV_FILE and restart sage."
-echo
-echo "Done. Enter this key in the web app under Settings > Server & Reset:"
-echo "    sudo grep API_SECRET $ENV_FILE"
-if grep -q '^SAGE_DESK=1' "$ENV_FILE"; then
-  TOKEN_FILE="$(dirname "$(grep '^SAGE_DB_PATH=' "$ENV_FILE" | cut -d= -f2-)")/desk_token.txt"
+part_depth() {
+  step "Depth clock face (optional)"
+  # The depth clock face's cutout is optional and heavy; Sage runs without it.
+  as_user "$REPO/deploy/install_depth.sh" "$REPO" \
+    || echo "The depth face's cutout packages didn't install; photos will show without a cutout."
+}
+
+part_web() {
+  step "Web app"
+  # The build is the biggest memory user in the whole install (Excalidraw makes
+  # it ~2 GB). On a 4 GB Pi, with Sage also resident, it ran the Pi out of
+  # memory and the Pi rebooted. Sage is held stopped for the whole install (see
+  # hold_services). Here: cap Node's heap so it fails with an error
+  # instead of taking the Pi down, run at low priority, and skip npm ci when
+  # node_modules already matches the lockfile.
+  if command -v npm >/dev/null; then
+    BACKEND_URL="$(grep '^VITE_PI_BACKEND_URL=' "$ENV_FILE" 2>/dev/null | cut -d= -f2- || true)"
+    if [ -f "$REPO/node_modules/.package-lock.json" ] && cmp -s "$REPO/package-lock.json" "$REPO/node_modules/.package-lock.json.src" 2>/dev/null; then
+      echo "node_modules already matches package-lock.json; skipping npm ci."
+    else
+      (cd "$REPO" && as_user nice -n 10 env NODE_OPTIONS=--max-old-space-size=1536 npm ci --silent --no-audit --no-fund) \
+        && cp "$REPO/package-lock.json" "$REPO/node_modules/.package-lock.json.src" \
+        || { echo "npm ci failed" >&2; exit 1; }
+    fi
+    rm -rf "$REPO/dist.next"
+    (cd "$REPO" && as_user nice -n 10 env NODE_OPTIONS=--max-old-space-size=2048 VITE_PI_BACKEND_URL="${BACKEND_URL:-/}" npm run build --silent -- --outDir dist.next --emptyOutDir) \
+      || { rm -rf "$REPO/dist.next"; echo "The web build failed (out of memory?). The old dist/ is kept; re-run this script." >&2; exit 1; }
+    rm -rf "$REPO/dist.old"
+    [ -d "$REPO/dist" ] && mv "$REPO/dist" "$REPO/dist.old"
+    mv "$REPO/dist.next" "$REPO/dist"
+    rm -rf "$REPO/dist.old"
+  else
+    echo "npm is not installed, so the web app was not built. Install Node.js 20+ and re-run."
+  fi
+}
+
+part_autosync() {
+  if [ "$AUTOSYNC" -eq 1 ]; then
+    step "Letting auto-sync restart sage (and nothing else) without root"
+    SUDOERS=/etc/sudoers.d/sage-autosync
+    printf '%s ALL=(root) NOPASSWD: /usr/bin/systemctl restart sage, /usr/bin/systemctl stop sage\n' "$RUN_AS" > "$SUDOERS.tmp"
+    chmod 440 "$SUDOERS.tmp"
+    if visudo -cf "$SUDOERS.tmp" >/dev/null; then mv "$SUDOERS.tmp" "$SUDOERS"; else rm -f "$SUDOERS.tmp"; echo "Couldn't install the sudoers rule; auto-sync won't be able to restart services." >&2; fi
+  fi
+}
+
+part_services() {
+  step "systemd units"
+  UNITS=(sage)
+  [ "$AUTOSYNC" -eq 1 ] && UNITS+=(sage-autosync)
+  for unit in "${UNITS[@]}"; do
+    sed -e "s|@USER@|$RUN_AS|g" -e "s|@REPO@|$REPO|g" \
+      "$REPO/deploy/systemd/$unit.service" > "/etc/systemd/system/$unit.service"
+  done
+  # Retired units: the old backend (backend/app is gone), and LUMO's own
+  # server and photo inbox, whose jobs Sage does now. lumo would also hold the
+  # clock's port (8765) that Sage needs.
+  for old in sage-backend lumo lumo-obex; do
+    if systemctl list-unit-files "$old.service" >/dev/null 2>&1; then
+      systemctl disable --now "$old.service" 2>/dev/null || true
+      rm -f "/etc/systemd/system/$old.service"
+    fi
+  done
+  # Ollama is no longer used: all AI goes to Groq. Stop and disable it so it
+  # doesn't start on boot and hold its model (~1-2 GB) resident on the Pi. The
+  # package and downloaded models are left in place; `ollama rm` frees the disk.
+  if systemctl list-unit-files "ollama.service" >/dev/null 2>&1; then
+    systemctl disable --now "ollama.service" 2>/dev/null || true
+    echo "Disabled the ollama service (AI now uses Groq). Run 'ollama rm <model>' to reclaim its disk."
+  fi
+  systemctl daemon-reload
+  for unit in "${UNITS[@]}"; do
+    systemctl enable --quiet "$unit.service"
+    held_add "$unit"  # started at the very end, once the install is complete
+  done
+}
+
+part_audio() {
+  step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
+  # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
+  # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
+  # source) and can take the phone's audio to pass on (A2DP sink). speaker.py
+  # drops the phone's audio link whenever there's no soundbar to play it on.
+  # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
+  HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
+  as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
+  echo 'bluez_monitor.enabled = false' | as_user tee "$HOME_DIR/.config/wireplumber/bluetooth.lua.d/51-sage-no-audio.lua" >/dev/null
+  printf 'wireplumber.profiles = {\n  main = {\n    monitor.bluez = disabled\n  }\n}\n' | as_user tee "$HOME_DIR/.config/wireplumber/wireplumber.conf.d/51-sage-no-audio.conf" >/dev/null
+  as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$RUN_AS")" systemctl --user restart wireplumber 2>/dev/null || true
+
+  apt-get install -y -qq bluez-alsa-utils libasound2-plugin-bluez alsa-utils ffmpeg >/dev/null 2>&1 \
+    || { echo "bluez-alsa didn't install, so the soundbar speaker is off. Try: sudo apt-get install bluez-alsa-utils libasound2-plugin-bluez"; return 0; }
+  DAEMON="$(command -v bluealsad || command -v bluealsa || true)"
+  UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
+  if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
+    mkdir -p "/etc/systemd/system/$UNIT.d"
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
+    systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
+    systemctl daemon-reload
+    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+  else
+    echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
+  fi
+  # Sage's Wi-Fi switch (Settings > Bluetooth): with Ethernet, Wi-Fi off frees the
+  # radio for Bluetooth audio. Only these two exact commands.
+  NMCLI="$(command -v nmcli || echo /usr/bin/nmcli)"
+  printf '%s ALL=(root) NOPASSWD: %s radio wifi on, %s radio wifi off\n' "$RUN_AS" "$NMCLI" "$NMCLI" > /etc/sudoers.d/sage-wifi.tmp
+  chmod 440 /etc/sudoers.d/sage-wifi.tmp
+  if visudo -cf /etc/sudoers.d/sage-wifi.tmp >/dev/null; then mv /etc/sudoers.d/sage-wifi.tmp /etc/sudoers.d/sage-wifi; else rm -f /etc/sudoers.d/sage-wifi.tmp; fi
+  # The Sage user talks to bluez-alsa over D-Bus; its policy allows the audio group.
+  usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
+}
+
+part_check() {
+  step "Checking"
+  sleep 3
+  if curl -fsS http://127.0.0.1:8000/api/health; then echo; else echo "Sage did not answer; see: journalctl -u sage -n 50"; fi
+}
+
+summary() {
   echo
-  echo "Desk clock: put this pairing code in lumo/esp32_client/secrets.h as DESK_TOKEN, with this Pi's IP as PI_HOSTNAME:"
-  if [ -f "$TOKEN_FILE" ]; then echo "    $(cat "$TOKEN_FILE")"; else echo "    (not made yet; see Settings or $TOKEN_FILE once Sage has started)"; fi
-  echo "    This Pi's addresses: $(hostname -I)"
-fi
+  echo "Sage listens on this Pi only (127.0.0.1:8000). Reach it through your tunnel or Tailscale link."
+  echo "To also open it on the home network, add SAGE_BIND=0.0.0.0 to $ENV_FILE and restart sage."
+  echo
+  echo "Done. Enter this key in the web app under Settings > Server & Reset:"
+  echo "    sudo grep API_SECRET $ENV_FILE"
+  if grep -q '^SAGE_DESK=1' "$ENV_FILE"; then
+    TOKEN_FILE="$(dirname "$(grep '^SAGE_DB_PATH=' "$ENV_FILE" | cut -d= -f2-)")/desk_token.txt"
+    echo
+    echo "Desk clock: put this pairing code in lumo/esp32_client/secrets.h as DESK_TOKEN, with this Pi's IP as PI_HOSTNAME:"
+    if [ -f "$TOKEN_FILE" ]; then echo "    $(cat "$TOKEN_FILE")"; else echo "    (not made yet; see Settings or $TOKEN_FILE once Sage has started)"; fi
+    echo "    This Pi's addresses: $(hostname -I)"
+  fi
+}
+
+# Nothing runs while the install is in progress: the services that use memory
+# are stopped before the first part and started again only after the last one
+# has finished (including when a part fails, so the Pi isn't left without Sage).
+HELD=()
+held_add() { [[ " ${HELD[*]:-} " == *" $1 "* ]] || HELD+=("$1"); }
+hold_services() {
+  for svc in sage-autosync sage; do
+    if systemctl is-active --quiet "$svc"; then held_add "$svc"; systemctl stop "$svc"; fi
+  done
+  # Ollama is no longer used; stop it now so it isn't resident during the heavy
+  # web build. part_services disables it, so it isn't added to HELD to restart.
+  systemctl stop ollama 2>/dev/null || true
+}
+start_held() {
+  [ "${#HELD[@]}" -gt 0 ] || return 0
+  step "Starting ${HELD[*]}"
+  local svc ordered=()
+  for svc in sage sage-autosync; do [[ " ${HELD[*]} " == *" $svc "* ]] && ordered+=("$svc"); done
+  for svc in "${ordered[@]}"; do systemctl start "$svc" || echo "Could not start $svc; see: journalctl -u $svc -n 50" >&2; done
+  HELD=()
+}
+trap start_held EXIT
+hold_services
+for part in "${PARTS[@]}"; do
+  [ "$part" = check ] && continue
+  if wanted "$part"; then "part_$part"; fi
+done
+start_held
+wanted check && part_check
+wanted check && summary
+exit 0

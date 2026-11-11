@@ -8,6 +8,7 @@
 
 import { api } from './api';
 import { piBackendUrl } from './piBackend';
+import { isAlarm } from './items';
 import { WorkItem } from './types';
 import { formatTime } from '../utils/reminders';
 
@@ -65,7 +66,8 @@ class NotificationService {
     try {
       const nowTime = Date.now();
       const state = api.sync.getState();
-      const activeItems = state.workItems.filter(i => !i.deletedAt && i.status !== 'done' && !isSnoozedNow(i, nowTime));
+      // LUMO rings its own alarms; they aren't reminders to pop up here.
+      const activeItems = state.workItems.filter(i => !i.deletedAt && i.status !== 'done' && !isAlarm(i) && !isSnoozedNow(i, nowTime));
 
       for (const item of activeItems) {
         const targetTimeStr = item.remindAt || item.startAt;

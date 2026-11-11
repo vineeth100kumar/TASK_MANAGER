@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .headline-container {
+      position: absolute;
+      left: 110px;
+      top: var(--cover-top, 295px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-start;
+      z-index: 5;
+    }
+
+    .cover-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 168px;
+      line-height: 0.86;
+      letter-spacing: -0.015em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+
+    .accent-pill-wrapper {
+      display: flex;
+      align-items: flex-start;
+      justify-content: flex-start;
+      margin-top: 16px;
+      position: relative;
+      z-index: 6;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="headline-container">
+    {% if pill_word %}
+      <h1 class="cover-headline">{{ main_words }}</h1>
+      <div class="accent-pill-wrapper">
+        <div class="accent-pill"><span>{{ pill_word }}</span></div>
+      </div>
+    {% else %}
+      <h1 class="cover-headline">{{ headline }}</h1>
+    {% endif %}
+    <span id="baseline-anchor" style="display:block;width:0;height:0;"></span>
+  </div>
+
+  {{ loop_svg | safe }}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="footer-right">
+      {{ arrow_svg | safe }}
+    </div>
+  </div>
+</body>
+</html>

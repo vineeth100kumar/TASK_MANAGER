@@ -1,0 +1,11 @@
+# LUMO's flash layout (4 MB), used instead of the board menu's Partition Scheme
+# whenever it sits next to the .ino. Two 1.9 MB app slots: updates over Wi-Fi
+# (ota.cpp) write the one that isn't running. NVS (settings, alarms, Wi-Fi
+# details) is where every stock scheme puts it, so it survives the change.
+# Name,   Type, SubType,  Offset,   Size,     Flags
+nvs,      data, nvs,      0x9000,   0x5000,
+otadata,  data, ota,      0xe000,   0x2000,
+app0,     app,  ota_0,    0x10000,  0x1E0000,
+app1,     app,  ota_1,    0x1F0000, 0x1E0000,
+spiffs,   data, spiffs,   0x3D0000, 0x20000,
+coredump, data, coredump, 0x3F0000, 0x10000,

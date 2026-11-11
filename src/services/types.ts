@@ -15,7 +15,11 @@ export interface Project {
   id: string;
   name: string;
   key: string;
-  type?: string; // not read anywhere; existing records hold 'standard'
+  /** On: this content project has a Posts tab and makes slides with Auto Content (see posts.ts). */
+  autoContent?: boolean;
+  /** ISO time the project was marked complete; null/absent = active. */
+  completedAt?: string | null;
+  type?: string; // technical | nontech | content | other | a custom name; see projectTypes.ts
   color: string;
   sequence: number;
   description?: string;
@@ -58,6 +62,8 @@ export interface WorkItem {
   lifeContext?: LifeContext;
   type: string; // task, bug, feature, improvement, meeting, reminder, milestone
   status: TaskStatus;
+  /** The project type's own status (e.g. 'editing'); status keeps the base. See projectTypes.ts. */
+  stage?: string | null;
   priority: TaskPriority;
   
   // Categorization
@@ -79,6 +85,10 @@ export interface WorkItem {
   remindAt?: string | null;  // ISO Datetime
   reminderLeadMinutes?: number | null; // minutes before startAt/dueDate that remindAt was set for; null = no lead-based reminder
   repeatRule?: string | null;
+  /** Several times in a day ("08:00", "20:00"); each is ticked on its own and the task is done when all are. */
+  doseTimes?: string[] | null;
+  /** The doseTimes ticked so far for the current due date. */
+  dosesDone?: string[] | null;
   // The next copy a repeating item made when it was done, and the item a copy came from,
   // so undoing the completion can take the copy back.
   spawnedNextId?: string | null;
@@ -93,6 +103,8 @@ export interface WorkItem {
   // Attention & Cognitive Flow (Sage Attention Engine)
   isInbox?: boolean;
   isFocus?: boolean;
+  /** Private: kept out of every list and count, shown only on the locked Hidden page. */
+  isHidden?: boolean;
   focusOrder?: number | null;
   snoozedUntil?: string | null; // ISO Datetime
   snoozeCount?: number;
@@ -136,6 +148,9 @@ export interface Goal {
   updatedAt?: string;
 }
 
+/** Reminder time every new habit starts with (same as claude_api.py). */
+export const DEFAULT_HABIT_REMIND_TIME = '20:00';
+
 export interface Habit {
   id: string;
   name: string;
@@ -144,6 +159,16 @@ export interface Habit {
   history: string[]; // dates ticked, e.g. ["2026-10-01", "2026-10-02"]
   areaId?: string | null;
   streak?: number;
+  // A daily nudge at this time ("19:30") on days the habit isn't ticked yet,
+  // sent by the Pi (raspberry_pi/notifier.py). Unset means no reminder.
+  // New habits start at DEFAULT_HABIT_REMIND_TIME.
+  remindTime?: string | null;
+  /** Several times in a day; each is ticked on its own and the day counts only when all are. */
+  doseTimes?: string[] | null;
+  /** Doses ticked per date; history gets the date once every dose is ticked. */
+  doseLog?: Record<string, string[]> | null;
+  remindPush?: boolean;   // to the website / home-screen app (default on)
+  remindEmail?: boolean;  // to the notification email (default off)
   createdAt: string;
   updatedAt?: string;
 }
@@ -160,8 +185,32 @@ export interface Note {
   areaId?: string | null;
   projectId?: string | null;
   lifeContext?: LifeContext;   // unset on older notes, which show under both
+  // 'map' makes the note a thought map: its thoughts live in the thoughts table.
+  // 'html' is a report and 'code' a code snippet, usually pushed by an AI: the
+  // body parts hold the source as sent, shown in a sandboxed frame or code view.
+  kind?: 'map' | 'html' | 'code' | null;
+  language?: string;          // for code notes
+  source?: string;            // who sent it: claude, gemini, ... (unset: you)
   createdAt: string;
   updatedAt: string;
+}
+
+// How far a thought on a map has been worked out: open (just captured), unsure
+// (confused or still researching), good (holds up) or bad (doesn't hold).
+export type ThoughtStatus = 'open' | 'unsure' | 'good' | 'bad';
+
+export interface Thought {
+  id: string;
+  mapId: string;              // the note (kind 'map') it belongs to
+  text: string;
+  status: ThoughtStatus;
+  topic?: string;             // its branch on the map; empty is the main line
+  parentId?: string | null;   // the thought it sits under
+  note?: string;
+  source?: string;            // 'you', or 'claude' when added from a Claude chat
+  createdAt: string;
+  updatedAt?: string;
+  revision?: number;
 }
 
 export interface Comment {

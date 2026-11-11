@@ -1,7 +1,8 @@
 import { useState } from 'react';
-import { withTime } from '../../utils/reminders';
+import { withTime, formatClock } from '../../utils/reminders';
 import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
-import { STATUSES, PRIORITIES } from '../../services/constants';
+import { PRIORITIES } from '../../services/constants';
+import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/projectTypes';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
 import { WorkItem } from '../../services/types';
 import { api } from '../../services/api';
@@ -13,7 +14,7 @@ import { CompleteButton } from '../common/CompleteButton';
 function formatWhen(iso: string) {
   const d = new Date(iso);
   if (isNaN(d.getTime())) return iso;
-  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`;
+  return `${d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} · ${formatClock(d)}`;
 }
 
 interface ListViewProps {
@@ -21,9 +22,11 @@ interface ListViewProps {
   onSelect: (id: string) => void;
   selectedId: string | null;
   onTransition: (task: WorkItem, toStatus: string) => void;
+  /** Groups: a project's own statuses, or the usual four. */
+  statuses?: StatusStage[];
 }
 
-export function ListView({ tasks, onSelect, selectedId, onTransition }: ListViewProps) {
+export function ListView({ tasks, onSelect, selectedId, onTransition, statuses = DEFAULT_STATUSES }: ListViewProps) {
   const { showToast } = useToast();
   // Ticks spin briefly, then fill; the status change follows once the pop has played.
   const [pressed, setPressed] = useState<Set<string>>(() => new Set());
@@ -47,19 +50,19 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
     }
   };
 
-  const renderGroup = (title: string, groupTasks: any[], colorDot?: string) => {
+  const renderGroup = (title: string, groupTasks: any[], colorDot?: string, stage?: StatusStage) => {
     if (groupTasks.length === 0) return null;
     return (
       <div key={title} className="mb-10">
         <div className="flex items-center gap-2 mb-3 px-2">
-          {colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
+          {stage ? <stage.icon size={15} strokeWidth={2.2} className={stage.tint} aria-hidden /> : colorDot && <div className={`w-2.5 h-2.5 rounded-full ${colorDot}`} />}
           <h4 className="font-semibold text-[13.5px] tracking-[-0.01em] text-gray-900 dark:text-white capitalize">{title}</h4>
           <span className="text-[11px] font-semibold tabular-nums text-gray-500 bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full">{groupTasks.length}</span>
         </div>
         
         <div className="flex flex-col gap-1.5 stagger">
           {groupTasks.map(task => {
-            const dateStr = withTime(formatDateRange(task.startDate, task.dueDate), task.dueTime);
+            const dateStr = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
             const swipeable = task.entityType === 'task' && task.status !== 'done';
             return (
               <SwipeRow key={task.id}
@@ -80,7 +83,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />
                   ) : task.entityType === 'milestone' ? (
-                    <Flag size={20} className={task.status === 'done' || task.status === 'achieved' ? 'text-emerald-500' : 'text-orange-500'} />
+                    <Flag size={20} className="text-emerald-500" aria-label="Milestone reached" />
                   ) : (
                     <Bell size={20} className="text-emerald-500" />
                   )}
@@ -88,7 +91,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                   <div className="flex flex-col">
                     <div className="flex items-center gap-2">
                       <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-gray-400 w-14 shrink-0">{task.key}</span>
-                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.status === 'done' || task.completed ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.entityType !== 'milestone' && (task.status === 'done' || task.completed) ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
                         <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}
@@ -120,7 +123,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
                       <span key={tag} className="hidden sm:inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500">#{tag}</span>
                     ))}
                     {dateStr && (
-                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
+                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
                         <CalendarIcon size={14}/> {dateStr}
                       </span>
                     )}
@@ -136,7 +139,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
 
                 {task.entityType === 'milestone' && dateStr && (
                   <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
-                    <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {dateStr}</span>
+                    <span className="text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 text-gray-500"><Flag size={14}/> {dateStr}</span>
                   </div>
                 )}
 
@@ -154,22 +157,15 @@ export function ListView({ tasks, onSelect, selectedId, onTransition }: ListView
     );
   };
 
-  const eventTasks = tasks.filter(t => t.entityType === 'event');
-  const reminderTasks = tasks.filter(t => t.entityType === 'reminder');
-  const issueTasks = tasks.filter(t => t.entityType === 'task');
-  const milestoneTasks = tasks
-    .filter(t => t.entityType === 'milestone')
-    .sort((a, b) => (a.dueDate || a.startDate || '9999').localeCompare(b.dueDate || b.startDate || '9999'));
+  // Every kind (task, event, reminder, milestone) under its status, the same
+  // groups and counts as the Board and the status strip. Each row shows its kind.
+  const byDate = (a: WorkItem, b: WorkItem) => (a.dueDate || a.startDate || '9999').localeCompare(b.dueDate || b.startDate || '9999');
 
   return (
     <div className="max-w-5xl mx-auto pb-32">
-      {renderGroup('Events', eventTasks, 'bg-purple-500')}
-      {renderGroup('Reminders', reminderTasks, 'bg-emerald-500')}
-      {renderGroup('Milestones', milestoneTasks, 'bg-orange-500')}
-      
-      {Object.values(STATUSES).map(status => {
-        const statusTasks = issueTasks.filter(t => t.status === status.id);
-        return renderGroup(status.label, statusTasks, status.dot);
+      {statuses.map(status => {
+        const statusTasks = tasks.filter(t => stageOf(t, statuses).id === status.id).sort(byDate);
+        return renderGroup(status.label, statusTasks, status.dot, status);
       })}
     </div>
   );

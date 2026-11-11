@@ -80,6 +80,29 @@ class QuickAddResult:
         }
 
 
+
+# Lead-in words before the actual task ("add task to ...", "remind me to ...")
+# are about saving it, not part of it. Mirrors src/utils/titles.ts stripLeadIn.
+_LEAD_IN = re.compile("|".join("^(?:%s)" % p for p in [
+    r"(?:(?:please|pls|can\s+you|could\s+you)\s+)?(?:add|create|make|put|new|set\s+up|log)\s+(?:(?:a|an|the|one|another)\s+)?(?:new\s+)?(?:task|todo|to-do|reminder|item)\s*(?::|-|to\b|for\b|about\b|that\s+says\b)?\s*",
+    r"(?:task|todo|to-do|reminder)\s*[:\-]\s*",
+    r"remind\s+me\s+(?:to|about)\s+",
+    r"(?:i\s+(?:need|have|want)\s+to|i\s+should|i\s+must|need\s+to|have\s+to|gotta|got\s+to|don'?t\s+forget\s+to)\s+",
+]), re.IGNORECASE)
+
+
+def strip_lead_in(title: str) -> str:
+    """'Add task to finalise the firmware' -> 'Finalise the firmware'. Unchanged if nothing would be left."""
+    t = (title or "").strip()
+    for _ in range(3):
+        nxt = _LEAD_IN.sub("", t, count=1).strip()
+        if nxt == t or not nxt:
+            break
+        t = nxt
+    if not t or t == (title or "").strip():
+        return title
+    return t[0].upper() + t[1:]
+
 def parse_quick_add(text: str, now: Optional[datetime.datetime] = None) -> QuickAddResult:
     if now is None:
         now = datetime.datetime.now()
@@ -366,7 +389,7 @@ def parse_quick_add(text: str, now: Optional[datetime.datetime] = None) -> Quick
         result.entity_type = "event"
 
     # Clean up the title
-    result.title = re.sub(r"\s+", " ", work).strip()
+    result.title = strip_lead_in(re.sub(r"\s+", " ", work).strip())
     if not result.title:
         result.title = "Untitled"
 

@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { DrawingPad } from './DrawingPad';
 import { imageFileToDataUrl, sanitizeNoteHtml } from './noteHtml';
+import { Select } from '../common/Select';
 
 const FONTS = [
   { label: 'Sans', value: 'Inter Variable, Inter, ui-sans-serif, system-ui, sans-serif' },
@@ -214,7 +215,7 @@ export function RichNoteEditor({ noteId, html, onChange }: RichNoteEditorProps) 
   const keep = (e: React.MouseEvent) => e.preventDefault();
   const btn = 'shrink-0 p-2 rounded-lg text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10 transition-colors';
   const sep = <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5" />;
-  const selectCls = 'shrink-0 w-[5.6rem] h-8 rounded-lg bg-transparent hover:bg-black/5 dark:hover:bg-white/10 text-[13px] font-medium text-gray-700 dark:text-gray-200 px-1.5 outline-none cursor-pointer dark:[color-scheme:dark]';
+  const selectCls = 'shrink-0 !gap-1 h-8 rounded-lg bg-transparent hover:bg-black/5 dark:hover:bg-white/10 data-[open]:bg-black/5 dark:data-[open]:bg-white/10 text-[13px] font-medium text-gray-700 dark:text-gray-200 px-2 outline-none';
 
   return (
     <div className="flex-1 min-h-0 flex flex-col">
@@ -223,18 +224,18 @@ export function RichNoteEditor({ noteId, html, onChange }: RichNoteEditorProps) 
           <button type="button" onMouseDown={keep} onClick={() => run('undo')} className={btn} title="Undo"><Undo2 size={16} /></button>
           <button type="button" onMouseDown={keep} onClick={() => run('redo')} className={btn} title="Redo"><Redo2 size={16} /></button>
           {sep}
-          <select aria-label="Text style" className={selectCls} defaultValue="" onChange={e => { run('formatBlock', e.target.value); e.target.value = ''; }}>
+          <Select aria-label="Text style" className={selectCls} value="" onChange={v => run('formatBlock', v)}>
             <option value="" disabled>Style</option>
             {BLOCKS.map(b => <option key={b.value} value={b.value}>{b.label}</option>)}
-          </select>
-          <select aria-label="Font" className={selectCls} defaultValue="" onChange={e => { run('fontName', e.target.value); e.target.value = ''; }}>
+          </Select>
+          <Select aria-label="Font" className={selectCls} value="" onChange={v => run('fontName', v)}>
             <option value="" disabled>Font</option>
             {FONTS.map(f => <option key={f.label} value={f.value}>{f.label}</option>)}
-          </select>
-          <select aria-label="Text size" className={selectCls} defaultValue="" onChange={e => { run('fontSize', e.target.value); e.target.value = ''; }}>
+          </Select>
+          <Select aria-label="Text size" className={selectCls} value="" onChange={v => run('fontSize', v)}>
             <option value="" disabled>Size</option>
             {SIZES.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
+          </Select>
           {sep}
           <button type="button" onMouseDown={keep} onClick={() => run('bold')} className={btn} title="Bold (Ctrl+B)"><Bold size={16} /></button>
           <button type="button" onMouseDown={keep} onClick={() => run('italic')} className={btn} title="Italic (Ctrl+I)"><Italic size={16} /></button>

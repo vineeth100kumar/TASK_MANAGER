@@ -1,7 +1,7 @@
-﻿fastapi
+fastapi
+python-multipart
 uvicorn[standard]
 websockets
-ollama
 pydantic
 httpx
 anthropic
@@ -9,3 +9,11 @@ pywebpush
 dbus-next
 tzdata
 pillow
+webauthn
+# Posts (content_engine/): the Auto Content slide maker
+jinja2
+playwright
+numpy
+typer
+python-dotenv
+segno

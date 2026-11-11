@@ -24,11 +24,17 @@ export interface NotifyPrefs {
   morningTime: string;
   eveningCheckIn: boolean;
   eveningTime: string;
+  playful: boolean;
   email: {
     enabled: boolean;
     to: string;
     morningPlan: boolean;
+    eveningCheckIn: boolean;
     reminders: boolean;
+    /** "Sage is back up" after an update, restart, crash or power cut. */
+    backUp?: boolean;
+    /** "Your post is ready" when Posts finishes drawing slides. */
+    postReady?: boolean;
     smtpHost: string;
     smtpPort: number;
     smtpUser: string;

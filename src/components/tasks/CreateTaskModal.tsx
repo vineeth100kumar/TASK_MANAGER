@@ -1,13 +1,23 @@
+import { durationToMinutes } from '../../utils/taskLists';
 import React, { createContext, useContext, useState, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun } from 'lucide-react';
+import { X, Tag, Calendar, Clock, Flag, MapPin, Repeat, Timer, Sparkles, Target, ChevronDown, Briefcase, Sun, Wand2, Loader2 } from 'lucide-react';
 import { SpinnerCheck } from '../common/SpinnerCheck';
 import { ENTITY_TYPES, LABELS } from '../../services/constants';
 import { api } from '../../services/api';
+import { aiEngine } from '../../services/aiEngine';
+import { useToast } from '../../context/ToastContext';
 import { Project, Area, LifeContext } from '../../services/types';
 import { parseQuickAdd, QuickAddResult, flipGuessedTime, formatShortDate } from '../../utils/quickAddParser';
 import { formatTime } from '../../utils/reminders';
 import { RepeatSelect } from '../common/RepeatSelect';
+import { DoseTimesPicker } from '../common/DoseTimesPicker';
+import { toDateKey } from '../../utils/recurrence';
+import { Select } from '../common/Select';
+import { DatePicker, formatPickedDate } from '../common/DatePicker';
+import { getTodayString } from '../../utils/dateUtils';
+import { TimePicker, DateTimePicker } from '../common/TimePicker';
+import { ChatCapture } from './ChatCapture';
 
 const REMINDER_LEAD_OPTIONS: { value: number | ''; label: string }[] = [
   { value: '', label: 'No reminder' },
@@ -23,6 +33,7 @@ const SMART_PARSE_KEY = 'sage-smart-parse';
 const LAST_CONTEXT_KEY = 'sage-last-context';
 const MORE_OPTIONS_KEY = 'sage-add-more-options';
 const KEEP_ADDING_KEY = 'sage-keep-adding';
+const ADD_MODE_KEY = 'sage-add-mode';
 // How long the save button shows its tick before the sheet closes or clears.
 const SAVED_HOLD_MS = 520;
 // True for that moment, so the footer's save button can show it.
@@ -65,12 +76,6 @@ function formatDuration(minutes: number | null | undefined): string {
   return h ? (m ? `${h}h${m}m` : `${h}h`) : `${m}m`;
 }
 
-function durationToMinutes(text: string): number | undefined {
-  const h = text.match(/(\d+)\s*h/i);
-  const m = text.match(/(\d+)\s*m/i);
-  const total = (h ? parseInt(h[1], 10) * 60 : 0) + (m ? parseInt(m[1], 10) : 0);
-  return total > 0 ? total : undefined;
-}
 
 const mergeTags = (manual: string[], parsed: QuickAddResult | null) => Array.from(new Set([...manual, ...(parsed?.tags || [])]));
 
@@ -124,9 +129,14 @@ interface CreateTaskModalProps {
   lifeContext?: LifeContext;
   // Opened from the Focus view: new tasks go straight into Focus.
   defaultFocus?: boolean;
+  // Chat saves on its own; this refreshes the lists behind the sheet.
+  onChanged?: () => void;
 }
 
-export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: filterContext, defaultFocus = false }: CreateTaskModalProps) {
+export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: filterContext, defaultFocus = false, onChanged }: CreateTaskModalProps) {
+  // Chat (type it in plain words) or the Form; the last one used opens next time.
+  const [mode, setModeState] = useState<'chat' | 'form'>(() => (readPref(ADD_MODE_KEY) === 'chat' && !defaultFocus ? 'chat' : 'form'));
+  const setMode = (m: 'chat' | 'form') => { setModeState(m); writePref(ADD_MODE_KEY, m); };
   // Work or personal: the filtered context if there is one, else whatever was used last.
   const [lifeContext, setLifeContext] = useState<LifeContext>(() => filterContext || (readPref(LAST_CONTEXT_KEY) === 'personal' ? 'personal' : 'work'));
   const [keepAdding, setKeepAdding] = useState(() => readPref(KEEP_ADDING_KEY) === 'on');
@@ -202,19 +212,31 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
         <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
           <div className="flex items-center gap-3">
             <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
-            {/* Work or personal, one tap; follows the sidebar filter when it narrows to one. */}
-            <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
+            <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Chat or form">
+              {(['chat', 'form'] as const).map(m => (
+                <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}
+                  className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${mode === m ? 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm' : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
+                  {m === 'chat' ? <><Sparkles size={12} /> Chat</> : 'Form'}
+                </button>
+              ))}
+            </div>
+            {/* Work or personal, one tap; follows the sidebar filter when it narrows to one. Chat works it out per item. */}
+            {mode === 'form' && <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Work or personal">
               {(['work', 'personal'] as const).map(c => (
                 <button key={c} type="button" aria-pressed={lifeContext === c} onClick={() => setLifeContext(c)}
                   className={`flex items-center gap-1 px-2.5 py-1 rounded-md text-[12px] font-semibold transition-colors ${lifeContext === c ? (c === 'personal' ? 'bg-white dark:bg-[#3a3a3c] text-orange-600 dark:text-orange-400 shadow-sm' : 'bg-white dark:bg-[#3a3a3c] text-gray-900 dark:text-white shadow-sm') : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
                   {c === 'work' ? <Briefcase size={12} /> : <Sun size={12} />} {c === 'work' ? 'Work' : 'Personal'}
                 </button>
               ))}
-            </div>
+            </div>}
           </div>
           <button onClick={() => !isSubmitting && onClose()} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" disabled={isSubmitting} aria-label="Close"><X size={18}/></button>
         </div>
 
+        {mode === 'chat' ? (
+          <ChatCapture lifeContext={lifeContext} projects={projects} areas={areas} onChanged={() => onChanged?.()}
+            onOpenForm={text => { setTitle(text); setMode('form'); }} />
+        ) : <>
         <div className="px-6 pt-5 pb-2 shrink-0">
           <div className="flex p-1 gap-1 rounded-xl bg-gray-100 dark:bg-white/5">
              {Object.entries(ENTITY_TYPES).map(([k, v]) => (
@@ -235,6 +257,7 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
           {entityType === 'milestone' && <MilestoneForm smart={smart} onSubmit={handleSubmit} isSubmitting={isSubmitting} onCancel={onClose} workspaceId={workspaceId} lifeContext={lifeContext} projects={projects} areas={areas} keep={keep} />}
         </div>
         </SavedContext.Provider>
+        </>}
       </motion.div>
     </div>
   );
@@ -319,7 +342,7 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
         {tags.map(t => (
           <span key={t} className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-semibold bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300">
             #{t}
-            <button type="button" onClick={() => setTags(tags.filter(x => x !== t))}><X size={10} /></button>
+            <button type="button" onClick={() => setTags(tags.filter(x => x !== t))} aria-label={`Remove tag ${t}`} className="rounded-full p-0.5 -mr-1 hover:bg-black/10 dark:hover:bg-white/10"><X size={10} /></button>
           </span>
         ))}
         <input
@@ -353,10 +376,10 @@ const SharedTags = ({ tags, setTags }: { tags: string[]; setTags: (t: string[]) 
 const SharedReminderLead = ({ value, setValue }: { value: number | ''; setValue: (v: number | '') => void }) => (
   <div className="space-y-1">
     <label className="field-label">Remind Me</label>
-    <select className="field"
-      value={value} onChange={e => setValue(e.target.value === '' ? '' : parseInt(e.target.value, 10))}>
+    <Select className="field"
+      value={value} onChange={v => setValue(v === '' ? '' : parseInt(v, 10))}>
       {REMINDER_LEAD_OPTIONS.map(opt => <option key={opt.label} value={opt.value}>{opt.label}</option>)}
-    </select>
+    </Select>
   </div>
 );
 
@@ -412,7 +435,7 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
     description: '', type: 'task', priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || '', startDate: '', dueDate: '', dueTime: '', estimated: '',
-    location: '', repeatRule: '', isFocus: !!defaultFocus
+    location: '', repeatRule: '', isFocus: !!defaultFocus, doseTimes: [] as string[]
   });
   const [tags, setTags] = useState<string[]>([]);
   // A task with a time reminds you at that time unless you choose otherwise.
@@ -438,6 +461,44 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
     }
   }, [projects, areas]);
 
+  const { showToast } = useToast();
+  const [refining, setRefining] = useState(false);
+  // Ask the AI for a cleaner name and a short description, in the style of the
+  // project's other tasks. Keeps the date, time and priority the title already set.
+  const refine = async () => {
+    const raw = (smart.parsed?.title || smart.title).trim();
+    if (!raw || refining) return;
+    setRefining(true);
+    try {
+      const project = lifeContext === 'personal' ? null : projects.find((p: any) => p.id === payload.projectId);
+      const pastTitles = project
+        ? api.workItems.snapshot()
+            .filter((i: any) => i.projectId === project.id && !i.deletedAt && (i.entityType || 'task') === 'task'
+              && i.title && i.title.trim().toLowerCase() !== raw.toLowerCase())
+            .slice(0, 20).map((i: any) => i.title)
+        : [];
+      const r = await aiEngine.refineItem({ title: raw, project: project?.name, projectType: (project as any)?.type, pastTitles });
+      // The title loses its date/time words after refining, so lock in what the parser read first.
+      const p = smart.parsed;
+      if (p) {
+        if (parsedDate(p)) set('dueDate', parsedDate(p));
+        if (p.time) set('dueTime', p.time);
+        if (p.priority) set('priority', p.priority);
+        if (p.location) set('location', p.location);
+        if (parsedRepeat(p)) set('repeatRule', parsedRepeat(p));
+        if (p.durationMinutes) set('estimated', formatDuration(p.durationMinutes));
+        if (p.tags?.length) setTags(prev => Array.from(new Set([...prev, ...p.tags])));
+      }
+      if (r.title) smart.setTitle(r.title);
+      if (r.description) { set('description', r.description); if (!moreOpen) toggleMore(); }
+      showToast(r.description ? 'Refined the name and added a description' : 'Refined the name');
+    } catch (e: any) {
+      showToast(e?.message || 'Could not refine this one', 'error');
+    } finally {
+      setRefining(false);
+    }
+  };
+
   const reminderLead: number | '' = chosenLead ?? (payload.dueTime ? 0 : '');
 
   const handleSubmit = (e: React.FormEvent) => {
@@ -454,6 +515,8 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
       startDate,
       dueDate,
       dueTime: dueDate && payload.dueTime ? payload.dueTime : null,
+      // Several doses a day need a day: with none chosen it is today.
+      ...(payload.doseTimes.length > 1 && !dueDate ? { dueDate: toDateKey(new Date()), isInbox: false } : {}),
       reminderLeadMinutes: reminderLead === '' || !dueDate ? null : reminderLead
     });
   };
@@ -463,12 +526,22 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
   const personal = lifeContext === 'personal';
   const moreSummary = [
     personal ? areas.find((a: any) => a.id === payload.areaId)?.name : projects.find((p: any) => p.id === payload.projectId)?.name,
-    payload.estimated, payload.repeatRule && 'repeats', reminderLead !== '' && 'reminder', tags.length > 0 && `${tags.length} tag${tags.length === 1 ? '' : 's'}`,
+    payload.estimated, payload.repeatRule && 'repeats', payload.doseTimes.length > 0 && `${payload.doseTimes.length}x a day`, reminderLead !== '' && 'reminder', tags.length > 0 && `${tags.length} tag${tags.length === 1 ? '' : 's'}`,
   ].filter(Boolean).join(' · ');
 
   return (
     <form onSubmit={handleSubmit}>
       <SmartTitle smart={smart} disabled={isSubmitting} placeholder="What needs to be done?" />
+
+      {/* Let the AI give it a clearer name and a short description, in the style of this project's tasks. */}
+      {(smart.parsed?.title || smart.title).trim() && (
+        <button type="button" onClick={refine} disabled={refining || isSubmitting}
+          title="Clean up the name and add a short description, based on this project's other tasks"
+          className="inline-flex items-center gap-1.5 mb-4 px-3 h-8 rounded-full text-[12.5px] font-semibold ring-1 ring-inset ring-purple-300/60 dark:ring-purple-500/30 text-purple-700 dark:text-purple-300 bg-purple-50 dark:bg-purple-900/20 hover:bg-purple-100 dark:hover:bg-purple-900/40 disabled:opacity-60 transition-colors active:scale-[0.97]">
+          {refining ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />}
+          {refining ? 'Refining…' : 'Refine with AI'}
+        </button>
+      )}
 
       {/* The common choices, one tap each. */}
       <div className="flex flex-nowrap sm:flex-wrap items-center gap-2 mb-4 -mx-6 px-6 sm:mx-0 sm:px-0 overflow-x-auto no-scrollbar" role="group" aria-label="When">
@@ -480,20 +553,16 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
             </button>
           );
         })}
-        <label className={`${chipBase} ${customDate ? chipOn : chipOff} relative cursor-pointer`}>
+        <DatePicker aria-label="Due date" value={payload.dueDate} onChange={v => set('dueDate', v)} className={`${chipBase} ${customDate ? chipOn : chipOff}`}>
           <Calendar size={13} />
-          {customDate ? new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' }) : 'Pick date'}
-          <input type="date" aria-label="Due date" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)}
-            className="absolute inset-0 opacity-0 cursor-pointer" />
-        </label>
-        <label className={`${chipBase} ${payload.dueTime ? chipOn : chipOff} relative cursor-pointer`}>
+          {customDate ? formatPickedDate(payload.dueDate) : 'Pick date'}
+        </DatePicker>
+        <TimePicker aria-label="Time" value={payload.dueTime} className={`${chipBase} ${payload.dueTime ? chipOn : chipOff}`}
+          onChange={v => { set('dueTime', v); if (v && !payload.dueDate) set('dueDate', options[0].value); }}>
           <Clock size={13} />
           {payload.dueTime ? formatTime(payload.dueTime) : 'Time'}
-          <input type="time" aria-label="Time" value={payload.dueTime}
-            onChange={e => { set('dueTime', e.target.value); if (e.target.value && !payload.dueDate) set('dueDate', options[0].value); }}
-            className="absolute inset-0 opacity-0 cursor-pointer" />
-        </label>
-        <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5" aria-hidden />
+        </TimePicker>
+        <span className="shrink-0 w-px h-5 bg-black/10 dark:bg-white/10 mx-0.5 sm:hidden" aria-hidden />
         <button type="button" onClick={() => set('priority', PRIORITY_CYCLE[(PRIORITY_CYCLE.indexOf(payload.priority as any) + 1) % PRIORITY_CYCLE.length])}
           className={`${chipBase} ${payload.priority === 'high' || payload.priority === 'urgent' ? PRIORITY_STYLE[payload.priority] : chipOff}`}
           title="Tap to change priority" aria-label={`Priority: ${payload.priority}`}>
@@ -520,18 +589,18 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         {!personal ? (
           <div className="space-y-1">
             <label className="field-label">Project</label>
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No projects</option>}
-            </select>
+            </Select>
           </div>
         ) : (
           <div className="space-y-1">
             <label className="field-label">Life Area</label>
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas Yet</option>}
-            </select>
+            </Select>
           </div>
         )}
         <div className="space-y-1">
@@ -540,11 +609,11 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         </div>
         <div className="space-y-1">
           <label className="field-label">Start Date</label>
-          <input type="date" className="field" value={payload.startDate} onChange={e => set('startDate', e.target.value)} disabled={isSubmitting} />
+          <DatePicker className="field" value={payload.startDate} onChange={v => set('startDate', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Due Date</label>
-          <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} />
+          <DatePicker className="field" value={payload.dueDate} onChange={v => set('dueDate', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1">
@@ -555,6 +624,11 @@ function TaskForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeCo
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
           <RepeatSelect className="field" value={payload.repeatRule} onChange={v => set('repeatRule', v)} disabled={isSubmitting} />
+        </div>
+
+        <div className="space-y-1 col-span-2">
+          <label className="field-label">Times per day</label>
+          <DoseTimesPicker value={payload.doseTimes} onChange={v => set('doseTimes', v as any)} disabled={isSubmitting} />
         </div>
 
         <SharedReminderLead value={reminderLead} setValue={setReminderLead} />
@@ -619,24 +693,28 @@ function EventForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeC
         <div className="space-y-1">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            </Select>
           )}
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Starts</label>
-          <input type="datetime-local" className="field" value={payload.startAt} onChange={e => set('startAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Starts" className="field" value={payload.startAt} onChange={v => {
+            set('startAt', v);
+            // An event runs an hour unless you say otherwise.
+            if (v && (!payload.endAt || payload.endAt <= v)) set('endAt', minutesBefore(v, -60));
+          }} disabled={isSubmitting} />
         </div>
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Ends</label>
-          <input type="datetime-local" className="field" value={payload.endAt} onChange={e => set('endAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Ends" className="field" value={payload.endAt} onChange={v => set('endAt', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
@@ -690,9 +768,9 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
       <SharedDesc desc={payload.description} setDesc={(v:any) => set('description', v)} disabled={isSubmitting} />
 
       <div className="grid grid-cols-2 gap-4">
-        <div className="space-y-1">
+        <div className="space-y-1 col-span-2 sm:col-span-1">
           <label className="field-label">Remind At</label>
-          <input type="datetime-local" className="field" value={payload.remindAt} onChange={e => set('remindAt', e.target.value)} disabled={isSubmitting} />
+          <DateTimePicker aria-label="Remind at" className="field" value={payload.remindAt} onChange={v => set('remindAt', v)} disabled={isSubmitting} />
         </div>
         <div className="space-y-1">
           <label className="field-label">Repeat</label>
@@ -702,15 +780,15 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
         <div className="space-y-1 col-span-2">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               <option value="">No Life Area</option>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               <option value="">No Project</option>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            </Select>
           )}
         </div>
 
@@ -724,13 +802,13 @@ function ReminderForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, li
 
 function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, lifeContext, projects = [], areas = [], keep }: any) {
   const [payload, setPayload] = useState({
-    description: '', type: 'milestone', dueDate: '', priority: 'medium',
+    description: '', type: 'milestone', dueDate: getTodayString(), priority: 'medium',
     projectId: workspaceId !== 'all' ? workspaceId : (projects[0]?.id || ''),
     areaId: areas[0]?.id || ''
   });
   const [tags, setTags] = useState<string[]>([]);
   const set = useParsedFields(smart.parsed, p => ({
-    dueDate: parsedDate(p),
+    dueDate: parsedDate(p) || getTodayString(),
     priority: p?.priority || 'medium',
   }), setPayload);
 
@@ -741,7 +819,9 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
       ...payload,
       labels: mergeTags(tags, smart.parsed),
       dueDate,
-      startDate: dueDate
+      startDate: dueDate,
+      // Logged once the work is done, so a milestone is always done.
+      status: 'done',
     });
   };
 
@@ -752,22 +832,22 @@ function MilestoneForm({ smart, onSubmit, isSubmitting, onCancel, workspaceId, l
 
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-1">
-          <label className="field-label">Target Checkpoint Date</label>
-          <input type="date" className="field" value={payload.dueDate} onChange={e => set('dueDate', e.target.value)} disabled={isSubmitting} required />
+          <label className="field-label">Date reached</label>
+          <DatePicker className="field" value={payload.dueDate} onChange={v => set('dueDate', v)} disabled={isSubmitting} />
         </div>
 
         <div className="space-y-1">
           <label className="field-label">{lifeContext === 'personal' ? 'Life Area' : 'Project'}</label>
           {lifeContext === 'personal' ? (
-            <select className="field field-personal" value={payload.areaId} onChange={e => set('areaId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field field-personal" value={payload.areaId} onChange={v => set('areaId', v)} disabled={isSubmitting}>
               {areas.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
               {areas.length === 0 && <option value="">No Life Areas</option>}
-            </select>
+            </Select>
           ) : (
-            <select className="field" value={payload.projectId} onChange={e => set('projectId', e.target.value)} disabled={isSubmitting}>
+            <Select className="field" value={payload.projectId} onChange={v => set('projectId', v)} disabled={isSubmitting}>
               {projects.map((p: any) => <option key={p.id} value={p.id}>{p.name}</option>)}
               {projects.length === 0 && <option value="">No Projects</option>}
-            </select>
+            </Select>
           )}
         </div>
 

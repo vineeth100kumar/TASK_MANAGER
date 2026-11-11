@@ -55,7 +55,7 @@ export function MobileTabBar({ activeView, activeWorkspace, lifeContext, onNavig
             <button key={tab.id} onClick={() => onNavigate(tab.id)} aria-current={active ? 'page' : undefined}
               className={`relative flex flex-col items-center justify-center gap-1 text-[11px] font-medium tracking-[-0.005em] transition-colors active:scale-95 ${active ? accent : 'text-gray-500 dark:text-gray-400'}`}>
               {active && <motion.span layoutId="tab-indicator" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute top-0 h-[3px] w-8 rounded-b-full bg-current" />}
-              <span className="relative">
+              <span className={`relative ${active ? 'tab-hop' : ''}`}>
                 <tab.icon size={22} strokeWidth={active ? 2.25 : 1.75} />
                 {tab.id === 'inbox' && inboxCount > 0 && (
                   <span className={`absolute -top-1.5 -right-2.5 min-w-[18px] h-[18px] px-1 rounded-full ${lifeContext === 'personal' ? 'bg-orange-500' : 'bg-blue-600'} text-white text-[10px] font-semibold flex items-center justify-center tabular-nums ring-2 ring-white dark:ring-[#141416]`}>

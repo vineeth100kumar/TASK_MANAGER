@@ -1,0 +1,6 @@
+# Reels (voice and word timing). Heavy, so they live apart from requirements.txt and a
+# failed install never blocks Sage: Reels still work from your own recording without them.
+# deploy/install_reels.sh installs these from PyPI and downloads the models.
+kokoro-onnx          # the built-in voice (Kokoro-82M, runs on the Pi's CPU)
+soundfile
+faster-whisper       # word timing from the voice (without it, timing is estimated from the sound)

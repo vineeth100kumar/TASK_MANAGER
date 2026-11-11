@@ -36,6 +36,8 @@ TWELVE_URL = "https://api.twelvedata.com/time_series"
 TWELVE_PER_MINUTE = 8
 TWELVE_PER_DAY = 780  # a little under the plan's 800, for the Settings check
 FRED_URL = "https://fred.stlouisfed.org/graph/fredgraph.csv"
+FRED_TIMEOUT = 45  # FRED's CSV is slow from the Pi; the shared 15s timeout kept missing
+FRED_TRIES = 2
 NSE_HOME = "https://www.nseindia.com/"
 NSE_INDICES = "https://www.nseindia.com/api/allIndices"
 YAHOO_REST = 60 * 60  # seconds Yahoo is left alone after a 429
@@ -65,10 +67,12 @@ FRED_IDS = {
 }
 # Twelve Data names where they differ: an index becomes the fund that tracks it.
 TWELVE_NAMES = {
-    "^GSPC": "SPY", "^NDX": "QQQ", "DX-Y.NYB": "UUP", "CL=F": "USO", "GC=F": "XAU/USD",
+    "^GSPC": "SPY", "^NDX": "QQQ", "DX-Y.NYB": "UUP", "GC=F": "XAU/USD",
     "BTC-USD": "BTC/USD", "INR=X": "USD/INR", "^STOXX": "FEZ", "^N225": "EWJ",
     "000300.SS": "MCHI", "^FTSE": "EWU", "^HSI": "EWH", "^KS11": "EWY", "^BVSP": "EWZ",
 }
+# CL=F is left off on purpose: the only free stand-in is the USO fund, whose
+# price (about $70-160) isn't a barrel of crude, so oil comes from FRED/Yahoo.
 # Symbols Twelve Data's free plan doesn't carry under any name.
 NOT_ON_TWELVE = {"^TNX", "^VIX", "^INDIAVIX"}
 
@@ -177,9 +181,14 @@ def parse_fred(text: str) -> Series:
 
 async def from_fred(client: httpx.AsyncClient, series_id: str) -> Series:
     start = (datetime.date.today() - datetime.timedelta(days=450)).isoformat()
-    resp = await client.get(FRED_URL, params={"id": series_id, "cosd": start})
-    resp.raise_for_status()
-    return parse_fred(resp.text)
+    for attempt in range(FRED_TRIES):
+        try:
+            resp = await client.get(FRED_URL, params={"id": series_id, "cosd": start}, timeout=FRED_TIMEOUT)
+            resp.raise_for_status()
+            return parse_fred(resp.text)
+        except httpx.TransportError:
+            if attempt == FRED_TRIES - 1:
+                raise
 
 
 # --- NSE ---

@@ -47,7 +47,7 @@ export function SwipeRow({ children, onSwipeRight, onSwipeLeft, rightLabel = 'Do
   };
 
   return (
-    <div className={`relative overflow-hidden rounded-2xl ${className}`}>
+    <div className={`relative overflow-hidden has-[[aria-expanded=true]]:overflow-visible has-[[aria-expanded=true]]:z-30 rounded-2xl ${className}`}>
       {onSwipeRight && (
         <motion.div style={{ opacity: rightOpacity }} className="absolute inset-0 flex items-center pl-5 bg-emerald-500 text-white text-[13px] font-semibold gap-2 rounded-2xl" aria-hidden>
           <Check size={18} strokeWidth={armed === 'right' ? 3 : 2} className={`transition-transform duration-200 ${armed === 'right' ? 'scale-125' : ''}`} /> {rightLabel}

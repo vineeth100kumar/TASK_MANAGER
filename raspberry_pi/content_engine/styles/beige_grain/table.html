@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 112px;
+      top: var(--content-top, 260px);
+      width: 856px;
+      z-index: 5;
+    }
+
+    .table-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 96px;
+      line-height: 0.9;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: none;
+    }
+
+    .table-body {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 36px;
+      line-height: 1.3;
+      color: #0A0A0A;
+      text-align: left;
+      margin: 0 0 32px 0;
+    }
+
+    .data-table {
+      width: 100%;
+      margin-top: 12px;
+      border-collapse: collapse;
+      font-family: 'Inter', sans-serif;
+      font-size: 40px;
+      line-height: 1.22;
+      color: #0A0A0A;
+    }
+
+    .data-table th {
+      font-weight: 700;
+      font-size: 0.72em;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      text-align: left;
+      padding: 0.5em 0.55em 0.5em 0;
+      border-bottom: 4px solid #000000;
+    }
+
+    .data-table td {
+      font-weight: 500;
+      padding: 0.48em 0.55em 0.48em 0;
+      border-bottom: 2px solid rgba(0, 0, 0, 0.18);
+      text-align: left;
+      vertical-align: top;
+      overflow-wrap: normal;
+      word-break: normal;
+      hyphens: manual;
+    }
+
+    .data-table th:last-child, .data-table td:last-child { padding-right: 0; }
+    .data-table td:first-child { font-weight: 700; }
+    .data-table .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+
+    .data-table tr.hl td {
+      color: #F86036;
+      font-weight: 800;
+      border-bottom-color: #F86036;
+    }
+
+    .table-source {
+      position: absolute;
+      left: 112px;
+      top: calc(var(--footer-y, 1221px) - 64px);
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 24px;
+      letter-spacing: 0.02em;
+      color: #6B6458;
+      z-index: 5;
+    }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="header-right">{{ brand.tag }}</div>
+  </div>
+
+  <div class="content-container">
+    <h2 class="table-headline">{{ headline }}</h2>
+    {{ underline_svg | safe }}
+    {% if body %}<div class="table-body">{{ body }}</div>{% endif %}
+    <table class="data-table">
+      {% if table.columns %}
+      <thead><tr>{% for c in table.columns %}<th class="{{ 'num' if table.numeric[loop.index0] else '' }}">{{ c }}</th>{% endfor %}</tr></thead>
+      {% endif %}
+      <tbody>
+        {% for row in table.rows %}
+        <tr class="{{ 'hl' if table.highlight == loop.index0 else '' }}">{% for c in row %}<td class="{{ 'num' if table.numeric[loop.index0] else '' }}">{{ c }}</td>{% endfor %}</tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  {% if source_note %}<div class="table-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="footer-right">{{ counter }}</div>
+  </div>
+</body>
+</html>

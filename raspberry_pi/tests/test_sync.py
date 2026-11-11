@@ -123,8 +123,6 @@ class SyncTests(unittest.TestCase):
         self.assertEqual([r["id"] for r in changes["changes"]["workItems"]], ["b"])
 
 
-if __name__ == "__main__":
-    unittest.main()
 
 
 class QuickActionTests(unittest.TestCase):
@@ -165,3 +163,27 @@ class QuickActionTests(unittest.TestCase):
             self.assertEqual(client.post(f"/api/items/nope/{action}", json={}).status_code, 404)
         self.assertEqual(self.sent, [])
 
+
+
+class BackupBackoffTests(unittest.TestCase):
+    def test_waits_longer_while_google_sheets_refuses(self):
+        base = db_server.GAS_BACKUP_INTERVAL
+        self.assertEqual(db_server.backup_wait(0), base)
+        self.assertEqual(db_server.backup_wait(1), base)
+        self.assertEqual(db_server.backup_wait(2), base * 2)
+        self.assertLessEqual(db_server.backup_wait(50), max(db_server.GAS_BACKUP_MAX_WAIT, base))
+
+
+class SqliteTuningTests(unittest.TestCase):
+    def test_every_connection_skips_the_per_commit_disk_wait(self):
+        import sqlite3
+        with tempfile.TemporaryDirectory() as d:
+            conn = sqlite3.connect(os.path.join(d, "t.db"))
+            try:
+                self.assertEqual(conn.execute("PRAGMA synchronous").fetchone()[0], 1)  # NORMAL
+            finally:
+                conn.close()
+
+
+if __name__ == "__main__":
+    unittest.main()

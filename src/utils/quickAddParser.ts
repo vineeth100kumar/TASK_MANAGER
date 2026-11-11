@@ -24,6 +24,8 @@
  *                                             -> suggests an event
  */
 
+import { stripLeadIn } from './titles';
+
 export type QuickAddEntityType = 'task' | 'event' | 'reminder';
 export type QuickAddPriority = 'low' | 'medium' | 'high' | 'urgent';
 
@@ -354,7 +356,7 @@ export function parseQuickAdd(input: string, now: Date = new Date()): QuickAddRe
     .replace(/(?:\s+(?:by|on|at|for|before|due|this|next|from|until|in|the))+\s*$/i, '')
     .replace(/^\s*(?:on|at|by)\s+/i, '');
 
-  const title = text.trim().replace(/^[,.\s]+|[,.\s]+$/g, '') || input.trim();
+  const title = stripLeadIn(text.trim().replace(/^[,.\s]+|[,.\s]+$/g, '') || input.trim());
 
   return {
     title,

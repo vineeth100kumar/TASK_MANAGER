@@ -7,6 +7,10 @@
 
 import { getPiApiKey } from './piBackend';
 import { RADAR_EVENT } from './radar';
+import { POST_EVENT } from './posts';
+import { REEL_EVENT } from './reels';
+import { LUMO_EVENT } from './lumo';
+import { applyLifeModeEvent, loadLifeMode } from './lifeMode';
 
 export type LiveEvent =
   | { type: 'SYNC_APPLIED'; serverRevision: number }
@@ -16,6 +20,7 @@ const MAX_RETRY_MS = 60000;
 
 export const PHONE_EVENT = 'sage:phone';
 export const BLUETOOTH_EVENT = 'sage:bluetooth';
+export const SPEAKER_EVENT = 'sage:speaker';
 
 export class LiveStream {
   private socket: WebSocket | null = null;
@@ -60,17 +65,34 @@ export class LiveStream {
       if (event?.type === 'AUTH_OK') {
         this.retryMs = 1000;
         this.setConnected(true);
+        // A mode change may have been missed while disconnected.
+        loadLifeMode();
+      } else if (event?.type === 'LIFE_MODE') {
+        // Work or Chill changed: arriving, leaving, or a pick on another device.
+        applyLifeModeEvent(event);
       } else if (event?.type === 'SYNC_APPLIED' || event?.type === 'SYNC_CLEARED') {
         this.onEvent(event);
       } else if (typeof event?.type === 'string' && event.type.startsWith('PHONE_')) {
         // The phone's Bluetooth events (see PhoneCorner) go to whoever listens.
         window.dispatchEvent(new CustomEvent(PHONE_EVENT, { detail: event }));
-      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS' || event?.type === 'RADAR_SPARKS') {
+      } else if (event?.type === 'RADAR_UPDATED' || event?.type === 'RADAR_PROGRESS' || event?.type === 'RADAR_MARKETS' || event?.type === 'RADAR_SPARKS' || event?.type === 'RADAR_INDUSTRY') {
         // New headlines or prices, a research run moving on, or new sparks (see RadarView).
         window.dispatchEvent(new CustomEvent(RADAR_EVENT, { detail: event }));
+      } else if (event?.type === 'POST_PROGRESS') {
+        // A post is being drawn, or finished (see PostPage).
+        window.dispatchEvent(new CustomEvent(POST_EVENT, { detail: event }));
+      } else if (event?.type === 'REEL_PROGRESS') {
+        // A reel is being made, or finished (see ReelPage).
+        window.dispatchEvent(new CustomEvent(REEL_EVENT, { detail: event }));
+      } else if (event?.type === 'DESK_STATE') {
+        // The desk clock's timer, stopwatch or ringing alarm changed (see LumoView).
+        window.dispatchEvent(new CustomEvent(LUMO_EVENT, { detail: event }));
       } else if (event?.type === 'BT_STATE') {
         // The Bluetooth settings page (see BluetoothSettings) shows the device list live.
         window.dispatchEvent(new CustomEvent(BLUETOOTH_EVENT, { detail: event }));
+      } else if (event?.type === 'SPEAKER_STATE') {
+        // The soundbar card in Bluetooth settings (see SpeakerCard).
+        window.dispatchEvent(new CustomEvent(SPEAKER_EVENT, { detail: event }));
       }
     };
     socket.onclose = () => {

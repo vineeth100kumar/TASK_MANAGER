@@ -1,18 +1,41 @@
 #include <Arduino.h>
 #include "display.h"
+#include "store.h"
 #include "anim.h"
 #include "clockkeeper.h"
 #include "faces.h"
 #include "aa_text.h"
+#include "ws_client.h"
 #include <Fonts/FreeSans9pt7b.h>
 #include <Fonts/FreeSans12pt7b.h>
 #include <Fonts/FreeSans24pt7b.h>
 #include <math.h>
 
-Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC);
+FitTFT tft(TFT_CS, TFT_DC);
+ScreenFit screenFit;
+
+// The squeeze for screens drawn for the whole panel: into the card with the
+// Even Frame on, else into the window's columns. Off when nothing is hidden.
+void displayFitApply(bool on) {
+  int x0 = screenFit.l, w = 320 - screenFit.l - screenFit.r;
+  if (screenFit.frame) { FitCard c = fitCard(); x0 = c.x; w = c.w; }
+  tft.fit = on && !screenFit.test && w > 100 && (x0 != 0 || w != 320);
+  tft.fx0 = x0; tft.fw = w;
+}
+
+// Black in the columns the squeeze leaves out (the frame, or the hidden edge).
+static void fitMargins() {
+  if (!tft.fit) return;
+  int16_t x0 = tft.fx0, w = tft.fw;
+  tft.fit = false;
+  if (x0 > 0) tft.fillRect(0, 0, x0, 240, 0x0000);
+  if (x0 + w < 320) tft.fillRect(x0 + w, 0, 320 - x0 - w, 240, 0x0000);
+  tft.fit = true;
+}
 
 alignas(4) uint8_t artBuf[20004];  // drawn as uint16_t pixels
 bool newArtReady = false;
+uint16_t artSerial = 0;
 
 static const uint16_t COLOR_BG_BLACK  = 0x0000;
 static const uint16_t COLOR_BG_STEALTH= 0x0842; // Deep stealth black/navy
@@ -27,9 +50,9 @@ static ScreenMode lastModeDrawn = SCREEN_CONNECTING;
 
 // Layouts are written for the full 240 rows; SY() maps such a row into the
 // rows the case window shows (VIS_T..VIS_B, see display.h).
-static constexpr int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
-static constexpr int SH(int y, int h) { return SY(y + h) - SY(y); }
-static constexpr int CAPTION_Y = VIS_B - 26;   // memory caption strip
+static inline int SY(int y) { return VIS_T + (y * VIS_H + 120) / 240; }
+static inline int SH(int y, int h) { return SY(y + h) - SY(y); }
+#define CAPTION_Y (VIS_B - 26)   // memory caption strip
 
 void displayInit() {
   tft.begin();
@@ -38,33 +61,219 @@ void displayInit() {
   tft.fillScreen(COLOR_BG_BLACK);
 }
 
-// The cover's most vivid colour, for the light ring while music plays: each
-// pixel counts by how saturated and bright it is, so a grey sleeve with one
-// red stripe still gives red.
-static uint8_t tintRGB[3] = { 30, 215, 96 };
+// ---------------------------------------------------------------------
+//  Backlight (GPIO20). PWM at BL_FREQ, duty on a gamma curve so a change
+//  of a few percent at the dim end is as visible as at the bright end.
+//  Fades run in brightness-percent space, which is what the eye follows,
+//  so a jump from 20 to 80 eases evenly rather than rushing the bright part.
+// ---------------------------------------------------------------------
+static float   blCur    = -1;     // brightness now, 0..100 (-1 = not set up yet)
+static float   blTarget = 0;      // where it is easing to
+static uint32_t blLastTick = 0;
+static int32_t blLastDuty = -1;
+static uint8_t blRes     = BL_RES;   // the PWM resolution actually in use
+static int32_t blMaxDuty = (1 << BL_RES) - 1;
+
+static void blWriteDuty(float pct) {
+  if (pct < 0) pct = 0; else if (pct > 100) pct = 100;
+  int32_t duty = (int32_t)(powf(pct / 100.0f, BL_GAMMA) * blMaxDuty + 0.5f);
+  if (pct >= 100) duty = blMaxDuty;           // dead-on full, no PWM ripple
+  if (duty == blLastDuty) return;
+  blLastDuty = duty;
+  ledcWrite(BL_PIN, duty);
+}
+
+void backlightInit(uint8_t level) {
+  // LEDC runs off an 80 MHz clock: freq * 2^res must fit under it, or the
+  // attach fails and the pin does nothing. Drop the resolution until the
+  // carrier fits (20 kHz needs 11 bits, not 12), the same guard the haptics
+  // use. That is still 2048 steps, smooth for brightness.
+  blRes = BL_RES;
+  while (blRes > 4 && (80000000UL >> blRes) < BL_FREQ) blRes--;
+  if (!ledcAttach(BL_PIN, BL_FREQ, blRes)) {   // belt and suspenders
+    blRes = 10;
+    ledcAttach(BL_PIN, BL_FREQ, blRes);
+  }
+  blMaxDuty = (1 << blRes) - 1;
+  blCur = blTarget = level;
+  blLastDuty = -1;
+  blWriteDuty(blCur);
+  blLastTick = millis();
+  Serial.printf("[BL] backlight PWM on GPIO%d: %u Hz, %u-bit\n", BL_PIN, (unsigned)BL_FREQ, (unsigned)blRes);
+}
+
+void backlightSet(uint8_t level, bool immediate) {
+  if (blCur < 0) { backlightInit(level); return; }
+  blTarget = level;
+  if (immediate) { blCur = level; blWriteDuty(blCur); }
+}
+
+void backlightTick() {
+  if (blCur < 0 || blCur == blTarget) return;
+  uint32_t now = millis();
+  float dt = now - blLastTick;
+  blLastTick = now;
+  if (dt <= 0) return;
+  float step = 100.0f * dt / BL_FADE_MS;      // percent per tick
+  if (blCur < blTarget) { blCur += step; if (blCur > blTarget) blCur = blTarget; }
+  else                  { blCur -= step; if (blCur < blTarget) blCur = blTarget; }
+  blWriteDuty(blCur);
+}
+
+// A one-time gentle glow up from black at power-on.
+void backlightWake(uint8_t level) {
+  if (blCur < 0) backlightInit(0);
+  blTarget = level;
+  blLastTick = millis();
+  uint32_t start = millis();
+  while (blCur != blTarget && millis() - start < BL_WAKE_MS + 80) {
+    backlightTick();
+    delay(6);
+  }
+  blCur = level; blWriteDuty(blCur);
+}
+
+// The cover's two main colours, for the LED row while music plays (2.19).
+// Pixels are sorted into 24 hue bins, each counting by how vivid it is
+// (greys don't count at all), so a grey sleeve with one red stripe still
+// gives red. The cover is checked across and down: it is split into left and
+// right halves, and top and bottom halves, and each half's main colour (its
+// heaviest run of three neighbouring bins) is found. If the two sides differ
+// more than the top and bottom do, by at least 30 degrees, the left side's
+// colour goes on the row's left end and the right side's on the right; if top
+// and bottom differ more, the top's colour goes left and the bottom's right.
+// A cover whose colours don't split that way (a red dot in the middle of a
+// blue sleeve) takes the whole cover's main colour and the heaviest run 45
+// degrees or more away from it, the one sitting further left (or higher)
+// going first. A cover with one colour gets a paler version of it as the
+// second, and a colourless one warm white and silver.
+static uint8_t tintRGB[3]  = { 30, 215, 96 };
+static uint8_t tint2RGB[3] = { 160, 240, 190 };
+
+static const int HUE_BINS = 24;
+
+struct HueHist { float r[HUE_BINS], g[HUE_BINS], b[HUE_BINS], w[HUE_BINS]; };
+
+static void setTint(uint8_t* out, float r, float g, float b) {
+  float mx = max(r, max(g, b));
+  if (mx < 0.01f) mx = 0.01f;
+  out[0] = (uint8_t)(255 * r / mx);             // full brightness: the LEDs set their own
+  out[1] = (uint8_t)(255 * g / mx);
+  out[2] = (uint8_t)(255 * b / mx);
+}
+
+static float runAt(const HueHist& h, int bin) {   // a run of three bins centred on bin
+  return h.w[(bin + HUE_BINS - 1) % HUE_BINS] + h.w[bin] + h.w[(bin + 1) % HUE_BINS];
+}
+
+static int heaviest(const HueHist& h, int awayFrom = -1) {
+  int best = -1;
+  for (int b = 0; b < HUE_BINS; b++) {
+    if (awayFrom >= 0) {
+      int dist = abs(b - awayFrom);
+      if (dist > HUE_BINS / 2) dist = HUE_BINS - dist;
+      if (dist < 3) continue;                   // 3 bins = 45 degrees; the runs don't overlap
+    }
+    if (best < 0 || runAt(h, b) > runAt(h, best)) best = b;
+  }
+  return best;
+}
+
+static int hueGap(int a, int b) {
+  int d = abs(a - b);
+  return d > HUE_BINS / 2 ? HUE_BINS - d : d;
+}
+
+static void runColor(const HueHist& h, int bin, uint8_t* out) {
+  float r = 0, g = 0, b = 0, w = 0;
+  for (int k = -1; k <= 1; k++) {
+    int n = (bin + k + HUE_BINS) % HUE_BINS;
+    r += h.r[n]; g += h.g[n]; b += h.b[n]; w += h.w[n];
+  }
+  setTint(out, r / w, g / w, b / w);
+}
+
+static float total(const HueHist& h) {
+  float t = 0;
+  for (int b = 0; b < HUE_BINS; b++) t += h.w[b];
+  return t;
+}
+
+// The two halves' main colours, if they differ by 30 degrees or more: the
+// gap in bins, else 0.
+static int splitGap(const HueHist& a, const HueHist& b, int& binA, int& binB) {
+  if (total(a) < 0.25f || total(b) < 0.25f) return 0;
+  binA = heaviest(a);
+  binB = heaviest(b);
+  int gap = hueGap(binA, binB);
+  return gap >= 2 ? gap : 0;
+}
 
 static void measureArtTint() {
+  static HueHist left, right, top, bottom;      // static: 1.5 KB off the stack
+  memset(&left, 0, sizeof left); memset(&right, 0, sizeof right);
+  memset(&top, 0, sizeof top);   memset(&bottom, 0, sizeof bottom);
   const uint16_t* px = (const uint16_t*)artBuf;
-  float r = 0, g = 0, b = 0, w = 0;
-  for (int i = 0; i < 100 * 100; i += 3) {
+  for (int i = 0; i < 100 * 100; i += 2) {
     uint16_t c = px[i];
     float pr = ((c >> 11) & 31) / 31.0f, pg = ((c >> 5) & 63) / 63.0f, pb = (c & 31) / 31.0f;
     float mx = max(pr, max(pg, pb)), mn = min(pr, min(pg, pb));
-    float wt = (mx - mn) * mx;                  // saturation times value
-    wt *= wt;
-    r += pr * wt; g += pg * wt; b += pb * wt; w += wt;
+    float d = mx - mn;
+    if (d < 0.12f || mx < 0.10f) continue;     // greys, whites and blacks have no hue
+    float wt = d * mx;                          // chroma: vivid pixels count most, area still matters
+    float h;                                    // 0..6
+    if (mx == pr)      h = (pg - pb) / d;
+    else if (mx == pg) h = 2 + (pb - pr) / d;
+    else               h = 4 + (pr - pg) / d;
+    if (h < 0) h += 6;
+    int bin = (int)(h * HUE_BINS / 6) % HUE_BINS;
+    HueHist& across = (i % 100) < 50 ? left : right;
+    HueHist& down   = (i / 100) < 50 ? top : bottom;
+    across.r[bin] += pr * wt; across.g[bin] += pg * wt; across.b[bin] += pb * wt; across.w[bin] += wt;
+    down.r[bin]   += pr * wt; down.g[bin]   += pg * wt; down.b[bin]   += pb * wt; down.w[bin]   += wt;
   }
-  if (w < 0.5f) { tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170; return; }
-  r /= w; g /= w; b /= w;
-  float mx = max(r, max(g, b));
-  if (mx < 0.01f) mx = 0.01f;
-  tintRGB[0] = (uint8_t)(255 * r / mx);         // full brightness: the ring sets its own
-  tintRGB[1] = (uint8_t)(255 * g / mx);
-  tintRGB[2] = (uint8_t)(255 * b / mx);
+
+  // Across and down.
+  int l = 0, r = 0, t = 0, b = 0;
+  int gapH = splitGap(left, right, l, r);
+  int gapV = splitGap(top, bottom, t, b);
+  if (gapH && gapH >= gapV) { runColor(left, l, tintRGB); runColor(right, r, tint2RGB); return; }
+  if (gapV)                 { runColor(top, t, tintRGB);  runColor(bottom, b, tint2RGB); return; }
+
+  // The whole cover: the two halves added together.
+  static HueHist all;
+  for (int k = 0; k < HUE_BINS; k++) {
+    all.r[k] = left.r[k] + right.r[k]; all.g[k] = left.g[k] + right.g[k];
+    all.b[k] = left.b[k] + right.b[k]; all.w[k] = left.w[k] + right.w[k];
+  }
+  if (total(all) < 0.5f) {
+    tintRGB[0] = 200; tintRGB[1] = 190; tintRGB[2] = 170;
+    tint2RGB[0] = 150; tint2RGB[1] = 170; tint2RGB[2] = 205;
+    return;
+  }
+  int first = heaviest(all);
+  int second = heaviest(all, first);
+  if (second >= 0 && runAt(all, second) < 0.08f * runAt(all, first)) second = -1;   // a speck, not a colour
+  if (second < 0) {
+    runColor(all, first, tintRGB);
+    for (int k = 0; k < 3; k++) tint2RGB[k] = (uint8_t)(tintRGB[k] + (255 - tintRGB[k]) * 0.55f);
+    return;
+  }
+  // Which sits further left (or, if they barely differ across, higher):
+  // the share of each colour found in the left (top) half.
+  float aL = runAt(left, first) / runAt(all, first), bL = runAt(left, second) / runAt(all, second);
+  float aT = runAt(top, first) / runAt(all, first),  bT = runAt(top, second) / runAt(all, second);
+  bool swap = fabsf(aL - bL) >= fabsf(aT - bT) ? bL > aL : bT > aT;
+  runColor(all, swap ? second : first, tintRGB);
+  runColor(all, swap ? first : second, tint2RGB);
 }
 
 void displayArtTint(uint8_t& r, uint8_t& g, uint8_t& b) {
   r = tintRGB[0]; g = tintRGB[1]; b = tintRGB[2];
+}
+
+void displayArtTint2(uint8_t& r, uint8_t& g, uint8_t& b) {
+  r = tint2RGB[0]; g = tint2RGB[1]; b = tint2RGB[2];
 }
 
 // The cover arrives in strips (0xAA 0xBD, first row, row count, pixels) that
@@ -77,11 +286,12 @@ void onNewArt(const uint8_t* data, size_t len) {
     size_t row = data[2], rows = data[3];
     if (row + rows > 100 || len - 4 < rows * ROW_BYTES) return;
     memcpy(artBuf + row * ROW_BYTES, data + 4, rows * ROW_BYTES);
-    if (row + rows == 100) { newArtReady = true; measureArtTint(); }   // the last strip completes the cover
+    if (row + rows == 100) { newArtReady = true; artSerial++; measureArtTint(); }   // the last strip completes the cover
   } else if (len >= 4 && data[0] == 0xAA && data[1] == 0xBB) {
     size_t copyLen = min(len - 4, (size_t)20000);
     memcpy(artBuf, data + 4, copyLen);
     newArtReady = true;
+    artSerial++;
     measureArtTint();
   }
 }
@@ -130,6 +340,60 @@ void onNewMemoryStrip(const uint8_t* data, size_t len) {
   }
 }
 
+// ===================== DEPTH FACE (2.9) =====================
+//  A photo with the time tucked behind the person. The Pi cuts the person
+//  out and draws the whole face (photo, time, person, date), then sends it as
+//  strips: 0xAA 0xDE, first row (2 bytes, little-endian), row count, then
+//  320 RGB565 pixels per row. Rows count from the top of the case window.
+//  Two rows a message keeps each one inside a network packet (see art.py).
+//  Each minute only the rows that changed come again.
+//
+//  The clock asks for a picture (DEPTH_NEED) when the face opens and draws
+//  Monolith until one arrives. If Sage goes quiet for a few minutes the
+//  photo's time would go stale, so it goes back to Monolith and asks again.
+static bool depthOn = false;                // the clock screen is showing the depth face
+static bool depthShowing = false;           // a picture from the Pi is on screen
+static unsigned long depthLastStrip = 0;
+static unsigned long depthAskedAt = 0;
+static const unsigned long DEPTH_STALE_MS = 150000;   // ~2.5 minutes without a strip
+static const unsigned long DEPTH_ASK_MS   = 60000;    // ask again this often while waiting
+static uint16_t depthRows[320 * 2];
+
+void onDepthStrip(const uint8_t* data, size_t len) {
+  if (!depthOn || lastModeDrawn != SCREEN_CLOCK || len < 5) return;
+  uint16_t y = data[2] | ((uint16_t)data[3] << 8);
+  uint8_t  n = data[4];
+  // The Pi draws the picture 216 rows tall; in a taller window it sits in the middle.
+  const int DEPTH_ROWS = 216, off = max(0, (VIS_H - DEPTH_ROWS) / 2);
+  if (n == 0 || n > 2 || len < 5 + (size_t)n * 640 || y + n > DEPTH_ROWS) return;
+  memcpy(depthRows, data + 5, (size_t)n * 640);   // aligned copy, as onNewMemoryStrip does
+  tft.drawRGBBitmap(0, VIS_T + off + y, depthRows, 320, n);
+  depthShowing = true;
+  depthLastStrip = millis();
+}
+
+static void depthAsk() {
+  depthAskedAt = millis();
+  wsSend("{\"evt\":\"DEPTH_NEED\"}");
+}
+
+// Called on the clock screen with the depth face. True while the Pi's
+// picture is up (so nothing else draws); false to draw Monolith.
+static bool depthTick(bool opened) {
+  unsigned long now = millis();
+  if (opened) {
+    depthShowing = false;
+    depthAsk();
+  } else if (depthShowing && now - depthLastStrip > DEPTH_STALE_MS) {
+    depthShowing = false;
+    faceReset();
+    depthAsk();
+  } else if (!depthShowing && now - depthAskedAt > DEPTH_ASK_MS) {
+    depthAsk();
+  }
+  return depthShowing;
+}
+
 void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, uint16_t bgColor) {
   pct = constrain(pct, 0.0f, 1.0f);
   int fillW = (int)(w * pct);
@@ -153,8 +417,9 @@ void drawProgressBar(int x, int y, int w, int h, float pct, uint16_t fillColor, 
 static const int CLK_CANVAS_W = 280;
 static const int CLK_CANVAS_H = 80;
 static const int CLK_CANVAS_X = (320 - CLK_CANVAS_W) / 2;
-static const int CLK_CANVAS_Y = SY(38);
-static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_Y = SY(134), CLK_BAR_H = 3;
+#define CLK_CANVAS_Y SY(38)
+static const int CLK_BAR_X = 40, CLK_BAR_W = 240, CLK_BAR_H = 3;
+#define CLK_BAR_Y SY(134)
 
 static GFXcanvas16* timeCanvas = nullptr;
 static bool          canvasTried = false;
@@ -285,7 +550,9 @@ static void drawClockStatics(const LumoState& s, const ClockNow& c, float fade) 
 // =====================================================================
 //  ANALOG CLOCK: a dial above, the date and alarm (or second zone) below.
 // =====================================================================
-static const int DIAL_X = 160, DIAL_Y = SY(102), DIAL_R = 88 * VIS_H / 240;
+static const int DIAL_X = 160;
+#define DIAL_Y SY(102)
+#define DIAL_R (88 * VIS_H / 240)
 static const int HAND_H = DIAL_R * 50 / 88, HAND_M = DIAL_R * 74 / 88, HAND_S = DIAL_R * 80 / 88;
 static float dialLast[3] = { -1, -1, -1 };   // hour, minute, second hand angles drawn
 
@@ -377,7 +644,8 @@ static void drawClockTime(const LumoState& s, const ClockNow& c, float fade, boo
   // Colon breathes once per second; quantised so we only blit when it visibly changes.
   float pulse = 0.5f + 0.5f * cosf(c.secFrac * 6.2831853f);     // 1 -> 0 -> 1
   uint8_t step = (uint8_t)(pulse * 12.0f);
-  if (!force && !turnFrame && step == clockLastColonStep && fade >= 1.0f) return;
+  // (During the fade-in `force` says when its step moved; 2.18.)
+  if (!force && !turnFrame && step == clockLastColonStep) return;
   clockLastColonStep = step;
 
   uint16_t accent, ink, muted; const char* greeting;
@@ -513,19 +781,57 @@ static void drawClockSeconds(const ClockNow& c, float fade, bool force) {
   clockLastBarPx = px;
 }
 
+// A small amber dot in the top right corner while Sage is out of reach
+// (LINK_BADGE_MS and longer), redrawn each second so a face's redraw can't
+// hide it. Once Sage is back it redraws the whole screen, which clears it.
+static void drawLinkBadge() {
+  static unsigned long lastDot = 0;
+  static bool shown = false;
+  bool away = wsDownFor() > LINK_BADGE_MS;
+  if (away && (!shown || millis() - lastDot > 1000)) {
+    tft.fillCircle(311, VIS_T + 8, 3, tft.color565(255, 160, 0));
+    lastDot = millis();
+    shown = true;
+  } else if (!away && shown) {
+    tft.fillCircle(311, VIS_T + 8, 3, COLOR_BG_BLACK);
+    shown = false;
+  }
+}
+
+static void clockTick(const LumoState& s);
+
 // Called every loop while the clock is on screen; paces itself to ~30 fps.
 void displayClockTick(const LumoState& s) {
-  static unsigned long lastDraw = 0;
+  clockTick(s);
+  drawLinkBadge();
+  displayFitApply(!faceIsPremium(s.clock_style));
+}
+
+static void clockTick(const LumoState& s) {
+  if (screenFit.test) return;            // the Fit test is drawn once
+  static uint32_t nextDraw = 0;
   unsigned long now = millis();
   bool entering = (now - clockEnterMs) < 700;
-  if (!clockNeedsStatic && now - lastDraw < 33) return;
-  lastDraw = now;
+  bool moving = entering || clkTurning || (now - clockEnterMs) < 900 ||
+                (faceIsPremium(s.clock_style) && faceAnimating());
+  if (!framePace(nextDraw, now, moving ? FRAME_FAST_MS : FRAME_CALM_MS, clockNeedsStatic)) return;
 
   ClockNow c = clockNow();
   if (!c.synced) {                      // no Pi yet: show whatever we were last told
     c.h = s.h; c.m = s.m; c.s = 0; c.secFrac = 0; c.minuteOfDay = s.h * 60.0f + s.m;
   }
 
+  depthOn = s.clock_style == CLOCK_DEPTH;
+  if (depthOn) {
+    displayFitApply(true);                 // the Pi's picture is drawn for the whole panel
+    bool drawn = depthTick(clockNeedsStatic);
+    displayFitApply(false);
+    if (drawn) {
+      clockNeedsStatic = false;
+      return;
+    }
+  }
+  displayFitApply(!faceIsPremium(s.clock_style));
   if (faceIsPremium(s.clock_style)) {
     faceTick(s, c);
     clockNeedsStatic = false;
@@ -534,27 +840,85 @@ void displayClockTick(const LumoState& s) {
 
   float fade = entering ? constrain((now - clockEnterMs) / 700.0f, 0.0f, 1.0f) : 1.0f;
   fade = fade * fade * (3.0f - 2.0f * fade);
+  // The fade moves in FADE_STEPS steps, and a frame whose step hasn't changed
+  // isn't redrawn (2.18): the eye can't tell them apart, and each one costs a
+  // whole redraw.
+  static const int FADE_STEPS = 24;
+  static int lastFadeStep = -1;
+  int fadeStep = (int)(fade * FADE_STEPS + 0.5f);
+  fade = (float)fadeStep / FADE_STEPS;
+  bool fadeMoved = entering && fadeStep != lastFadeStep;
+  lastFadeStep = entering ? fadeStep : -1;
 
   if (s.clock_style == CLOCK_ANALOG) {
-    if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+    bool statics = clockNeedsStatic || fadeMoved || c.m != clockLastMinute;
+    if (statics) {
       drawAnalogStatics(s, c, fade);
       clockLastMinute = c.m;
     }
-    drawAnalogHands(s, c, fade, clockNeedsStatic || entering);
+    drawAnalogHands(s, c, fade, statics);
     clockNeedsStatic = false;
     return;
   }
 
-  if (clockNeedsStatic || entering || c.m != clockLastMinute) {
+  bool statics = clockNeedsStatic || fadeMoved || c.m != clockLastMinute;
+  if (statics) {
     drawClockStatics(s, c, fade);
     clockLastMinute = c.m;
     clockNeedsStatic = false;
   }
-  drawClockTime(s, c, fade, entering);
-  if (c.synced && s.show_seconds) drawClockSeconds(c, fade, entering);
+  drawClockTime(s, c, fade, fadeMoved || statics);
+  if (c.synced && s.show_seconds) drawClockSeconds(c, fade, fadeMoved || statics);
+}
+
+// The Fit test (Sage: LUMO > Clock > Screen fit): a one-pixel outline on the
+// window's edges, with rulers inside. Nudge each side in Sage until the outline
+// just touches the bezel all the way round and none of it is hidden.
+static void drawFitTest() {
+  const ScreenFit& f = screenFit;
+  int L = f.l, R = 319 - f.r, T = f.t, B = 239 - f.b;
+  const uint16_t dim = tft.color565(70, 74, 84), amber = tft.color565(255, 159, 67);
+  tft.fillScreen(COLOR_BG_BLACK);
+  for (int x = L; x <= R; x += 10) {                       // rulers, a tick every 10, longer every 50
+    int n = ((x - L) % 50 == 0) ? 9 : 4;
+    tft.drawFastVLine(x, T, n, dim);
+    tft.drawFastVLine(x, B - n + 1, n, dim);
+  }
+  for (int y = T; y <= B; y += 10) {
+    int n = ((y - T) % 50 == 0) ? 9 : 4;
+    tft.drawFastHLine(L, y, n, dim);
+    tft.drawFastHLine(R - n + 1, y, n, dim);
+  }
+  tft.drawRect(L, T, R - L + 1, B - T + 1, COLOR_WHITE);
+  if (f.frame) {                                           // where the Even Frame's card will sit
+    FitCard c = fitCard();
+    tft.drawRect(c.x, c.y, c.w, c.h, amber);
+  }
+  tft.setFont(&FreeSans12pt7b);
+  tft.setTextColor(COLOR_WHITE);
+  tft.setCursor(L + 36, T + 70);
+  tft.print("FIT TEST");
+  tft.setFont(NULL);
+  tft.setTextSize(1);
+  tft.setTextColor(COLOR_MUTED);
+  tft.setCursor(L + 36, T + 84);
+  tft.print("The white line should just touch");
+  tft.setCursor(L + 36, T + 96);
+  tft.print("the bezel on all four sides.");
+  tft.setTextColor(amber);
+  tft.setCursor(L + 36, T + 118);
+  tft.printf("left %d  right %d  top %d  bottom %d", f.l, f.r, f.t, f.b);
+  if (f.frame) {
+    tft.setCursor(L + 36, T + 134);
+    tft.print("Orange: the Even Frame's card");
+  }
 }
 
 static void drawClockScreen(const LumoState& s, bool full) {
+  if (screenFit.test) {
+    if (full) drawFitTest();
+    return;
+  }
   if (full) {
     tft.fillScreen(COLOR_BG_BLACK);
     clockEnterMs = millis();
@@ -821,6 +1185,59 @@ void displayAlarmTick(const LumoState& s) {
   drawAlarmFrame(pulse);
 }
 
+void displayUpdateScreen(const char* version, int pct, const char* error) {
+  static const int BAR_X = 40, BAR_W = 240, BAR_H = 8;
+  const int barY = SY(170);
+  if (pct <= 0) {
+    tft.fillScreen(COLOR_BG_STEALTH);
+    centerText("LUMO", SY(92), COLOR_WHITE, &FreeSans24pt7b);
+    char line[40];
+    snprintf(line, sizeof(line), "v" FW_VERSION "  >  v%s", version && version[0] ? version : "?");
+    centerText(line, SY(122), COLOR_MUTED, &FreeSans9pt7b);
+    if (pct < 0) {
+      centerText("Update failed", SY(160), COLOR_RED_PULSE, &FreeSans12pt7b);
+      centerText(error && error[0] ? error : "unknown error", SY(200), COLOR_MUTED, &FreeSans9pt7b);
+      tft.setFont(NULL);
+      return;
+    }
+    centerText("Updating", SY(152), COLOR_WHITE, &FreeSans12pt7b);
+    centerText("Keep LUMO plugged in", SY(230), COLOR_MUTED, &FreeSans9pt7b);
+  }
+  drawProgressBar(BAR_X, barY, BAR_W, BAR_H, pct / 100.0f, COLOR_ACCENT, COLOR_BG_BLACK);
+  tft.fillRect(0, barY + 12, 320, 18, COLOR_BG_STEALTH);
+  char p[8];
+  snprintf(p, sizeof(p), "%d%%", max(pct, 0));
+  centerText(p, barY + 26, COLOR_ACCENT, &FreeSans9pt7b);
+  tft.setFont(NULL);
+}
+
+void displayRollbackScreen(const char* why) {
+  displayFitApply(true);
+  tft.fillScreen(COLOR_BG_STEALTH);
+  fitMargins();
+  centerText("LUMO", SY(92), COLOR_WHITE, &FreeSans24pt7b);
+  centerText("v" FW_VERSION, SY(122), COLOR_MUTED, &FreeSans9pt7b);
+  centerText("Going back to the last version", SY(160), COLOR_RED_PULSE, &FreeSans12pt7b);
+  centerText(why && why[0] ? why : "this version didn't pass its checks", SY(200), COLOR_MUTED, &FreeSans9pt7b);
+  tft.setFont(NULL);
+  displayFitApply(false);
+}
+
+bool displayPanelAnswers() {
+  // Reads are only reliable well below the 40 MHz writes run at.
+  tft.setSPISpeed(4000000);
+  bool ok = false;
+  for (int i = 0; i < 3 && !ok; i++) {
+    uint8_t mode = tft.readcommand8(ILI9341_RDMODE);
+    // 0x9C after begin(): booster on, awake, normal mode, display on. A loose
+    // or missing read line gives 0x00 or 0xFF.
+    ok = mode != 0x00 && mode != 0xFF && (mode & 0x14) == 0x14;
+    if (!ok) delay(20);
+  }
+  tft.setSPISpeed(40000000);
+  return ok;
+}
+
 // Connecting: the eyes and caption are drawn once; only three dots breathe.
 static bool connNeedsStatic = true;
 
@@ -842,7 +1259,7 @@ void displayConnectingTick(const LumoState& s) {
     } else {
       centerText("Connecting", SY(168), COLOR_WHITE, &FreeSans12pt7b);
       char ipBuf[40];
-      snprintf(ipBuf, sizeof(ipBuf), "%s", PI_HOSTNAME);
+      snprintf(ipBuf, sizeof(ipBuf), "%s", netHost[0] ? netHost : "No Wi-Fi details: flash by USB");
       centerText(ipBuf, SY(222), COLOR_MUTED, &FreeSans9pt7b);
     }
     tft.setFont(NULL);
@@ -854,74 +1271,6 @@ void displayConnectingTick(const LumoState& s) {
     float k = 0.5f + 0.5f * sinf(phase);
     tft.fillCircle(144 + i * 16, SY(190), 4, mix565(COLOR_BG_STEALTH, COLOR_ACCENT, 0.15f + 0.85f * k));
   }
-}
-
-// A reminder or notification, over whatever was on screen (the sketch goes
-// back to that screen when the card is answered or times out). Cards with
-// actions show what LEFT, OK and RIGHT do along the bottom.
-static void drawCardScreen(const LumoState& s) {
-  const uint16_t panel = tft.color565(21, 26, 34);
-  bool hasActions = s.act_left[0] || s.act_ok[0] || s.act_right[0];
-  tft.fillScreen(COLOR_BG_BLACK);
-  const int panelH = hasActions ? SH(18, 164) : SH(18, 204);
-  tft.fillRoundRect(12, SY(18), 296, panelH, 10, panel);
-  tft.drawRoundRect(12, SY(18), 296, panelH, 10, COLOR_ACCENT);
-
-  tft.setFont(NULL);
-  tft.setTextSize(1);
-  tft.setTextColor(COLOR_ACCENT);
-  tft.setCursor(28, SY(32));
-  tft.print(s.notif_app);
-
-  tft.setFont(&FreeSans12pt7b);
-  tft.setTextColor(COLOR_WHITE);
-  tft.setCursor(28, SY(72));
-  tft.print(s.notif_title);
-
-  // The body wraps on spaces, about 30 characters to a line, three lines.
-  tft.setFont(&FreeSans9pt7b);
-  tft.setTextColor(tft.color565(170, 178, 192));
-  const char* p = s.notif_body;
-  int y = SY(104);
-  for (int line = 0; line < 3 && *p; line++) {
-    while (*p == ' ') p++;
-    int len = strlen(p), take = len;
-    if (len > 30) {
-      take = 30;
-      while (take > 0 && p[take] != ' ') take--;
-      if (take == 0) take = 30;
-    }
-    char row[32];
-    strlcpy(row, p, min(take + 1, (int)sizeof(row)));
-    tft.setCursor(28, y);
-    tft.print(row);
-    p += take;
-    y += SH(104, 24);
-  }
-
-  if (hasActions) {
-    const char* labels[3] = { s.act_left, s.act_ok, s.act_right };
-    const char* keys[3]   = { "<", "OK", ">" };
-    const int btnY = SY(196);
-    for (int i = 0; i < 3; i++) {
-      int x = 12 + i * 102;
-      if (!labels[i][0]) continue;
-      bool primary = (i == 1);
-      if (primary) tft.fillRoundRect(x, btnY, 92, 32, 6, COLOR_ACCENT);
-      else tft.drawRoundRect(x, btnY, 92, 32, 6, COLOR_MUTED);
-      char text[20];
-      if (i == 2) snprintf(text, sizeof(text), "%s %s", labels[i], keys[i]);   // "Snooze >"
-      else snprintf(text, sizeof(text), "%s %s", keys[i], labels[i]);         // "< Tomorrow", "OK Done"
-      int16_t x1, y1; uint16_t w, h;
-      tft.setFont(NULL);
-      tft.setTextSize(1);
-      tft.getTextBounds(text, 0, 0, &x1, &y1, &w, &h);
-      tft.setTextColor(primary ? COLOR_BG_BLACK : COLOR_WHITE);
-      tft.setCursor(x + (92 - (int)w) / 2, btnY + 12);
-      tft.print(text);
-    }
-  }
-  tft.setFont(NULL);
 }
 
 static void drawMemoryScreen(const LumoState& s, bool full) {
@@ -961,12 +1310,20 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
   if (mode != SCREEN_MEMORY) {
     memoryImageLoaded = false;
   }
+  if (mode != SCREEN_CLOCK) depthOn = false;
   bool modeChanged = (mode != lastModeDrawn) || forceFullRedraw;
   lastModeDrawn = mode;
+  // Every screen fits the window; the smooth faces place themselves.
+  displayFitApply(mode != SCREEN_CLOCK || !faceIsPremium(s.clock_style));
+  if (modeChanged) fitMargins();
 
   switch (mode) {
     case SCREEN_CARD:
-      drawCardScreen(s);
+      // A reminder or notification, over whatever was on screen (the sketch
+      // goes back to it when the card is answered or times out). Drawn
+      // smooth, straight onto the card, so not squeezed (faces.cpp).
+      displayFitApply(false);
+      cardDraw(s);
       break;
     case SCREEN_CLOCK:
       drawClockScreen(s, modeChanged);
@@ -990,6 +1347,15 @@ void displayDrawScreen(ScreenMode mode, const LumoState& s, bool forceFullRedraw
       break;
     case SCREEN_MEMORY:
       drawMemoryScreen(s, modeChanged);
+      break;
+    case SCREEN_TIMER:
+    case SCREEN_STOPWATCH:
+    case SCREEN_WORLD:
+      if (modeChanged) {
+        tft.fillScreen(0x0841);
+        toolScreenReset();
+      }
+      toolScreenTick(mode, s);
       break;
   }
 }

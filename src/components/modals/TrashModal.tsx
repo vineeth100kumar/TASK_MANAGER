@@ -59,7 +59,7 @@ export function TrashModal({ onClose, onRestored }: TrashModalProps) {
               {deletedItems.length} items
             </span>
           </div>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-200"><X size={20}/></button>
+          <button onClick={onClose} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18}/></button>
         </div>
 
         {/* Content list */}

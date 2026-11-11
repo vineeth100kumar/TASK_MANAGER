@@ -1,12 +1,19 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <time.h>
+#include <esp_task_wdt.h>
 #include "config.h"
 #include "peripherals.h"
 #include "display.h"
 #include "ws_client.h"
 #include "clockkeeper.h"
 #include "store.h"
+#include "ota.h"
+#include "faces.h"
+#include "perf.h"
+#include "anim.h"
+
+uint32_t frameWakeAt = 0;   // the soonest beat a screen wants to draw on (anim.h)
 
 static LumoState lumoState;
 static ScreenMode currentScreen = SCREEN_CONNECTING;
@@ -46,12 +53,17 @@ static bool cardShowing() {
 // ---------------------------------------------------------------------
 //  Offline alarms. Sage rings alarms itself and sends the next day's to
 //  the clock (ALARMS); the clock rings them only while it can't reach Sage,
-//  stops on any button (RIGHT snoozes) and gives up after 10 minutes.
+//  each on its own days (a one-off once, then it's dropped), stops on any
+//  button (RIGHT snoozes) and gives up
+//  after 10 minutes. An alarm Sage was ringing when the link went is taken
+//  over the same way, so it can always be stopped. What happened is told to
+//  Sage when it's back (wsReportOffline), so it isn't rung twice.
 // ---------------------------------------------------------------------
 static int lastAlarmMinute = -1;
 static unsigned long localRingStart = 0;
 static bool snoozeSet = false;
 static LocalAlarm snoozeAt;
+static int8_t ringH = -1, ringM = -1;   // the alarm ringing now, as set (a snooze keeps the first time)
 
 static void localAlarmTick() {
   LumoState& s = lumoState;
@@ -63,20 +75,49 @@ static void localAlarmTick() {
       Serial.println("[ALARM] Nobody answered; stopping");
       s.local_ringing = false;
       s.alarm_ringing = false;
+      wsReportOffline("timeout", ringH, ringM);
     }
     return;
   }
 
-  int minute = c.h * 60 + c.m;
-  if (minute == lastAlarmMinute || talkingToSage() || s.alarm_ringing) return;
-  bool due = snoozeSet && snoozeAt.h == c.h && snoozeAt.m == c.m;
-  for (uint8_t i = 0; i < s.local_alarm_count && !due; i++) {
-    due = s.local_alarms[i].h == c.h && s.local_alarms[i].m == c.m;
+  // Sage was ringing one when the link went: the clock carries on with it.
+  if (s.alarm_ringing && !talkingToSage()) {
+    Serial.println("[ALARM] Lost Sage while ringing; the clock has it now");
+    s.local_ringing = true;
+    localRingStart = millis();
+    return;
   }
-  if (!due) return;
-  lastAlarmMinute = minute;
+
+  // An alarm counts as due for a few minutes, so one that falls while the
+  // clock is still finding out that the link has gone rings late rather than
+  // never. lastAlarmMinute (also set when Sage rings one) stops a second ring.
+  if (talkingToSage() || s.alarm_ringing) return;
+  int minute = c.h * 60 + c.m;
+  auto dueNow = [&](int at) {
+    return at != lastAlarmMinute && (minute - at + 1440) % 1440 <= LOCAL_LATE_MINUTES;
+  };
+  int at = -1;
+  if (snoozeSet && dueNow(snoozeAt.h * 60 + snoozeAt.m)) {
+    at = snoozeAt.h * 60 + snoozeAt.m;   // ringH/ringM still name the alarm it snoozed
+  }
+  for (uint8_t i = 0; i < s.local_alarm_count && at < 0; i++) {
+    const LocalAlarm& a = s.local_alarms[i];
+    bool today = a.d ? (c.wd < 0 || (a.d >> c.wd) & 1) : (a.w < 0 || c.wd < 0 || a.w == c.wd);
+    if (dueNow(a.h * 60 + a.m) && today) {
+      at = a.h * 60 + a.m;
+      ringH = a.h;
+      ringM = a.m;
+      if (!a.d) {   // a one-off (or a snooze Sage set): rung, so gone
+        memmove(&s.local_alarms[i], &s.local_alarms[i + 1], sizeof(LocalAlarm) * (s.local_alarm_count - i - 1));
+        s.local_alarm_count--;
+        storeSaveAlarms(s);
+      }
+    }
+  }
+  if (at < 0) return;
+  lastAlarmMinute = at;
   snoozeSet = false;
-  Serial.printf("[ALARM] %02d:%02d, ringing without Sage\n", c.h, c.m);
+  Serial.printf("[ALARM] %02d:%02d, ringing without Sage\n", at / 60, at % 60);
   s.local_ringing = true;
   s.alarm_ringing = true;
   localRingStart = millis();
@@ -89,9 +130,49 @@ static void localAlarmButton(Button b) {
   if (b == BTN_RIGHT) {
     ClockNow c = clockNow();
     int at = (c.h * 60 + c.m + s.snooze_minutes) % 1440;
-    snoozeAt = { (uint8_t)(at / 60), (uint8_t)(at % 60) };
+    snoozeAt = { (uint8_t)(at / 60), (uint8_t)(at % 60), -1 };
     snoozeSet = true;
     Serial.printf("[ALARM] Snoozed to %02d:%02d\n", snoozeAt.h, snoozeAt.m);
+  }
+  wsReportOffline(b == BTN_RIGHT ? "snooze" : "stop", ringH, ringM);
+}
+
+// Sage started ringing one: remember its time, to name it if the clock has
+// to finish it alone.
+static void noteSageRing() {
+  static bool was = false;
+  bool now = lumoState.alarm_ringing && !lumoState.local_ringing;
+  if (now && !was) {
+    ClockNow c = clockNow();
+    ringH = c.h;
+    ringM = c.m;
+    lastAlarmMinute = c.h * 60 + c.m;   // so the clock doesn't ring it again by itself
+  }
+  was = lumoState.alarm_ringing;
+}
+
+// ---------------------------------------------------------------------
+//  The timer runs out here, on the millisecond, even if Sage's word that
+//  it's done is late or never comes. It takes the screen (an alarm still
+//  comes first) and chirps until a button, Sage or a minute stops it.
+// ---------------------------------------------------------------------
+static bool timerTookScreen = false;
+static unsigned long timerDoneAt = 0;
+
+static void timerTick() {
+  LumoState& s = lumoState;
+  if (s.tm_state == TOOL_RUNNING && (int32_t)(millis() - s.tm_end) >= 0) {
+    s.tm_state = TOOL_DONE;
+    s.flag_tools_changed = true;
+  }
+  if (s.tm_state == TOOL_DONE) {
+    if (!timerDoneAt) timerDoneAt = millis();
+    if (millis() - timerDoneAt > 60000UL) {   // nobody answered
+      s.tm_state = TOOL_IDLE;
+      s.flag_tools_changed = true;
+    }
+  } else {
+    timerDoneAt = 0;
   }
 }
 
@@ -100,21 +181,24 @@ void setup() {
   delay(200);
   Serial.println("\n=== LUMO Firmware v" FW_VERSION " Starting ===");
 
-  ledcAttach(BUZZER_PIN, HAPTIC_FREQ, HAPTIC_RES);
-  ledcWrite(BUZZER_PIN, 255);
-
   storeLoad(lumoState);
+  storeLoadFit(screenFit);
+  hapticInit(lumoState.haptic_strength);
   initNeoPixels();
+  backlightInit(0);               // GPIO20 backlight off until the first screen is up
   displayInit();
+  otaTrialBegin();   // a new version's first start: its trial begins (and may end here)
 
   tft.setFont(NULL);
   tft.setTextSize(2);
   tft.setTextColor(0xFFFF);
   tft.setCursor(20, 100);
   tft.print("Connecting to Wi-Fi...");
+  backlightWake(lumoState.backlight);   // a gentle glow up to the set brightness
 
   WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASS);
+  storeNetLoad();
+  WiFi.begin(netSsid, netPass);
 
   unsigned long startAttempt = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - startAttempt < 10000) {
@@ -123,24 +207,46 @@ void setup() {
   }
   Serial.println();
 
+  // Internet time in UTC, whenever the network is there (now or later): the
+  // clock falls back on it while it can't reach the Pi (clockkeeper.cpp).
+  configTime(0, 0, NTP_SERVER1, NTP_SERVER2);
+  WiFi.setSleep(false);
   if (WiFi.status() == WL_CONNECTED) {
     Serial.printf("[WiFi] Connected! IP: %s\n", WiFi.localIP().toString().c_str());
-    configTime(GMT_OFFSET_SEC, DAYLIGHT_OFFSET, NTP_SERVER1, NTP_SERVER2);
-    WiFi.setSleep(false);
   } else {
-    Serial.println("[WiFi] Connection failed, continuing offline...");
+    Serial.println("[WiFi] Connection failed, continuing offline (it keeps trying)...");
   }
 
   wsInit(lumoState);
   wsConnect();
+
+  // A loop() that gets stuck (it has happened: LUMO dropped off and never
+  // tried again) restarts LUMO after LOOP_WDT_MS instead of freezing, and
+  // the next HELLO tells Sage where it was stuck (wsMark).
+  esp_task_wdt_config_t wdt = { .timeout_ms = LOOP_WDT_MS, .idle_core_mask = 0, .trigger_panic = true };
+  if (esp_task_wdt_reconfigure(&wdt) != ESP_OK) esp_task_wdt_init(&wdt);
+  enableLoopWDT();
 
   currentScreen = SCREEN_CONNECTING;
   displayDrawScreen(SCREEN_CONNECTING, lumoState, true);
 }
 
 void loop() {
+  perfLoopStart();
+  frameWakeAt = millis() + LOOP_IDLE_MS;
   wsPoll();
+  otaTrialTick(talkingToSage());
+  wsMark("update");
+  if (otaPoll()) displayDrawScreen(currentScreen, lumoState, true);   // the update failed: back to the screen
+  wsMark("screen");
+  backlightTick();
   hapticUpdate();
+  // Type "buzz" in the serial monitor to test the motor with no shaping.
+  if (Serial.available()) {
+    String line = Serial.readStringUntil('\n');
+    line.trim();
+    if (line == "buzz") hapticSelfTest();
+  }
   neoSetContext(currentScreen, lumoState);   // the ring's AUTO scene follows the screen and face
   neoTick();
 
@@ -151,11 +257,20 @@ void loop() {
     lumoState.m = clk.m;
   }
 
+  noteSageRing();
   localAlarmTick();
+  timerTick();
 
   Button btn = readButton();
   if (btn != BTN_NONE) {
-    hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TAP);
+    if (lumoState.hap_buttons) hapticPlay(btn == BTN_HOLD_OK ? HAP_HOLD : HAP_TICK);
+    if (lumoState.tm_state == TOOL_DONE && !lumoState.alarm_ringing) {
+      // Any button stops a finished timer; Sage hears it too and agrees
+      // (now, or when it's back).
+      lumoState.tm_state = TOOL_IDLE;
+      lumoState.flag_tools_changed = true;
+      if (!talkingToSage()) wsReportOffline("timer_stop", -1, -1);
+    }
     if (lumoState.local_ringing) {
       localAlarmButton(btn);   // Sage isn't there to decide
     } else {
@@ -178,12 +293,34 @@ void loop() {
 
   // A ringing alarm (Sage's or the clock's own) takes the screen; afterwards,
   // back to what was there.
-  neoSetAlarm(lumoState.alarm_ringing);
+  bool timerDone = lumoState.tm_state == TOOL_DONE;
+  neoSetAlarm(lumoState.alarm_ringing || timerDone);
   if (lumoState.alarm_ringing && currentScreen != SCREEN_ALARM) {
     if (currentScreen != SCREEN_CARD && currentScreen != SCREEN_CONNECTING) returnScreen = currentScreen;
     switchScreen(SCREEN_ALARM);
   } else if (!lumoState.alarm_ringing && currentScreen == SCREEN_ALARM) {
     switchScreen(returnScreen);
+  }
+
+  // A finished timer shows itself; when it's answered, back to what was there.
+  if (timerDone && !lumoState.alarm_ringing && currentScreen != SCREEN_TIMER &&
+      currentScreen != SCREEN_ALARM && currentScreen != SCREEN_CONNECTING) {
+    if (currentScreen != SCREEN_CARD) returnScreen = currentScreen;
+    timerTookScreen = true;
+    switchScreen(SCREEN_TIMER);
+  } else if (!timerDone && timerTookScreen && currentScreen == SCREEN_TIMER) {
+    timerTookScreen = false;
+    switchScreen(returnScreen);
+  }
+  if (currentScreen != SCREEN_TIMER) timerTookScreen = false;
+
+  // Sage's "Reinitialize display": the controller starts over (what a restart
+  // does at boot) and the screen on show is drawn again, with no reboot.
+  if (lumoState.flag_display_reset) {
+    lumoState.flag_display_reset = false;
+    Serial.println("[DISPLAY] reinitialising the screen controller");
+    displayInit();
+    displayDrawScreen(currentScreen, lumoState, true);
   }
 
   // Sage asked for a screen. Under a card or an alarm, it's where they return to.
@@ -207,12 +344,15 @@ void loop() {
     displayDrawScreen(SCREEN_CARD, lumoState, true);
   }
 
-  // A ringing alarm beats like a heart (the light beats with it); it stops
-  // the moment the alarm screen goes.
-  static bool alarmBuzzing = false;
-  if ((currentScreen == SCREEN_ALARM) != alarmBuzzing) {
-    alarmBuzzing = !alarmBuzzing;
-    if (alarmBuzzing) hapticPlay(HAP_ALARM);
+  // A ringing alarm sounds the tone chosen for it in Sage (the light beats
+  // with it) and stops the moment the alarm screen goes; a finished timer
+  // chirps. 0 nothing, 1 the alarm, 2 the timer.
+  static uint8_t sounding = 0;
+  uint8_t want = currentScreen == SCREEN_ALARM ? 1 : (timerDone && currentScreen == SCREEN_TIMER) ? 2 : 0;
+  if (want != sounding) {
+    sounding = want;
+    if (want == 1) hapticRing(lumoState.alarm_tone, lumoState.alarm_volume);
+    else if (want == 2) hapticRing(TONE_CHIRP, lumoState.alarm_volume);
     else hapticOff();
   }
 
@@ -255,12 +395,38 @@ void loop() {
   else if (currentScreen == SCREEN_CONNECTING) {
     displayConnectingTick(lumoState);
   }
+  else if (currentScreen == SCREEN_TIMER || currentScreen == SCREEN_STOPWATCH || currentScreen == SCREEN_WORLD) {
+    if (lumoState.flag_tools_changed) {
+      lumoState.flag_tools_changed = false;
+      // The World screen's rows move when places come or go: start afresh.
+      if (currentScreen == SCREEN_WORLD) displayDrawScreen(SCREEN_WORLD, lumoState, true);
+      else toolScreenReset();
+    }
+    toolScreenTick(currentScreen, lumoState);
+  }
+  else if (currentScreen == SCREEN_CARD) {
+    cardTick(lumoState);
+  }
   else if (currentScreen == SCREEN_MEMORY) {
     if (lumoState.flag_memory_changed) {
       lumoState.flag_memory_changed = false;
       displayDrawScreen(SCREEN_MEMORY, lumoState, false);
     }
   }
+  perfLoopEnd();
 
-  delay(6);
+  // Sleep until the next beat a screen asked for (anim.h), never longer than
+  // LOOP_IDLE_MS, so frames land on time instead of up to 6 ms late (2.18).
+  // A screen running behind its beat goes again straight away, but loop()
+  // still sleeps a moment every 100 ms so the system's idle work gets done.
+  static unsigned long lastSleep = 0;
+  int32_t wait = (int32_t)(frameWakeAt - millis());
+  if (wait > LOOP_IDLE_MS) wait = LOOP_IDLE_MS;
+  if (wait <= 0 && millis() - lastSleep >= 100) wait = 1;
+  if (wait > 0) {
+    delay(wait);
+    lastSleep = millis();
+  } else {
+    yield();
+  }
 }

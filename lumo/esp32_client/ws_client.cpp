@@ -4,23 +4,137 @@
 #include "display.h"
 #include "clockkeeper.h"
 #include "store.h"
+#include "ota.h"
+#include "perf.h"
 
 #include <WiFi.h>
-#include <ArduinoWebsockets.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
 #include <ArduinoJson.h>
 #include <ESPmDNS.h>
+#include <esp_system.h>
+#include <esp_attr.h>
+#include <soc/soc_caps.h>
 
 static unsigned long lastHapticCmd = 0;   // when Sage last asked for a haptic
 
-using namespace websockets;
+#include "lumo_socket.h"
 
-static WebsocketsClient client;
+static LumoSocket client;   // our own websocket client (lumo_socket.h says why)
 static LumoState* statePtr = nullptr;
 static bool isConnected = false;
+static bool paused = false;   // updating over Wi-Fi: no reconnecting meanwhile
 
-static unsigned long lastReconnectAttempt = 0;
-static unsigned long reconnectInterval    = 2000;
-static const unsigned long MAX_BACKOFF    = 30000;
+// ---------------------------------------------------------------------
+//  Keeping the link up. Anything from the Pi (a message, its ping, the
+//  answer to ours) counts as hearing from it; a link that stays quiet for
+//  LINK_DEAD_MS is closed and tried again, so a Pi that restarted or a
+//  Wi-Fi that dropped never leaves the clock thinking it's connected.
+// ---------------------------------------------------------------------
+static unsigned long openedAt     = 0;   // when the socket opened (HELLO sent)
+static unsigned long lastHeard    = 0;
+static unsigned long lastPingSent = 0;
+static unsigned long nextTryAt    = 0;   // when to try the Pi again
+static unsigned long retryMs      = LINK_RETRY_MIN_MS;
+static unsigned long downSince    = 1;   // when Sage was last reachable (0 while it is)
+static uint16_t      reconnects   = 0;   // pairings since this start, less the first
+static uint16_t      wifiDrops    = 0;
+static int           rttMs        = -1;  // how long the Pi took to answer the last ping
+static bool          everPaired   = false;
+static char          lastDrop[40] = "";  // why the link went last, told to the Pi on the way back
+static uint16_t      tries        = 0;   // tries to reach the Pi since the link went
+static char          tryFail[72]  = "";  // why the last of them failed
+static uint8_t       kicks        = 0;   // Wi-Fi rejoins because the Pi stayed out of reach
+static unsigned long lastKick     = 0;
+
+// Kept through a restart (not through a power cut): where loop() was, so a
+// watchdog or crash restart can tell Sage what LUMO was doing, and whether
+// LUMO restarted itself because the Pi stayed out of reach (only once per
+// outage, so a Pi that's off for the night doesn't restart LUMO all night).
+#define RTC_MAGIC 0x4C554D4FUL
+RTC_NOINIT_ATTR static uint32_t crumbMagic;
+RTC_NOINIT_ATTR static char     crumbAt[16];
+RTC_NOINIT_ATTR static uint32_t piRestartMagic;
+static char bootText[64] = "";
+static bool restartedForPi = false;
+
+void wsMark(const char* where) {
+  strlcpy(crumbAt, where, sizeof(crumbAt));
+  crumbMagic = RTC_MAGIC;
+}
+
+// The Pi's address: an IP in secrets.h is used as it is; an mDNS name is
+// looked up once and remembered, and only looked up again when that address
+// stops working (each lookup holds the clock for up to 2 s).
+static IPAddress piIp;
+static bool      piIpKnown = false;
+static uint8_t   piIpFails = 0;
+
+// What the clock did alone while it couldn't reach Sage, told to it in the
+// next HELLO so Sage doesn't ring a stopped alarm again (desk.offline_reports).
+struct OfflineReport { char a[12]; int8_t h, m; unsigned long at; };
+static OfflineReport pending[6];
+static uint8_t pendingCount = 0;
+
+static const char* resetName() {
+  switch (esp_reset_reason()) {
+    case ESP_RST_POWERON:  return "power on";
+    case ESP_RST_SW:       return "restarted";
+    case ESP_RST_PANIC:    return "crash";
+    case ESP_RST_INT_WDT:
+    case ESP_RST_TASK_WDT:
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "brownout (power dipped)";
+    case ESP_RST_EXT:      return "reset button";
+#if SOC_USB_SERIAL_JTAG_SUPPORTED
+    case ESP_RST_USB:      return "USB (a computer opened the serial port, or the reset button)";
+#endif
+    case ESP_RST_DEEPSLEEP: return "woke from sleep";
+    default:               return "other";
+  }
+}
+
+// Why LUMO last started, worked out once at start (the marks change after).
+static void noteBoot() {
+  esp_reset_reason_t r = esp_reset_reason();
+  bool stuck = r == ESP_RST_PANIC || r == ESP_RST_INT_WDT || r == ESP_RST_TASK_WDT || r == ESP_RST_WDT;
+  restartedForPi = r == ESP_RST_SW && piRestartMagic == RTC_MAGIC;
+  if (restartedForPi) {
+    strlcpy(bootText, "restarted itself: Sage out of reach for 15 min", sizeof(bootText));
+  } else if (stuck && crumbMagic == RTC_MAGIC) {
+    crumbAt[sizeof(crumbAt) - 1] = '\0';
+    snprintf(bootText, sizeof(bootText), "%s (stuck in %s)", resetName(), crumbAt);
+  } else {
+    strlcpy(bootText, resetName(), sizeof(bootText));
+  }
+  piRestartMagic = 0;
+  wsMark("start");
+}
+
+static const char* bootReason() { return bootText; }
+
+static void linkDown(const char* why) {
+  if (isConnected) Serial.printf("[WS] Link down: %s\n", why);
+  isConnected = false;
+  if (statePtr) statePtr->paired = false;
+  if (!downSince) downSince = millis();
+  strlcpy(lastDrop, why, sizeof(lastDrop));
+  nextTryAt = millis() + retryMs;
+}
+
+static void onPaired() {
+  if (everPaired) reconnects++;
+  everPaired = true;
+  downSince = 0;
+  retryMs = LINK_RETRY_MIN_MS;
+  piIpFails = 0;
+  tries = 0;
+  tryFail[0] = '\0';
+  kicks = 0;
+  restartedForPi = false;   // a new outage may restart LUMO once again
+  pendingCount = 0;      // Sage has them now
+  lastDrop[0] = '\0';
+}
 
 // CLOCK's display fields: style, hour24, show_seconds and the second zone.
 // Saved to flash only when one of them changed.
@@ -34,6 +148,7 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   else if (strcmp(st, "stacked") == 0)    style = CLOCK_STACKED;
   else if (strcmp(st, "nightstand") == 0) style = CLOCK_NIGHTSTAND;
   else if (strcmp(st, "dial") == 0)       style = CLOCK_DIAL;
+  else if (strcmp(st, "depth") == 0)      style = CLOCK_DEPTH;
   bool h24  = doc["hour24"].is<bool>() ? doc["hour24"].as<bool>() : s.hour24;
   bool secs = doc["show_seconds"].is<bool>() ? doc["show_seconds"].as<bool>() : s.show_seconds;
 
@@ -61,12 +176,12 @@ static void applyClockStyle(LumoState& s, JsonDocument& doc) {
   storeSaveClock(s);
 }
 
-static void handleTextMessage(const String& payload) {
+static void handleTextMessage(const char* payload, size_t len) {
   if (!statePtr) return;
   LumoState& s = *statePtr;
 
   JsonDocument doc;
-  DeserializationError err = deserializeJson(doc, payload);
+  DeserializationError err = deserializeJson(doc, payload, len);
   if (err) {
     Serial.printf("[WS] JSON parse error: %s\n", err.c_str());
     return;
@@ -77,6 +192,7 @@ static void handleTextMessage(const String& payload) {
   if (strcmp(cmd, "PAIRED") == 0) {
     s.paired = doc["ok"] | false;
     s.pair_refused = !s.paired;
+    if (s.paired) onPaired();
     Serial.printf("[WS] %s\n", s.paired ? "Paired with Sage" : "Sage refused DESK_TOKEN");
     return;
   }
@@ -95,9 +211,9 @@ static void handleTextMessage(const String& payload) {
     uint8_t n = 0;
     for (JsonObject a : doc["list"].as<JsonArray>()) {
       if (n >= MAX_LOCAL_ALARMS) break;
-      int h = a["h"] | -1, m = a["m"] | -1;
+      int h = a["h"] | -1, m = a["m"] | -1, w = a["w"] | -1, d = a["d"] | 0;
       if (h < 0 || h > 23 || m < 0 || m > 59) continue;
-      list[n++] = { (uint8_t)h, (uint8_t)m };
+      list[n++] = { (uint8_t)h, (uint8_t)m, (int8_t)(w >= 0 && w <= 6 ? w : -1), (uint8_t)(d & 0x7F) };
     }
     uint8_t snooze = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     if (n != s.local_alarm_count || snooze != s.snooze_minutes ||
@@ -119,6 +235,9 @@ static void handleTextMessage(const String& payload) {
     else if (strcmp(m, "SPOTIFY") == 0) s.next_screen = SCREEN_SPOTIFY;
     else if (strcmp(m, "TASKS") == 0)   s.next_screen = SCREEN_TASKS;
     else if (strcmp(m, "MEMORY") == 0)  s.next_screen = SCREEN_MEMORY;
+    else if (strcmp(m, "TIMER") == 0)   s.next_screen = SCREEN_TIMER;
+    else if (strcmp(m, "STOPWATCH") == 0) s.next_screen = SCREEN_STOPWATCH;
+    else if (strcmp(m, "WORLD") == 0)   s.next_screen = SCREEN_WORLD;
     s.flag_screen_switch = true;
     Serial.printf("[WS] Remote screen switch: %s\n", m);
   }
@@ -137,15 +256,25 @@ static void handleTextMessage(const String& payload) {
     const char* app = doc["app"] | "iPhone";
     const char* title = doc["title"] | "Alert";
     const char* body = doc["body"] | "";
-    strncpy(s.notif_app, app, sizeof(s.notif_app) - 1);
-    strncpy(s.notif_title, title, sizeof(s.notif_title) - 1);
-    strncpy(s.notif_body, body, sizeof(s.notif_body) - 1);
+    strlcpy(s.notif_app, app, sizeof(s.notif_app));
+    strlcpy(s.notif_title, title, sizeof(s.notif_title));
+    strlcpy(s.notif_body, body, sizeof(s.notif_body));
+    // 2.20: the app's colour ("#25D366") and the kind of card. A Pi from
+    // before sends neither: Sage's orange and a plain message card.
+    const char* color = doc["color"] | "";
+    unsigned long rgbv = 0;
+    if (color[0] == '#' && strlen(color) == 7) rgbv = strtoul(color + 1, nullptr, 16);
+    else rgbv = 0x5AC8FA;
+    s.notif_r = (rgbv >> 16) & 0xFF; s.notif_g = (rgbv >> 8) & 0xFF; s.notif_b = rgbv & 0xFF;
+    const char* kind = doc["kind"] | "note";
+    s.notif_kind = !strcmp(kind, "call") ? CARD_CALL : !strcmp(kind, "sage") ? CARD_SAGE : CARD_NOTE;
     s.notif_active = true;
     s.notif_start = millis();
     s.flag_card_changed = true;
-    neoPing(90, 170, 255);
-    // A knock for a phone notification; a reminder already brought its own.
-    if (millis() - lastHapticCmd > 800) hapticPlay(HAP_NOTIFY);
+    neoNotify(s.notif_r, s.notif_g, s.notif_b, s.notif_kind == CARD_CALL);
+    // A knock for a phone notification (a firmer one for a call); a reminder
+    // already brought its own.
+    if (s.hap_notify && millis() - lastHapticCmd > 800) hapticPlay(s.notif_kind == CARD_CALL ? HAP_REMINDER : HAP_NOTIFY);
   }
   else if (strcmp(cmd, "SYSTEM_STATS") == 0) {
     s.cpu_temp = doc["cpu_temp"] | s.cpu_temp;
@@ -157,7 +286,12 @@ static void handleTextMessage(const String& payload) {
   else if (strcmp(cmd, "CLOCK") == 0) {
     s.h = doc["h"] | s.h;
     s.m = doc["m"] | s.m;
-    clockSync(s.h, s.m, doc["s"] | 0, doc["ms"] | 0);
+    clockSync(s.h, s.m, doc["s"] | 0, doc["ms"] | 0, doc["wd"] | -1);
+    if (doc["utc_off"].is<int>() && doc["utc_off"].as<int>() != s.utc_off) {
+      s.utc_off = doc["utc_off"].as<int>();
+      clockSetUtcOffset(s.utc_off);
+      storeSaveClock(s);
+    }
     if (doc["alarm_h"].is<int>() && doc["alarm_m"].is<int>()) {
       s.alarm_h   = doc["alarm_h"];
       s.alarm_m   = doc["alarm_m"];
@@ -172,6 +306,28 @@ static void handleTextMessage(const String& payload) {
       strncpy(s.date, doc["date"], sizeof(s.date) - 1);
     }
     applyClockStyle(s, doc);
+  }
+  else if (strcmp(cmd, "FIT") == 0) {
+    // The case window, and the Even Frame / island switches (Sage: LUMO > Clock > Screen fit).
+    ScreenFit n = screenFit;
+    n.l = constrain(doc["l"] | (int)n.l, 0, 60);
+    n.r = constrain(doc["r"] | (int)n.r, 0, 60);
+    n.t = constrain(doc["t"] | (int)n.t, 0, 60);
+    n.b = constrain(doc["b"] | (int)n.b, 0, 60);
+    if (doc["frame"].is<bool>())  n.frame  = doc["frame"];
+    if (doc["island"].is<bool>()) n.island = doc["island"];
+    bool test = doc["test"] | false;
+    bool saved = n.l != screenFit.l || n.r != screenFit.r || n.t != screenFit.t || n.b != screenFit.b ||
+                 n.frame != screenFit.frame || n.island != screenFit.island;
+    bool redraw = saved || test != screenFit.test;
+    n.test = test;
+    screenFit = n;
+    if (saved) storeSaveFit(screenFit);
+    if (redraw) {
+      s.flag_clock_changed = true;            // the clock screen starts over at the new window
+      if (test) { s.next_screen = SCREEN_CLOCK; s.flag_screen_switch = true; }   // the pattern shows on the clock screen
+    }
+    Serial.printf("[WS] Screen fit: l%d r%d t%d b%d frame %d island %d test %d\n", n.l, n.r, n.t, n.b, n.frame, n.island, n.test);
   }
   else if (strcmp(cmd, "WEATHER") == 0) {
     s.temp_c = doc["temp_c"] | s.temp_c;
@@ -233,19 +389,119 @@ static void handleTextMessage(const String& payload) {
     neoSetMode(nm, bri, hue);
   }
   else if (strcmp(cmd, "HAPTIC") == 0) {
-    // A named pattern, or a length: Sage sends 300 ms with a reminder.
+    // A named effect, or a length: Sage sends 300 ms with a reminder.
     const char* pattern = doc["pattern"] | "";
     uint16_t ms = doc["ms"] | 50;
-    if      (!strcmp(pattern, "tap"))      hapticPlay(HAP_TAP);
-    else if (!strcmp(pattern, "notify"))   hapticPlay(HAP_NOTIFY);
-    else if (!strcmp(pattern, "success"))  hapticPlay(HAP_SUCCESS);
-    else if (!strcmp(pattern, "reminder") || ms >= 250) hapticPlay(HAP_REMINDER);
-    else hapticPulse(ms);
     lastHapticCmd = millis();
+    if (!s.hap_notify) return;   // knocks for notifications are off in Sage
+    if (pattern[0] && hapticPlayNamed(pattern)) {}
+    else if (ms >= 250) hapticPlay(HAP_REMINDER);
+    else hapticPulse(ms);
+  }
+  else if (strcmp(cmd, "HAPTICS") == 0) {
+    // Which events knock, and the strength set in Sage. A change of
+    // strength plays one tick so you feel it.
+    s.hap_buttons = doc["buttons"] | s.hap_buttons;
+    s.hap_notify  = doc["notify"]  | s.hap_notify;
+    int pct = doc["strength"] | (int)s.haptic_strength;
+    pct = constrain(pct, 0, 100);
+    if (pct != s.haptic_strength) {
+      s.haptic_strength = pct;
+      hapticSetStrength(pct);
+      storeSaveHaptics(s);
+      hapticPlay(HAP_TICK);
+    }
   }
   else if (strcmp(cmd, "ALARM_RING") == 0) {
+    strlcpy(s.alarm_label, doc["label"] | "", sizeof(s.alarm_label));
+    s.alarm_tone   = hapticToneNamed(doc["tone"] | "", s.alarm_tone);
+    s.alarm_volume = constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100);
+    s.snooze_minutes = constrain((int)(doc["snooze"] | (int)s.snooze_minutes), 1, 60);
     s.alarm_ringing = true;
     s.local_ringing = false;   // Sage has it now
+  }
+  else if (strcmp(cmd, "TONE") == 0) {
+    // An alarm sound, to choose one in Sage: one cycle of it ("cycles": 1,
+    // Sage 2.11 on), else a few seconds.
+    hapticPreview(hapticToneNamed(doc["tone"] | "", s.alarm_tone),
+                  constrain((int)(doc["volume"] | (int)s.alarm_volume), 0, 100),
+                  constrain((int)(doc["seconds"] | 4), 1, 15),
+                  (int)(doc["cycles"] | 0) > 0);
+  }
+  else if (strcmp(cmd, "TIMER") == 0) {
+    const char* st = doc["state"] | "idle";
+    ToolState next = !strcmp(st, "running") ? TOOL_RUNNING : !strcmp(st, "paused") ? TOOL_PAUSED
+                   : !strcmp(st, "done") ? TOOL_DONE : TOOL_IDLE;
+    uint32_t left = doc["left_ms"] | 0;
+    s.tm_left_ms  = left;
+    s.tm_end      = millis() + left;
+    s.tm_total_ms = doc["total_ms"] | 0;
+    strlcpy(s.tm_label, doc["label"] | "", sizeof(s.tm_label));
+    s.tm_state = next;
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "STOPWATCH") == 0) {
+    s.sw_running = doc["running"] | false;
+    s.sw_base_ms = doc["elapsed_ms"] | 0;
+    s.sw_mark    = millis();
+    s.sw_lap_count = doc["lap_count"] | 0;
+    s.sw_lap_shown = 0;
+    for (uint32_t lap : doc["laps"].as<JsonArray>()) {
+      if (s.sw_lap_shown < STOPWATCH_LAPS) s.sw_laps[s.sw_lap_shown++] = lap;
+    }
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "WORLD") == 0) {
+    s.wc_count = 0;
+    for (JsonObject z : doc["zones"].as<JsonArray>()) {
+      if (s.wc_count >= MAX_WORLD_CLOCKS) break;
+      strlcpy(s.wc_name[s.wc_count], z["name"] | "", sizeof(s.wc_name[0]));
+      s.wc_offset[s.wc_count] = constrain((int)(z["offset"] | 0), -1440, 1440);
+      s.wc_count++;
+    }
+    s.flag_tools_changed = true;
+  }
+  else if (strcmp(cmd, "NIGHT") == 0) {
+    s.night = doc["on"] | false;
+    neoSetSleep(s.night);
+  }
+  else if (strcmp(cmd, "IDENTIFY") == 0) {
+    // "This one": a bright white double flash and a knock.
+    neoPing(255, 255, 255);
+    hapticPlay(HAP_SUCCESS);
+  }
+  else if (strcmp(cmd, "OTA") == 0) {
+    // A new firmware on the Pi: fetched and flashed from loop() (ota.cpp).
+    // Never while an alarm rings; Sage doesn't ask then either.
+    if (!s.alarm_ringing && !s.local_ringing) otaRequest(doc["url"] | "", doc["version"] | "");
+  }
+  else if (strcmp(cmd, "BRIGHTNESS") == 0) {
+    // Screen brightness 0-100 (2.23), eased and kept in flash.
+    int level = constrain(doc["level"] | (int)s.backlight, 0, 100);
+    if ((uint8_t)level != s.backlight) {
+      s.backlight = level;
+      storeSaveBacklight(s);
+    }
+    backlightSet(level);
+    Serial.printf("[WS] Brightness %d%%\n", level);
+  }
+  else if (strcmp(cmd, "BACKLIGHT") == 0) {
+    // The on/off test (2.22): off dims the screen to black, on restores the
+    // set brightness. Both ease through the backlight engine (2.23).
+    bool on = doc["on"] | true;
+    backlightSet(on ? s.backlight : 0);
+    Serial.printf("[WS] Backlight %s\n", on ? "on" : "off");
+  }
+  else if (strcmp(cmd, "DISPLAY_RESET") == 0) {
+    // A loose connection can leave the screen controller blank white. Done
+    // from loop(): the controller is started over and the screen redrawn.
+    s.flag_display_reset = true;
+  }
+  else if (strcmp(cmd, "REBOOT") == 0) {
+    Serial.println("[WS] Restarting, as Sage asked");
+    client.close(1001);
+    delay(300);
+    ESP.restart();
   }
   else if (strcmp(cmd, "ALARM_OFF") == 0) {
     s.alarm_ringing = false;
@@ -293,6 +549,8 @@ static void handleTextMessage(const String& payload) {
 static void handleBinaryMessage(const uint8_t* data, size_t len) {
   if (len >= 2 && data[0] == 0xAA && data[1] == 0xCC) {
     onNewMemoryStrip(data, len);
+  } else if (len >= 2 && data[0] == 0xAA && data[1] == 0xDE) {
+    onDepthStrip(data, len);
   } else {
     onNewArt(data, len);
   }
@@ -300,30 +558,134 @@ static void handleBinaryMessage(const uint8_t* data, size_t len) {
 
 void wsInit(LumoState& state) {
   statePtr = &state;
+  noteBoot();
+  clockSetUtcOffset(state.utc_off);
 
-  client.onMessage([](WebsocketsMessage msg) {
-    if (msg.isText()) {
-      handleTextMessage(msg.data());
-    } else if (msg.isBinary()) {
-      handleBinaryMessage((const uint8_t*)msg.c_str(), msg.length());
-    }
-  });
+  client.onText = [](const char* text, size_t len) {
+    lastHeard = millis();
+    handleTextMessage(text, len);
+  };
+  client.onBinary = [](const uint8_t* data, size_t len) {
+    lastHeard = millis();
+    handleBinaryMessage(data, len);
+  };
+  client.onPing = []() { lastHeard = millis(); };
+  client.onPong = []() {
+    lastHeard = millis();
+    rttMs = (int)(millis() - lastPingSent);
+  };
+  client.onClose = [](uint16_t code) {
+    if (!isConnected) return;   // linkDown already said why
+    char why[40];
+    if (statePtr && statePtr->pair_refused) strlcpy(why, "Sage refused the pairing code", sizeof(why));
+    else if (code == 1006) strlcpy(why, "the link broke", sizeof(why));
+    else snprintf(why, sizeof(why), "closed (%u)", code);
+    linkDown(why);
+  };
+}
 
-  client.onEvent([](WebsocketsEvent event, String data) {
-    if (event == WebsocketsEvent::ConnectionOpened) {
-      Serial.println("[WS] Connected to Pi server!");
-      isConnected = true;
-      reconnectInterval = 2000;
-      // The first frame must be HELLO with the pairing code, or Sage hangs up.
-      char hello[80];
-      snprintf(hello, sizeof(hello), "{\"evt\":\"HELLO\",\"token\":\"%s\",\"fw\":\"%s\"}", DESK_TOKEN, FW_VERSION);
-      client.send(hello);
-    } else if (event == WebsocketsEvent::ConnectionClosed) {
-      Serial.println("[WS] Disconnected from Pi server");
-      isConnected = false;
-      if (statePtr) statePtr->paired = false;
+// The socket is open: the first frame must be HELLO with the pairing code,
+// or Sage hangs up. It also says why the link went last time, and what the
+// clock did on its own meanwhile.
+static void sayHello() {
+  Serial.println("[WS] Connected to Pi server!");
+  isConnected = true;
+  openedAt = lastHeard = lastPingSent = millis();
+  JsonDocument hello;
+  hello["evt"] = "HELLO";
+  hello["token"] = netToken;
+  hello["fw"] = FW_VERSION;
+  hello["reconnects"] = reconnects;
+  if (tries) hello["tries"] = tries;          // failed tries before this one got through
+  if (tryFail[0]) hello["tryFail"] = tryFail;
+  if (kicks) hello["kicks"] = kicks;
+  if (lastDrop[0]) hello["drop"] = lastDrop;
+  if (!everPaired) hello["boot"] = bootReason();
+  hello["ota"] = 1;   // takes updates over Wi-Fi (the OTA command)
+  if (otaOnTrial()) hello["trial"] = true;   // a new version, kept once it has run 2 min (ota.cpp)
+  {
+    JsonObject f = hello["fit"].to<JsonObject>();   // the case window as saved (2.15)
+    f["l"] = screenFit.l; f["r"] = screenFit.r; f["t"] = screenFit.t; f["b"] = screenFit.b;
+    f["frame"] = screenFit.frame; f["island"] = screenFit.island;
+  }
+  if (otaLastError()[0]) hello["otaError"] = otaLastError();
+  if (pendingCount) {
+    JsonArray list = hello["offline"].to<JsonArray>();
+    for (uint8_t i = 0; i < pendingCount; i++) {
+      JsonObject r = list.add<JsonObject>();
+      r["a"] = pending[i].a;
+      if (pending[i].h >= 0) { r["h"] = pending[i].h; r["m"] = pending[i].m; }
+      r["ago"] = (millis() - pending[i].at) / 1000UL;
     }
-  });
+  }
+  char buf[768];
+  serializeJson(hello, buf, sizeof(buf));
+  client.sendText(buf);
+}
+
+static String piAddress() {
+  IPAddress ip;
+  if (ip.fromString(netHost)) return String(netHost);
+  if (piIpKnown && piIpFails < 2) return piIp.toString();
+  IPAddress found = MDNS.queryHost(netHost, 2000);
+  if (found != INADDR_NONE && found[0] != 0) {
+    piIpFails = 0;
+    if (!piIpKnown || found != piIp) Serial.printf("[WS] mDNS: %s is %s\n", netHost, found.toString().c_str());
+    piIp = found;
+    piIpKnown = true;
+    return piIp.toString();
+  }
+  if (piIpKnown) {         // mDNS didn't answer: the last address is still the best guess
+    piIpFails = 0;
+    return piIp.toString();
+  }
+  Serial.println("[WS] mDNS lookup failed; trying the name as it is");
+  return String(netHost);
+}
+
+// Reaching the Pi (an mDNS lookup, the TCP connect and the handshake) can
+// take several seconds when it's away, so since 2.18 it runs in a task of its
+// own and the screen keeps moving meanwhile. While a try runs the task owns
+// `client`; wsPoll leaves it alone until the try is done (connectState 2).
+static TaskHandle_t     connectTask  = nullptr;
+static volatile uint8_t connectState = 0;     // 0 idle, 1 trying, 2 done (loop() takes the result)
+static volatile bool    connectOk    = false;
+static char             connectHost[64] = "";
+
+static void connectTry() {
+  String host = piAddress();
+  strlcpy(connectHost, host.c_str(), sizeof(connectHost));
+  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", connectHost, PI_WS_PORT, PI_WS_PATH);
+  connectOk = client.connect(connectHost, PI_WS_PORT, PI_WS_PATH, LINK_CONNECT_MS);
+}
+
+static void connectWorker(void*) {
+  for (;;) {
+    ulTaskNotifyTake(pdTRUE, portMAX_DELAY);
+    connectTry();
+    connectState = 2;
+  }
+}
+
+// A try finished: say hello, or note why not and wait longer before the next.
+static void connectFinish() {
+  connectState = 0;
+  if (connectOk && paused) {   // an update started meanwhile
+    client.close(1001);
+    return;
+  }
+  if (connectOk) {
+    sayHello();
+    return;
+  }
+  if (piIpKnown) piIpFails++;
+  if (tries < 60000) tries++;
+  snprintf(tryFail, sizeof(tryFail), "%s at %s", client.failure(), connectHost);
+  Serial.printf("[WS] Try %u failed: %s\n", tries, tryFail);
+  // Wait longer each time, with a little randomness so a clock and a
+  // restarting Pi don't keep missing each other.
+  retryMs = min(retryMs * 2, (unsigned long)LINK_RETRY_MAX_MS);
+  nextTryAt = millis() + retryMs * 3 / 4 + random(retryMs / 2 + 1);
 }
 
 void wsConnect() {
@@ -331,45 +693,171 @@ void wsConnect() {
     Serial.println("[WS] WiFi not connected, skipping wsConnect");
     return;
   }
-
-  String hostStr = PI_HOSTNAME;
-  IPAddress piIP;
-  if (!piIP.fromString(PI_HOSTNAME)) {
-    IPAddress resolved = MDNS.queryHost(PI_HOSTNAME, 3000);
-    if (resolved != INADDR_NONE && resolved[0] != 0) {
-      hostStr = resolved.toString();
-      Serial.printf("[WS] mDNS resolved: %s -> %s\n", PI_HOSTNAME, hostStr.c_str());
-    } else {
-      Serial.println("[WS] mDNS query failed. Trying direct hostname...");
-    }
-  } else {
-    hostStr = piIP.toString();
+  if (connectState) return;   // a try is already running (or waiting to be taken)
+  if (!connectTask) xTaskCreate(connectWorker, "lumo-connect", 6144, nullptr, 1, &connectTask);
+  if (!connectTask) {         // no memory for the task: try here, as before 2.18
+    wsMark("connect");
+    connectTry();
+    connectFinish();
+    return;
   }
+  connectState = 1;
+  xTaskNotifyGive(connectTask);
+}
 
-  Serial.printf("[WS] Connecting to ws://%s:%d%s\n", hostStr.c_str(), PI_WS_PORT, PI_WS_PATH);
-  client.connect(hostStr, PI_WS_PORT, PI_WS_PATH);
+// Every 30 s, how the clock is doing, for the LUMO page in Sage.
+static void sendStatus() {
+  static unsigned long lastStatus = 0;
+  if (!isConnected || !statePtr || !statePtr->paired) return;
+  if (lastStatus && millis() - lastStatus < 30000) return;
+  lastStatus = millis();
+  char perf[160];
+  perfReport(perf, sizeof(perf));   // how smoothly the screen ran since the last STATUS (2.18)
+  char json[384];
+  snprintf(json, sizeof(json),
+           "{\"evt\":\"STATUS\",\"ip\":\"%s\",\"rssi\":%d,\"uptime\":%lu,\"heap\":%u,\"ssid\":\"%.32s\",\"rtt\":%d,\"wifiDrops\":%u,\"perf\":%s}",
+           WiFi.localIP().toString().c_str(), (int)WiFi.RSSI(), millis() / 1000UL,
+           (unsigned)ESP.getFreeHeap(), WiFi.SSID().c_str(), rttMs, (unsigned)wifiDrops, perf);
+  client.sendText(json);
+}
+
+// The router dropped the clock, or the clock lost the router: join again,
+// and if that doesn't take, restart the radio. The ESP32 retries on its own
+// too, but it can get stuck after the router restarts.
+static void wifiWatch() {
+  static unsigned long lostAt = 0, lastJoin = 0, lastReset = 0;
+  unsigned long now = millis();
+  if (WiFi.status() == WL_CONNECTED) {
+    if (lostAt) Serial.printf("[WiFi] Back after %lu s\n", (now - lostAt) / 1000UL);
+    lostAt = 0;
+    return;
+  }
+  if (!lostAt) {
+    lostAt = lastJoin = lastReset = now;
+    wifiDrops++;
+    Serial.println("[WiFi] Lost the network");
+    if (isConnected) {
+      linkDown("Wi-Fi lost");
+      client.close(1001);
+    }
+    return;
+  }
+  if (now - lastReset > WIFI_RESET_MS) {
+    Serial.println("[WiFi] Still gone; restarting the radio");
+    lastReset = lastJoin = now;
+    WiFi.disconnect(true);
+    WiFi.mode(WIFI_OFF);
+    delay(100);
+    WiFi.mode(WIFI_STA);
+    WiFi.setSleep(false);
+    WiFi.begin(netSsid, netPass);
+  } else if (now - lastJoin > WIFI_REJOIN_MS) {
+    Serial.println("[WiFi] Joining again");
+    lastJoin = now;
+    WiFi.disconnect();
+    WiFi.begin(netSsid, netPass);
+  }
+}
+
+// Wi-Fi says it's connected but the Pi stays out of reach: the connection
+// to the router can be stale (it happens after the router restarts, and with
+// a weak signal), so join again every LINK_KICK_MS, and if the Pi is still
+// away after LINK_REBOOT_MS restart LUMO, once per outage. Never while an
+// alarm rings or a timer runs.
+static void piWatch(unsigned long now) {
+  if (isConnected || paused || !downSince || WiFi.status() != WL_CONNECTED) return;
+  unsigned long away = now - downSince;
+  bool busy = statePtr && (statePtr->alarm_ringing || statePtr->local_ringing || statePtr->tm_state == TOOL_RUNNING);
+  if (away > LINK_REBOOT_MS && !restartedForPi && !busy) {
+    Serial.println("[WS] Sage out of reach for 15 min; restarting LUMO");
+    piRestartMagic = RTC_MAGIC;
+    delay(100);
+    ESP.restart();
+  }
+  if (away > LINK_KICK_MS && now - lastKick > LINK_KICK_MS) {
+    lastKick = now;
+    if (kicks < 255) kicks++;
+    piIpFails = 2;       // look the Pi up again too (its address may have changed)
+    Serial.printf("[WiFi] Sage out of reach for %lu s; joining the network again\n", away / 1000UL);
+    WiFi.disconnect();
+    WiFi.begin(netSsid, netPass);
+  }
 }
 
 void wsPoll() {
-  client.poll();
-
-  if (!isConnected && WiFi.status() == WL_CONNECTED) {
-    unsigned long now = millis();
-    if (now - lastReconnectAttempt >= reconnectInterval) {
-      lastReconnectAttempt = now;
-      Serial.printf("[WS] Reconnecting (backoff: %lu ms)...\n", reconnectInterval);
-      wsConnect();
-      reconnectInterval = min(reconnectInterval * 2, MAX_BACKOFF);
-    }
+  wsMark("link");
+  wifiWatch();
+  if (connectState == 2) connectFinish();
+  if (connectState == 1) {    // the connect task has the socket
+    piWatch(millis());
+    return;
   }
+  client.poll();
+  sendStatus();
+
+  unsigned long now = millis();
+  if (isConnected) {
+    bool paired = statePtr && statePtr->paired;
+    if (now - lastHeard > LINK_DEAD_MS) {
+      linkDown("no reply to pings");
+      client.close(1001);
+    } else if (!paired && now - openedAt > LINK_HELLO_MS) {
+      linkDown("no answer to the pairing code");
+      client.close(1008);
+    } else if (now - lastPingSent >= LINK_PING_MS) {
+      lastPingSent = now;
+      client.ping();
+    }
+    return;
+  }
+
+  piWatch(now);
+  if (!paused && WiFi.status() == WL_CONNECTED && (int32_t)(now - nextTryAt) >= 0) {
+    Serial.printf("[WS] Reconnecting (next wait: %lu ms)...\n", retryMs);
+    wsConnect();
+  }
+}
+
+void wsPause() {
+  paused = true;
+  if (isConnected) {
+    linkDown("updating");
+    client.close(1001);
+  }
+}
+
+void wsResume() {
+  paused = false;
+  nextTryAt = millis();
 }
 
 bool wsConnected() {
   return isConnected;
 }
 
+unsigned long wsDownFor() {
+  return downSince ? millis() - downSince : 0;
+}
+
 void wsSend(const char* json) {
   if (isConnected) {
-    client.send(json);
+    client.sendText(json);
   }
+}
+
+void wsReportOffline(const char* action, int h, int m) {
+  if (isConnected && statePtr && statePtr->paired) {
+    char json[96];
+    if (h >= 0) snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"h\":%d,\"m\":%d,\"ago\":0}", action, h, m);
+    else snprintf(json, sizeof(json), "{\"evt\":\"OFFLINE\",\"a\":\"%s\",\"ago\":0}", action);
+    client.sendText(json);
+    return;
+  }
+  if (pendingCount == sizeof(pending) / sizeof(pending[0])) {   // keep the newest
+    memmove(pending, pending + 1, sizeof(pending) - sizeof(pending[0]));
+    pendingCount--;
+  }
+  OfflineReport& r = pending[pendingCount++];
+  strlcpy(r.a, action, sizeof(r.a));
+  r.h = h; r.m = m; r.at = millis();
 }

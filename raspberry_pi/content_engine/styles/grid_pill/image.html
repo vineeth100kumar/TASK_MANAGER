@@ -1,0 +1,155 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    {{ base_css | safe }}
+
+    .content-container {
+      position: absolute;
+      left: 110px;
+      top: var(--content-top, 240px);
+      width: 860px;
+      display: flex;
+      flex-direction: column;
+      z-index: 5;
+    }
+
+    .image-headline {
+      font-family: 'League Spartan', sans-serif;
+      font-weight: 800;
+      font-size: 84px;
+      line-height: 0.92;
+      letter-spacing: -0.01em;
+      color: #000000;
+      text-transform: uppercase;
+      text-align: left;
+      margin-bottom: 28px;
+    }
+
+    .accent-bar {
+      width: 80px;
+      height: 6px;
+      background-color: #EE4425;
+      border-radius: 3px;
+      margin-bottom: 32px;
+    }
+
+    .image-frame {
+      width: 860px;
+      height: 640px;
+      border-radius: 28px;
+      overflow: hidden;
+      background-color: transparent;
+      flex-shrink: 0;
+    }
+
+    .image-frame img {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .image-caption {
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 34px;
+      line-height: 1.3;
+      color: #111111;
+      text-align: left;
+      margin-top: 28px;
+    }
+
+    .image-bullets {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35em;
+      margin-top: 24px;
+      font-family: 'Inter', sans-serif;
+      font-weight: 500;
+      font-size: 34px;
+      line-height: 1.25;
+      color: #111111;
+    }
+
+    .image-bullet { display: flex; align-items: flex-start; gap: 0.55em; }
+
+    .ib-mark {
+      width: 0.4em;
+      height: 0.4em;
+      border-radius: 50%;
+      background-color: #EE4425;
+      margin-top: 0.45em;
+      flex-shrink: 0;
+    }
+
+    .image-frame {
+      position: relative;
+    }
+
+    .image-text-above { margin-bottom: 28px; }
+    .image-text-above .image-caption { margin-top: 0; }
+    .image-text-above .image-bullets { margin-top: 18px; }
+
+    .image-tint, .image-scrim { position: absolute; inset: 0; pointer-events: none; }
+    .image-scrim { background: #000000; }
+
+
+    .image-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 14px;
+      padding: 40px;
+      text-align: center;
+      font-family: 'Inter', sans-serif;
+      color: #666666;
+      background: repeating-linear-gradient(45deg, #F3F3F3, #F3F3F3 18px, #E9E9E9 18px, #E9E9E9 36px);
+      outline: 3px dashed #999999;
+      outline-offset: -14px;
+    }
+
+    .image-placeholder b { font-size: 26px; letter-spacing: 0.12em; text-transform: uppercase; color: #444444; }
+    .image-placeholder span { font-size: 32px; line-height: 1.3; max-width: 90%; }
+  </style>
+</head>
+<body>
+  <div class="header-row">
+    <div class="header-left">{{ brand.page_name }}</div>
+    <div class="topic-pill">{{ brand.tag or 'BUSINESS' }}</div>
+  </div>
+
+  <div class="content-container">
+    {% if headline %}
+    <h2 class="image-headline">{{ headline }}</h2>
+    <div class="accent-bar"></div>
+    {% endif %}
+    {% if fx.above %}
+    <div class="image-text-above">
+      {% if body %}<p class="image-caption">{{ body }}</p>{% endif %}
+      {% if bullets %}<div class="image-bullets">{% for b in bullets %}<div class="image-bullet"><span class="ib-mark"></span><span>{{ b }}</span></div>{% endfor %}</div>{% endif %}
+    </div>
+    {% endif %}
+    <div class="image-frame" style="{{ fx.frame_style }}">
+      {% if image_url %}<img src="{{ image_url }}" alt="{{ alt }}" style="{{ fx.img_style }}">
+      {% else %}<div class="image-placeholder"><b>Picture needed</b>{% if placeholder %}<span>{{ placeholder }}</span>{% endif %}</div>{% endif %}
+      {% if fx.tint_color %}<div class="image-tint" style="background: {{ fx.tint_color }}; opacity: {{ fx.tint_strength }};"></div>{% endif %}
+      {% if fx.overlay %}<div class="image-scrim" style="opacity: {{ fx.overlay }};"></div>{% endif %}
+    </div>
+    {% if not fx.above %}
+    {% if body %}<p class="image-caption">{{ body }}</p>{% endif %}
+    {% if bullets %}<div class="image-bullets">{% for b in bullets %}<div class="image-bullet"><span class="ib-mark"></span><span>{{ b }}</span></div>{% endfor %}</div>{% endif %}
+    {% endif %}
+  </div>
+
+  {% if source_note %}<div class="slide-source">{{ source_note }}</div>{% endif %}
+
+  <div class="footer-row">
+    <div class="footer-left">{{ brand.handle }}</div>
+    <div class="slide-counter">{{ counter }}</div>
+  </div>
+</body>
+</html>

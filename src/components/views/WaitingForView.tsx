@@ -7,7 +7,10 @@ import { WorkItem, LifeContext } from '../../services/types';
 import { useCompletion } from '../../hooks/useCompletion';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { useCachedState } from '../../hooks/useCachedState';
 import { SnoozeMenu } from '../common/SnoozeMenu';
+import { DatePicker } from '../common/DatePicker';
+import { useEscapeKey } from '../../hooks/useEscapeKey';
 
 interface WaitingForViewProps {
   lifeContext?: LifeContext;
@@ -15,8 +18,10 @@ interface WaitingForViewProps {
 }
 
 export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProps) {
-  const [items, setItems] = useState<WorkItem[]>([]);
+  const [items, setItems, loaded] = useCachedState<WorkItem[]>(`waiting:${lifeContext || 'all'}`, []);
   const [isAddOpen, setIsAddOpen] = useState(false);
+  const closeAdd = React.useCallback(() => setIsAddOpen(false), []);
+  useEscapeKey(closeAdd, isAddOpen);
   const [who, setWho] = useState('');
   const [about, setAbout] = useState('');
   const [followUpDate, setFollowUpDate] = useState('');
@@ -97,7 +102,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
             <span>Waiting For & Delegations</span>
           </div>
           <h2 className="text-display text-[26px] md:text-[32px] font-semibold leading-tight">
-            {items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
+            {!loaded ? 'Waiting for' : items.length === 0 ? 'Nothing pending on others' : `${items.length} pending response${items.length === 1 ? '' : 's'}`}
           </h2>
           <p className="text-[13.5px] text-gray-500 dark:text-gray-400 mt-1.5">
             Track questions asked, tasks delegated, and documents pending someone else's reply.
@@ -113,7 +118,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
       </div>
 
       {/* Waiting Items List */}
-      {items.length === 0 ? (
+      {!loaded ? null : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
           <div className="w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
             <UserCheck size={24} />
@@ -205,7 +210,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                   <Hourglass size={16} />
                   <span>Track Delegated Item</span>
                 </div>
-                <button onClick={() => setIsAddOpen(false)}><X size={18} className="text-gray-400" /></button>
+                <button type="button" onClick={() => setIsAddOpen(false)} className="p-1.5 -mr-1.5 rounded-lg text-gray-400 hover:text-gray-700 hover:bg-gray-100 dark:hover:text-gray-200 dark:hover:bg-white/10 transition-colors" aria-label="Close"><X size={18} /></button>
               </div>
 
               <form onSubmit={handleCreateWaiting} className="space-y-4">
@@ -234,10 +239,9 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
                 <div>
                   <label className="text-[11px] font-semibold uppercase tracking-wider text-gray-400 block mb-1">When should you follow up if no reply?</label>
-                  <input 
-                    type="date" 
+                  <DatePicker 
                     value={followUpDate} 
-                    onChange={e => setFollowUpDate(e.target.value)}
+                    onChange={v => setFollowUpDate(v)}
                     className="w-full px-3.5 py-2.5 rounded-xl bg-gray-100 dark:bg-white/5 border border-transparent dark:border-white/10 text-xs font-semibold outline-none dark:text-white"
                   />
                 </div>

@@ -13,6 +13,8 @@ import { IdeaPage } from '../radar/IdeaPage';
 import { VaultTab } from '../radar/VaultTab';
 import { MarketsTab } from '../radar/MarketsTab';
 import { LabTab } from '../radar/LabTab';
+import { IndustrySearch } from '../radar/IndustrySearch';
+import { IndustryPage } from '../radar/IndustryPage';
 
 type Tab = 'signals' | 'lab' | 'markets' | 'studio' | 'ideas' | 'vault';
 
@@ -40,6 +42,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
   const [ideaId, setIdeaId] = useState<string | null>(null);
   const [vaultOpenId, setVaultOpenId] = useState<string | null>(null);
   const [seedTheme, setSeedTheme] = useState('');
+  const [industryId, setIndustryId] = useState<string | null>(null);
   const [summary, setSummary] = useState<RadarSummary | null>(null);
   const [signals, setSignals] = useState<RadarSignal[]>([]);
   const [region, setRegion] = useState('Global');
@@ -53,6 +56,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
   const setTab = (t: Tab) => {
     setTabState(t);
     setIdeaId(null);
+    setIndustryId(null);
     try { localStorage.setItem(TAB_KEY, t); } catch { /* storage unavailable */ }
   };
 
@@ -137,6 +141,14 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
     );
   }
 
+  if (industryId) {
+    return (
+      <div className="max-w-6xl mx-auto">
+        <IndustryPage briefId={industryId} onBack={() => setIndustryId(null)} onResearch={research} onOpenNote={onOpenNote} onOpenBrief={setIndustryId} />
+      </div>
+    );
+  }
+
   const idea = ideaId ? ideas.find(i => i.id === ideaId) : undefined;
   if (idea) {
     return (
@@ -201,6 +213,8 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
           </p>
         )}
       </div>
+
+      <IndustrySearch onOpen={id => { setIdeaId(null); setIndustryId(id); }} />
 
       {tab === 'signals' && (!summary && !error ? (
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6" aria-busy="true">

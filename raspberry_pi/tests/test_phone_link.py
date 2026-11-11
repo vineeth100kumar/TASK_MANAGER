@@ -27,7 +27,10 @@ def attrs_packet(uid, app, title, message):
 class Decoding(unittest.TestCase):
     def test_notification_source(self):
         note = phone_link.parse_notification_source(bytes([0, 0, 4, 1]) + struct.pack("<I", 77))
-        self.assertEqual(note, {"event": "added", "silent": False, "preExisting": False, "category": "social", "uid": 77})
+        self.assertEqual(note, {"event": "added", "silent": False, "important": False, "preExisting": False,
+                                "positive": False, "negative": False, "category": "social", "uid": 77})
+        call = phone_link.parse_notification_source(bytes([0, 2 | 8 | 16, 1, 1]) + struct.pack("<I", 78))
+        self.assertEqual((call["category"], call["important"], call["positive"], call["negative"]), ("incoming call", True, True, True))
         self.assertTrue(phone_link.parse_notification_source(bytes([2, 4, 0, 0, 1, 0, 0, 0]))["preExisting"])
         self.assertIsNone(phone_link.parse_notification_source(b"\x00\x01"))
 
@@ -38,6 +41,13 @@ class Decoding(unittest.TestCase):
 
     def test_entity_update(self):
         self.assertEqual(phone_link.parse_entity_update(bytes([2, 2, 0]) + b"Yellow"), (2, 2, "Yellow"))
+
+    def test_app_color(self):
+        self.assertEqual(phone_link.app_color("net.whatsapp.WhatsApp"), "#25D366")
+        made_up = phone_link.app_color("com.example.thing")
+        self.assertIn(made_up, phone_link.APP_PALETTE)
+        self.assertEqual(phone_link.app_color("com.example.thing"), made_up)   # always the same
+        self.assertEqual(phone_link.app_color("", "email"), "#0A84FF")
 
     def test_app_label(self):
         self.assertEqual(phone_link.app_label("com.apple.MobileSMS"), "Messages")
@@ -66,6 +76,27 @@ class State(unittest.TestCase):
         self.assertEqual(self.sent[-1]["type"], "PHONE_NOTIFICATION")
         note = self.sent[-1]["notification"]
         self.assertEqual((note["id"], note["app"], note["title"], note["message"]), ("5", "WhatsApp", "Ravi", "On my way"))
+
+    def test_actions_go_to_the_phone(self):
+        written = []
+
+        class ControlPoint:
+            async def call_write_value(self, value, options):
+                written.append(bytes(value))
+
+        async def go():
+            self.link._pending[7] = {"category": "incoming call", "uid": 7, "positive": True, "negative": True}
+            await self.link._on_value(phone_link.ANCS_DATA_SOURCE, attrs_packet(7, "com.apple.mobilephone", "Amma", "Incoming call"))
+            note = self.sent[-1]["notification"]
+            self.assertEqual((note["color"], note["actions"]), ("#34C759", {"positive": True, "negative": True}))
+            self.assertFalse(await self.link.perform_action("7", True))       # no link yet
+            self.link._chars[phone_link.ANCS_CONTROL_POINT] = ControlPoint()
+            self.assertTrue(await self.link.perform_action("7", False))
+            self.assertFalse(await self.link.perform_action("99", True))      # not one of the phone's
+            await self.link.add_notification({"title": "Test", "uid": "local-1"})
+            self.assertFalse(await self.link.perform_action("local-1", False))
+        self.run_async(go())
+        self.assertEqual(written, [bytes([2, 7, 0, 0, 0, 1])])
 
     def test_keeps_newest_twenty_and_removes(self):
         async def go():
@@ -118,9 +149,16 @@ class V:
 
 
 class FakeChar:
-    def __init__(self, fail_notify=None, fail_write=None):
+    def __init__(self, fail_notify=None, fail_write=None, values=None):
         self.fail_notify, self.fail_write = fail_notify, fail_write
-        self.notified, self.writes = 0, []
+        self.notified, self.stopped, self.writes = 0, 0, []
+        self.values = values or {}  # AMS Entity Attribute: (entity, attr) -> value
+
+    async def call_read_value(self, options):
+        return self.values.get(tuple(self.writes[-1]), b"")
+
+    async def call_stop_notify(self):
+        self.stopped += 1
 
     async def call_start_notify(self):
         self.notified += 1
@@ -191,6 +229,100 @@ class Subscribing(unittest.TestCase):
         ams.fail_write = None
         asyncio.run(link._subscribe(objects, dev))
         self.assertIn(phone_link.AMS_ENTITY_UPDATE, link._chars)
+
+    def test_invalid_state_restarts_the_songs_notify(self):
+        """BlueZ said Notifying=yes but the phone answered AMS 0xA0 (not
+        listening): stop and start the notify so BlueZ tells the phone again."""
+        dev = "/org/bluez/hci0/dev_X"
+        path = f"{dev}/service1/char0"
+        ams = FakeChar(fail_write="Operation failed with ATT error: 0xa0")
+        objects = {path: {"org.bluez.GattCharacteristic1": {"UUID": V(phone_link.AMS_ENTITY_UPDATE), "Notifying": V(True)}}}
+        link = phone_link.PhoneLink()
+        props = FakeProps()
+
+        async def char(_path):
+            return FakeObj(ams, props)
+        link._char = char
+        with mock.patch.object(phone_link, "AMS_SETTLE", 0):
+            asyncio.run(link._subscribe(objects, dev))
+            self.assertEqual((ams.stopped, ams.notified), (0, 0))  # BlueZ said it was on
+            self.assertTrue(link._ams_not_listening)
+            ams.fail_write = None
+            asyncio.run(link._subscribe(objects, dev))
+        self.assertEqual((ams.stopped, ams.notified), (1, 1))
+        self.assertFalse(link._ams_not_listening)
+        self.assertEqual(link.link["nowPlaying"], "asked")
+
+
+class Resubscribing(unittest.TestCase):
+    """The phone's BLE link can drop and come back between two ticks. BlueZ
+    then stops notifying and the phone forgets the song request, so the Pi
+    has to subscribe again or now playing freezes while the phone looks
+    connected."""
+
+    def test_quiet_entity_update_means_subscribe_again(self):
+        dev = "/org/bluez/hci0/dev_X"
+        path = f"{dev}/service1/char0"
+        link = phone_link.PhoneLink()
+        link._chars = {phone_link.AMS_ENTITY_UPDATE: FakeChar()}
+
+        def objects(notifying):
+            return {path: {"org.bluez.GattCharacteristic1": {"UUID": V(phone_link.AMS_ENTITY_UPDATE), "Notifying": V(notifying)}}}
+
+        with mock.patch.object(phone_link.time, "time", return_value=1000):
+            link._subscribed_at = 990  # just subscribed: BlueZ may not have set the flag yet
+            self.assertEqual(link._stale_reason(objects(False), dev), "")
+            link._subscribed_at = 900
+            self.assertEqual(link._stale_reason(objects(True), dev), "")
+            self.assertIn("no longer notifying", link._stale_reason(objects(False), dev))
+            self.assertIn("gone", link._stale_reason({}, dev))
+
+
+class MissingTitle(unittest.TestCase):
+    """The Pi subscribed mid-song (a restart, a BLE drop): the phone sent the
+    player ("playing", the app) but not the track, and the clock said
+    "Nothing playing". The Pi reads the song itself."""
+
+    def setUp(self):
+        self.link = phone_link.PhoneLink()
+        self.sent = []
+
+        async def broadcast(event):
+            self.sent.append(event)
+        self.link.broadcast = broadcast
+        self.ams = FakeChar()
+        self.attr = FakeChar(values={(2, 2): b"Clocks", (2, 0): b"Coldplay", (2, 1): b"A Rush of Blood", (2, 3): b"307.5"})
+        self.link._chars = {phone_link.AMS_ENTITY_UPDATE: self.ams, phone_link.AMS_ENTITY_ATTRIBUTE: self.attr}
+
+    def check_at(self, t):
+        with mock.patch.object(phone_link.time, "time", return_value=t):
+            asyncio.run(self.link._check_title())
+
+    def test_reads_the_song_when_playing_with_no_title(self):
+        asyncio.run(self.link._on_value(phone_link.AMS_ENTITY_UPDATE, bytes([0, 0, 0]) + b"YouTube Music"))
+        asyncio.run(self.link._on_value(phone_link.AMS_ENTITY_UPDATE, bytes([0, 1, 0]) + b"1,1.0,40"))
+        self.check_at(1000)
+        self.assertEqual(self.attr.writes, [])  # gives the phone a moment first
+        self.check_at(1004)
+        media = self.sent[-1]["media"]
+        self.assertEqual((media["title"], media["artist"], media["duration"]), ("Clocks", "Coldplay", 307.5))
+        self.assertEqual(self.link.link["nowPlaying"], "asked")
+        self.check_at(1010)  # has a title now: nothing more to ask
+        self.assertEqual(len(self.attr.writes), 4)
+
+    def test_no_title_back_asks_again_later(self):
+        self.attr.values = {}
+        self.link.media["playing"] = True
+        self.check_at(1000)
+        self.check_at(1004)
+        self.assertEqual(self.ams.writes, [bytes([2, 0, 1, 2, 3])])  # asked for the track again
+        self.check_at(1010)
+        self.assertEqual(len(self.ams.writes), 1)  # waits before the next try
+        self.check_at(1020)
+        self.assertEqual(len(self.ams.writes), 2)
+        self.link.media["playing"] = False
+        self.check_at(1100)
+        self.assertEqual(self.link._title_tries, 0)
 
 
 class Logging(unittest.TestCase):

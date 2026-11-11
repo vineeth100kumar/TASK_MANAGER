@@ -6,6 +6,7 @@ import { api } from '../../services/api';
 import { WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
+import { DatePicker } from '../common/DatePicker';
 
 interface InboxTriageProps {
   items: WorkItem[];
@@ -215,7 +216,7 @@ export function InboxTriage({ items, onClose, onChanged }: InboxTriageProps) {
                     ))}
                   </div>
                   <div className="flex gap-2">
-                    <input type="date" className="field" value={customDate} onChange={e => setCustomDate(e.target.value)} aria-label="Pick a date" />
+                    <DatePicker className="field" value={customDate} onChange={v => setCustomDate(v)} aria-label="Pick a date" />
                     <button onClick={() => customDate && doSchedule(customDate)} disabled={!customDate || busy}
                       className="px-4 rounded-xl text-[14px] font-semibold bg-blue-600 hover:bg-blue-700 text-white disabled:opacity-50 transition-colors">Set</button>
                   </div>
@@ -231,7 +232,7 @@ export function InboxTriage({ items, onClose, onChanged }: InboxTriageProps) {
                   </div>
                   <div className="space-y-1.5">
                     <label className="field-label" htmlFor="triage-follow">Follow up on</label>
-                    <input id="triage-follow" type="date" className="field" value={followUp} onChange={e => setFollowUp(e.target.value)} />
+                    <DatePicker id="triage-follow" className="field" value={followUp} onChange={v => setFollowUp(v)} />
                   </div>
                   <div className="flex items-center justify-between pt-1">
                     <button type="button" onClick={() => setStep('choose')} className="text-[13px] font-medium text-gray-500 hover:text-gray-800 dark:hover:text-gray-200">← Back</button>

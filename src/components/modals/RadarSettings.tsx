@@ -3,6 +3,7 @@ import { KeyRound, Radar } from 'lucide-react';
 import { piBackendUrl, piHeaders } from '../../services/piBackend';
 import { RadarSettings as Settings, radarAvailable, radarSettingsApi } from '../../services/radar';
 import { useToast } from '../../context/ToastContext';
+import { Select } from '../common/Select';
 import { EdgeEditor } from '../radar/EdgeEditor';
 
 function Toggle({ on, onChange, label }: { on: boolean; onChange: (on: boolean) => void; label: string }) {
@@ -106,8 +107,8 @@ export function RadarSettings() {
     }
   };
 
-  if (!radarAvailable()) return <p className="text-[13px] text-gray-500">Radar runs on the Pi server, so its settings show when Sage is opened from the Pi.</p>;
-  if (error) return <p className="text-[13px] text-red-500">{error}</p>;
+  if (!radarAvailable()) return <div className="rounded-2xl border border-gray-100 dark:border-white/5 bg-gray-50 dark:bg-white/[0.03] p-4"><p className="text-xs text-gray-500">Radar runs on the Pi server, so its settings show when Sage is opened from the Pi.</p></div>;
+  if (error) return <div className="rounded-2xl border border-red-200/60 dark:border-red-500/20 bg-red-50 dark:bg-red-500/10 p-4"><p className="text-xs font-medium text-red-600 dark:text-red-400">{error}</p></div>;
   if (!settings) return <div className="skeleton h-40" />;
 
   return (
@@ -123,10 +124,10 @@ export function RadarSettings() {
         <EdgeEditor key={JSON.stringify(settings.edge)} edge={settings.edge} onSaved={edge => setSettings({ ...settings, edge })} />
       </div>
       <Row title="Sparks each morning" detail="How many business-idea sparks the Lab makes at 7:00. One AI call makes the whole batch.">
-        <select value={settings.sparksPerDay} onChange={e => save({ sparksPerDay: Number(e.target.value) as Settings['sparksPerDay'] })}
+        <Select value={String(settings.sparksPerDay)} onChange={v => save({ sparksPerDay: Number(v) as Settings['sparksPerDay'] })}
           className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-[13px] font-semibold">
-          {[3, 5, 10].map(n => <option key={n} value={n}>{n}</option>)}
-        </select>
+          {[3, 5, 10].map(n => <option key={n} value={String(n)}>{n}</option>)}
+        </Select>
       </Row>
       <Row title="Radar brief on Today" detail="Three signals, the biggest market move and the hottest topic, on the Today screen.">
         <Toggle on={settings.brief} onChange={brief => save({ brief })} label="Radar brief on Today" />
@@ -137,11 +138,11 @@ export function RadarSettings() {
           className="w-16 px-2 py-1.5 rounded-xl bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-[13px] font-semibold text-center tabular-nums" />
       </Row>
       <Row title="AI for research" detail="Groq is free with the key under Server & Reset. Claude writes sharper dossiers and is paid per run. The other one is the backup.">
-        <select value={settings.engine} onChange={e => save({ engine: e.target.value as Settings['engine'] })}
+        <Select value={settings.engine} onChange={v => save({ engine: v as Settings['engine'] })}
           className="px-2.5 py-1.5 rounded-xl bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-[13px] font-semibold">
           <option value="groq">Groq first</option>
           <option value="claude">Claude first</option>
-        </select>
+        </Select>
       </Row>
       <Row title="Radar line on LUMO" detail="Mornings, the clock's Tasks screen adds one line: the hottest topic and the biggest market move.">
         <Toggle on={settings.lumoLine} onChange={lumoLine => save({ lumoLine })} label="Radar line on LUMO" />

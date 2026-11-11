@@ -1,14 +1,15 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, Suspense } from 'react';
 import { flushSync } from 'react-dom';
 import { AnimatePresence, LayoutGroup, MotionConfig, motion } from 'framer-motion';
 import { ShieldAlert, CheckCircle, LayoutList, Plus, RotateCcw } from 'lucide-react';
 
 import { api } from './services/api';
-import { STATUSES, FOCUS_LIMIT } from './services/constants';
+import { FOCUS_LIMIT } from './services/constants';
 import { LifeFilter } from './services/types';
 import { ToastProvider, useToast } from './context/ToastContext';
 import { notificationService } from './services/notificationService';
 import { refreshSubscription } from './services/pushNotifications';
+import { loadLifeMode, getLifeMode, lifeModeError, setLifeMode, useLifeMode } from './services/lifeMode';
 import { countDoneToday, doneMessage, haptic } from './utils/progress';
 
 import { Sidebar } from './components/layout/Sidebar';
@@ -20,24 +21,26 @@ import { FocusView } from './components/views/FocusView';
 import { WaitingForView } from './components/views/WaitingForView';
 import { ListView } from './components/views/ListView';
 import { BoardView } from './components/views/BoardView';
-import { TableView } from './components/views/TableView';
-import { CalendarView } from './components/views/CalendarView';
-import { TimelineView } from './components/views/TimelineView';
-import { NotesView } from './components/views/NotesView';
-import { NotesLock } from './components/notes/NotesLock';
-import { CanvasView } from './components/views/CanvasView';
-import { RadarView } from './components/views/RadarView';
-import { ProjectBranchesView } from './components/branches/ProjectBranchesView';
-import { TrashModal } from './components/modals/TrashModal';
-import { SyncDiagnosticsModal } from './components/modals/SyncDiagnosticsModal';
-import { SettingsModal } from './components/modals/SettingsModal';
 import { FilterBar } from './components/common/FilterBar';
-import { ShortcutSheet } from './components/modals/ShortcutSheet';
+import { ShownLine } from './components/common/ShownLine';
+import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
-import { MorningPickThree } from './components/modals/MorningPickThree';
-import { EveningShutdown } from './components/modals/EveningShutdown';
+import {
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, ReelsView, HiddenView, ProjectBranchesView,
+  CalendarView, TimelineView, TableView,
+  SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
+  prefetchViews,
+} from './components/views/lazyViews';
 import { PhoneCorner } from './components/common/PhoneCorner';
+import { ModePrompt } from './components/common/ModePrompt';
+import { WelcomeHome } from './components/common/WelcomeHome';
+import { SageLoader } from './components/common/SageLoader';
+import { BootBoundary } from './components/common/BootBoundary';
+import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
+import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { ProjectFront } from './components/common/ProjectFront';
+import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
 function MainApp() {
   // Global State
@@ -49,11 +52,17 @@ function MainApp() {
   
   // Navigation State
   const [activeView, setActiveView] = useState('dashboard');
+  // Posts page: a project to show posts of, and a post or New post to open (nonce makes a repeat tap count).
+  const [postsProject, setPostsProject] = useState('');
+  const [postsFocus, setPostsFocus] = useState<{ postId?: string; newPost?: boolean; nonce: number } | null>(null);
+  // Reels page, the same way.
+  const [reelsProject, setReelsProject] = useState('');
+  const [reelsFocus, setReelsFocus] = useState<{ reelId?: string; newReel?: boolean; nonce: number } | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
   const [presentationMode, setPresentationMode] = useState(() => window.matchMedia('(max-width: 767px)').matches ? 'list' : 'board');
   const [isShortcutsOpen, setIsShortcutsOpen] = useState(false);
-  const [filters, setFilters] = useState({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' });
+  const [filters, setFilters] = useState<{ search: string; entityType: string; priority: string; status: string; tag: string; stage?: string }>({ search: '', entityType: 'all', priority: 'all', status: 'all', tag: '' });
   // Work and personal show together unless the sidebar filter narrows to one.
   const [lifeFilter, setLifeFilterState] = useState<LifeFilter>(() => {
     try {
@@ -65,22 +74,38 @@ function MainApp() {
     setLifeFilterState(f);
     try { localStorage.setItem('sage-life-filter', f); } catch { /* storage unavailable */ }
   }, []);
-  const lifeContext = lifeFilter === 'all' ? undefined : lifeFilter;
+  // Chill mode shows personal only, whatever the sidebar filter says; Work
+  // mode shows what the filter picks (see services/lifeMode.ts).
+  const { mode: lifeMode } = useLifeMode();
+  useEffect(() => { loadLifeMode(); }, []);
+  // Personal-only is Chill now, so Work shows work, or everything with "Show personal too".
+  const viewFilter: LifeFilter = lifeMode === 'chill' ? 'personal' : lifeFilter === 'personal' ? 'all' : lifeFilter;
+  const lifeContext = viewFilter === 'all' ? undefined : viewFilter;
   // Radar is work only; switching to Personal while on it goes back to Today.
   useEffect(() => {
-    if (lifeFilter === 'personal' && activeView === 'radar') setActiveView('dashboard');
-  }, [lifeFilter, activeView]);
+    if (viewFilter === 'personal' && activeView === 'radar') setActiveView('dashboard');
+  }, [viewFilter, activeView]);
   
   // Data State
   const [workItems, setWorkItems] = useState<any[]>([]);
+  // How many of the page's items are on screen, and why the rest aren't.
+  const [shown, setShown] = useState<Shown>({ total: 0, shown: 0, hidden: {} });
+  const [typeCounts, setTypeCounts] = useState<Record<string, number>>({});
   const [isLoading, setIsLoading] = useState(true);
+  // The splash stays up until the first data load finishes, so the app never
+  // flashes empty between login and its data. A safety timer lets it go even
+  // if that first load is slow or offline.
+  const [booted, setBooted] = useState(false);
   const [selectedItemId, setSelectedItemId] = useState<string | null>(null);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<string | undefined>(undefined);
+  const openSettings = useCallback((tab?: string) => { setSettingsTab(tab); setIsSettingsOpen(true); }, []);
   const [isTrashOpen, setIsTrashOpen] = useState(false);
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const [isMorningOpen, setIsMorningOpen] = useState(false);
   const [isEveningOpen, setIsEveningOpen] = useState(false);
+  const [isWeeklyOpen, setIsWeeklyOpen] = useState(false);
   // A note to open when Notes shows next (Radar's "Open note").
   const [openNoteId, setOpenNoteId] = useState<string | null>(null);
   useEffect(() => { if (activeView !== 'notes') setOpenNoteId(null); }, [activeView]);
@@ -138,18 +163,41 @@ function MainApp() {
     const openId = params.get('open');
     const actionParam = params.get('action');
     const viewParam = params.get('view');
+    const postParam = params.get('post');
+    const reelParam = params.get('reel');
     const ritualParam = params.get('ritual');
-    if (openId || actionParam || viewParam || ritualParam) {
+    if (openId || actionParam || viewParam || ritualParam || postParam || reelParam) {
       params.delete('open');
       params.delete('action');
       params.delete('view');
       params.delete('ritual');
+      params.delete('post');
+      params.delete('reel');
       const rest = params.toString();
       window.history.replaceState(null, '', window.location.pathname + (rest ? `?${rest}` : '') + window.location.hash);
     }
+    // A "your post is ready" email opens the post.
+    if (postParam) { setActiveView('posts'); setPostsFocus({ postId: postParam, nonce: Date.now() }); }
+    const onOpenPosts = (e: Event) => {
+      const d = (e as CustomEvent<{ postId?: string; projectId?: string; newPost?: boolean }>).detail || {};
+      setPostsProject(d.projectId || '');
+      setPostsFocus({ postId: d.postId, newPost: d.newPost, nonce: Date.now() });
+      setActiveView('posts');
+    };
+    window.addEventListener('sage:open-posts', onOpenPosts);
+    // A "your reel is ready" email opens the reel.
+    if (reelParam) { setActiveView('reels'); setReelsFocus({ reelId: reelParam, nonce: Date.now() }); }
+    const onOpenReels = (e: Event) => {
+      const d = (e as CustomEvent<{ reelId?: string; projectId?: string; newReel?: boolean }>).detail || {};
+      setReelsProject(d.projectId || '');
+      setReelsFocus({ reelId: d.reelId, newReel: d.newReel, nonce: Date.now() });
+      setActiveView('reels');
+    };
+    window.addEventListener('sage:open-reels', onOpenReels);
     if (actionParam === 'new-task') setIsCreateModalOpen(true);
     if (ritualParam === 'morning') setIsMorningOpen(true);
     if (ritualParam === 'evening') setIsEveningOpen(true);
+    if (ritualParam === 'weekly') setIsWeeklyOpen(true);
     if (viewParam === 'focus') setActiveView('focus');
     else if (viewParam === 'dashboard') setActiveView('dashboard');
     else if (viewParam === 'inbox') setActiveView('inbox');
@@ -157,6 +205,14 @@ function MainApp() {
       if (event.data?.type === 'sage-open-item' && typeof event.data.id === 'string') setSelectedItemId(event.data.id);
     };
     navigator.serviceWorker?.addEventListener('message', onWorkerMessage);
+    // Screens can open a ritual without a URL change (Today's weekly review link).
+    const onRitual = (e: Event) => {
+      const r = (e as CustomEvent).detail;
+      if (r === 'weekly') setIsWeeklyOpen(true);
+      if (r === 'evening') setIsEveningOpen(true);
+      if (r === 'morning') setIsMorningOpen(true);
+    };
+    window.addEventListener('sage:ritual', onRitual);
 
     // Another device deleted or more recently changed something edited here.
     const unsubOverruled = api.sync.onOverruled((e) => {
@@ -187,6 +243,9 @@ function MainApp() {
       unsubOverruled();
       unsubEntity();
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
+      window.removeEventListener('sage:ritual', onRitual);
+      window.removeEventListener('sage:open-posts', onOpenPosts);
+      window.removeEventListener('sage:open-reels', onOpenReels);
     };
   }, []);
 
@@ -202,6 +261,12 @@ function MainApp() {
         if (e.key === 'n' || e.key === 'N' || e.key === 'c' || e.key === 'C') {
           e.preventDefault();
           setIsCreateModalOpen(true);
+        } else if (e.key === 'm' || e.key === 'M') {
+          // Work <-> Chill from anywhere.
+          e.preventDefault();
+          const next = getLifeMode().mode === 'chill' ? 'work' : 'chill';
+          setLifeMode(next).then(() => showToast(next === 'chill' ? 'Chill mode: personal only' : 'Work mode: everything shows', 'info'))
+            .catch(e => showToast(lifeModeError(e), 'error'));
         } else if (e.key === '?') {
           e.preventDefault();
           setIsShortcutsOpen(open => !open);
@@ -221,27 +286,74 @@ function MainApp() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  // Fetching
-  const fetchWorkItems = useCallback(async (showLoading = true) => {
-    if (showLoading) setIsLoading(true);
+  // Fetching. The list keeps showing while it refreshes; only the very first
+  // load shows placeholders. A slower, older request never overwrites a newer one.
+  const fetchSeq = useRef(0);
+  const fetchWorkItems = useCallback(async (_showLoading?: boolean) => {
+    const seq = ++fetchSeq.current;
     try {
-      const data = await api.workItems.list({ ...filters, projectId: activeWorkspace, lifeContext });
-      setWorkItems(data);
+      const scope = { ...filters, projectId: activeWorkspace, lifeContext };
+      const [sel, everyKind] = await Promise.all([api.workItems.query(scope), api.workItems.query({ ...scope, entityType: 'all' })]);
+      if (seq === fetchSeq.current) {
+        setWorkItems(sel.items);
+        setShown(sel.count);
+        const counts: Record<string, number> = { all: everyKind.items.length };
+        for (const i of everyKind.items) counts[i.entityType] = (counts[i.entityType] || 0) + 1;
+        setTypeCounts(counts);
+      }
     } catch (e) {
       showToast("Failed to load work items.", "error");
     } finally {
-      setIsLoading(false);
+      if (seq === fetchSeq.current) setIsLoading(false);
+      setBooted(true);
     }
   }, [filters, activeWorkspace, lifeContext, showToast]);
 
   fetchRef.current = fetchWorkItems;
 
-  useEffect(() => { 
-    const debounceTimer = setTimeout(() => {
-      fetchWorkItems(true);
-    }, 250);
+  // Switching project, Work/Personal or a filter reloads at once; only typing
+  // in search waits for a pause.
+  const lastSearch = useRef(filters.search);
+  useEffect(() => {
+    const typing = lastSearch.current !== filters.search;
+    lastSearch.current = filters.search;
+    if (!typing) { fetchWorkItems(); return; }
+    const debounceTimer = setTimeout(() => fetchWorkItems(), 200);
     return () => clearTimeout(debounceTimer);
-  }, [filters, activeWorkspace, lifeContext, fetchWorkItems]);
+  }, [filters.search, fetchWorkItems]);
+
+  // Fetch the other pages' code in the background once the first screen is up,
+  // not while the splash is still waiting on the app's own code and data.
+  useEffect(() => { if (booted) prefetchViews(); }, [booted]);
+
+  // Never let the splash trap the app: show it for at most a few seconds even
+  // if the first data pull is slow or the Pi is unreachable.
+  useEffect(() => {
+    const t = setTimeout(() => setBooted(true), 8000);
+    return () => clearTimeout(t);
+  }, []);
+
+  // A new page starts at the top, not wherever the last one was scrolled to.
+  const scrollRef = useRef<HTMLDivElement>(null);
+  useEffect(() => { scrollRef.current?.scrollTo({ top: 0 }); }, [activeView, activeWorkspace]);
+
+  // A soft light follows the pointer over rows and cards (see .surface-item in index.css).
+  useEffect(() => {
+    if (!window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
+    let frame = 0;
+    let last: PointerEvent | null = null;
+    const paint = () => {
+      frame = 0;
+      const el = (last?.target as Element | null)?.closest?.('.surface-item.is-interactive') as HTMLElement | null;
+      if (!el || !last) return;
+      const r = el.getBoundingClientRect();
+      el.style.setProperty('--mx', `${last.clientX - r.left}px`);
+      el.style.setProperty('--my', `${last.clientY - r.top}px`);
+    };
+    const onMove = (e: PointerEvent) => { last = e; if (!frame) frame = requestAnimationFrame(paint); };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => { window.removeEventListener('pointermove', onMove); cancelAnimationFrame(frame); };
+  }, []);
 
   // Tapping a tag shows everything with it, in the list view.
   const filterByTag = (tag: string) => {
@@ -257,22 +369,26 @@ function MainApp() {
   }, [activeView]);
 
   // Mutations with Universal Undo
-  const handleTransitionStatus = async (item: any, newStatus: string) => {
+  // newStatus is a base status ('done') or one of the project type's own (see
+  // projectTypes.ts); both store as a base status plus the stage shown.
+  const handleTransitionStatus = async (item: any, picked: string) => {
     const oldItem = { ...item };
-    setWorkItems(prev => prev.map(t => t.id === item.id ? { ...t, status: newStatus } : t));
+    const statuses = statusesFor(item.projectId, api.sync.getState().projects);
+    const { status: newStatus, stage } = resolveStage(picked, statuses);
+    setWorkItems(prev => prev.map(t => t.id === item.id ? { ...t, status: newStatus, stage } : t));
     try {
-      await api.workItems.transitionStatus(item.id, newStatus, item.version);
+      await api.workItems.transitionStatus(item.id, newStatus, item.version, stage);
       
       // Provide Universal 8-Second Undo on State Changes
       if (newStatus === 'done') haptic(12);
       showToast(
-        newStatus === 'done' ? doneMessage(countDoneToday()) : `Moved to ${(STATUSES as any)[newStatus]?.label || newStatus}`, 
+        newStatus === 'done' ? doneMessage(countDoneToday()) : `Moved to ${statuses.find(x => x.id === stage)?.label || newStatus}`, 
         'success',
         {
           label: 'Undo',
           group: newStatus === 'done' ? 'done' : undefined,
           onAction: async () => {
-            await api.workItems.transitionStatus(item.id, oldItem.status, oldItem.version);
+            await api.workItems.transitionStatus(item.id, oldItem.status, oldItem.version, oldItem.stage ?? null);
             showToast('Action undone');
             fetchWorkItems(false);
           }
@@ -339,7 +455,9 @@ function MainApp() {
       // Say where it went, so nobody wonders whether it saved.
       const today = new Date();
       const isToday = payload.dueDate === `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
-      showToast(focusFull ? `Focus is full (${FOCUS_LIMIT}), so this is in your ${payload.dueDate ? 'list' : 'Inbox'}` : payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
+      // Chill hides work, so say where a work item went.
+      const hiddenInChill = getLifeMode().mode === 'chill' && payload.lifeContext !== 'personal';
+      showToast(hiddenInChill ? "Saved to Work. It's hidden while you're in Chill" : focusFull ? `Focus is full (${FOCUS_LIMIT}), so this is in your ${payload.dueDate ? 'list' : 'Inbox'}` : payload.isFocus ? 'Added to Focus' : isToday ? 'Added for today' : payload.dueDate ? `Added for ${new Date(`${payload.dueDate}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}` : 'Added to Inbox', 'success', { label: 'Undo', group: 'added', onAction: async () => { await api.workItems.softDelete(created.id); fetchWorkItems(false); } });
       fetchWorkItems(false);
     } catch (e: any) {
       showToast(e.message, 'error');
@@ -347,20 +465,37 @@ function MainApp() {
     }
   };
 
+  // A project opens in the view its type suits (Branches for technical work,
+  // Board for content, List for errands). Phones keep the list.
+  const openProject = (id: string) => {
+    const project = api.sync.getState().projects.find(p => p && p.id === id);
+    setActiveView('tasks');
+    setActiveWorkspace(id);
+    // A status chip belongs to one project's type; don't carry it to the next.
+    if (filters.stage) setFilters({ ...filters, stage: '' });
+    if (project && !window.matchMedia('(max-width: 767px)').matches) setPresentationMode(projectTypeInfo(project).view);
+  };
+  const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
+  // A project's board and list group by its type's statuses; elsewhere, the usual four.
+  const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
+
   return (
     <div className="h-screen w-full flex overflow-hidden transition-colors duration-300 font-sans bg-white text-gray-900 dark:bg-[#0a0a0b] dark:text-gray-100">
-      <Sidebar 
+      <AnimatePresence>{!booted && <SageLoader key="splash" />}</AnimatePresence>
+      <TrustDevicePrompt booted={booted} onOpenSettings={() => openSettings('security')} />
+      <Sidebar
         isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
         activeView={activeView} setActiveView={setActiveView}
         activeWorkspace={activeWorkspace} setActiveWorkspace={setActiveWorkspace}
         isDarkMode={isDarkMode} setIsDarkMode={changeTheme}
-        lifeContext={lifeFilter} setLifeContext={setLifeFilter}
+        lifeContext={viewFilter} setLifeContext={setLifeFilter}
         setIsTrashOpen={setIsTrashOpen}
         setIsDiagnosticsOpen={setIsDiagnosticsOpen}
         setIsSettingsOpen={setIsSettingsOpen}
+        onOpenProject={openProject}
       />
 
-      <main data-context={lifeFilter} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-colors duration-500 ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
+      <main data-context={viewFilter} data-mode={lifeMode} className={`flex-1 flex flex-col h-full overflow-hidden relative transition-[background-color,padding] duration-500 ${selectedItemId ? 'xl:pr-[600px]' : ''} ${lifeContext === 'personal' ? 'bg-[#fffdfa] dark:bg-[#0c0906]' : 'bg-[#ffffff] dark:bg-[#0a0a0b]'}`}>
         <div className="app-ambient" aria-hidden />
         <Header 
           isSidebarOpen={isSidebarOpen} setIsSidebarOpen={setIsSidebarOpen}
@@ -376,18 +511,16 @@ function MainApp() {
         {activeView === 'canvas' ? (
           // The canvas pans and zooms itself, so it fills the space instead of scrolling.
           <div className="relative flex-1 min-h-0 p-3 pb-[calc(4.75rem+env(safe-area-inset-bottom))] md:p-6">
-            <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
+            <Suspense fallback={<div className="skeleton h-full" />}>
+              <CanvasView lifeContext={lifeContext} isDarkMode={isDarkMode} />
+            </Suspense>
           </div>
         ) : (
-        <div className="flex-1 overflow-y-auto custom-scrollbar relative">
-          <motion.div key={`${activeView}:${lifeFilter}:${activeWorkspace}`} className="p-4 pb-28 md:p-8 min-h-full"
-            initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.35, ease: [0.16, 1, 0.3, 1] }}>
-            {isLoading ? (
-              <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading your items">
-                <div className="skeleton h-36 md:h-44" />
-                <div className="grid md:grid-cols-2 gap-4"><div className="skeleton h-48" /><div className="skeleton h-48" /></div>
-                <div className="skeleton h-16 !rounded-2xl" />
-              </div>
+        <div ref={scrollRef} className="flex-1 overflow-y-auto custom-scrollbar relative">
+          <div key={`${activeView}:${viewFilter}:${activeWorkspace}`} className="view-enter p-4 pb-28 md:p-8 min-h-full">
+            <Suspense fallback={<PageSkeleton />}>
+            {activeView === 'tasks' && isLoading ? (
+              <PageSkeleton />
             ) : activeView === 'notes' ? (
               <NotesLock><NotesView lifeContext={lifeContext} openNoteId={openNoteId} /></NotesLock>
             ) : activeView === 'radar' ? (
@@ -395,6 +528,18 @@ function MainApp() {
                 onOpenProject={(id) => { setActiveWorkspace(id); setPresentationMode('branches'); setActiveView('tasks'); }}
                 onOpenNote={(id) => { setOpenNoteId(id); setActiveView('notes'); }}
               />
+            ) : activeView === 'lumo' ? (
+              <LumoView />
+            ) : activeView === 'drop' ? (
+              <DropView />
+            ) : activeView === 'posts' ? (
+              <PostsView projectId={postsProject} focus={postsFocus} />
+            ) : activeView === 'reels' ? (
+              <ReelsView projectId={reelsProject} focus={reelsFocus} />
+            ) : activeView === 'hidden' ? (
+              <NotesLock title="Hidden tasks are locked" hint="Enter your password to see them.">
+                <HiddenView onSelectTask={setSelectedItemId} />
+              </NotesLock>
             ) : activeView === 'inbox' ? (
               <InboxView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'focus' ? (
@@ -410,8 +555,18 @@ function MainApp() {
               />
             ) : (
               <div>
+                {isProjectPage && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
+                {isProjectPage && (
+                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
+                )}
                 {/* Global Quick Filter Bar */}
-                <FilterBar filters={filters} setFilters={setFilters} />
+                <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
+                <ShownLine
+                  count={presentationMode === 'calendar' || presentationMode === 'timeline' ? onlyDated({ items: workItems, count: shown }).count : shown}
+                  lifeContext={lifeContext}
+                  onShowBoth={() => setLifeFilter('all')}
+                  onShowList={() => setPresentationMode('list')}
+                />
 
                 {workItems.length === 0 ? (
                   <div className="h-full flex flex-col items-center justify-center text-gray-400 py-20 stagger">
@@ -420,7 +575,7 @@ function MainApp() {
                     </div>
                     <h3 className="text-lg font-semibold tracking-tight text-gray-900 dark:text-white mb-1.5">No items found</h3>
                     <p className="text-[14px] text-gray-500 max-w-sm text-center leading-relaxed">
-                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all' || filters.tag) ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
+                      {(filters.search || filters.entityType !== 'all' || filters.priority !== 'all' || filters.status !== 'all' || filters.tag || filters.stage) ? "Try adjusting your filter options above." : "Create your first item or press N to add one."}
                     </p>
                     <button onClick={() => setIsCreateModalOpen(true)} className="mt-6 px-5 py-2.5 bg-blue-600 text-white text-[14px] rounded-xl font-semibold hover:bg-blue-700 shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 transition-all active:scale-[0.98] flex items-center gap-2">
                       <Plus size={16} /> Add Item <span className="ml-1 text-[11px] font-semibold px-1.5 py-0.5 rounded-md bg-white/20">N</span>
@@ -430,8 +585,8 @@ function MainApp() {
                   <AnimatePresence mode="wait">
                     <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
-                        {presentationMode === 'list' && <ListView tasks={workItems} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'board' && <BoardView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'branches' && (
                           <ProjectBranchesView
                             items={workItems}
@@ -439,10 +594,11 @@ function MainApp() {
                             activeWorkspace={activeWorkspace}
                             onSelectTask={setSelectedItemId}
                             onRefreshData={() => fetchWorkItems(false)}
+                            onTransition={handleTransitionStatus}
                           />
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}
-                        {presentationMode === 'table' && <TableView tasks={workItems.filter(i=>i.entityType==='task')} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'table' && <TableView tasks={workItems} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'calendar' && <CalendarView tasks={workItems} onSelect={setSelectedItemId} />}
                       </LayoutGroup>
                     </motion.div>
@@ -450,7 +606,8 @@ function MainApp() {
                 )}
               </div>
             )}
-          </motion.div>
+            </Suspense>
+          </div>
         </div>
         )}
 
@@ -471,16 +628,19 @@ function MainApp() {
       </AnimatePresence>
 
       <AnimatePresence>
-        {isShortcutsOpen && <ShortcutSheet onClose={() => setIsShortcutsOpen(false)} />}
+        {isShortcutsOpen && <Suspense key="shortcuts" fallback={null}><ShortcutSheet onClose={() => setIsShortcutsOpen(false)} /></Suspense>}
       </AnimatePresence>
 
       <AnimatePresence>
         {isSettingsOpen && (
-          <SettingsModal
-            onClose={() => setIsSettingsOpen(false)}
-            lifeContext={lifeContext}
-            onDataChanged={() => fetchWorkItems(false)}
-          />
+          <Suspense key="settings" fallback={null}>
+            <SettingsModal
+              onClose={() => { setIsSettingsOpen(false); setSettingsTab(undefined); }}
+              initialTab={settingsTab}
+              lifeContext={lifeContext}
+              onDataChanged={() => fetchWorkItems(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
@@ -489,6 +649,7 @@ function MainApp() {
           <CreateTaskModal 
             onClose={() => setIsCreateModalOpen(false)} 
             onCreate={handleCreateWorkItem} 
+            onChanged={() => fetchWorkItems(false)}
             workspaceId={activeWorkspace !== 'all' ? activeWorkspace : (api.sync.getState().projects[0]?.id || '')} 
             lifeContext={lifeContext} 
             defaultFocus={activeView === 'focus'}
@@ -498,29 +659,40 @@ function MainApp() {
 
       <AnimatePresence>
         {isTrashOpen && (
-          <TrashModal 
-            onClose={() => setIsTrashOpen(false)} 
-            onRestored={() => fetchWorkItems(false)} 
-          />
+          <Suspense key="trash" fallback={null}>
+            <TrashModal
+              onClose={() => setIsTrashOpen(false)}
+              onRestored={() => fetchWorkItems(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
       <AnimatePresence>
         {isDiagnosticsOpen && (
-          <SyncDiagnosticsModal
-            onClose={() => setIsDiagnosticsOpen(false)}
-          />
+          <Suspense key="diagnostics" fallback={null}>
+            <SyncDiagnosticsModal
+              onClose={() => setIsDiagnosticsOpen(false)}
+            />
+          </Suspense>
         )}
       </AnimatePresence>
 
-      {isMorningOpen && (
-        <MorningPickThree onClose={() => setIsMorningOpen(false)} onNavigateView={setActiveView} />
-      )}
-      {isEveningOpen && (
-        <EveningShutdown onClose={() => setIsEveningOpen(false)} />
-      )}
+      <Suspense fallback={null}>
+        {isMorningOpen && (
+          <MorningPickThree onClose={() => setIsMorningOpen(false)} onNavigateView={setActiveView} />
+        )}
+        {isEveningOpen && (
+          <EveningShutdown onClose={() => setIsEveningOpen(false)} />
+        )}
+        {isWeeklyOpen && (
+          <WeeklyReview onClose={() => setIsWeeklyOpen(false)} onNavigateView={setActiveView} />
+        )}
+      </Suspense>
 
       <PhoneCorner />
+      <ModePrompt />
+      <WelcomeHome />
 
       {/* Interactive Toasts with 8-Second Undo Safety Net */}
       <div className="fixed bottom-[calc(5.5rem+env(safe-area-inset-bottom))] md:bottom-16 inset-x-4 md:inset-x-auto md:right-4 z-[100] flex flex-col items-center md:items-end gap-2 pointer-events-none">
@@ -549,11 +721,25 @@ function MainApp() {
   );
 }
 
+// Placeholder while a page's data or code arrives (rarely seen: both are
+// usually ready before the page is).
+function PageSkeleton() {
+  return (
+    <div className="max-w-5xl mx-auto space-y-4" aria-busy="true" aria-label="Loading">
+      <div className="skeleton h-36 md:h-44" />
+      <div className="grid md:grid-cols-2 gap-4"><div className="skeleton h-48" /><div className="skeleton h-48" /></div>
+      <div className="skeleton h-16 !rounded-2xl" />
+    </div>
+  );
+}
+
 export default function App() {
   return (
     <MotionConfig reducedMotion="user">
       <ToastProvider>
-        <MainApp />
+        <BootBoundary>
+          <MainApp />
+        </BootBoundary>
       </ToastProvider>
     </MotionConfig>
   );

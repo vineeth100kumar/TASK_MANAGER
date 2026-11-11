@@ -16,11 +16,22 @@ The clock only draws and reports button presses; this decides what it shows:
   previous, play/pause and next. Each song is looked up once (song.py): its
   genre, tempo and a few facts (SONG_INFO), and its lyrics, sent a line at
   a time as the song reaches them (LYRIC).
+- Welcome back: when the phone comes home after a while out, a card says
+  so (Settings: welcome) with what's on today and the next alarm.
+- Firmware updates over Wi-Fi (ota.py): a build GitHub made from a merged
+  change goes to the clock when it isn't busy.
 - Weather and the Pi's vitals.
 - The next day's alarms go to the clock too (ALARMS), so firmware 2.0 can
-  ring them itself while it can't reach the Pi.
+  ring them itself while it can't reach the Pi. Firmware 2.10 says what it
+  did with them while it was cut off (offline_reports), so an alarm stopped
+  on the clock isn't rung again, and a snooze carries over.
 - Settings changed in Sage (desk/settings.py) apply at once, and Sage can
   press the clock's buttons itself (press).
+- The LUMO page in Sage runs a timer and a stopwatch here (tools.py) and
+  shows them on the clock (firmware 2.8), keeps the World screen's places,
+  dims everything at night, and can ring a tone, flash the clock to find it
+  or restart it. Whatever it changes is announced as DESK_STATE, so an open
+  page follows along.
 """
 
 import asyncio
@@ -31,9 +42,13 @@ from typing import Any, Awaitable, Callable, List, Optional, Set
 
 import item_actions
 import notifier
-from desk import ambient, art, settings as desk_settings, song, today
-from desk.alarms import Alarms, is_alarm
+from desk import ambient, art, depth, gallery as desk_gallery, settings as desk_settings, song, today
+from desk.alarms import TONE_CYCLE_MS, Alarms, is_alarm
+from desk.ota import ALARM_MARGIN_MINUTES, FirmwareUpdates
+from desk.tools import Stopwatch, Timer
 from desk.controller import DeskController, fit
+
+FIT_TEST_SECONDS = 180   # the Fit test pattern goes by itself after this long
 
 log = logging.getLogger("desk")
 
@@ -41,7 +56,18 @@ SOURCE = "desk"
 WEATHER_EVERY = 30 * 60
 REFRESH_EVERY = 60
 REMINDER_SNOOZE_MINUTES = 60
+# How long a phone notification's card stays up, and an incoming call's.
+NOTE_CARD_SECONDS = 20
+CALL_CARD_SECONDS = 45
+GALLERY_PEEK_SECONDS = 120   # a button press in photo frame mode shows the clock this long
 MEDIA_ACTIONS = {"media_previous": "previous", "media_toggle": "toggle", "media_next": "next"}
+NIGHT_EVERY = 20
+WORLD_EVERY = 15 * 60
+# Firmware that draws the timer, stopwatch and world screens, plays the alarm
+# tones and takes the haptics and night settings.
+TOOLS_FIRMWARE = (2, 8)
+# Firmware with the depth face, which shows a picture the Pi draws (depth.py).
+DEPTH_FIRMWARE = (2, 9)
 
 
 class Desk:
@@ -60,6 +86,7 @@ class Desk:
         vitals: Optional[ambient.Vitals] = None,
         settings: Optional[dict] = None,
         morning_line: Callable[[], Optional[str]] = lambda: None,
+        ota: Optional[FirmwareUpdates] = None,
     ) -> None:
         self.link = link
         self.now = now
@@ -76,6 +103,11 @@ class Desk:
 
         self.settings = settings or desk_settings.defaults()
         self.lights_off = False
+        self.fit_test = False          # the Fit test pattern is showing on the clock (firmware 2.15+)
+        self.night = False
+        self.timer = Timer()
+        self.stopwatch = Stopwatch()
+        self.sent_world: Optional[dict] = None
         self.controller = DeskController(link, now, next_alarm=self.next_alarm, screens=self.settings["screens"])
         self.controller.screen = self.settings["homeScreen"]
         self.controller.lights = self.lights()
@@ -89,6 +121,13 @@ class Desk:
         self.alarms = Alarms(now().tzinfo)
         self.ringing_since = 0.0
         self.today: List[str] = []
+        self.today_count = 0   # Sage's items in the Today list (not Radar's line)
+        # When the phone was last seen before it went away; None while it's
+        # home, or when Sage started with it already gone.
+        self.phone_left_at: Optional[float] = None
+        self.phone_away = False
+        # Photo frame mode: a button press shows the clock until this time.
+        self.gallery_peek_until = 0.0
         self.weather: Optional[dict] = None
         self.sent_alarms: Optional[dict] = None
         self.track: Optional[tuple] = None
@@ -100,6 +139,24 @@ class Desk:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self._refresh_soon = False
         self._tasks: Set[asyncio.Task] = set()
+        # The depth face's rows the clock has now (None: it has none, or
+        # it redrew and asked again), so each minute only changes go out.
+        self.depth_sent: Optional[list] = None
+        self._depth_lock = asyncio.Lock()
+        link.on_depth_need = self.depth_need
+        link.on_offline = self.offline_reports
+        self.ota = ota or FirmwareUpdates(link, busy=self.update_blocker, auto=lambda: self.settings["updates"]["auto"],
+                                          hold=lambda: self.settings["updates"].get("hold", ""), quiet=self.update_window_wait)
+        self.ota.on_change = self.announce
+        self.ota.on_flashed = self.firmware_flashed
+
+        self.gallery = desk_gallery.Gallery(
+            send_binary=link.send_binary,
+            send_json=link.send,
+            items=items,
+            photos_dir=str(desk_gallery.PHOTOS_DIR),
+        )
+        self.gallery.configure(self.settings.get("gallery", {}))
 
     # --- Sage's items ---
 
@@ -108,14 +165,21 @@ class Desk:
         """Firmware 1.x, which draws cards only on its face screen."""
         return str(getattr(self.link, "fw", "") or "").startswith("1.")
 
-    def takes_cover_strips(self) -> bool:
-        """Firmware 2.2 and later take the cover in strips. Older firmware
-        restarts on a whole cover (see art.py), so it gets none."""
+    def firmware_at_least(self, version: tuple) -> bool:
         try:
             major, minor = (int(x) for x in str(getattr(self.link, "fw", "") or "").split(".")[:2])
         except ValueError:
             return False
-        return (major, minor) >= (2, 2)
+        return (major, minor) >= version
+
+    def takes_cover_strips(self) -> bool:
+        """Firmware 2.2 and later take the cover in strips. Older firmware
+        restarts on a whole cover (see art.py), so it gets none."""
+        return self.firmware_at_least((2, 2))
+
+    @property
+    def has_tools(self) -> bool:
+        return self.firmware_at_least(TOOLS_FIRMWARE)
 
     async def send_cover(self) -> None:
         if not self.cover or len(self.cover) != art.FRAME_LEN or not self.takes_cover_strips():
@@ -138,7 +202,14 @@ class Desk:
         now = self.now()
         self.alarms.tz = now.tzinfo
         before = self.next_alarm()
+        was_ringing = self.alarms.ringing
         self.alarms.load(items)
+        if was_ringing and not self.alarms.ringing:
+            # Deleted, switched off or moved in Sage while it rang: quiet it,
+            # and leave the item as it was just saved.
+            log.info("Alarm %s changed while ringing; stopping it", was_ringing.id)
+            await self.link.send({"cmd": "ALARM_OFF"})
+            await self.announce()
         missed = self.alarms.missed(now)
         for alarm in missed:
             log.info("Alarm %s was missed; setting it for next time", alarm.id)
@@ -146,6 +217,7 @@ class Desk:
         if missed:
             self.alarms.load(await asyncio.to_thread(self.items))
         lines = today.lines(items, now, now.tzinfo)
+        self.today_count = len(lines)
         # Radar's line (one trend, one market move) in the morning, when it's
         # switched on in Settings > Radar and there's room under the tasks.
         if now.hour < 12 and len(lines) < today.MAX_ITEMS:
@@ -160,10 +232,11 @@ class Desk:
         await self.send_alarms()
 
     async def send_alarms(self, force: bool = False) -> None:
-        """The alarms due in the next day, for the clock to ring on its own
-        if it loses the Pi. Sent when they change."""
-        upcoming = [{"h": a.rings_at.hour, "m": a.rings_at.minute} for a in self.alarms.upcoming(self.now())]
-        command = {"cmd": "ALARMS", "list": upcoming, "snooze": self.settings["alarm"]["snoozeMinutes"]}
+        """The alarms coming up, for the clock to ring on its own if it
+        loses the Pi. Sent when they change."""
+        # w and d (firmware 2.11) let it ring each on its own days, however
+        # long it stays cut off (Alarms.for_clock).
+        command = {"cmd": "ALARMS", "list": self.alarms.for_clock(self.now()), "snooze": self.settings["alarm"]["snoozeMinutes"]}
         if force or command != self.sent_alarms:
             if await self.link.send(command):
                 self.sent_alarms = command
@@ -184,14 +257,21 @@ class Desk:
     def on_event(self, event: dict) -> None:
         """Every event Sage sends its web clients (EventHub.listeners)."""
         kind = event.get("type")
+        if kind == "DESK_STATE":
+            return  # our own news, for the web page
         if kind in ("SYNC_APPLIED", "SYNC_CLEARED", "RADAR_UPDATED"):
             if not self._refresh_soon:
                 self._refresh_soon = True
                 self._spawn(self._refresh_after_burst())
         elif kind == "PHONE_NOTIFICATION":
             self._spawn(self.show_notification(event.get("notification") or {}))
+        elif kind == "PHONE_NOTIFICATION_REMOVED":
+            # Read, cleared or answered on the phone: its card goes too.
+            self._spawn(self._guard(self.controller.take_down(f"phone:{event.get('id')}")))
         elif kind == "PHONE_MEDIA":
             self._spawn(self.show_media(event.get("media") or {}))
+        elif kind == "PHONE_STATUS":
+            self._spawn(self._guard(self.phone_presence(bool(event.get("home")))))
 
     async def _refresh_after_burst(self) -> None:
         await asyncio.sleep(0.5)  # a sync batch can send several events at once
@@ -230,16 +310,92 @@ class Desk:
         })
 
     async def show_notification(self, note: dict) -> None:
-        # A reminder waiting for an answer, or a ringing alarm, comes first.
+        """A card for each of the phone's notifications, in the app's colour
+        (the clock's light takes it too). LEFT clears it on the phone as well
+        when the phone allows that, OK closes it. An incoming call gets
+        Decline and Answer instead, and stays while it rings."""
+        card = self.controller.card
+        # A reminder waiting for an answer, or a ringing alarm, comes first;
+        # a newer notification takes over from an older one.
+        if (card and not card.tag.startswith("phone:")) or self.alarms.ringing or not self.link.connected:
+            return
+        note_id = str(note.get("id") or "")
+        call = note.get("category") == "incoming call"
+        offers = note.get("actions") or {}
+
+        def act(positive: bool):
+            return lambda: self._guard(self.phone_action(note_id, positive))
+
+        def close():
+            return asyncio.sleep(0)
+
+        actions = {}
+        if call:
+            if offers.get("negative"):
+                actions["LEFT"] = ("Decline", act(False))
+            if offers.get("positive"):
+                actions["RIGHT"] = ("Answer", act(True))
+        elif offers.get("negative"):
+            actions["LEFT"] = ("Clear", act(False))
+        if not (call and actions):
+            actions["OK"] = ("Close", close)
+        await self._card_surface()
+        await self.controller.show_card(
+            note.get("app") or "iPhone", note.get("title") or "",
+            note.get("message") or ("Calling" if call else ""), actions,
+            seconds=CALL_CARD_SECONDS if call else NOTE_CARD_SECONDS,
+            color=note.get("color") or "", kind="call" if call else "note",
+            tag=f"phone:{note_id}", auto_close=True)
+
+    async def phone_action(self, note_id: str, positive: bool) -> None:
+        perform = getattr(self.phone, "perform_action", None)
+        if perform and not await perform(note_id, positive):
+            log.info("The phone didn't take the %s action for notification %s", "positive" if positive else "negative", note_id)
+
+    async def phone_presence(self, home: bool) -> None:
+        """PHONE_STATUS: the phone left (it's been gone a few minutes, see
+        phone_link.AWAY_AFTER) or came back. Away starts the gallery;
+        back stops it and optionally shows the welcome card."""
+        self.phone_away = not home
+        await self.sync_gallery()
+        if not home:
+            if self.phone_left_at is None:
+                self.phone_left_at = getattr(self.phone, "last_seen", 0) or time.time()
+            await self.announce()
+            return
+        left_at, self.phone_left_at = self.phone_left_at, None
+        await self.announce()
+        welcome = self.settings["welcome"]
+        if left_at is None or not welcome["enabled"] or time.time() - left_at < welcome["awayMinutes"] * 60:
+            return
         if self.controller.card or self.alarms.ringing or not self.link.connected:
             return
+        log.info("Phone back after %d min; welcoming you", (time.time() - left_at) // 60)
         await self._card_surface()
-        await self.controller.show_card(note.get("app") or "iPhone", note.get("title") or "", note.get("message") or "")
+        await self.controller.show_card("Sage", welcome["message"], self.welcome_line())
+
+    def welcome_line(self) -> str:
+        """What's on: the first thing on today (Up next), how many more, and the next alarm."""
+        n = self.today_count
+        if n and self.today:
+            more = n - 1
+            parts = [f"Up next: {self.today[0]}"] + ([f"{more} more today"] if more else [])
+        else:
+            parts = [f"{n} thing{'s' if n != 1 else ''} on today" if n else "Nothing else on today"]
+        alarm = self.next_alarm()
+        if alarm:
+            parts.append(f"next alarm {alarm[0]:02d}:{alarm[1]:02d}")
+        return ", ".join(parts)
 
     async def show_media(self, media: dict) -> None:
         track = (media.get("title") or "", media.get("artist") or "")
+        shown = track
+        if not track[0] and media.get("playing"):
+            # Playing, but the phone hasn't said what: name the app rather
+            # than let the clock say "Nothing playing".
+            shown = (media.get("app") or "Your phone", "Playing")
         await self.link.send({
-            "cmd": "SPOTIFY", "title": track[0], "artist": track[1],
+            "cmd": "SPOTIFY", "title": shown[0], "artist": shown[1],
             "progress_ms": 0, "duration_ms": 0, "playing": bool(media.get("playing")),
         })
         if track != self.track and track[0]:
@@ -308,9 +464,26 @@ class Desk:
             log.info("Alarm ringing: %02d:%02d %s", alarm.h, alarm.m, alarm.title)
             self.ringing_since = now.timestamp()
             await self.controller.clear_card()
-            await self.link.send({"cmd": "ALARM_RING"})
+            await self.link.send(self.ring_command())
+            await self.announce()
         elif now.timestamp() - self.ringing_since > self.settings["alarm"]["ringMinutes"] * 60:
             await self.stop_alarm(snooze=False)
+
+    def ring_command(self) -> dict:
+        """ALARM_RING with the alarm's name and sound (firmware 2.6 rings its
+        one pattern and ignores the rest)."""
+        alarm = self.alarms.ringing
+        defaults = self.settings["alarm"]
+        return {
+            "cmd": "ALARM_RING",
+            "label": fit(alarm.title if alarm else "Alarm", 27),
+            "tone": (alarm and alarm.tone) or defaults["tone"],
+            "volume": alarm.volume if alarm and alarm.volume is not None else defaults["volume"],
+            "snooze": self.snooze_minutes(alarm),
+        }
+
+    def snooze_minutes(self, alarm) -> int:
+        return (alarm and alarm.snooze) or self.settings["alarm"]["snoozeMinutes"]
 
     async def stop_alarm(self, snooze: bool) -> None:
         alarm, self.alarms.ringing = self.alarms.ringing, None
@@ -318,8 +491,52 @@ class Desk:
         if alarm is None:
             return
         now = self.now()
-        fields = Alarms.snoozed(now, self.settings["alarm"]["snoozeMinutes"]) if snooze else Alarms.rolled(alarm, now)
+        fields = Alarms.snoozed(now, self.snooze_minutes(alarm)) if snooze else Alarms.rolled(alarm, now)
         await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
+        await self.announce()
+
+    async def offline_reports(self, reports: list) -> None:
+        """What the clock did by itself while it couldn't reach the Pi
+        (firmware 2.10): {"a": "stop" | "snooze" | "timeout", "h": 7, "m": 0,
+        "ago": seconds} for an alarm it rang, {"a": "timer_stop"} for a
+        finished timer it was told to be quiet."""
+        now = self.now()
+        for report in reports:
+            action = report.get("a")
+            ago = report.get("ago") if isinstance(report.get("ago"), int) and not isinstance(report.get("ago"), bool) else 0
+            at = now - datetime.timedelta(seconds=max(0, min(ago, 86400)))
+            if action == "timer_stop":
+                if self.timer.state == "done":
+                    await self.timer_do("cancel")
+                continue
+            if action not in ("stop", "snooze", "timeout"):
+                continue
+            h, m = report.get("h"), report.get("m")
+            log.info("The clock %s an alarm at %s:%s by itself, %ss ago", {"stop": "stopped", "snooze": "snoozed", "timeout": "gave up on"}[action], h, m, ago)
+            ringing = self.alarms.ringing
+            rang_at = {(ringing.h, ringing.m)} if ringing else set()
+            if ringing and ringing.rings_at:
+                rang_at.add((ringing.rings_at.hour, ringing.rings_at.minute))
+            if (h, m) in rang_at:
+                await self.stop_alarm(snooze=action == "snooze")
+                continue
+            # The Pi wasn't ringing it: it was down, or its own ring had ended.
+            alarm = next((a for a in self.alarms.alarms if a.rings_at and (a.rings_at.hour, a.rings_at.minute) == (h, m)
+                          and at - datetime.timedelta(hours=2) <= a.rings_at <= now + datetime.timedelta(minutes=1)), None)
+            if alarm is None and action == "snooze":
+                # The Pi came back after the alarm's time and has already set
+                # it for next time (or switched a one-off off): the snooze
+                # still stands if it hasn't run out.
+                alarm = next((a for a in self.alarms.alarms if (a.h, a.m) == (h, m) and (not a.rings_at or a.rings_at > now)), None)
+                if alarm is not None and at + datetime.timedelta(minutes=self.snooze_minutes(alarm)) > now:
+                    await self.change(self.actions.set_fields, alarm.id, Alarms.snoozed(at, self.snooze_minutes(alarm)), SOURCE)
+                continue
+            if alarm is None:
+                continue
+            self.alarms._rung.add(alarm.key)   # the clock has rung this one
+            fields = Alarms.snoozed(at, self.snooze_minutes(alarm)) if action == "snooze" else Alarms.rolled(alarm, now)
+            await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
+        await self.announce()
 
     # --- Buttons and screens ---
 
@@ -329,6 +546,16 @@ class Desk:
             if action in ("snooze_alarm", "stop_alarm"):
                 await self.stop_alarm(snooze=action == "snooze_alarm")
             return True  # a ringing alarm takes every button, even a locked clock's
+        if self.timer.state == "done":
+            await self.timer_do("cancel")
+            return True  # any button stops a finished timer
+        if self.gallery.active and not self.phone_away:
+            # Photo frame mode: a press brings the clock back for a while.
+            peeking = time.time() < self.gallery_peek_until
+            self.gallery_peek_until = time.time() + GALLERY_PEEK_SECONDS
+            if not peeking and not self.controller.card:
+                await self.controller.show_screen(self.controller.screen)
+                return True  # the first press only wakes the clock
         return self.settings["buttons"]["locked"] and not remote
 
     def action_for(self, button: str) -> str:
@@ -343,6 +570,10 @@ class Desk:
             await self.controller.send_lights()
         elif action in ("snooze_alarm", "stop_alarm") and self.alarms.ringing:
             await self.stop_alarm(snooze=action == "snooze_alarm")
+        elif action.startswith("timer_"):
+            await self.timer_do({"timer_toggle": "toggle", "timer_cancel": "cancel", "timer_add_minute": "add"}[action], seconds=60)
+        elif action.startswith("stopwatch_"):
+            await self.stopwatch_do(action.split("_", 1)[1])
 
     async def press(self, button: str) -> None:
         """A press sent from Sage: the same as the clock's own button, but
@@ -354,13 +585,86 @@ class Desk:
     def lights(self) -> dict:
         if self.lights_off:
             return {"mode": "OFF", "brightness": 0}
-        return dict(self.settings["lights"])
+        if self.night:
+            night = self.settings["night"]
+            out = {"mode": night["lightsMode"], "brightness": night["brightness"]}
+        else:
+            out = dict(self.settings["lights"])
+        if out["mode"] == "PHOTO":  # the depth photo's main colour; warm white without one
+            hue = depth.ring_hue()
+            out = {"mode": "COLOR", "brightness": out["brightness"], "hue": hue} if hue is not None \
+                else {"mode": "WARM", "brightness": out["brightness"]}
+        return out
+
+    async def photo_changed(self) -> None:
+        """A new depth photo or crop: the face, and the ring if it follows the photo."""
+        await self.send_depth()
+        lights = self.lights()
+        if lights != self.controller.lights:
+            self.controller.lights = lights
+            if self.link.connected:
+                await self.controller.send_lights()
+
+    async def send_haptics(self) -> None:
+        """The haptics: strength (firmware 2.7+, kept in flash, one tick when
+        it changes) and which events knock (2.8+). Older firmware ignores it."""
+        haptics = self.settings["haptics"]
+        await self.link.send({"cmd": "HAPTICS", "strength": haptics["strength"],
+                              "buttons": haptics["buttons"], "notify": haptics["notifications"]})
+
+    async def send_brightness(self) -> bool:
+        """The screen brightness, 10-100 (firmware 2.23+, kept in flash). Older
+        firmware has a backlight fixed at full and ignores this."""
+        if not self.link.connected or not self.firmware_at_least((2, 23)):
+            return False
+        return await self.link.send({"cmd": "BRIGHTNESS", "level": self.settings["screen"]["brightness"]})
+
+    async def send_fit(self) -> bool:
+        """The case window and the Even Frame / island switches (firmware 2.15+,
+        kept in flash), with the Fit test on or off. Older firmware has none."""
+        if not self.link.connected or not self.firmware_at_least((2, 15)):
+            return False
+        screen = self.settings["screen"]
+        return await self.link.send({"cmd": "FIT", "l": screen["left"], "r": screen["right"], "t": screen["top"],
+                                     "b": screen["bottom"], "frame": screen["frame"], "island": screen["island"],
+                                     "test": self.fit_test})
+
+    async def _fit_test_timeout(self) -> None:
+        await asyncio.sleep(FIT_TEST_SECONDS)
+        if self.fit_test:
+            self.fit_test = False
+            await self.send_fit()
+
+    def gallery_wanted(self) -> bool:
+        """Away mode shows the gallery while the phone is out; photo frame
+        mode ("always") shows it whether you're home or not."""
+        g = self.settings.get("gallery", {})
+        if not g.get("enabled"):
+            return False
+        return g.get("mode", "away") == "always" or self.phone_away
+
+    async def sync_gallery(self) -> None:
+        """Start or stop the gallery to match the settings and the phone."""
+        if self.gallery_wanted():
+            if self.gallery.active or not self.link.connected:
+                return
+            self.gallery.configure(self.settings.get("gallery", {}))
+            self.gallery.start()
+            self.gallery_peek_until = 0.0
+            await self.gallery.show_current()
+            log.info("Gallery started (%s)", "away" if self.phone_away else "photo frame")
+        elif self.gallery.active:
+            self.gallery.stop()
+            if self.link.connected and not self.controller.card:
+                await self.controller.show_screen(self.settings["homeScreen"])
+            log.info("Gallery stopped, back to the clock")
 
     def clock_extra(self) -> dict:
         """How to show the time, sent with every CLOCK (firmware 1.6 ignores
         these; LUMO 2 draws the clock styles from them)."""
         clock = self.settings["clock"]
-        extra = {"style": clock["style"], "hour24": clock["hour24"], "show_seconds": clock["seconds"]}
+        style = self.settings["night"]["face"] if self.night and self.settings["night"]["face"] else clock["style"]
+        extra = {"style": style, "hour24": clock["hour24"], "show_seconds": clock["seconds"]}
         if clock["secondZone"]:
             from zoneinfo import ZoneInfo
             there = self.now().astimezone(ZoneInfo(clock["secondZone"]))
@@ -371,6 +675,8 @@ class Desk:
     async def apply_settings(self, new: dict) -> None:
         """Use settings just saved in Sage, and show them on the clock now."""
         self.settings = new
+        self.gallery.configure(new.get("gallery", {}))
+        self.night = desk_settings.in_night(new, self.now().hour, self.now().minute)
         self.controller.screens = new["screens"]
         self.controller.lights = self.lights()
         if not self.link.connected:
@@ -378,21 +684,33 @@ class Desk:
                 self.controller.screen = new["homeScreen"]
             return
         await self.controller.send_lights()
+        await self.send_haptics()
+        await self.send_fit()
+        await self.send_brightness()
         await self.controller.send_clock()
         await self.send_alarms()
+        await self.send_tool_settings(force=True)
         if self.controller.screen not in new["screens"] and not self.controller.card:
             await self.controller.show_screen(new["homeScreen"])
+        await self.sync_gallery()
 
     async def on_screen(self, screen: str) -> None:
+        self.depth_sent = None  # a new screen; the clock asks again if it's the face
         if screen == "SYSTEM":
             await self.link.send(self.vitals.command())
 
     async def after_redraw(self) -> None:
         """The rest of what a freshly connected clock needs."""
+        self.depth_sent = None
         await self.link.send({"cmd": "SHOW_TASKS", "items": self.today})
+        await self.send_haptics()
+        await self.send_fit()
+        await self.send_brightness()
         await self.send_alarms(force=True)
         if self.weather:
             await self.link.send(self.weather)
+        if not self.track and (self.phone.media or {}).get("playing"):
+            await self.show_media(self.phone.media)  # playing, title not known yet
         if self.track:
             await self.show_media(self.phone.media)
             await self.send_cover()
@@ -401,7 +719,231 @@ class Desk:
                 if self.lyric:
                     await self.link.send({"cmd": "LYRIC", "title": self.track[0], "line": self.lyric})
         if self.alarms.ringing:
-            await self.link.send({"cmd": "ALARM_RING"})
+            await self.link.send(self.ring_command())
+        await self.send_tool_settings(force=True)
+        if self.has_tools:
+            await self.link.send(self.timer.command())
+            await self.link.send(self.stopwatch.command())
+        if self.gallery.active:
+            await self.gallery.show_current()
+        else:
+            await self.sync_gallery()
+
+    # --- The LUMO page: timer, stopwatch, world, night, haptics, device ---
+
+    def world_command(self) -> dict:
+        """The World screen's places, each as minutes ahead of the time here."""
+        now = self.now()
+        here = now.utcoffset() or datetime.timedelta(0)
+        zones = []
+        from zoneinfo import ZoneInfo
+        for name in self.settings["world"]["zones"]:
+            there = now.astimezone(ZoneInfo(name)).utcoffset() or datetime.timedelta(0)
+            zones.append({"name": fit(name.rsplit("/", 1)[-1].replace("_", " "), 15),
+                          "offset": int((there - here).total_seconds() // 60)})
+        return {"cmd": "WORLD", "zones": zones}
+
+    async def send_tool_settings(self, force: bool = False) -> None:
+        """World places and night, for firmware 2.8 and later. The
+        places are re-sent when an offset changes (summer time)."""
+        if not self.has_tools:
+            return
+        world = self.world_command()
+        if force or world != self.sent_world:
+            if await self.link.send(world):
+                self.sent_world = world
+        if force:
+            await self.link.send({"cmd": "NIGHT", "on": self.night})
+
+    async def night_tick(self) -> None:
+        now = self.now()
+        night = desk_settings.in_night(self.settings, now.hour, now.minute)
+        if night == self.night:
+            return
+        self.night = night
+        log.info("Night mode %s", "on" if night else "off")
+        self.controller.lights = self.lights()
+        if self.link.connected:
+            await self.controller.send_lights()
+            await self.controller.send_clock()
+            if self.has_tools:
+                await self.link.send({"cmd": "NIGHT", "on": night})
+        await self.announce()
+
+    async def timer_do(self, action: str, seconds: int = 0, label: str = "") -> None:
+        """start, pause, resume, toggle, add or cancel. Raises ValueError for
+        a timer that can't be set."""
+        timer = self.timer
+        if action == "start":
+            timer.start(seconds, label)
+        elif action == "add":
+            timer.add(seconds or 60)
+        elif action in ("pause", "resume", "toggle", "cancel"):
+            getattr(timer, action)()
+        else:
+            raise ValueError(f"Unknown timer action {action!r}.")
+        if self.has_tools:
+            await self.link.send(timer.command())
+            if action == "start" and self.controller.screen != "TIMER" and not self.controller.card:
+                await self.controller.show_screen("TIMER")
+        await self.announce()
+
+    async def stopwatch_do(self, action: str) -> None:
+        """start, pause, toggle, lap or reset."""
+        if action not in ("start", "pause", "toggle", "lap", "reset"):
+            raise ValueError(f"Unknown stopwatch action {action!r}.")
+        getattr(self.stopwatch, action)()
+        if self.has_tools:
+            await self.link.send(self.stopwatch.command())
+            if action == "start" and self.controller.screen != "STOPWATCH" and not self.controller.card:
+                await self.controller.show_screen("STOPWATCH")
+        await self.announce()
+
+    async def tools_tick(self) -> None:
+        change = self.timer.tick()
+        if change:
+            if change == "done":
+                log.info("Timer done: %s", self.timer.label or "timer")
+            if self.has_tools:
+                await self.link.send(self.timer.command())
+            await self.announce()
+
+    async def ringing_do(self, action: str) -> bool:
+        """Snooze or stop a ringing alarm from Sage. False when none rings."""
+        if not self.alarms.ringing:
+            return False
+        await self.stop_alarm(snooze=action == "snooze")
+        return True
+
+    async def device_do(self, action: str, tone: str = "", volume: int = 0) -> bool:
+        """identify (flash and knock), restart, display_reset, or tone (play one cycle of an
+        alarm sound). False when no clock is there to do it."""
+        if not self.link.connected:
+            return False
+        if action == "identify":
+            return await self.link.send({"cmd": "IDENTIFY"})
+        if action == "restart":
+            return await self.link.send({"cmd": "REBOOT"})
+        if action in ("backlight_on", "backlight_off"):
+            # GPIO20 high or low (firmware 2.22): a wiring test for the display's LED pin.
+            if not self.firmware_at_least((2, 22)):
+                raise ValueError("The backlight test needs firmware 2.22 or later.")
+            return await self.link.send({"cmd": "BACKLIGHT", "on": action == "backlight_on"})
+        if action == "display_reset":
+            # Start the screen controller over, no reboot (firmware 2.21).
+            if not self.firmware_at_least((2, 21)):
+                raise ValueError("Reinitialize display needs firmware 2.21 or later.")
+            return await self.link.send({"cmd": "DISPLAY_RESET"})
+        if action == "tone":
+            # One cycle of the sound, then quiet (firmware 2.11). Older
+            # firmware ignores cycles and plays for seconds instead.
+            tone = tone or self.settings["alarm"]["tone"]
+            seconds = -(-TONE_CYCLE_MS.get(tone, 2000) // 1000)
+            return await self.link.send({"cmd": "TONE", "tone": tone, "volume": volume if volume else self.settings["alarm"]["volume"],
+                                         "cycles": 1, "seconds": seconds})
+        if action in ("fit_test", "fit_test_off"):
+            if not self.firmware_at_least((2, 15)):
+                raise ValueError("The Fit test needs firmware 2.15 or later.")
+            self.fit_test = action == "fit_test"
+            sent = await self.send_fit()
+            if self.fit_test:
+                self._spawn(self._fit_test_timeout())    # it never stays up for long
+            return sent
+        raise ValueError(f"Unknown device action {action!r}.")
+
+    def state(self) -> dict:
+        """What the LUMO page shows live."""
+        ringing = self.alarms.ringing
+        return {
+            "screen": self.controller.screen,
+            "night": self.night,
+            "lightsOff": self.lights_off,
+            "fitTest": self.fit_test,
+            "screenFitSupported": self.firmware_at_least((2, 15)),
+            "brightnessSupported": self.firmware_at_least((2, 23)),
+            "toolsSupported": self.has_tools,
+            "ringing": {"id": ringing.id, "label": ringing.title, "since": int(self.ringing_since * 1000)} if ringing else None,
+            "timer": self.timer.describe(),
+            "stopwatch": self.stopwatch.describe(),
+            "updates": self.ota.status(),
+            "gallery": {"active": self.gallery.active, "mode": self.settings.get("gallery", {}).get("mode", "away"),
+                        "peeking": self.gallery.active and time.time() < self.gallery_peek_until,
+                        "slide": self.gallery.index, "total": len(self.gallery.slides)},
+        }
+
+    def update_blocker(self) -> str:
+        """Why the clock shouldn't take a firmware update right now ("" if it can)."""
+        if self.alarms.ringing:
+            return "an alarm is ringing"
+        if self.timer.state in ("running", "done"):
+            return "a timer is running"
+        if self.controller.card:
+            return "a card is waiting for an answer"
+        now = self.now()
+        alarm = self.alarms.next(now)
+        if alarm and (alarm.rings_at - now).total_seconds() < ALARM_MARGIN_MINUTES * 60:
+            return "an alarm is due soon"
+        return ""
+
+    def update_window_wait(self) -> str:
+        """Why automatic updates wait for their window ("" inside it)."""
+        window = self.settings["updates"].get("window", "")
+        now = self.now()
+        if desk_settings.in_window(window, now.hour, now.minute):
+            return ""
+        return f"automatic updates wait for {window.replace('-', '–')}"
+
+    async def hold_firmware(self, held: str) -> None:
+        """Hold automatic updates on `held` ("" lets them go again)."""
+        if self.settings["updates"].get("hold", "") == held:
+            return
+        self.settings = await asyncio.to_thread(desk_settings.save, {"updates": {"hold": held}})
+        await self.announce()
+
+    async def firmware_flashed(self, fw: str) -> None:
+        """LUMO came back on a version Sage didn't send (a USB flash): hold
+        updates there, so the flash isn't replaced a few seconds later."""
+        await self.hold_firmware(fw)
+
+    async def announce(self) -> None:
+        await self.broadcast({"type": "DESK_STATE", "state": self.state()})
+
+    # --- The depth face (firmware 2.9) ---
+
+    def depth_active(self) -> bool:
+        """The clock is showing the depth face, so it takes the picture."""
+        return (self.link.connected and self.firmware_at_least(DEPTH_FIRMWARE)
+                and self.controller.screen == "CLOCK" and self.clock_extra()["style"] == "depth")
+
+    async def depth_need(self) -> None:
+        """The clock opened the face (or lost the picture): send all of it."""
+        self.depth_sent = None
+        await self.send_depth()
+
+    async def send_depth(self) -> None:
+        """The rows of the depth face that changed since the last send. With
+        no photo nothing goes, and the clock keeps showing Monolith."""
+        async with self._depth_lock:
+            if not self.depth_active():
+                self.depth_sent = None
+                return
+            hour24 = self.settings["clock"]["hour24"]
+            rows = await asyncio.to_thread(depth.clock_frame, self.now(), hour24)
+            if rows is None:
+                return
+            for message in depth.strips(rows, self.depth_sent):
+                if not await self.link.send_binary(message):
+                    self.depth_sent = None
+                    return
+            self.depth_sent = rows
+
+    async def depth_minutes(self) -> None:
+        """Just after each minute turns, the new time for a clock that has the picture."""
+        while True:
+            now = self.now()
+            await asyncio.sleep(60 - now.second - now.microsecond / 1_000_000 + 0.3)
+            if self.depth_sent is not None:
+                await self._guard(self.send_depth())
 
     # --- Running ---
 
@@ -427,12 +969,33 @@ class Desk:
         if self.link.connected and self.controller.screen == "SYSTEM":
             await self.link.send(self.vitals.command())
 
+    async def gallery_tick(self) -> None:
+        """Advance the gallery slide when active. A card, a ringing alarm or
+        a peek at the clock (photo frame mode) holds it."""
+        if not self.gallery.active or not self.link.connected:
+            return
+        if self.controller.card or self.alarms.ringing or time.time() < self.gallery_peek_until:
+            return
+        await self.gallery.advance()
+
+    async def _gallery_loop(self) -> None:
+        """Run the gallery on its own interval (it changes with settings)."""
+        while True:
+            await asyncio.sleep(max(10, self.gallery.interval))
+            await self._guard(self.gallery_tick())
+
     async def run(self) -> None:
         self.loop = asyncio.get_running_loop()
         await asyncio.gather(
             self.controller.tick_forever(),
+            self.depth_minutes(),
             self._every(1, self.ring),
+            self._every(1, self.tools_tick),
+            self._every(NIGHT_EVERY, self.night_tick),
+            self._every(WORLD_EVERY, self.send_tool_settings),
             self._every(REFRESH_EVERY, self.refresh),
             self._every(WEATHER_EVERY, self.update_weather),
             self._every(2, self.ambient),
+            self._every(30, self.ota.tick),
+            self._gallery_loop(),
         )

@@ -1,27 +1,29 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { withTime } from '../../utils/reminders';
+import { useState, useEffect, useCallback } from 'react';
 import { AnimatePresence } from 'framer-motion';
-import { Sun, CheckCircle2, AlertTriangle, Clock, Calendar as CalendarIcon, Target, Zap, Hourglass, Sparkles, ChevronRight, Check, BrainCircuit, Trophy } from 'lucide-react';
+import { Sun, Sparkles, Check, CalendarCheck, ChevronDown, Moon, Inbox as InboxIcon } from 'lucide-react';
 import { api } from '../../services/api';
-import { aiEngine } from '../../services/aiEngine';
 import { WorkItem, LifeContext } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
-import { SnoozeMenu } from '../common/SnoozeMenu';
-import { formatDateRange, getTodayString } from '../../utils/dateUtils';
+import { useCachedState } from '../../hooks/useCachedState';
+import { getTodayString } from '../../utils/dateUtils';
+import { isOverdue, pickUpNext, totalMinutes, formatMinutes } from '../../utils/taskLists';
+import { UpNextCard } from '../common/UpNextCard';
+import { QuickAddLine } from '../common/QuickAddLine';
+import { ProjectGroups } from '../common/ProjectGroups';
 import { HabitTodayCard } from '../habits/HabitViews';
 import { countDoneToday, weekActivity } from '../../utils/progress';
 import { WeekStrip } from '../common/WeekStrip';
 import { useCompletion } from '../../hooks/useCompletion';
-import { CompleteButton } from '../common/CompleteButton';
 import { ProgressRing } from '../common/ProgressRing';
+import { CountUp } from '../common/CountUp';
 import { Celebrate } from '../common/Celebrate';
 import { Fold } from '../common/Fold';
-import { ContextTag } from '../common/ContextTag';
+import { TaskRow } from '../common/TaskRow';
 import { ReminderPrompt } from '../common/ReminderPrompt';
 import { RadarBriefCard } from '../radar/RadarBriefCard';
-
-const FOCUS_DRAG_TYPE = 'application/x-sage-item';
+import { HiddenWorkLine } from '../common/HiddenWorkLine';
+import { holidayMap, nextHoliday, holidayLabel, useHolidayPref } from '../../utils/holidays';
 
 interface DashboardViewProps {
   workspaceId: string;
@@ -30,101 +32,70 @@ interface DashboardViewProps {
   onNavigateView?: (view: string) => void;
 }
 
-export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
-  const [data, setData] = useState<any>(null);
+interface TodayData {
+  items: WorkItem[];
+  snoozed: WorkItem[];
+  habits: any[];
+  doneToday: number;
+  week: any[];
+}
+
+// Today is one list: everything overdue, due today, starting today or starred,
+// overdue first, then by priority, then by time. No buckets.
+export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
+  const [data, setData] = useCachedState<TodayData | null>(`today-list:${lifeContext || 'all'}`, null);
   const [time, setTime] = useState(new Date());
-  const [aiBriefing, setAiBriefing] = useState<any>(null);
-  const [isAiLoading, setIsAiLoading] = useState(false);
-  // Ask for the briefing once per visit; data refreshes shouldn't re-ask, even after a failure.
-  const briefingRequested = useRef(false);
-  const [isFocusDropActive, setIsFocusDropActive] = useState(false);
+  const [showSnoozed, setShowSnoozed] = useState(false);
   const { showToast } = useToast();
+  const holidayPref = useHolidayPref();
 
-  const loadAttentionData = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const summary = await api.attention.getTodayAttention(lifeContext);
-      const habits = await api.habits.list();
-      const goals = await api.goals.list();
-      setData({ ...summary, habits, goals, doneToday: countDoneToday(lifeContext), week: weekActivity(lifeContext) });
-
-      if (!briefingRequested.current && summary.todayFocus && summary.todayFocus.length > 0) {
-        briefingRequested.current = true;
-        setIsAiLoading(true);
-        try {
-           const tasksString = JSON.stringify(summary.todayFocus.map((t: any) => ({ id: t.id, title: t.title, priority: t.priority })));
-           const briefing = await aiEngine.getDailyBriefing(tasksString);
-           setAiBriefing(briefing);
-        } catch (e) {
-           console.warn('AI Briefing failed:', e);
-        } finally {
-           setIsAiLoading(false);
-        }
-      }
+      const [today, habits] = await Promise.all([api.today.list(lifeContext), api.habits.list()]);
+      setData({ ...today, habits, doneToday: countDoneToday(lifeContext), week: weekActivity(lifeContext) });
     } catch (e) {
-      console.warn('Failed to load attention data:', e);
-      setData({
-        needsAttention: [],
-        dueToday: [],
-        reminders: [],
-        todayFocus: [],
-        quickWins: [],
-        waitingFor: [],
-        slippedItems: [],
-        inboxCount: 0,
-        habits: [],
-        goals: [],
-        suggestions: [],
-        week: [],
-        doneToday: 0
-      });
+      console.warn('Failed to load Today:', e);
+      setData({ items: [], snoozed: [], habits: [], doneToday: 0, week: [] });
     }
-  }, [lifeContext]);
+  }, [lifeContext, setData]);
 
   useEffect(() => {
     let day = getTodayString();
     const timer = setInterval(() => {
       setTime(new Date());
-      // Left open overnight, Today's lists were still yesterday's.
-      if (getTodayString() !== day) { day = getTodayString(); loadAttentionData(); }
+      // Left open overnight, Today was still yesterday's.
+      if (getTodayString() !== day) { day = getTodayString(); load(); }
     }, 60_000);
-    loadAttentionData();
+    load();
     return () => clearInterval(timer);
-  }, [loadAttentionData]);
-  useDataChanges(loadAttentionData);
+  }, [load]);
+  useDataChanges(load);
 
-  const { complete: handleComplete, isCompleting, isSaving } = useCompletion(loadAttentionData);
+  const { complete: handleComplete, isCompleting, isSaving } = useCompletion(load);
 
-  const handleAddToFocus = async (itemId: string) => {
-    const item = [...(data?.dueToday || []), ...(data?.quickWins || []), ...(data?.suggestions || []), ...(data?.needsAttention || [])].find((i: WorkItem) => i.id === itemId);
-    if (!item || item.isFocus) return;
+  const handleStar = async (item: WorkItem) => {
     try {
-      await api.focus.toggle(itemId);
-      if (item.isInbox) await api.inbox.clarify(itemId, {});
-      showToast('Added to Focus');
-      loadAttentionData();
+      await api.focus.toggle(item.id);
+      if (!item.isFocus && item.isInbox) await api.inbox.clarify(item.id, {});
+      load();
     } catch (err: any) {
-      showToast('Could not add to Focus: ' + err.message, 'error');
-    }
-  };
-
-  const handleFocusAll = async (items: WorkItem[]) => {
-    try {
-      for (const item of items) {
-        if (item.isFocus) continue;
-        await api.focus.toggle(item.id);
-        if (item.isInbox) await api.inbox.clarify(item.id, {});
-      }
-      showToast(items.length === 1 ? 'Added to Focus' : `${items.length} added to Focus`);
-      loadAttentionData();
-    } catch (err: any) {
-      showToast('Could not add to Focus: ' + err.message, 'error');
+      showToast(err.message || 'Could not change the star', 'error');
     }
   };
 
   const handleToggleHabit = async (habitId: string, day: string) => {
     try {
       await api.habits.toggleDay(habitId, day);
-      loadAttentionData();
+      load();
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const handleToggleDose = async (habitId: string, day: string, time: string) => {
+    try {
+      await api.habits.toggleDose(habitId, day, time);
+      load();
     } catch (err) {
       console.error(err);
     }
@@ -134,57 +105,39 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
     return (
       <div className="max-w-6xl mx-auto space-y-4 md:space-y-6" aria-busy="true" aria-label="Loading Today">
         <div className="skeleton h-44 md:h-56" />
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
-          <div className="skeleton h-56 lg:col-span-7" />
-          <div className="skeleton h-56 lg:col-span-5" />
-        </div>
+        <div className="skeleton h-72" />
       </div>
     );
   }
 
-  // Items already in Focus show there; Scheduled lists only the rest.
-  const scheduled: WorkItem[] = (data.dueToday || []).filter((i: WorkItem) => !i.isFocus);
-  const hasScheduled = scheduled.length > 0;
-
-  const hasWaiting = data.waitingFor?.length > 0;
-  const focusCount = data.todayFocus?.length || 0;
-  const suggestions: WorkItem[] = data.suggestions || [];
-  // While Focus is empty the suggestions list carries overdue items, so the
-  // Needs Attention card doesn't repeat them.
-  const suggestedIds = new Set(focusCount === 0 ? suggestions.map(i => i.id) : []);
-  const needsAttention: WorkItem[] = (data.needsAttention || []).filter((i: WorkItem) => !suggestedIds.has(i.id) && !i.isFocus);
-  const quickWins: WorkItem[] = (data.quickWins || []).filter((i: WorkItem) => !suggestedIds.has(i.id));
-  const hasQuickWins = quickWins.length > 0;
   const todayIso = getTodayString();
+  const items = data.items || [];
+  const snoozed = data.snoozed || [];
+  const overdueCount = items.filter(i => isOverdue(i, todayIso)).length;
+  const upNext = pickUpNext(items);
+  const rest = upNext ? items.filter(i => i.id !== upNext.id) : items;
+  const { minutes, unknown } = totalMinutes(items);
 
-  // Today's progress: what got done vs what's still in Focus or scheduled.
-  const doneToday: number = data.doneToday || 0;
-  const remaining = focusCount + scheduled.length;
+  const doneToday = data.doneToday || 0;
+  const remaining = items.length;
   const total = doneToday + remaining;
   const allDone = total > 0 && remaining === 0;
 
   const hour = time.getHours();
   const greeting = allDone ? 'All done for today' : hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
 
-  // One line under the greeting that says where the day stands.
   const daySummary = (() => {
     if (allDone) return `You finished ${doneToday} ${doneToday === 1 ? 'thing' : 'things'} today. Enjoy the rest of it.`;
-    if (doneToday > 0) return remaining === 1 ? `${doneToday} done. Just one to go.` : `${doneToday} done, ${remaining} to go. Keep the momentum.`;
-    const parts = [
-      focusCount > 0 && `${focusCount} in focus`,
-      hasScheduled && `${scheduled.length} scheduled`,
-    ].filter(Boolean) as string[];
-    if (parts.length === 0) return 'A clear day. Pick one thing from your inbox to focus on.';
-    return `You have ${parts.join(' and ')}. Start with the first one.`;
+    if (remaining === 0) return 'Nothing due today. Pick something from the Inbox when you are ready.';
+    if (doneToday > 0) return remaining === 1 ? `${doneToday} done. Just one to go.` : `${doneToday} done, ${remaining} to go.`;
+    return `${remaining} ${remaining === 1 ? 'thing' : 'things'} for today${overdueCount ? `, ${overdueCount} overdue` : ''}. Start at the top.`;
   })();
 
-  const accent = lifeContext === 'personal' ? 'text-orange-600 dark:text-orange-400' : 'text-blue-600 dark:text-blue-400';
-  const showBriefing = isAiLoading || !!aiBriefing;
 
   return (
-    <div className="max-w-6xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans stagger">
-      
-      {/* 1. Greeting and today's progress */}
+    <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans stagger">
+
+      {/* Greeting and today's progress */}
       <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} p-5 md:p-8 rounded-3xl`}>
         <div className="flex items-center justify-between gap-5">
           <div className="flex-1 min-w-0">
@@ -196,7 +149,31 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
-            {data.week?.length > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
+            {/* India holidays: today's, or the next one within two weeks. A note, not a task. */}
+            {(() => {
+              const todays = holidayMap(holidayPref).get(todayIso) || [];
+              const next = todays.length ? null : nextHoliday(todayIso, holidayPref, 14);
+              if (!todays.length && !next) return null;
+              const days = next ? Math.round((new Date(`${next.date}T00:00`).getTime() - new Date(`${todayIso}T00:00`).getTime()) / 86_400_000) : 0;
+              return (
+                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-rose-600 dark:text-rose-300" data-testid="holiday-line">
+                  <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                  {todays.length ? (
+                    <><span className="font-semibold">{todays.map(h => h.name).join(' · ')}</span><span className="text-rose-500/80 dark:text-rose-300/70">today, {holidayLabel(todays[0]).toLowerCase()}{todays[0].moonSighting ? ' (subject to moon sighting)' : ''}</span></>
+                  ) : next && (
+                    <><span className="text-rose-500/80 dark:text-rose-300/70">Next holiday:</span><span className="font-semibold">{next.name}</span><span className="text-rose-500/80 dark:text-rose-300/70">{days === 1 ? 'tomorrow' : `${new Date(`${next.date}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, in ${days} days`}{next.type === 'restricted' ? ' (restricted)' : ''}</span></>
+                  )}
+                </p>
+              );
+            })()}
+            {/* Weekend: the weekly review is one tap away. */}
+            {(time.getDay() === 0 || time.getDay() === 6) && (
+              <button onClick={() => window.dispatchEvent(new CustomEvent('sage:ritual', { detail: 'weekly' }))}
+                className="mt-2 text-[13px] font-semibold text-blue-600 dark:text-blue-400 hover:underline">
+                Do the weekly review
+              </button>
+            )}
+            {data.week?.length > 0 && total > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
           </div>
 
           {total > 0 && (
@@ -208,7 +185,7 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
                   <Celebrate distance={46}><Check className="text-emerald-500 w-6 h-6 md:w-9 md:h-9" strokeWidth={3} /></Celebrate>
                 ) : (
                   <>
-                    <span className="text-[17px] md:text-[28px] font-semibold tracking-tight tabular-nums text-gray-900 dark:text-white">{doneToday}<span className="text-gray-400 font-normal">/{total}</span></span>
+                    <span className="text-[17px] md:text-[28px] font-semibold tracking-tight tabular-nums text-gray-900 dark:text-white"><CountUp value={doneToday} from={0} /><span className="text-gray-400 font-normal">/{total}</span></span>
                     <span className="hidden md:block text-[11px] font-medium text-gray-400 mt-1">done</span>
                   </>
                 )}
@@ -217,357 +194,103 @@ export function DashboardView({ workspaceId, onSelectTask, lifeContext, onNaviga
           )}
         </div>
 
-        {/* AI briefing: only takes space when there's something to read. */}
-        {showBriefing && (
-          <div className="mt-4 md:mt-5 rounded-2xl p-4 w-full max-w-2xl bg-white/70 dark:bg-white/[0.04] backdrop-blur-md ring-1 ring-black/[0.06] dark:ring-white/[0.08] shadow-[0_1px_2px_rgb(16_24_40/0.04)]">
-             <div className={`flex items-center gap-2 mb-1.5 font-semibold text-[12px] ${accent}`}>
-                <BrainCircuit size={14} /> <span>Sage AI Strategy</span>
-             </div>
-             {isAiLoading ? (
-                 <div className="space-y-2 pt-1" aria-label="Analyzing your tasks">
-                    <div className="skeleton h-3 w-11/12 !rounded-full" />
-                    <div className="skeleton h-3 w-2/3 !rounded-full" />
-                 </div>
-             ) : (
-                 <p className="text-[14px] text-gray-800 dark:text-gray-200 leading-relaxed animate-[rise_400ms_var(--ease-out-expo)]">
-                    {aiBriefing.strategyText}
-                 </p>
-             )}
-          </div>
-        )}
       </div>
 
-      {/* Offer reminders here, in context, rather than prompting on launch. */}
+      <QuickAddLine lifeContext={lifeContext} onAdded={load} />
+
       <ReminderPrompt />
 
-      {/* 2. Needs Attention Ribbon (Overdue & Repeatedly Snoozed - Gentle & Actionable) */}
-      {needsAttention.length > 0 && (
-        <div className="p-5 rounded-3xl bg-red-50/70 dark:bg-red-950/20 border border-red-200/60 dark:border-red-900/30 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="eyebrow text-red-600 dark:text-red-400">
-              <AlertTriangle size={14} />
-              <span>Needs Attention</span>
-              <span className="tabular-nums opacity-70">{needsAttention.length}</span>
-            </div>
-            <span className="hidden sm:inline text-[12px] text-gray-400">Nothing changes unless you say so</span>
-          </div>
+      {/* Chill mode: work is out of sight, never lost. */}
+      <HiddenWorkLine scope="today" />
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            {needsAttention.slice(0, 4).map((item: WorkItem) => (
-              <div key={item.id} className={`p-3.5 rounded-2xl surface-item is-interactive border border-red-100 dark:border-red-900/30 flex items-center justify-between gap-3 ${isCompleting(item.id) ? 'is-completing' : ''}`}>
-                <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
-                  <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                  <span className="text-[11px] text-red-500 font-medium">
-                    {item.dueDate ? withTime(formatDateRange(null, item.dueDate), item.dueTime) : `Snoozed ${item.snoozeCount} times`}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2 shrink-0">
-                  <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
-                  <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
-                </div>
-              </div>
-            ))}
+      {/* Up next: the one thing to do now. Not shown when nothing is waiting. */}
+      {upNext && (
+        <UpNextCard
+          item={upNext} completing={isCompleting(upNext.id)} saving={isSaving(upNext.id)}
+          onComplete={() => handleComplete(upNext)} onOpen={() => onSelectTask(upNext.id)} onChanged={load}
+        />
+      )}
+
+      {/* The one list */}
+      {(rest.length > 0 || snoozed.length > 0 || !upNext) && (
+      <section className="relative has-[[aria-expanded=true]]:z-30 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3" aria-label="Today's tasks">
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <CalendarCheck size={18} className="text-blue-500" />
+            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">{upNext ? 'Then' : 'Today'}</h3>
+            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{rest.length}</span>
           </div>
+          {minutes > 0 && (
+            <span className="text-[12px] text-gray-400" title={unknown ? `${unknown} without an estimate` : undefined}>
+              About {formatMinutes(minutes)}{unknown ? ' + more' : ''}
+            </span>
+          )}
         </div>
+
+        {rest.length === 0 && !upNext ? (
+          <div className="flex flex-col items-center text-center py-8 gap-2">
+            {doneToday > 0 ? (
+              <Celebrate><div className="w-11 h-11 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center"><Check size={20} strokeWidth={3} /></div></Celebrate>
+            ) : (
+              <div className="w-11 h-11 rounded-full bg-gray-100 dark:bg-white/5 text-gray-400 flex items-center justify-center"><CalendarCheck size={20} /></div>
+            )}
+            <p className="text-[14px] font-semibold text-gray-900 dark:text-white">{doneToday > 0 ? 'Today is clear' : 'Nothing due today'}</p>
+            {onNavigateView && (
+              <button onClick={() => onNavigateView('inbox')} className="text-[13px] text-blue-600 dark:text-blue-400 font-semibold hover:underline flex items-center gap-1">
+                <InboxIcon size={13} /> See all tasks in the Inbox
+              </button>
+            )}
+          </div>
+        ) : (
+          <div className="stagger -mb-2">
+            <AnimatePresence initial={false}>
+              <ProjectGroups items={rest}>
+                {(item, grouped) => (
+                  <Fold key={item.id}>
+                    <TaskRow
+                      item={item} today={todayIso} combined={!lifeContext} hideHome={grouped}
+                      completing={isCompleting(item.id)} saving={isSaving(item.id)}
+                      onComplete={() => handleComplete(item)} onOpen={() => onSelectTask(item.id)}
+                      onStar={() => handleStar(item)} onSnoozed={load}
+                    />
+                  </Fold>
+                )}
+              </ProjectGroups>
+            </AnimatePresence>
+          </div>
+        )}
+
+        {/* Snoozed items for today stay one tap away instead of vanishing. */}
+        {snoozed.length > 0 && (
+          <div className="pt-1">
+            <button onClick={() => setShowSnoozed(s => !s)} className="flex items-center gap-1.5 text-[12.5px] font-semibold text-gray-400 hover:text-gray-600 dark:hover:text-gray-300" aria-expanded={showSnoozed}>
+              <Moon size={13} /> {snoozed.length} snoozed for later
+              <ChevronDown size={13} className={`transition-transform ${showSnoozed ? 'rotate-180' : ''}`} />
+            </button>
+            {showSnoozed && (
+              <div className="mt-2 space-y-2">
+                {snoozed.map(item => (
+                  <TaskRow
+                    key={item.id} item={item} today={todayIso} combined={!lifeContext}
+                    completing={isCompleting(item.id)} saving={isSaving(item.id)}
+                    onComplete={() => handleComplete(item)} onOpen={() => onSelectTask(item.id)}
+                    onStar={() => handleStar(item)} onSnoozed={load}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+      </section>
       )}
 
       {/* Habits: a fresh entry each day, so a missed day shows as missed instead of carrying over. */}
       {lifeContext !== 'work' && data.habits?.length > 0 && (
-        <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} />
+        <HabitTodayCard habits={data.habits} today={todayIso} onToggle={handleToggleHabit} onToggleDose={handleToggleDose} />
       )}
 
       {/* Radar brief: opt-in in Settings > Radar, and work only. */}
       {lifeContext !== 'personal' && onNavigateView && <RadarBriefCard onOpen={() => onNavigateView('radar')} />}
-
-      {/* 3. Main Grid: Today's Focus & Scheduled Checkpoints */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 md:gap-6">
-        
-        {/* Active Focus (drop target: drag items here from Scheduled or Quick Wins) */}
-        <div
-          onDragOver={(e) => { if (e.dataTransfer.types.includes(FOCUS_DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setIsFocusDropActive(true); } }}
-          onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setIsFocusDropActive(false); }}
-          onDrop={(e) => { e.preventDefault(); setIsFocusDropActive(false); const id = e.dataTransfer.getData(FOCUS_DRAG_TYPE); if (id) handleAddToFocus(id); }}
-          className={`${hasScheduled ? 'lg:col-span-7' : 'lg:col-span-12'} surface p-4 md:p-6 rounded-3xl border space-y-4 transition-colors ${isFocusDropActive ? 'border-amber-400 ring-4 ring-amber-400/15 bg-amber-50/60 dark:bg-amber-950/20' : 'border-black/5 dark:border-white/5'}`}>
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Target size={18} className="text-amber-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Focus</h3>
-              {focusCount > 0 && <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{focusCount}</span>}
-            </div>
-            {onNavigateView && (
-              <button onClick={() => onNavigateView('focus')} className="group/link text-[12px] font-semibold text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-0.5">
-                <span>View Focus Space</span>
-                <ChevronRight size={13} className="transition-transform group-hover/link:translate-x-0.5" />
-              </button>
-            )}
-          </div>
-
-          {focusCount === 0 && !isFocusDropActive && suggestions.length > 0 ? (
-            // An empty Focus is a decision to make; Sage offers a short answer.
-            <div className="space-y-3">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[13px] text-gray-500 dark:text-gray-400 flex items-center gap-2.5">
-                  {doneToday > 0 && <Celebrate dots={8} distance={20}><Trophy size={16} className="text-emerald-500" /></Celebrate>}
-                  {doneToday > 0 ? 'Focus is clear. Up for one more? These look most pressing.' : 'Nothing in Focus yet. These look most pressing today.'}
-                </div>
-                {suggestions.length > 1 && (
-                  <button onClick={() => handleFocusAll(suggestions)} className="shrink-0 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold bg-amber-500 hover:bg-amber-600 text-white shadow-sm shadow-amber-600/25 active:scale-[0.97] transition-all">
-                    Focus all {suggestions.length}
-                  </button>
-                )}
-              </div>
-              <div className="space-y-2 stagger">
-                {suggestions.map((item: WorkItem) => {
-                  const reason = item.dueDate && item.dueDate < todayIso ? 'Overdue' : item.priority === 'urgent' ? 'Urgent' : 'High priority';
-                  return (
-                    <div key={item.id} className="p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 border-dashed">
-                      <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
-                        <p className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</p>
-                        <span className="flex items-center gap-1.5 mt-0.5">
-                          <span className={`text-[11px] font-semibold ${reason === 'Overdue' ? 'text-red-500' : 'text-orange-500'}`}>{reason}</span>
-                          <ContextTag item={item} combined={!lifeContext} />
-                        </span>
-                      </div>
-                      <button onClick={() => handleAddToFocus(item.id)} className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-[12.5px] font-semibold text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20 active:scale-[0.97] transition-all">
-                        <Target size={13} /> Focus
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          ) : focusCount === 0 && doneToday > 0 && !isFocusDropActive ? (
-            // Finishing Focus is the high point of the day, so it gets a moment.
-            <div className="flex flex-col items-center text-center py-6 gap-3">
-              <Celebrate>
-                <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center ring-8 ring-emerald-500/[0.06]">
-                  <Trophy size={22} />
-                </div>
-              </Celebrate>
-              <div>
-                <p className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">Focus cleared</p>
-                <p className="text-[13px] text-gray-500 dark:text-gray-400 mt-0.5">
-                  {hasScheduled ? 'Pull the next thing in from Scheduled, or call it a win.' : hasQuickWins ? 'Got a few minutes? There are quick wins below.' : 'Nothing left in Focus. Pick the next thing when you are ready.'}
-                </p>
-              </div>
-              {!hasScheduled && !hasQuickWins && onNavigateView && (
-                <button onClick={() => onNavigateView('inbox')} className="text-[13px] text-blue-600 dark:text-blue-400 font-semibold hover:underline">
-                  Pick from Inbox →
-                </button>
-              )}
-            </div>
-          ) : focusCount === 0 ? (
-            <div className={`flex flex-col sm:flex-row items-center justify-center gap-2 sm:gap-3 py-5 rounded-2xl border border-dashed text-center transition-colors ${isFocusDropActive ? 'border-amber-400 text-amber-600' : 'border-gray-300/80 dark:border-white/10 text-gray-400'}`}>
-              <Target size={18} className="shrink-0" />
-              <p className="text-[13px] font-medium">
-                {isFocusDropActive ? 'Drop to add to Focus' : hasScheduled ? 'Nothing in Focus yet. Tap the target on a scheduled item, or drag it here.' : 'Nothing in Focus yet. Choose one thing to start with.'}
-              </p>
-              {!isFocusDropActive && (
-                <button onClick={() => onNavigateView && onNavigateView('inbox')} className="text-[13px] text-blue-500 font-semibold hover:underline">
-                  Pick from Inbox →
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="stagger -mb-2">
-              <AnimatePresence initial={false}>
-              {data.todayFocus.map((item: WorkItem, index: number) => (
-                <Fold key={item.id}>
-                <div className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 hover:border-amber-200 dark:hover:border-amber-500/30 ${index === 0 ? 'ring-1 ring-amber-400/30 dark:ring-amber-400/20' : ''} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
-                  <div className="flex items-center gap-3 min-w-0 flex-1">
-                    <span className="w-5 h-5 rounded-full bg-amber-100 dark:bg-amber-950/40 text-amber-600 dark:text-amber-300 font-semibold text-[10px] flex items-center justify-center shrink-0">
-                      {index + 1}
-                    </span>
-                    <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
-                    <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-amber-500 transition-colors">
-                      {item.title}
-                    </span>
-                    {item.dueDate && item.dueDate < todayIso && <span className="shrink-0 text-[10.5px] font-semibold text-red-500">Overdue</span>}
-                    <ContextTag item={item} combined={!lifeContext} />
-                    {index === 0 && <span className="hidden sm:inline shrink-0 text-[10.5px] font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400 bg-amber-500/10 px-2 py-0.5 rounded-full">Up next</span>}
-                  </div>
-                  <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
-                </div>
-                </Fold>
-              ))}
-              </AnimatePresence>
-            </div>
-          )}
-        </div>
-
-        {/* Scheduled today that isn't already in Focus. Hidden when empty; see the summary strip below. */}
-        {hasScheduled && (
-        <div className="lg:col-span-5 surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-4">
-          <div className="flex items-center gap-2">
-            <CalendarIcon size={18} className="text-blue-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Scheduled for Today</h3>
-            <span className="text-[12px] font-semibold text-gray-400 tabular-nums">{scheduled.length}</span>
-          </div>
-
-          <div className="stagger -mb-2">
-            <AnimatePresence initial={false}>
-            {scheduled.map((item: WorkItem) => (
-              <Fold key={item.id}>
-              <div
-                draggable
-                onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
-                onClick={() => onSelectTask(item.id)}
-                className={`p-3.5 rounded-2xl surface-item is-interactive flex items-center justify-between gap-3 cursor-pointer hover:border-blue-200 dark:hover:border-blue-500/30 md:cursor-grab md:active:cursor-grabbing ${isCompleting(item.id) ? 'is-completing' : ''}`}>
-                <div className="flex items-center gap-3 min-w-0 flex-1">
-                  <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
-                  <div className="min-w-0 flex-1">
-                    <h4 className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                    <span className="flex items-center gap-1.5"><ContextTag item={item} combined={!lifeContext} /><span className="text-[11px] font-medium text-gray-400">{item.startAt ? new Date(item.startAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' }) : item.entityType === 'task' ? withTime('Due today', item.dueTime) : item.entityType[0].toUpperCase() + item.entityType.slice(1)}</span></span>
-                  </div>
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); handleAddToFocus(item.id); }} className="p-1.5 -m-0.5 rounded-lg text-gray-300 dark:text-gray-600 hover:text-amber-500 hover:bg-amber-50 dark:hover:bg-amber-950/30 transition-colors shrink-0" title="Add to Focus" aria-label="Add to Focus">
-                  <Target size={16} />
-                </button>
-              </div>
-              </Fold>
-            ))}
-            </AnimatePresence>
-          </div>
-        </div>
-        )}
-      </div>
-      {/* 4. Quick Wins & Delegations (Waiting For). Each card only shows when it has items. */}
-      {(hasQuickWins || hasWaiting) && (
-      <div className={`grid grid-cols-1 ${hasQuickWins && hasWaiting ? 'lg:grid-cols-2' : ''} gap-4 md:gap-6`}>
-        
-        {/* Quick Wins (<=15 min tasks) */}
-        {hasQuickWins && (
-        <div className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
-          <div className="flex items-center gap-2">
-            <Zap size={18} className="text-amber-500" />
-            <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Quick Wins</h3>
-            <span className="text-[12px] font-medium text-gray-400">15 min or less</span>
-          </div>
-          
-          <div className="stagger -mb-2">
-            <AnimatePresence initial={false}>
-            {quickWins.map((item: WorkItem) => (
-              <Fold key={item.id}>
-              <div
-                draggable={!item.isFocus}
-                onDragStart={(e) => { e.dataTransfer.setData(FOCUS_DRAG_TYPE, item.id); e.dataTransfer.effectAllowed = 'move'; }}
-                className={`p-3 rounded-2xl surface-item is-interactive flex items-center gap-3 ${item.isFocus ? '' : 'md:cursor-grab md:active:cursor-grabbing'} ${isCompleting(item.id) ? 'is-completing' : ''}`}>
-                <CompleteButton className="ml-0.5" checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={() => handleComplete(item)} />
-                <span onClick={() => onSelectTask(item.id)} className="row-title font-semibold text-[13px] text-gray-900 dark:text-white truncate cursor-pointer hover:text-blue-500">
-                  {item.title}
-                </span>
-                <ContextTag item={item} combined={!lifeContext} />
-                {item.estimated && <span className="ml-auto shrink-0 text-[11px] font-semibold text-gray-400 tabular-nums">{item.estimated}</span>}
-              </div>
-              </Fold>
-            ))}
-            </AnimatePresence>
-          </div>
-        </div>
-        )}
-
-        {/* Delegated Waiting For Summary */}
-        {hasWaiting && (
-        <div className="surface p-4 md:p-6 rounded-3xl border border-black/5 dark:border-white/5 space-y-3">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Hourglass size={18} className="text-purple-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Waiting For ({data.waitingFor.length})</h3>
-            </div>
-            {onNavigateView && (
-              <button onClick={() => onNavigateView('waiting_for')} className="text-xs font-semibold text-purple-500 hover:underline">
-                View All →
-              </button>
-            )}
-          </div>
-          <p className="text-xs text-gray-400">Awaiting someone else's response.</p>
-
-          <div className="space-y-2 stagger">
-            {data.waitingFor.slice(0, 3).map((item: WorkItem) => (
-              <div key={item.id} onClick={() => onSelectTask(item.id)} className="p-3 rounded-2xl surface-item is-interactive border border-purple-500/20 flex items-center justify-between gap-2 cursor-pointer">
-                <div className="min-w-0 flex-1">
-                  <span className="text-[10px] font-semibold text-purple-500 uppercase block">{item.waitingFor?.who}</span>
-                  <span className="font-semibold text-[13px] text-gray-900 dark:text-white truncate block">{item.waitingFor?.about || item.title}</span>
-                </div>
-                <ChevronRight size={14} className="text-gray-400" />
-              </div>
-            ))}
-          </div>
-        </div>
-        )}
-
-      </div>
-      )}
-
-      {/* Empty sections collapse into one quiet line instead of full-size cards. */}
-      {(!hasScheduled || !hasQuickWins || !hasWaiting) && (
-        <div className="flex flex-wrap items-center gap-x-5 gap-y-2 px-1 text-[13px] text-gray-400">
-          {!hasScheduled && <span className="flex items-center gap-1.5"><CheckCircle2 size={14} className="text-emerald-500" /> {data.dueToday?.length > 0 ? 'Nothing else scheduled' : doneToday > 0 ? 'Nothing left scheduled' : 'Nothing scheduled today'}</span>}
-          {!hasQuickWins && <span className="flex items-center gap-1.5"><Zap size={14} /> No quick wins</span>}
-          {!hasWaiting && (
-            <button onClick={() => onNavigateView && onNavigateView('waiting_for')} className="flex items-center gap-1.5 hover:text-purple-500 transition-colors">
-              <Hourglass size={14} /> Not waiting on anyone
-            </button>
-          )}
-        </div>
-      )}
-
-      {/* 5. Smart Resurfacing ("You haven't touched this in 14 days") */}
-      {data.slippedItems?.length > 0 && (
-        <div className="p-5 rounded-3xl bg-amber-50/50 dark:bg-amber-950/20 border border-amber-200/50 dark:border-amber-900/30 space-y-3">
-          <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-600 dark:text-amber-400">
-            <Clock size={15} />
-            <span>Smart Resurfacing</span>
-          </div>
-          <p className="text-xs text-gray-500 dark:text-gray-400">
-            You haven't looked at these in over two weeks. Still relevant? Sage suggests; you decide.
-          </p>
-
-          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-            {data.slippedItems.map((item: WorkItem) => (
-              <div key={item.id} className="p-3.5 rounded-2xl surface-item is-interactive space-y-2">
-                <h4 className="font-semibold text-[13px] text-gray-900 dark:text-white truncate">{item.title}</h4>
-                <div className="flex items-center gap-2">
-                  <button onClick={() => handleComplete(item)} className="px-2.5 py-1 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-600 dark:text-emerald-400 text-[10px] font-semibold rounded-lg hover:bg-emerald-100">
-                    Done
-                  </button>
-                  <SnoozeMenu itemId={item.id} onSnoozed={() => loadAttentionData()} />
-                  <button onClick={async () => { await api.workItems.softDelete(item.id); loadAttentionData(); }} className="px-2.5 py-1 text-gray-400 hover:text-red-500 text-[10px] font-semibold">
-                    Archive
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* 6. Goals (Life Space) */}
-      {lifeContext !== 'work' && data.goals?.length > 0 && (
-        <div className="pt-2">
-          {/* Goals */}
-          <div className="p-4 md:p-6 rounded-3xl surface border border-black/5 dark:border-white/5 space-y-4">
-            <div className="flex items-center gap-2">
-              <Target size={18} className="text-blue-500" />
-              <h3 className="font-semibold text-[15px] tracking-tight text-gray-900 dark:text-white">Active Goals</h3>
-            </div>
-            <div className="space-y-3">
-              {data.goals?.map((goal: any) => (
-                <div key={goal.id} className="p-4 rounded-2xl surface-item is-interactive space-y-2">
-                  <div className="flex justify-between items-center text-xs font-semibold">
-                    <span className="text-gray-900 dark:text-white">{goal.title}</span>
-                    <span className="text-blue-500">{goal.progress}%</span>
-                  </div>
-                  <div className="w-full bg-gray-100 dark:bg-white/10 rounded-full h-2 overflow-hidden">
-                    <div className="bg-blue-500 h-2 rounded-full transition-all duration-300" style={{ width: `${goal.progress}%` }} />
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
     </div>
   );
 }

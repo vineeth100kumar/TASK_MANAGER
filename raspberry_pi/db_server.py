@@ -2,33 +2,46 @@ import json
 import os
 import hmac
 import sqlite3
+import data_dir  # noqa: F401  (first: picks the SD card or the safe fallback for SAGE_DB_PATH)
+import sqlite_tuning  # noqa: F401  (every connection: synchronous=NORMAL, busy timeout)
 import datetime
 import asyncio
 import logging
+import time
+import uuid
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Request, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import db_writer
 import claude_api
+import placement
 import logstore
 import desk
+import drop
+import industry
 import item_actions
+import life_mode
 import phone_link
+import speaker
 import quick_add
 import markets
+import passkeys
 import prices
 import radar
 import radar_research
 import sparks
 import system_health
+import diagnostics
+import web_files
+from web_files import WebFiles
 
 app = FastAPI(title="Sage Database (SQLite Local-First Backup Node)")
 
@@ -45,8 +58,23 @@ GOOGLE_SHEETS_URL = os.getenv(
 # The key Apps Script expects (its SAGE_AUTH_KEY script property). Without it
 # the backup web app is open to anyone who finds its address.
 GAS_AUTH_KEY = os.getenv("SAGE_GAS_AUTH_KEY", "").strip()
+# A request slower than this many milliseconds is also logged as "slow" (see
+# record_requests and GET /api/logs/slow).
+try:
+    SLOW_MS = max(1, int(os.getenv("SAGE_SLOW_MS", "800")))
+except ValueError:
+    SLOW_MS = 800
 # How often queued changes are copied to Apps Script, in seconds.
 GAS_BACKUP_INTERVAL = int(os.getenv("SAGE_GAS_BACKUP_INTERVAL", "300"))
+GAS_BACKUP_PAGE = 50
+# While Google Sheets keeps refusing, try less often: 5, 10, 20, 40, then every 60 min.
+GAS_BACKUP_MAX_WAIT = 3600
+
+
+def backup_wait(failures: int) -> int:
+    if failures <= 0:
+        return GAS_BACKUP_INTERVAL
+    return min(GAS_BACKUP_INTERVAL * 2 ** (failures - 1), max(GAS_BACKUP_MAX_WAIT, GAS_BACKUP_INTERVAL))
 # The shared key every client sends as "Authorization: Bearer <key>". LUMO
 # reads the same value from the same file. Empty means no key check, which is
 # only safe when the server is not reachable from outside the Pi.
@@ -61,6 +89,8 @@ SYNC_TABLES = {
     "comments", "subtasks", "activities", "boards",
     # Radar's research (radar_research.py): one dossier per run, three ideas each.
     "dossiers", "ideas",
+    # Thought maps: each map is a note (kind "map"), one record per thought.
+    "thoughts",
 }
 SYNC_OPERATIONS = {"save", "patch", "delete"}
 LEDGER_DAYS = 90
@@ -84,6 +114,16 @@ def logged_in(request) -> bool:
     return access_gate.enabled and access_gate.session_valid(request.cookies.get(access_gate.COOKIE_NAME))
 
 
+def is_pi_itself(request) -> bool:
+    """A request made on the Pi itself (its own browser), not through the tunnel,
+    which adds a forwarding header, or from another device."""
+    host = request.client.host if request.client else ""
+    return host in ("127.0.0.1", "::1") and not (request.headers.get("cf-connecting-ip") or request.headers.get("x-forwarded-for"))
+
+
+API_SECRET_PATH = "/api/settings/api-secret"
+
+
 def request_key(request) -> str:
     auth = request.headers.get("authorization", "")
     return auth[7:].strip() if auth.lower().startswith("bearer ") else request.headers.get("x-sage-key", "")
@@ -97,6 +137,8 @@ async def require_api_key(request, call_next):
     install scripts and monitors can check the server is up.
     """
     path = request.url.path
+    if path == API_SECRET_PATH and is_pi_itself(request):
+        return await call_next(request)  # the Pi's own screen may read its key
     if path.startswith("/api/claude/") and request.method != "OPTIONS":
         # Claude's own routes take only Claude's token, and are off without one.
         if not claude_api.token_matches(request_key(request)):
@@ -106,6 +148,7 @@ async def require_api_key(request, call_next):
         API_SECRET
         and path.startswith("/api/")
         and path != "/api/health"
+        and path not in WEBAUTHN_OPEN_PATHS
         and request.method != "OPTIONS"
         and not logged_in(request)
     ):
@@ -134,6 +177,16 @@ GATE_OPEN_PATHS = {
     "/sw.js",
 }
 
+# Trusted-device login (passkeys.py) must work before there is a session: an
+# unlogged-in browser asks whether a passkey is set, gets a challenge, and logs
+# in with it. These three are open; making and managing passkeys still needs a
+# password session (they live under /api/webauthn/ but aren't listed here).
+WEBAUTHN_OPEN_PATHS = {
+    "/api/webauthn/status",
+    "/api/webauthn/auth/begin",
+    "/api/webauthn/auth/complete",
+}
+
 
 @app.middleware("http")
 async def require_login(request, call_next):
@@ -142,24 +195,44 @@ async def require_login(request, call_next):
         not access_gate.enabled
         or request.method == "OPTIONS"
         or path in GATE_OPEN_PATHS
+        or path in WEBAUTHN_OPEN_PATHS
         # The app's own font files, so the login page can use them too.
         or (path.startswith("/assets/inter-") and path.endswith(".woff2"))
         # The MCP address carries its own token and checks it (claude_api.py).
         or path.startswith("/mcp/")
         or path.startswith("/api/claude/")
+        # Drop's share links (drop.py) are public by design, and sandboxed.
+        or path.startswith(drop.PREFIX)
+        # Finished post images (posts.py) check the cookie, the key or their
+        # own signed token in the route, so a refused <img> gets a plain 401
+        # instead of a redirect to the login page.
+        or path.startswith(posts.MEDIA_PREFIX)
+        or path.startswith(reels.MEDIA_PREFIX)
         or (API_SECRET and key_matches(request_key(request)))
         or claude_may(request)
     ):
         return await call_next(request)
-    if logged_in(request) and not access_gate.is_page_load(request):
-        return await call_next(request)
-    if access_gate.is_page_load(request) and access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
-        # Each opening of the app takes the password, so this page must not
-        # be kept for the back button or reused from the browser's cache.
-        response = await call_next(request)
-        response.headers["Cache-Control"] = "no-store"
-        response.delete_cookie(access_gate.OPEN_COOKIE)
-        return response
+    if logged_in(request):
+        # A signed-in device opens the app straight from its session cookie,
+        # with no detour through /login. That detour — a full page redirect
+        # over the tunnel on every open — was what made opening slow and
+        # sometimes blank. Data calls and assets pass the same way.
+        if not access_gate.is_page_load(request) or not access_gate.ASK_EVERY_OPEN:
+            return await call_next(request)
+        # Strict mode (SAGE_ASK_EVERY_OPEN): each open spends a one-time ticket,
+        # so a reload or a new tab asks for the password again.
+        if access_gate.spend_open_ticket(request.cookies.get(access_gate.OPEN_COOKIE)):
+            # The page must not be kept for the back button or reused from the
+            # browser's cache, and must come back whole: a "304 Not Modified"
+            # here would spend the ticket on an empty answer, and with no-store
+            # the browser would have no copy to fall back on, showing a blank
+            # white page.
+            request.scope["headers"] = [(k, v) for k, v in request.scope["headers"]
+                                        if k not in (b"if-none-match", b"if-modified-since")]
+            response = await call_next(request)
+            response.headers["Cache-Control"] = "no-store"
+            response.delete_cookie(access_gate.OPEN_COOKIE)
+            return response
     if path.startswith("/api/"):
         return JSONResponse({"success": False, "error": "Log in to Sage first"}, status_code=401)
     target = path + (f"?{request.url.query}" if request.url.query else "")
@@ -175,17 +248,31 @@ async def record_requests(request, call_next):
     watched = path.startswith("/api/") or path.startswith("/mcp/")
     if not watched or request.method == "OPTIONS":
         return await call_next(request)
+    # A short id on every watched request: it is in the log line and in the
+    # X-Request-Id response header, so a slow page in the browser's Network tab
+    # can be matched to its line in the log.
+    rid = uuid.uuid4().hex[:8]
+    diagnostics.request_begin()
     started = asyncio.get_event_loop().time()
     try:
         response = await call_next(request)
     except Exception as e:
         ms = int((asyncio.get_event_loop().time() - started) * 1000)
-        logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r}")
+        diagnostics.request_end(path, ms, 0)
+        logstore.error("request", f"{request.method} {path} failed after {ms}ms: {e!r} [{rid}]")
         raise
     ms = int((asyncio.get_event_loop().time() - started) * 1000)
     status = response.status_code
-    level = "error" if status >= 500 else "warn" if status >= 400 else "info"
-    logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms)")
+    diagnostics.request_end(path, ms, status)
+    response.headers["X-Request-Id"] = rid
+    # /api/health is a liveness ping (install scripts, monitors, and the
+    # diagnostics self-probe) — counted above, but kept out of the log so it
+    # doesn't bury the real requests.
+    if path != "/api/health":
+        level = "error" if status >= 500 else "warn" if status >= 400 else "info"
+        logstore.log(level, "request", f"{request.method} {path} -> {status} ({ms}ms) [{rid}]")
+        if ms >= SLOW_MS:
+            logstore.warn("slow", f"{request.method} {path} -> {status} took {ms}ms (limit {SLOW_MS}ms) [{rid}]")
     return response
 
 
@@ -282,6 +369,116 @@ def logout():
     return response
 
 
+def _issue_session(response, request):
+    """Hand a browser the same login + one-page-load cookies that typing the
+    password does, so a passkey login lands in exactly the same place."""
+    secure = access_gate.is_https(request)
+    response.set_cookie(
+        access_gate.COOKIE_NAME, access_gate.new_session(),
+        max_age=access_gate.SESSION_DAYS * 86400, httponly=True, secure=secure, samesite="lax",
+    )
+    response.set_cookie(
+        access_gate.OPEN_COOKIE, access_gate.new_open_ticket(),
+        max_age=access_gate.OPEN_SECONDS, httponly=True, secure=secure, samesite="lax",
+    )
+    return response
+
+
+# --- Trusted devices (passkeys.py) ---
+# Face ID / Touch ID / Windows Hello instead of the password. Making a passkey
+# needs a password session; logging in with one does not (that is the point).
+@app.get("/api/webauthn/status", include_in_schema=False)
+async def webauthn_status(request: Request):
+    return passkeys.status(request, access_gate.enabled)
+
+
+@app.post("/api/webauthn/register/begin", include_in_schema=False)
+async def webauthn_register_begin(request: Request):
+    if not passkeys.AVAILABLE:
+        return JSONResponse({"success": False, "error": "Trusted devices aren't set up on this Pi yet."}, status_code=503)
+    if not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "Set a Sage password first; a trusted device unlocks it."}, status_code=400)
+    return HTMLResponse(passkeys.registration_options(request), media_type="application/json")
+
+
+@app.post("/api/webauthn/register/complete", include_in_schema=False)
+async def webauthn_register_complete(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "Trusted devices aren't available."}, status_code=400)
+    body = await request.json()
+    try:
+        result = passkeys.verify_registration(
+            request,
+            json.dumps(body.get("credential")),
+            str(body.get("session") or ""),
+            str(body.get("name") or ""),
+        )
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc) or "Couldn't trust this device."}, status_code=400)
+    return {"success": True, "device": result}
+
+
+@app.post("/api/webauthn/auth/begin", include_in_schema=False)
+async def webauthn_auth_begin(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    if access_gate.locked_for(ip, device):
+        return JSONResponse({"success": False, "error": "Too many tries. Use your password for now."}, status_code=429)
+    options = passkeys.authentication_options(request)
+    if options is None:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    return HTMLResponse(options, media_type="application/json")
+
+
+@app.post("/api/webauthn/auth/complete", include_in_schema=False)
+async def webauthn_auth_complete(request: Request):
+    if not passkeys.AVAILABLE or not access_gate.enabled:
+        return JSONResponse({"success": False, "error": "No trusted devices."}, status_code=400)
+    ip = access_gate.client_ip(request)
+    device = request.cookies.get(access_gate.DEVICE_COOKIE, "")[:40]
+    if access_gate.locked_for(ip, device):
+        return JSONResponse({"success": False, "error": "Too many tries. Use your password for now."}, status_code=429)
+    body = await request.json()
+    try:
+        ok = passkeys.verify_authentication(
+            request, json.dumps(body.get("credential")), str(body.get("session") or "")
+        )
+    except Exception as exc:
+        # A failed passkey counts against the same limits as a wrong password.
+        access_gate.record_failure(ip, device)
+        print(f"Passkey login failed from {ip}: {exc}")
+        return JSONResponse({"success": False, "error": str(exc) or "That didn't work."}, status_code=401)
+    if not ok:
+        access_gate.record_failure(ip, device)
+        return JSONResponse({"success": False, "error": "That didn't work."}, status_code=401)
+    access_gate.clear_failures(ip, device)
+    return _issue_session(JSONResponse({"success": True}), request)
+
+
+@app.get("/api/webauthn/devices", include_in_schema=False)
+async def webauthn_devices():
+    return {"success": True, "devices": passkeys.list_devices() if passkeys.AVAILABLE else [], "available": passkeys.AVAILABLE}
+
+
+@app.post("/api/webauthn/devices/rename", include_in_schema=False)
+async def webauthn_device_rename(request: Request):
+    body = await request.json()
+    ok = passkeys.AVAILABLE and passkeys.rename(str(body.get("id") or ""), str(body.get("name") or ""))
+    return {"success": bool(ok)}
+
+
+@app.post("/api/webauthn/devices/revoke", include_in_schema=False)
+async def webauthn_device_revoke(request: Request):
+    body = await request.json()
+    if body.get("all"):
+        removed = passkeys.revoke_all() if passkeys.AVAILABLE else 0
+        return {"success": True, "removed": removed}
+    ok = passkeys.AVAILABLE and passkeys.revoke(str(body.get("id") or ""))
+    return {"success": bool(ok)}
+
+
 # --- Live event stream (/ws) ---
 # Clients connect, send {"type": "auth", "token": "<key>"} as the first frame,
 # then receive one {"type": "SYNC_APPLIED", ...} message per applied batch so
@@ -341,6 +538,16 @@ async def event_stream(socket: WebSocket):
 
 def init_db():
     conn = sqlite3.connect(DB_PATH)
+    # WAL lets readers carry on while one writer saves. Without it every save
+    # (a post's progress, a sync, the notifier) blocked every read for up to
+    # 5 s and the logs filled with "database is locked". The mode is stored
+    # in the file, so setting it once here covers every connection.
+    try:
+        mode = conn.execute("PRAGMA journal_mode=WAL").fetchone()[0]
+        if str(mode).lower() != "wal":
+            logstore.warn("db", f"SQLite stayed in {mode} mode instead of WAL; saves may block reads")
+    except sqlite3.Error as e:
+        logstore.warn("db", f"Couldn't switch SQLite to WAL: {e}")
     cursor = conn.cursor()
     # Document Store Table
     cursor.execute('''
@@ -428,11 +635,17 @@ async def google_sheets_backup_worker():
     sync batches to Apps Script in order, stopping at the first failure so
     nothing is applied out of order.
     """
+    failures = 0
     while True:
+        system_health.beat(GAS_BACKUP_MAX_WAIT)
+        failed, rows = False, []
         try:
             conn = sqlite3.connect(DB_PATH)
             cursor = conn.cursor()
-            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC")
+            # A few at a time: while Google Sheets refuses the first one, the
+            # queue grows, and reading all of it every round cost the Pi memory
+            # and time for batches that were never going to be sent.
+            cursor.execute("SELECT id, payload FROM unsynced_batches ORDER BY id ASC LIMIT ?", (GAS_BACKUP_PAGE,))
             rows = cursor.fetchall()
 
             if rows:
@@ -456,6 +669,7 @@ async def google_sheets_backup_worker():
                         if not ok:
                             print(f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
                             logstore.error("backup", f"Google Sheets backup failed (HTTP {resp.status_code}): {resp.text[:200]}")
+                            failed = True
                             break
                         # A batch can succeed overall while some changes in it were
                         # refused. Say so rather than dropping them silently.
@@ -463,14 +677,17 @@ async def google_sheets_backup_worker():
                         if refused:
                             print(f"Google Sheets backup: {len(refused)} change(s) in batch {row_id} were rejected: {refused[:3]}")
                             logstore.warn("backup", f"{len(refused)} change(s) in batch {row_id} were rejected by Google Sheets: {refused[:3]}")
-                        cursor.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,))
-                        conn.commit()
+                        await db_writer.get(DB_PATH).write(
+                            lambda c, row_id=row_id: c.execute("DELETE FROM unsynced_batches WHERE id = ?", (row_id,)))
             conn.close()
         except Exception as e:
             print(f"Backup worker error: {e}")
             logstore.error("backup", f"Backup worker error: {e}")
+            failed = True
 
-        await asyncio.sleep(GAS_BACKUP_INTERVAL)
+        failures = failures + 1 if failed else 0
+        more = not failed and len(rows) == GAS_BACKUP_PAGE
+        await asyncio.sleep(1 if more else backup_wait(failures))
 
 # The event loop only holds weak references to tasks, so one nobody keeps can
 # be garbage collected mid-await (the desk clock's port closed that way).
@@ -479,7 +696,7 @@ _background_tasks: set = set()
 
 def _background(coro) -> None:
     name = system_health.worker_name(coro)
-    task = asyncio.create_task(coro)
+    task = asyncio.create_task(coro, name=name)  # system_health.beat() finds its worker by this name
     _background_tasks.add(task)
     system_health.worker_started(name)
 
@@ -512,6 +729,8 @@ async def startup_event():
     logging.getLogger().addHandler(handler)
     logging.getLogger("uvicorn.error").addHandler(handler)
     logstore.info("server", "Sage server started")
+    # The one thread that does database writes (see db_writer.py).
+    db_writer.connect(DB_PATH)
     if access_gate.enabled:
         print("Password gate is on: browsers must log in at /login.")
     if not API_SECRET:
@@ -519,8 +738,13 @@ async def startup_event():
         logstore.warn("server", "API_SECRET is not set; the server is open to anyone who can reach it.")
     _background(google_sheets_backup_worker())
     _background(notifier.scheduler())
+    _background(uptime.run())
+    _background(diagnostics.run())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
     _background(phone_link.link.run(events.broadcast))
+    _background(life_mode.run(events.broadcast))
+    _background(speaker.speaker.run(events.broadcast, phone_link.link))
+    _background(drop.run())
     if desk.ENABLED:
         from desk import run as desk_run
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
@@ -528,6 +752,39 @@ async def startup_event():
         _background(radar.collector.run(events.broadcast))
         _background(markets.collector.run())
         _background(sparks.run())
+
+
+@app.on_event("shutdown")
+def shutdown_event():
+    db_writer.stop()
+    # Marks this stop as on purpose, for the "Sage is back up" email.
+    try:
+        uptime.on_stop()
+    except Exception as e:
+        print(f"Couldn't record the shutdown: {e}")
+
+
+@app.get("/api/health/services")
+def health_services():
+    """Every background worker with a status (ok, stale, running, stopped, down),
+    plus the database writer. Needs the key like the rest of /api/ (the plain
+    /api/health stays open as a liveness ping)."""
+    rows = system_health.service_rows()
+    w = db_writer.writer
+    writer = {"running": w.running, "waiting": w.waiting, "done": w.done, "failed": w.failed} if w else None
+    bad = [r["name"] for r in rows if r["status"] in ("down", "stale")]
+    if writer and not writer["running"]:
+        bad.append("db_writer")
+    return {
+        "success": True,
+        "checkedAt": system_health._iso(time.time()),
+        "ok": not bad,
+        "unhealthy": bad,
+        "services": rows,
+        "dbWriter": writer,
+        "uptimeMinutes": int((time.time() - system_health.STARTED) // 60),
+        "commit": system_health.COMMIT,
+    }
 
 
 @app.get("/api/health")
@@ -558,7 +815,7 @@ def _deleted_ids(cursor, since: int = 0) -> Dict[str, list]:
 
 
 @app.get("/api/sync/all")
-def get_all_data():
+def get_all_data(request: Request):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     server_rev = get_server_revision(cursor)
@@ -566,13 +823,15 @@ def get_all_data():
     data = _rows_by_table(cursor.fetchall())
     deleted = _deleted_ids(cursor)
     conn.close()
-    return {
+    # Every opening of the app pulls this whole copy (megabytes of JSON), so it
+    # travels gzipped to browsers that take it: about a tenth of the size.
+    return web_files.json_maybe_gzip(request, {
         "success": True,
         "schemaVersion": 5,
         "serverRevision": server_rev,
         "data": data,
         "deleted": deleted,
-    }
+    })
 
 @app.get("/api/sync/changes")
 def get_changes_since(sinceRevision: int = 0):
@@ -626,21 +885,25 @@ async def process_operations(request: Request):
 async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -> dict:
     """Apply a batch of sync operations, queue them for the backup and tell
     every client. The web app and Claude's API (claude_api.py) both write here."""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
     op_results = []
     applied_ops = []
     new_server_rev = None
 
-    def next_rev():
-        # Only a batch that changes something moves the revision, so a retried
-        # batch doesn't make every device pull again.
+    def apply_batch(conn):
+        # Runs on the database writer thread (db_writer.py), which commits when
+        # this returns and rolls back if it raises, so the batch is one
+        # transaction and the event loop is never held by the commit.
         nonlocal new_server_rev
-        if new_server_rev is None:
-            new_server_rev = increment_server_revision(cursor)
-        return new_server_rev
+        cursor = conn.cursor()
 
-    try:
+        def next_rev():
+            # Only a batch that changes something moves the revision, so a retried
+            # batch doesn't make every device pull again.
+            nonlocal new_server_rev
+            if new_server_rev is None:
+                new_server_rev = increment_server_revision(cursor)
+            return new_server_rev
+
         cursor.execute("BEGIN TRANSACTION")
 
         ids = [op.operationId for op in req.operations if op.operationId]
@@ -737,12 +1000,11 @@ async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -
                     "operations": [op.model_dump() for op in applied_ops],
                 }),),
             )
-        conn.commit()
+
+    try:
+        await db_writer.get(DB_PATH).write(apply_batch)
     except Exception as e:
-        conn.rollback()
         raise HTTPException(status_code=500, detail=str(e))
-    finally:
-        conn.close()
 
     if applied_ops:
         await events.broadcast({
@@ -812,6 +1074,54 @@ async def backup_run():
         raise HTTPException(status_code=500, detail=f"Backup failed: {e}")
     return {"success": True, "file": path.name, **backup.status()}
 
+
+def _dir_bytes(folder) -> int:
+    total = 0
+    for dirpath, _, names in os.walk(folder):
+        for n in names:
+            try:
+                total += os.lstat(os.path.join(dirpath, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+@app.get("/api/storage")
+def storage_stats():
+    """What the Pi is holding: the whole disk, and Sage's own files on it."""
+    import shutil as _shutil
+    db_file = Path(DB_PATH).resolve()
+    home = db_file.parent
+    try:
+        disk = _shutil.disk_usage(home)
+        disk_total, disk_used, disk_free = disk.total, disk.used, disk.free
+    except OSError:
+        disk_total = disk_used = disk_free = 0
+
+    def _file_bytes(path) -> int:
+        try:
+            return os.path.getsize(path)
+        except OSError:
+            return 0
+
+    db_bytes = _file_bytes(db_file)
+    for extra in ("-wal", "-shm"):
+        db_bytes += _file_bytes(str(db_file) + extra)
+
+    backup_status = backup.status()
+    backup_bytes = _dir_bytes(backup_status["folder"]) if os.path.isdir(backup_status["folder"]) else 0
+
+    drop_usage = drop.usage()
+
+    return {
+        "success": True,
+        "disk": {"total": disk_total, "used": disk_used, "free": disk_free},
+        "db": {"bytes": db_bytes, "path": str(db_file)},
+        "backups": {"bytes": backup_bytes, "count": backup_status["count"], "folder": backup_status["folder"]},
+        "drop": drop_usage,
+        "card": data_dir.status(),
+    }
+
 # --- Quick-Add (Siri Shortcuts / Share Sheet / email capture) ---
 
 class QuickAddRequest(BaseModel):
@@ -868,6 +1178,21 @@ async def quick_add_endpoint(req: QuickAddRequest):
             if str((json.loads(raw) or {}).get("key") or "").startswith("TASK")
         )
         payload["key"] = f"TASK-{task_keys + 1}"
+        # Every task belongs to a project: the one it names, else the Inbox project.
+        projects = [json.loads(r[0]) for r in cursor.execute("SELECT payload FROM entities WHERE table_name = 'projects' AND deleted = 0")]
+        titles = [json.loads(r[0]) for r in cursor.execute("SELECT payload FROM entities WHERE table_name = 'workItems' AND deleted = 0")]
+        if placement.needs_place(payload):
+            payload["projectId"] = placement.choose_project(payload["title"], projects, titles) or placement.INBOX_PROJECT_ID
+            if payload["projectId"] == placement.INBOX_PROJECT_ID and not any(p.get("id") == placement.INBOX_PROJECT_ID for p in projects):
+                inbox_rev = increment_server_revision(cursor)
+                cursor.execute(
+                    "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
+                    ("projects", placement.INBOX_PROJECT_ID, json.dumps(placement.inbox_project(now_iso)), inbox_rev),
+                )
+                cursor.execute(
+                    "INSERT INTO sync_operations (operation_id, client_id, entity_type, entity_id, operation) VALUES (?, ?, ?, ?, ?)",
+                    (f"quickadd-inbox-{entity_id}", req.source, "projects", placement.INBOX_PROJECT_ID, "save"),
+                )
         next_rev = increment_server_revision(cursor)
         cursor.execute(
             "INSERT INTO entities (table_name, entity_id, revision, payload, deleted, server_revision) VALUES (?, ?, 1, ?, 0, ?)",
@@ -910,6 +1235,33 @@ async def quick_add_endpoint(req: QuickAddRequest):
     return {"success": True, "item": payload, "parsed": parsed.to_dict()}
 
 
+# --- One Siri shortcut for everything (see voice_command.py) ---
+import voice_command
+
+class VoiceRequest(BaseModel):
+    text: str
+    source: str = "siri"
+    dryRun: bool = False
+
+
+@app.get("/api/voice")
+def voice_status():
+    return {"success": True, "ai": voice_command.ai_available(), "engine": chat_capture.engine()}
+
+
+@app.post("/api/voice")
+async def voice_endpoint(req: VoiceRequest):
+    """Whatever was said or typed: understand it, do it, answer in a sentence Siri can speak."""
+    now = datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+    try:
+        return await voice_command.handle(req.text, now, dry_run=req.dryRun)
+    except claude_api.ApiError as e:
+        return {"success": False, "say": f"Sage couldn't save that: {e}", "error": str(e)}
+    except Exception as e:
+        print(f"Voice command failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Couldn't handle that: {e}")
+
+
 # --- Notification quick-actions ---
 class ItemActionRequest(BaseModel):
     source: str = "notification"
@@ -917,7 +1269,7 @@ class ItemActionRequest(BaseModel):
 @app.post("/api/items/{item_id}/done")
 async def item_done(item_id: str, req: ItemActionRequest):
     """Mark an item done from a notification action button."""
-    saved = item_actions.mark_done(item_id, req.source)
+    saved = await item_actions.mark_done_async(item_id, req.source)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
@@ -927,7 +1279,7 @@ async def item_done(item_id: str, req: ItemActionRequest):
 @app.post("/api/items/{item_id}/snooze")
 async def item_snooze(item_id: str, req: ItemActionRequest):
     """Snooze an item for 1 hour from a notification action button."""
-    saved = item_actions.snooze(item_id, req.source)
+    saved = await item_actions.snooze_async(item_id, req.source)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
@@ -939,7 +1291,7 @@ async def item_tomorrow(item_id: str, req: ItemActionRequest):
     """Move an item to tomorrow from a notification action button."""
     import notifier as _notifier
     today = datetime.datetime.now(_notifier._tz(_notifier.get_prefs())).date()
-    saved = item_actions.move_to_tomorrow(item_id, req.source, today)
+    saved = await item_actions.move_to_tomorrow_async(item_id, req.source, today)
     if not saved:
         raise HTTPException(status_code=404, detail="Item not found")
     await events.broadcast(item_actions.change_event(saved[1], item_id, req.source))
@@ -947,16 +1299,10 @@ async def item_tomorrow(item_id: str, req: ItemActionRequest):
 
 
 import re
-import ollama
-
-MODEL_NAME = "qwen2.5:1.5b"
 
 # --- AI Models ---
 class TaskParseRequest(BaseModel):
     natural_language: str
-
-class DailyBriefingRequest(BaseModel):
-    tasks_json: str
 
 # --- Helper to guarantee hallucination-proof parsing ---
 def safe_parse_json(raw_text: str):
@@ -1000,40 +1346,44 @@ def parse_task(req: TaskParseRequest):
     If the user enters multiple tasks, separate them into multiple objects in the array.
     User Input: {req.natural_language}
     """
+    # Groq, not the Pi's local Ollama model (which was removed to save memory).
+    import canvas_thinker
+    if canvas_thinker.groq_key():
+        try:
+            model = canvas_thinker._setting("GROQ_LLM_MODEL") or canvas_thinker.GROQ_DEFAULT_MODEL
+            for name in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
+                res = httpx.post(
+                    canvas_thinker.GROQ_URL,
+                    headers={"Authorization": f"Bearer {canvas_thinker.groq_key()}"},
+                    json={"model": name, "temperature": 0.0, "max_tokens": 1024,
+                          "messages": [{"role": "user", "content": prompt}]},
+                    timeout=30,
+                )
+                if res.status_code == 200:
+                    parsed = safe_parse_json(res.json()["choices"][0]["message"].get("content") or "")
+                    return {"success": True, "data": parsed}
+                if res.status_code == 401:
+                    break  # bad key: no point trying the fallback model
+        except Exception as e:
+            print(f"parse-task: Groq failed, using the local parser: {e}")
+            logstore.warn("quick_add", f"parse-task Groq failed: {e}")
+
+    # No Groq key, or Groq couldn't answer: fall back to the offline regex
+    # parser so "add milk at 6" still becomes a task without any AI running.
     try:
-        response = ollama.generate(
-            model=MODEL_NAME, prompt=prompt, format='json', options={"temperature": 0.0}
-        )
-        parsed_data = safe_parse_json(response['response'])
-        return {"success": True, "data": parsed_data}
+        q = quick_add.parse_quick_add((req.natural_language or "").strip())
+        title = quick_add.strip_lead_in(q.title) or (req.natural_language or "").strip()
+        return {"success": True, "data": [{
+            "title": title,
+            "dueDate": q.date,
+            "priority": q.priority or "medium",
+            "estimatedMinutes": q.duration_minutes or 30,
+            "isInbox": not q.date,
+        }]}
     except Exception as e:
         print(f"Error parsing task: {e}")
         logstore.warn("quick_add", f"Error parsing task: {e}")
-        raise HTTPException(status_code=500, detail="AI failed to parse task reliably")
-
-@app.post("/api/daily-briefing")
-def daily_briefing(req: DailyBriefingRequest):
-    prompt = f"""
-    You are a strategic assistant. Review the following tasks for today.
-    Tasks: 
-    {req.tasks_json}
-    Calculate the total estimated minutes, identify the bottleneck task, and write a 2-sentence motivational strategy.
-    Respond ONLY with a raw JSON dictionary matching this exact structure:
-    {{
-        "strategyText": "Your 2 sentence strategy...",
-        "totalFocusMinutes": 60,
-        "bottleneckTaskTitle": "Title of the hardest task",
-        "recommendedOrder": ["task_id_a", "task_id_b"]
-    }}
-    """
-    try:
-        response = ollama.generate(
-            model=MODEL_NAME, prompt=prompt, format='json', options={"temperature": 0.25}
-        )
-        parsed_data = safe_parse_json(response['response'])
-        return {"success": True, "data": parsed_data}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail="AI failed to generate briefing")
+        raise HTTPException(status_code=500, detail="Could not parse the task")
 
 # --- Canvas thinking partner (see canvas_thinker.py) ---
 import canvas_thinker
@@ -1044,6 +1394,14 @@ def canvas_think_status():
 
 class GroqKeyRequest(BaseModel):
     key: str = ""
+
+@app.get(API_SECRET_PATH)
+def api_secret_for_this_device():
+    """So a new device can fill in the server key without a terminal on the Pi.
+    Reaching here took the key itself, the login password, or the Pi's own screen
+    (require_api_key and require_login decide that), so it can show it."""
+    return {"success": True, "set": bool(API_SECRET), "secret": API_SECRET}
+
 
 @app.get("/api/settings/groq-key")
 def groq_key_status():
@@ -1107,6 +1465,13 @@ def read_logs(since: str = "", level: str = "", source: str = "", q: str = "", l
     return {"success": True, **logstore.read(since=since, level=level, source=source, q=q, limit=limit)}
 
 
+@app.get("/api/logs/slow")
+def read_slow_logs(since: str = "", limit: int = 50):
+    """Requests that took SAGE_SLOW_MS (default 800 ms) or longer, newest first.
+    Each line ends with the request id, which is also the X-Request-Id header."""
+    return {"success": True, "slowMs": SLOW_MS, **logstore.read(since=since, source="slow", limit=limit)}
+
+
 @app.post("/api/logs/clear")
 def clear_logs():
     logstore.clear()
@@ -1123,6 +1488,21 @@ def canvas_think(req: canvas_thinker.CanvasThinkRequest):
         logstore.error("canvas", f"Canvas thinker failed: {e}")
         raise HTTPException(status_code=502, detail=f"The thinking partner couldn't answer: {e}")
 
+# --- Chat capture in New Item (see chat_capture.py) ---
+import chat_capture
+
+@app.get("/api/chat-capture")
+def chat_capture_status():
+    return {"success": True, "engine": chat_capture.engine()}
+
+@app.post("/api/chat-capture")
+def chat_capture_run(req: chat_capture.ChatCaptureRequest):
+    try:
+        return {"success": True, **chat_capture.capture(req)}
+    except Exception as e:
+        print(f"Chat capture failed: {e}")
+        raise HTTPException(status_code=502, detail=f"Chat capture couldn't ask the AI: {e}")
+
 # --- Public link (see public_link.py) ---
 import public_link
 
@@ -1132,6 +1512,9 @@ def public_url():
 
 # --- Notifications (see notifier.py) ---
 import notifier
+import uptime
+import posts
+import reels
 notifier.init_tables()
 
 
@@ -1301,6 +1684,7 @@ class PhoneNotification(BaseModel):
     app: Optional[str] = "Phone"
     title: str
     message: Optional[str] = ""
+    category: Optional[str] = "other"   # "incoming call" shows the call card on the clock
 
 
 class PhoneCommand(BaseModel):
@@ -1310,6 +1694,48 @@ class PhoneCommand(BaseModel):
 @app.get("/api/phone")
 def phone_state():
     return {"success": True, **phone_link.link.snapshot()}
+
+
+# --- Work mode and Chill mode (see life_mode.py) ---
+# Chill shows only personal items and holds work reminders; Auto follows the
+# phone's home/away. Changes go out on /ws as LIFE_MODE.
+def _phone_presence():
+    link = phone_link.link
+    return bool(link.available and link.last_seen), bool(link.home)
+
+
+life_mode.presence = _phone_presence
+life_mode.last_seen = lambda: float(phone_link.link.last_seen or 0)
+
+
+def _life_mode_state() -> dict:
+    return {"success": True, **life_mode.current(), "held": len(life_mode.held()), "phoneLink": phone_link.link.available,
+            "welcome": life_mode.pending_welcome()}
+
+
+@app.get("/api/life-mode")
+def life_mode_state():
+    return _life_mode_state()
+
+
+@app.put("/api/life-mode")
+async def life_mode_update(update: Dict[str, Any]):
+    try:
+        life_mode.update_settings(update)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    state = _life_mode_state()
+    await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return state
+
+
+@app.post("/api/life-mode/welcomed")
+async def life_mode_welcomed(body: Dict[str, Any]):
+    """The web app showed Welcome home; don't show it again for this arrival."""
+    life_mode.mark_welcomed(body.get("id"))
+    state = _life_mode_state()
+    await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return state
 
 
 @app.post("/api/phone/notifications")
@@ -1416,6 +1842,59 @@ async def bluetooth_device(address: str, action: str):
     return await _bluetooth_do(lambda c: c.device_action(address, action))
 
 
+# --- Soundbar: greeting, spoken reminders, phone pass-through (see speaker.py) ---
+life_mode.on_arrival = speaker.speaker.on_arrival
+notifier.speak_reminder = speaker.speaker.on_reminder
+
+
+@app.get("/api/speaker")
+async def speaker_state():
+    return {"success": True, **(await asyncio.to_thread(speaker.speaker.snapshot))}
+
+
+@app.post("/api/speaker/settings")
+async def speaker_settings(update: Dict[str, Any]):
+    try:
+        await asyncio.to_thread(speaker.save_settings, update)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await speaker.speaker._publish(force=True)
+    return await speaker_state()
+
+
+@app.post("/api/speaker/say")
+async def speaker_say(body: Dict[str, Any]):
+    """Say a line now, or (no text) the welcome-home greeting. Ignores quiet hours."""
+    if not speaker.get_settings()["address"]:
+        raise HTTPException(status_code=400, detail="Pick a soundbar first.")
+    text = str(body.get("text") or "").strip()[:500]
+    if text:
+        await speaker.speaker.say(text, "test")
+    else:
+        text = await speaker.speaker.greet("test")
+    return {"success": True, "text": text}
+
+
+@app.post("/api/speaker/wifi")
+async def speaker_wifi(body: Dict[str, Any]):
+    try:
+        await asyncio.to_thread(speaker.set_wifi, bool(body.get("on")))
+    except (ValueError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await speaker_state()
+
+
+@app.post("/api/speaker/{action}")
+async def speaker_action(action: str):
+    if action == "connect":
+        asyncio.ensure_future(speaker.speaker.ensure_connected())
+    elif action == "disconnect":
+        await speaker.speaker.disconnect()
+    else:
+        raise HTTPException(status_code=404, detail="Unknown action.")
+    return await speaker_state()
+
+
 # --- Desk clock (see desk/) ---
 # LUMO's ESP32 clock as a screen and buttons for Sage. Off until SAGE_DESK=1.
 @app.get("/api/desk")
@@ -1436,6 +1915,7 @@ def _desk_settings_response(saved: dict) -> dict:
             "actions": list(desk_settings.ACTIONS),
             "clockStyles": list(desk_settings.CLOCK_STYLES),
             "lightModes": list(desk_settings.LIGHT_MODES),
+            "alarmTones": list(desk_settings.ALARM_TONES),
         },
     }
 
@@ -1479,6 +1959,290 @@ async def desk_press(req: DeskPress):
     return {"success": True, "button": button, **desk_run.status(desk.ENABLED)}
 
 
+# The LUMO page in Sage: alarms, the timer and stopwatch, and the clock itself.
+def _desk_now() -> datetime.datetime:
+    return datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+
+
+def _desk_running():
+    from desk import run as desk_run
+    if not desk.ENABLED or not desk_run.running():
+        raise HTTPException(status_code=409, detail="The desk clock isn't running. Set SAGE_DESK=1 and restart Sage.")
+    return desk_run
+
+
+@app.get("/api/desk/alarms")
+async def desk_alarms():
+    from desk import alarm_store
+    from desk.alarms import is_alarm
+    now = _desk_now()
+    items = await asyncio.to_thread(notifier.open_items)
+    alarms = [alarm_store.describe(i, now.tzinfo) for i in items if is_alarm(i)]
+    alarms.sort(key=lambda a: (a["time"], a["label"]))
+    return {"success": True, "alarms": alarms}
+
+
+@app.post("/api/desk/alarms")
+async def desk_alarm_create(spec: Dict[str, Any]):
+    from desk import alarm_store
+    now = _desk_now()
+    try:
+        item, rev = await asyncio.to_thread(alarm_store.create, spec, now)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await events.broadcast(item_actions.change_event(rev, item["id"], alarm_store.SOURCE))
+    return {"success": True, "alarm": alarm_store.describe(item, now.tzinfo)}
+
+
+@app.put("/api/desk/alarms/{alarm_id}")
+async def desk_alarm_update(alarm_id: str, spec: Dict[str, Any]):
+    from desk import alarm_store
+    now = _desk_now()
+    try:
+        saved = await asyncio.to_thread(alarm_store.update, alarm_id, spec, now, now.tzinfo)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not saved:
+        raise HTTPException(status_code=404, detail="No such alarm.")
+    await events.broadcast(item_actions.change_event(saved[1], alarm_id, alarm_store.SOURCE))
+    return {"success": True, "alarm": alarm_store.describe(saved[0], now.tzinfo)}
+
+
+@app.delete("/api/desk/alarms/{alarm_id}")
+async def desk_alarm_delete(alarm_id: str):
+    from desk import alarm_store
+    saved = await asyncio.to_thread(alarm_store.remove, alarm_id)
+    if not saved:
+        raise HTTPException(status_code=404, detail="No such alarm.")
+    await events.broadcast(item_actions.change_event(saved[1], alarm_id, alarm_store.SOURCE))
+    return {"success": True, "id": alarm_id}
+
+
+class DeskAction(BaseModel):
+    action: str
+    seconds: int = 0
+    label: str = ""
+    tone: str = ""
+    volume: int = 0
+
+
+@app.post("/api/desk/ringing")
+async def desk_ringing(req: DeskAction):
+    """Snooze or stop the alarm ringing on the clock."""
+    desk_run = _desk_running()
+    if req.action not in ("snooze", "stop"):
+        raise HTTPException(status_code=400, detail="action must be snooze or stop.")
+    if not await desk_run.ringing(req.action):
+        raise HTTPException(status_code=409, detail="No alarm is ringing.")
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/timer")
+async def desk_timer(req: DeskAction):
+    """start (seconds, label), pause, resume, add (seconds) or cancel."""
+    desk_run = _desk_running()
+    try:
+        await desk_run.timer(req.action, req.seconds, req.label)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/stopwatch")
+async def desk_stopwatch(req: DeskAction):
+    """start, pause, lap or reset."""
+    desk_run = _desk_running()
+    try:
+        await desk_run.stopwatch(req.action)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+@app.post("/api/desk/device")
+async def desk_device(req: DeskAction):
+    """identify (flash and knock), restart, or tone (hear an alarm sound)."""
+    from desk.alarms import TONES
+    desk_run = _desk_running()
+    if req.action == "tone" and req.tone and req.tone not in TONES:
+        raise HTTPException(status_code=400, detail=f"tone must be one of: {', '.join(TONES)}.")
+    try:
+        sent = await desk_run.device(req.action, req.tone, max(0, min(100, req.volume)))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if not sent:
+        raise HTTPException(status_code=409, detail="The clock isn't connected.")
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+class DeskFirmware(BaseModel):
+    action: str  # check, install, update (check, then install), hold or release
+    version: Optional[str] = None  # install: this listed build (older ones too)
+    sha: Optional[str] = None      # ...this rebuild of it
+
+
+@app.post("/api/desk/firmware")
+async def desk_firmware(req: DeskFirmware):
+    """Firmware updates over Wi-Fi (desk/ota.py): check GitHub now, or install the newest build now."""
+    desk_run = _desk_running()
+    try:
+        problem = await desk_run.firmware(req.action, req.version or "", req.sha or "")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    if problem and req.action in ("install", "update", "hold"):
+        raise HTTPException(status_code=409, detail=problem)
+    return {"success": True, **desk_run.status(desk.ENABLED)}
+
+
+# The depth face (desk/depth.py): a photo with the time behind the person.
+# LUMO shows it when the Depth face is picked (firmware 2.9).
+class DepthPhoto(BaseModel):
+    image: str  # a data URL or bare base64
+
+
+def _depth_describe() -> dict:
+    from desk import depth
+    from desk import settings as desk_settings
+    hour24 = bool(desk_settings.load().get("clock", {}).get("hour24", True))
+    return {"success": True, "depth": depth.describe(_desk_now(), hour24)}
+
+
+@app.get("/api/desk/depth")
+async def desk_depth_get():
+    return await asyncio.to_thread(_depth_describe)
+
+
+@app.post("/api/desk/depth/photo")
+async def desk_depth_photo(req: DepthPhoto):
+    """A new photo: cut out the person (a few seconds on the Pi; the very first
+    time also downloads the model) and keep both."""
+    from desk import depth
+    if len(req.image) > 20_000_000:
+        raise HTTPException(status_code=413, detail="That photo is too big. Try one under 15 MB.")
+
+    def work():
+        photo = depth.decode_upload(req.image)
+        mask, error = depth.cut_out(photo)  # a failed cutout keeps the photo and says why
+        if error:
+            print(f"Depth cutout failed: {error}")
+        depth.set_photo(photo, mask, _desk_now(), error)
+        return _depth_describe()
+
+    try:
+        out = await asyncio.to_thread(work)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
+    return out
+
+
+@app.post("/api/desk/depth/cutout")
+async def desk_depth_cutout():
+    """Cut out the person again from the kept photo, e.g. after installing rembg."""
+    from desk import depth
+    try:
+        out = await asyncio.to_thread(lambda: (depth.retry_cutout(_desk_now()), _depth_describe())[1])
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
+    return out
+
+
+async def _depth_to_clock() -> None:
+    """Show the change on LUMO straight away if its depth face is up."""
+    if desk.ENABLED:
+        from desk import run as desk_run
+        await desk_run.depth_changed()
+
+
+@app.put("/api/desk/depth")
+async def desk_depth_put(change: Dict[str, Any]):
+    from desk import depth
+    try:
+        await asyncio.to_thread(depth.update, change)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await _depth_to_clock()
+    return await asyncio.to_thread(_depth_describe)
+
+
+@app.delete("/api/desk/depth")
+async def desk_depth_delete():
+    from desk import depth
+    await asyncio.to_thread(depth.clear)
+    await _depth_to_clock()  # the ring may have been following the photo
+    return await asyncio.to_thread(_depth_describe)
+
+
+# --- Gallery photos (see desk/gallery.py) ---
+
+@app.get("/api/desk/gallery/photos")
+async def desk_gallery_photos():
+    from desk.gallery import PHOTOS_DIR, MAX_GALLERY_BYTES
+    PHOTOS_DIR.mkdir(parents=True, exist_ok=True)
+    photos = []
+    total = 0
+    for f in sorted(PHOTOS_DIR.iterdir()):
+        if f.suffix.lower() in (".jpg", ".jpeg", ".png", ".bmp"):
+            sz = f.stat().st_size
+            photos.append({"name": f.name, "size": sz})
+            total += sz
+    return {"photos": photos, "usedBytes": total, "capBytes": MAX_GALLERY_BYTES}
+
+
+@app.post("/api/desk/gallery/photos")
+async def desk_gallery_photo_upload(body: Dict[str, Any]):
+    import base64 as b64
+    from desk.gallery import PHOTOS_DIR, save_photo
+    name = body.get("name") or "photo.jpg"
+    name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
+    data_str = body.get("data") or ""
+    if "," in data_str:
+        data_str = data_str.split(",", 1)[1]
+    content = b64.b64decode(data_str)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
+    dest = await asyncio.to_thread(save_photo, content, name, PHOTOS_DIR)
+    return {"name": dest.name, "size": dest.stat().st_size}
+
+
+@app.post("/api/desk/gallery/photos/upload")
+async def desk_gallery_photo_upload_file(file: UploadFile = File(...)):
+    """Multipart upload for iOS Shortcuts and other automation tools."""
+    from desk.gallery import PHOTOS_DIR, save_photo
+    content = await file.read()
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=400, detail="Photo must be under 10 MB.")
+    name = (file.filename or "photo.jpg").strip()
+    name = "".join(c for c in name if c.isalnum() or c in ".-_ ").strip() or "photo.jpg"
+    dest = await asyncio.to_thread(save_photo, content, name, PHOTOS_DIR)
+    return {"name": dest.name, "size": dest.stat().st_size}
+
+
+@app.delete("/api/desk/gallery/photos/{name}")
+async def desk_gallery_photo_delete(name: str):
+    from desk.gallery import PHOTOS_DIR
+    target = PHOTOS_DIR / name
+    if not target.exists() or not target.is_file() or target.parent != PHOTOS_DIR:
+        raise HTTPException(status_code=404, detail="Photo not found.")
+    await asyncio.to_thread(target.unlink)
+    return {"deleted": name}
+
+
+@app.post("/api/desk/gallery/preview")
+async def desk_gallery_preview():
+    """Show the next gallery slide on the clock now (for testing)."""
+    from desk import run as desk_run
+    if not desk.ENABLED or desk_run.desk is None:
+        raise HTTPException(status_code=400, detail="The desk clock is off.")
+    g = desk_run.desk.gallery
+    if not g.active:
+        g.configure(desk_run.desk.settings.get("gallery", {}))
+        g.start()
+    await g.show_current()
+    return {"slide": g.index, "total": len(g.slides)}
+
+
 # --- Claude's access (claude_api.py), off until SAGE_CLAUDE_TOKEN is set ---
 def _claude_today() -> datetime.date:
     return datetime.datetime.now(notifier._tz(notifier.get_prefs())).date()
@@ -1497,6 +2261,25 @@ def _clock_status() -> dict:
     return desk_run.status(desk.ENABLED)
 
 
+def _depth_status() -> dict:
+    from desk import depth
+    meta = depth.load()
+    return {"hasPhoto": meta["hasPhoto"], "cutout": meta["cutout"], "cutoutError": meta.get("cutoutError"),
+            "cutoutProblem": depth.cutout_problem(), "updatedAt": meta.get("updatedAt")}
+
+
+def _slide_maker_status() -> dict:
+    state = posts.status()
+    return {"ready": state["ready"], "problems": state["problems"], "waiting": state["queued"], "emailReady": state["emailReady"]}
+
+
+def _reel_maker_status() -> dict:
+    state = reels.status()
+    return {"ready": state["ready"], "problems": state["problems"], "voiceReady": state["voiceReady"],
+            "voiceProblem": state["voiceProblem"], "timing": state["timing"], "waiting": state["queued"],
+            "emailReady": state["emailReady"]}
+
+
 def _claude_health() -> dict:
     return system_health.report(
         DB_PATH,
@@ -1505,13 +2288,18 @@ def _claude_health() -> dict:
         password_gate=access_gate.enabled,
         radar_enabled=radar.ENABLED,
         backups=backup.status,
-        phone=phone_link.link.snapshot,
+        phone=lambda: {**phone_link.link.snapshot(), "lifeMode": life_mode.current()},
         clock=_clock_status,
+        depth_face=_depth_status,
+        slide_maker=_slide_maker_status,
+        reel_maker=_reel_maker_status,
+        diagnostics=diagnostics.health_summary,
+        storage=data_dir.status,
     )
 
 
 claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _claude_today, _claude_health,
-                   logs=logstore.read)
+                   logs=logstore.read, drops=drop, posts=posts, diagnostics=diagnostics, reels=reels)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
 
@@ -1538,9 +2326,41 @@ app.include_router(markets.router)
 sparks.connect(DB_PATH, events.broadcast)
 app.include_router(sparks.router)
 
+# Radar industry search (industry.py): type an industry, get a full brief.
+industry.connect(DB_PATH, events.broadcast)
+app.include_router(industry.router)
+
+# Posts (posts.py): paste a script, the Pi draws the carousel slides and emails when done.
+posts.connect(DB_PATH, events.broadcast, claude_api.create_record, claude_api.update_record, claude_api._find)
+app.include_router(posts.router)
+
+
+def media_allowed(request) -> bool:
+    """Who may load /media/posts/ files without a token: the same people as
+    the rest of Sage (anyone, when neither a key nor a password is set)."""
+    if not API_SECRET and not access_gate.enabled:
+        return True
+    return logged_in(request) or bool(API_SECRET and key_matches(request_key(request)))
+
+
+posts.set_media_auth(media_allowed)
+
+# Reels (reels.py): a script (and your voice-over) in, a 1080x1920 reel out, on the same engine as Posts.
+reels.connect(DB_PATH)
+app.include_router(reels.router)
+
+# Drop (drop.py): temporary public links for HTML reports and small sites.
+drop.connect(DB_PATH)
+
+# Trusted devices (passkeys.py): credential ids and public keys, Pi-only and
+# never in SYNC_TABLES, so they don't sync to LUMO or any other device.
+passkeys.connect(DB_PATH)
+app.include_router(drop.router)
+
 
 if (DIST_DIR / "index.html").is_file():
-    app.mount("/", StaticFiles(directory=str(DIST_DIR), html=True), name="web")
+    # Hashed /assets/ files are cached for a year and sent pre-compressed (web_files.py).
+    app.mount("/", WebFiles(directory=str(DIST_DIR), html=True), name="web")
 else:
     print(f"No built web app at {DIST_DIR}; run `npm run build` in the repo root to serve it here.")
 
