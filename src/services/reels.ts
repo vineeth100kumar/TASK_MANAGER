@@ -105,6 +105,20 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+/** Download the reel script format guide (REEL_FORMAT.md) from the Pi. */
+export async function downloadReelFormat(): Promise<void> {
+  const res = await fetch(`${piBackendUrl()}/api/reels/format`, { headers: piHeaders({}) });
+  if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'REEL_FORMAT.md';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export type ReviewAction = 'approve' | 'reject' | 'reset';
 
 export const reelsApi = {

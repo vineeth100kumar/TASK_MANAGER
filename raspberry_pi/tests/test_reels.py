@@ -279,6 +279,12 @@ class VoiceUploadRules(unittest.IsolatedAsyncioTestCase):
 
 
 class Readiness(unittest.TestCase):
+    def test_format_guide_downloads(self):
+        r = client.get("/api/reels/format")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("REEL_FORMAT.md", r.headers.get("content-disposition", ""))
+        self.assertIn("autocontent: reel", r.text)
+
     def test_status_says_what_is_missing(self):
         state = reels.status()
         for key in ("ready", "problems", "voiceReady", "voiceProblem", "voices", "timing", "emailReady", "queued"):

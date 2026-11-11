@@ -899,6 +899,15 @@ def reels_list(projectId: str = "", limit: int = 60, archived: bool = False):
             "reels": recent(projectId, max(1, min(limit, 100)), archived)}
 
 
+@router.get("/api/reels/format")
+def reels_format():
+    """The reel script format guide (REEL_FORMAT.md), as a file to download."""
+    guide = ENGINE_DIR / "REEL_FORMAT.md"
+    if not guide.is_file():
+        return JSONResponse({"success": False, "error": "The format guide isn't on this Pi."}, status_code=404)
+    return FileResponse(guide, media_type="text/markdown; charset=utf-8", filename="REEL_FORMAT.md")
+
+
 @router.get("/api/reels/status")
 def reels_status():
     return {"success": True, "status": status()}
