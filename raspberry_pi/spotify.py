@@ -241,6 +241,8 @@ class SpotifyConnect:
         self._ws = None
         self._connecting = False
         self._last_sent = ""
+        self._log_at = 0.0
+        self._log_last = ""
 
     # --- State for the web app ---
 
@@ -407,7 +409,26 @@ class SpotifyConnect:
             raw = await proc.stdout.readline()
             if not raw:
                 break
-            self.lines.append(raw.decode(errors="replace").rstrip())
+            line = raw.decode(errors="replace").rstrip()
+            self.lines.append(line)
+            self._log_line(line)
+
+    def _log_line(self, line: str) -> None:
+        """Copy Soloist's own output into Sage's log (source "soloist") so it can
+        be read with sage_logs. Progress ticks are dropped and the rest is
+        rate-limited, so a chatty player can't flood the log."""
+        text = friendly_log(line)
+        if not text or re.search(r"\[\d+:\d\d / [\d?:]+\]\s*$", text) and "paused" not in text and "playing" not in text:
+            return
+        now = time.time()
+        if now - self._log_at < 1.0 or text == self._log_last:
+            return
+        self._log_at, self._log_last = now, text
+        try:
+            import logstore
+            logstore.info("soloist", text)
+        except Exception:
+            pass
 
     async def stop(self) -> None:
         proc, self.proc = self.proc, None
