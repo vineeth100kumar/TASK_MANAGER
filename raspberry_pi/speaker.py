@@ -180,8 +180,10 @@ WEATHER_WORDS = {"sun": "clear skies", "cloud": "cloudy", "rain": "rain about", 
 
 
 def _clock(now: datetime.datetime) -> str:
+    """12-hour time as it is said: "8:55 PM", "9 AM"."""
     h = now.hour % 12 or 12
-    return f"{h}:{now.minute:02d}" if now.minute else f"{h} o'clock"
+    ampm = "AM" if now.hour < 12 else "PM"
+    return f"{h}:{now.minute:02d} {ampm}" if now.minute else f"{h} {ampm}"
 
 
 def _number(n: int) -> str:
@@ -209,39 +211,46 @@ def greeting_facts(now: datetime.datetime, due: List[dict], overdue: List[dict],
     }
 
 
-def template_greeting(f: dict) -> str:
-    """The greeting without AI: short, warm, and always something to say."""
+FUN_OPENERS = [
+    "Welcome home{name}! The house missed you. Mostly the fridge.",
+    "And the legend returns{name}. Welcome home.",
+    "Welcome back{name}. I'd roll out a red carpet, but I'm a soundbar.",
+    "Home sweet home{name}. Systems online, vibes excellent.",
+    "Look who's back{name}! Welcome home, chief.",
+    "Welcome home{name}. Shoes off, feet up, mission complete.",
+    "Ah{name}, you've returned. The couch has been asking about you.",
+]
+
+
+def template_greeting(f: dict, pick: Optional[Callable[[list], str]] = None) -> str:
+    """The greeting without AI: playful and short. Time (12-hour), weather and
+    habits; tasks are left out on purpose (the person asked for that)."""
+    import random
+    choose = pick or random.choice
     name = f", {f['name']}" if f.get("name") else ""
-    hello = "Welcome home" + name + "." if f["partOfDay"] == "night" else f"Good {f['partOfDay']}{name}. Welcome home."
-    parts = [hello]
+    parts = [choose(FUN_OPENERS).format(name=name)]
     weather = ""
     if f.get("tempC") is not None:
-        weather = f" and {f['tempC']} degrees" + (f", {f['sky']}" if f.get("sky") else "")
+        weather = f" and a cosy {f['tempC']} degrees" + (f" with {f['sky']}" if f.get("sky") else "")
     parts.append(f"It's {f['time']}{weather}.")
-    n = f["dueCount"]
-    if n == 0:
-        parts.append("Nothing else is asked of you today.")
-    else:
-        first = f["dueToday"][0]
-        parts.append(f"You have {_number(n)} {'thing' if n == 1 else 'things'} left today" + (f", starting with {first}." if n > 1 else f": {first}."))
-    if f.get("overdueCount"):
-        parts.append(f"And {_number(f['overdueCount'])} overdue, when you're ready.")
     if f.get("habitsLeft"):
-        parts.append(f"Don't forget {f['habitsLeft'][0]}.")
+        parts.append(f"Quick one: {f['habitsLeft'][0]} is still waiting for you today.")
     if f.get("chill"):
-        parts.append("Work is put away for the evening." if f["partOfDay"] in ("evening", "night") else "Work is put away for now.")
+        parts.append("Work's locked away. Chill mode engaged.")
     return " ".join(parts)
 
 
-GREETING_PROMPT = """You are the voice of Sage, a home assistant in the manner of a calm, \
-quietly witty British butler AI (think J.A.R.V.I.S.). Write the one greeting spoken \
-aloud on the soundbar as the person walks in the door.
+GREETING_PROMPT = """You are the voice of Sage, a home assistant AI with a playful, \
+cheeky personality (a fun J.A.R.V.I.S.). Write the one greeting spoken aloud on \
+the soundbar as the person walks in the door.
 
-Rules: at most 45 words. Plain spoken English only: no emojis, lists, quotes, \
-markdown or stage directions. Use only the facts given; never invent tasks, \
-weather or numbers. Mention the time, then the weather if given, then what is \
-left today (name at most two items). One light touch of dry wit at most. \
-Address them by the name given, or not at all if there is none.
+Rules: at most 40 words. Make it fun: a joke, a playful line or a bit of hype, \
+different every time. Plain spoken English only: no emojis, lists, quotes, \
+markdown or stage directions. Say the time exactly as given (12-hour, like \
+"8:55 PM"), then the weather if given. If habitsLeft is not empty, give a light, \
+friendly nudge about the first one. Never mention tasks, work or to-dos. Use \
+only the facts given; never invent numbers. Address them by the name given, \
+or not at all if there is none.
 
 Facts (JSON):
 """
@@ -774,8 +783,9 @@ class Speaker:
             async with httpx.AsyncClient(timeout=8) as client:
                 for m in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
                     res = await client.post(canvas_thinker.GROQ_URL, headers={"Authorization": f"Bearer {key}"}, json={
-                        "model": m, "temperature": 0.8, "max_tokens": 400,
-                        "messages": [{"role": "user", "content": GREETING_PROMPT + json.dumps(facts)}],
+                        "model": m, "temperature": 1.0, "max_tokens": 400,
+                        "messages": [{"role": "user", "content": GREETING_PROMPT + json.dumps(
+                            {k: v for k, v in facts.items() if k not in ("dueToday", "dueCount", "overdueCount")})}],
                     })
                     if res.status_code == 200:
                         line = clean_line(res.json()["choices"][0]["message"].get("content") or "")
