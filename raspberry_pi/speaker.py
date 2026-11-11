@@ -452,8 +452,6 @@ class Speaker:
         self._surround_mode = ""
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
-        self._soundbar_tried_at = 0.0
-        self._start_tried = False      # one soundbar connect after Sage starts while you're home
         self._last_sent = ""
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
@@ -652,20 +650,6 @@ class Speaker:
         sb = links["soundbar"]
         now = time.time()
 
-        # The soundbar isn't connected but the phone wants to play through the
-        # Pi, or Sage just restarted (an update) while you're home: connect it,
-        # rather than leave the phone with nowhere to play. The phone case is
-        # tried at most once a minute; the restart case once.
-        startup = home and not self._start_tried
-        if self.phone and self.phone.available:
-            self._start_tried = True
-        if (settings["address"] and settings["passthrough"] and phone_addr and not sb["connected"]
-                and (startup or (links["phoneAudio"] and now - self._soundbar_tried_at > 60))):
-            self._soundbar_tried_at = now
-            if await self.ensure_connected():
-                links = self.links
-                sb = links["soundbar"]
-
         want_pass = bool(settings["address"] and settings["passthrough"] and sb["connected"] and phone_addr)
         if want_pass and links["phoneAudio"] and not self._pass_paused:
             await self._start_passthrough(settings["address"], phone_addr)
@@ -678,7 +662,7 @@ class Speaker:
             self._dropped_phone_at = now
             await self._phone_profile(False)
         # Soundbar up and pass-through on: invite the phone once in a while.
-        if want_pass and home and not links["phoneAudio"] and now - self._asked_phone_at > 60:
+        if want_pass and home and not links["phoneAudio"] and now - self._asked_phone_at > 300:
             self._asked_phone_at = now
             await self._phone_profile(True)
 
