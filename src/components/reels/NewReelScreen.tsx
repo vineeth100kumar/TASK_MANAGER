@@ -2,10 +2,10 @@
 // The script is checked as you type (line numbers, scenes, how long it will run, which voice),
 // and Make is pinned to the bottom of a phone so it is always under the thumb.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { EXAMPLE_REEL, ReelCheck, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
+import { EXAMPLE_REEL, ReelCheck, downloadReelFormat, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
 import type { Reel } from '../../services/reels';
@@ -116,6 +116,11 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
               <Sparkles size={15} /> Try an example
             </button>
           )}
+          <button type="button" title="Download the script format guide (REEL_FORMAT.md)"
+            onClick={() => downloadReelFormat().catch(() => showToast("Couldn't download the format guide.", 'error'))}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">
+            <BookOpen size={15} /> Format guide
+          </button>
           <input ref={file} type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" className="hidden" onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} />
         </div>
 
