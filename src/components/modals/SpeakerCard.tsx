@@ -2,8 +2,8 @@
 // greeting, spoken reminders and phone pass-through (raspberry_pi/speaker.py).
 
 import { useState } from 'react';
-import { Speaker, Loader2, Volume2, Link2, Unplug, Moon } from 'lucide-react';
-import { useSpeaker, type SpeakerSettings } from '../../services/speaker';
+import { Speaker, Loader2, Volume2, Link2, Unplug, Moon, AudioWaveform } from 'lucide-react';
+import { useSpeaker, type SpeakerSettings, type SurroundMode } from '../../services/speaker';
 import type { BluetoothDevice } from '../../services/bluetooth';
 import { useToast } from '../../context/ToastContext';
 
@@ -17,6 +17,12 @@ const VOICE_LABEL: Record<string, string> = {
   am_michael: 'Michael (American)', am_adam: 'Adam (American)', bf_emma: 'Emma (British)',
   bf_isabella: 'Isabella (British)', af_heart: 'Heart (American)', af_bella: 'Bella (American)',
 };
+
+const SURROUND_MODES: { mode: Exclude<SurroundMode, 'off'>; label: string; hint: string }[] = [
+  { mode: 'music', label: 'Music', hint: 'A wider stage and a little more bass, voices left as they are.' },
+  { mode: 'movie', label: 'Movie', hint: 'Wide and roomy, with dialogue lifted so speech stays clear.' },
+  { mode: 'wide', label: 'Wide', hint: 'The biggest sound. Best for games and concerts; can feel hollow on talk.' },
+];
 
 function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (on: boolean) => void; label: string; hint: string }) {
   return (
@@ -37,6 +43,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
   const sp = useSpeaker();
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
+  const [lastMode, setLastMode] = useState<Exclude<SurroundMode, 'off'>>('movie');
   const s = sp.state;
   if (!s) return null;
   const set = s.settings;
@@ -54,7 +61,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
   const missing = [!s.tools.bluealsa && 'bluez-alsa', !s.tools.aplay && 'aplay', !s.tools.voice && 'the Kokoro voice'].filter(Boolean);
   const status = !set.address ? 'Off'
     : s.speaking ? 'Speaking…'
-    : s.soundbar.connected ? (s.passing ? 'Connected · playing your phone' : 'Connected')
+    : s.soundbar.connected ? (s.passing ? 'Connected · playing your phone' : 'Connected') + (s.surroundOn ? ' · surround' : '')
     : 'Not connected · connects when you get home';
 
   return (
@@ -103,6 +110,29 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />
           <Switch on={set.passthrough} onChange={on => save({ passthrough: on })} label="Be a speaker for my phone"
             hint="Your phone sees the Pi as a speaker and its music plays on the soundbar. Sage pauses it for a moment to speak." />
+
+          <div className="space-y-2">
+            <Switch on={(set.surround || 'off') !== 'off'} onChange={on => save({ surround: on ? lastMode : 'off' })}
+              label="Surround sound"
+              hint="Makes the soundbar sound wider and roomier, for the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
+            {(set.surround || 'off') !== 'off' && (
+              <div className="pl-[3.25rem] space-y-1.5">
+                <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Surround mode">
+                  {SURROUND_MODES.map(m => (
+                    <button key={m.mode} role="radio" aria-checked={set.surround === m.mode} disabled={busy}
+                      onClick={() => { setLastMode(m.mode); save({ surround: m.mode }); }}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 ${set.surround === m.mode ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'}`}>
+                      {set.surround === m.mode && <AudioWaveform size={12} />}{m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400">{SURROUND_MODES.find(m => m.mode === set.surround)?.hint}</p>
+                {s.tools.surround === false && (
+                  <p className="text-[11px] text-amber-600 dark:text-amber-400">The surround plugin isn't on the Pi yet. Run once: <code>sudo deploy/install_pi.sh --only audio,server,web</code></p>
+                )}
+              </div>
+            )}
+          </div>
 
           {s.wifi?.available && (
             <div>

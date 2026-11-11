@@ -215,6 +215,16 @@ part_audio() {
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
+  # Virtual surround for the soundbar (Settings > Bluetooth > Surround): a small
+  # LADSPA plugin built here, and the ALSA device speaker.py plays through.
+  apt-get install -y -qq gcc libc6-dev >/dev/null 2>&1 || true
+  mkdir -p /usr/local/lib/sage/ladspa /etc/alsa/conf.d
+  if gcc -O2 -fPIC -shared -o /usr/local/lib/sage/ladspa/sage_surround.so.new "$REPO/raspberry_pi/audio/sage_surround.c" -lm; then
+    mv -f /usr/local/lib/sage/ladspa/sage_surround.so.new /usr/local/lib/sage/ladspa/sage_surround.so
+    install -m 644 "$REPO/deploy/alsa/60-sage-surround.conf" /etc/alsa/conf.d/60-sage-surround.conf
+  else
+    echo "The surround plugin didn't build, so Surround stays off. Try: sudo apt-get install gcc libc6-dev"
+  fi
   # Sage's Wi-Fi switch (Settings > Bluetooth): with Ethernet, Wi-Fi off frees the
   # radio for Bluetooth audio. Only these two exact commands.
   NMCLI="$(command -v nmcli || echo /usr/bin/nmcli)"
