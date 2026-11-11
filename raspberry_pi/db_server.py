@@ -31,6 +31,7 @@ import item_actions
 import life_mode
 import phone_link
 import speaker
+import spotify
 import quick_add
 import markets
 import passkeys
@@ -744,6 +745,7 @@ async def startup_event():
     _background(phone_link.link.run(events.broadcast))
     _background(life_mode.run(events.broadcast))
     _background(speaker.speaker.run(events.broadcast, phone_link.link))
+    _background(spotify.connect.run(events.broadcast, speaker.speaker))
     _background(drop.run())
     if desk.ENABLED:
         from desk import run as desk_run
@@ -1842,7 +1844,7 @@ async def bluetooth_device(address: str, action: str):
     return await _bluetooth_do(lambda c: c.device_action(address, action))
 
 
-# --- Soundbar: greeting, spoken reminders, phone pass-through (see speaker.py) ---
+# --- Soundbar: greeting and spoken reminders (see speaker.py) ---
 life_mode.on_arrival = speaker.speaker.on_arrival
 notifier.speak_reminder = speaker.speaker.on_reminder
 
@@ -1859,6 +1861,7 @@ async def speaker_settings(update: Dict[str, Any]):
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
     await speaker.speaker._publish(force=True)
+    await spotify.connect.follow_output()  # surround or soundbar changed: move the music too
     return await speaker_state()
 
 
@@ -1893,6 +1896,57 @@ async def speaker_action(action: str):
     else:
         raise HTTPException(status_code=404, detail="Unknown action.")
     return await speaker_state()
+
+
+# --- Spotify Connect on the soundbar (see spotify.py) ---
+@app.get("/api/spotify")
+async def spotify_state():
+    return {"success": True, **(await asyncio.to_thread(spotify.connect.snapshot))}
+
+
+@app.post("/api/spotify/settings")
+async def spotify_settings(update: Dict[str, Any]):
+    try:
+        await asyncio.to_thread(spotify.save_settings, update)
+    except (ValueError, TypeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await spotify.connect.supervise()
+    await spotify.connect.publish(force=True)
+    return await spotify_state()
+
+
+@app.post("/api/spotify/volume")
+async def spotify_volume(body: Dict[str, Any]):
+    try:
+        await spotify.connect.set_volume(int(body.get("volume", 50)))
+    except (ValueError, TypeError, RuntimeError) as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await spotify_state()
+
+
+@app.post("/api/spotify/shuffle")
+async def spotify_shuffle(body: Dict[str, Any]):
+    try:
+        await spotify.connect.shuffle(bool(body.get("on")))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await spotify_state()
+
+
+@app.post("/api/spotify/{action}")
+async def spotify_action(action: str):
+    try:
+        if action == "signout":
+            await spotify.connect.sign_out()
+        elif action == "restart":
+            await spotify.connect.restart()
+        else:
+            await spotify.connect.control(action)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    return await spotify_state()
 
 
 # --- Desk clock (see desk/) ---

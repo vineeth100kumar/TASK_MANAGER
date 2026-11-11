@@ -228,6 +228,14 @@ class LatencyTests(unittest.TestCase):
         self.assertIn("--pcm-buffer-time=500000", speaker.passthrough_cmd("x", "y", "steady"))
 
 
+class PassThroughOptionTests(unittest.TestCase):
+    def test_off_by_default(self):
+        self.assertFalse(speaker.DEFAULTS["phoneSpeaker"])
+        # an old saved "passthrough: true" no longer turns it on
+        self.assertNotIn("passthrough", speaker.DEFAULTS)
+        self.assertTrue(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
+
+
 class GreetGapTests(unittest.TestCase):
     def test_once_every_six_hours(self):
         self.assertTrue(speaker.greet_due(0, 1_000_000))

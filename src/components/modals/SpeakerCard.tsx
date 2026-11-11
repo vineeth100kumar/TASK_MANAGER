@@ -1,5 +1,6 @@
 // SpeakerCard - pick a paired soundbar as Sage's speaker: the welcome-home
 // greeting, spoken reminders and phone pass-through (raspberry_pi/speaker.py).
+// Spotify plays on it too: see SpotifyCard.
 
 import { Select } from '../common/Select';
 import { useState } from 'react';
@@ -31,7 +32,7 @@ const LATENCY_MODES: { mode: LatencyMode; label: string; hint: string }[] = [
   { mode: 'steady', label: 'Steady', hint: 'About 0.5 s of buffer (the old setting). Most lag, fewest dropouts.' },
 ];
 
-function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (on: boolean) => void; label: string; hint: string }) {
+export function Switch({ on, onChange, label, hint }: { on: boolean; onChange: (on: boolean) => void; label: string; hint: string }) {
   return (
     <label className="flex items-start gap-3 cursor-pointer">
       <button role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}
@@ -115,10 +116,10 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />
-          <Switch on={set.passthrough} onChange={on => save({ passthrough: on })} label="Be a speaker for my phone"
-            hint="Your phone sees the Pi as a speaker and its music plays on the soundbar. Sage pauses it for a moment to speak." />
+          <Switch on={set.phoneSpeaker} onChange={on => save({ phoneSpeaker: on })} label="Be a speaker for my phone"
+            hint="Optional. Your phone sees the Pi as a Bluetooth speaker and its sound plays on the soundbar. Laggier than Spotify below; it steps aside while Spotify plays." />
 
-          {set.passthrough && (
+          {set.phoneSpeaker && (
             <div className="pl-[3.25rem] space-y-1.5 -mt-2">
               <span className="block text-xs text-gray-500">Phone audio delay</span>
               <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Phone audio delay">
@@ -137,7 +138,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <div className="space-y-2">
             <Switch on={(set.surround || 'off') !== 'off'} onChange={on => save({ surround: on ? lastMode : 'off' })}
               label="Surround sound"
-              hint="Makes the soundbar sound wider and roomier, for the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
+              hint="Makes the soundbar sound wider and roomier, for Spotify, the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
             {(set.surround || 'off') !== 'off' && (
               <div className="pl-[3.25rem] space-y-1.5">
                 <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Surround mode">

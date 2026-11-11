@@ -9,8 +9,11 @@ Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
   GREET_EVERY_HOURS): the time, the weather, what's left today. Groq writes the line when
   there is a key; a plain template is the fallback, so it never stays silent.
 - Reminders: while you're home, a reminder that fires is also spoken.
-- Phone audio: with pass-through on, the Pi is a Bluetooth speaker for the
-  phone (A2DP sink) and plays what it receives on the soundbar. When the
+- Music: the Pi is a Spotify Connect speaker (spotify.py) that plays on the
+  soundbar; Sage pauses it for a moment to speak.
+- Phone audio (optional, off by default): with pass-through on, the Pi is a
+  Bluetooth speaker for the phone (A2DP sink) and plays what it receives on
+  the soundbar. It steps aside while Spotify plays. When the
   soundbar isn't connected, or pass-through is off, the Pi drops the phone's
   audio link so the phone's sound doesn't go to a Pi with nothing to play it.
 - Quiet hours: nothing is said between quietStart and quietEnd, except the
@@ -68,7 +71,7 @@ DEFAULTS: Dict[str, Any] = {
     "name": "",             # its name, for the UI
     "greet": True,          # say hello when you get home
     "reminders": True,      # speak reminders while you're home
-    "passthrough": True,    # be a Bluetooth speaker for the phone
+    "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
     "witty": True,          # let Groq write the greeting (falls back to the template)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
@@ -133,7 +136,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "passthrough", "witty"):
+    for key in ("greet", "reminders", "phoneSpeaker", "witty"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:
@@ -466,6 +469,7 @@ class Speaker:
         self.last: Optional[dict] = None
         self.error: Optional[dict] = None
         self.links: dict = {"soundbar": {"known": False, "paired": False, "connected": False, "audio": False, "name": ""}, "phoneAudio": False}
+        self.music = None            # spotify.connect, set by spotify.run(): paused while Sage speaks
         self.we_connected = False
         self.away_since: Optional[float] = None
         self._pass: Optional[asyncio.subprocess.Process] = None
@@ -575,6 +579,8 @@ class Speaker:
         if not settings["address"]:
             return
         await self._stop_passthrough()
+        if self.music is not None:
+            await self.music.pause_quietly()
         try:
             device = await self._device(settings["address"])
             await asyncio.wait_for(device.call_disconnect(), timeout=15)
@@ -675,15 +681,18 @@ class Speaker:
         sb = links["soundbar"]
         now = time.time()
 
-        want_pass = bool(settings["address"] and settings["passthrough"] and sb["connected"] and phone_addr)
+        # Spotify has the soundbar while it plays; only one player can hold it.
+        spotify_on = bool(self.music is not None and self.music.playing())
+        want_pass = bool(settings["address"] and settings["phoneSpeaker"] and sb["connected"] and phone_addr and not spotify_on)
         if want_pass and links["phoneAudio"] and not self._pass_paused:
             await self._start_passthrough(settings["address"], phone_addr)
         elif not want_pass or not links["phoneAudio"]:
             if not self._pass_paused:
                 await self._stop_passthrough()
 
-        # Phone audio with nowhere to go would be silence: drop it.
-        if links["phoneAudio"] and not want_pass and now - self._dropped_phone_at > 30:
+        # Phone audio with nowhere to go would be silence: drop it (but not
+        # just because Spotify is playing for a moment).
+        if links["phoneAudio"] and not want_pass and not spotify_on and now - self._dropped_phone_at > 30:
             self._dropped_phone_at = now
             await self._phone_profile(False)
         # Soundbar up and pass-through on: invite the phone once in a while.
@@ -783,12 +792,19 @@ class Speaker:
             return None
         return out
 
+    async def make_room(self) -> None:
+        """Spotify is about to play: stop passing the phone's audio through."""
+        await self._stop_passthrough()
+
     async def _play(self, wav: str, settings: dict) -> bool:
-        """Pause the phone's music and pass-through, speak, then carry on."""
+        """Pause Spotify, the phone's music and pass-through, speak, then carry on."""
         self._pass_paused += 1
         media = getattr(self.phone, "media", {}) or {}
         paused_phone = bool(media.get("playing")) and self._pass is not None
+        paused_music = False
         try:
+            if self.music is not None:
+                paused_music = await self.music.hold()
             if paused_phone:
                 await self.phone.send_command("pause")
             await self._stop_passthrough()
@@ -803,6 +819,8 @@ class Speaker:
         finally:
             self._pass_paused -= 1
             self._pass_next = 0.0
+            if paused_music:
+                await self.music.release()
             if paused_phone:
                 try:
                     await self.phone.send_command("play")
