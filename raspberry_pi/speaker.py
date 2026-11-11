@@ -77,6 +77,17 @@ DEFAULTS: Dict[str, Any] = {
     "quietEnd": "07:00",
     "leaveAfterMinutes": 20,  # 0 = never disconnect on leaving
     "surround": "off",      # off | music | movie | wide (SURROUND below)
+    "latency": "low",       # lowest | low | steady (LATENCY below): pass-through buffer
+}
+
+# How much the Pi buffers the phone's audio before the soundbar (bluealsa-aplay's
+# PCM buffer and period, in microseconds). bluealsa-aplay's own default is
+# 500 ms, which is most of the lag you hear; less buffer is less delay but can
+# crackle if the Bluetooth link hiccups (Wi-Fi off on Ethernet helps).
+LATENCY: Dict[str, Dict[str, int]] = {
+    "lowest": {"buffer": 120000, "period": 30000},
+    "low": {"buffer": 200000, "period": 50000},
+    "steady": {"buffer": 500000, "period": 100000},
 }
 
 # Virtual surround presets: the sage_surround plugin's controls.
@@ -156,6 +167,11 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if mode != "off" and mode not in SURROUND:
             raise ValueError("Surround is off, music, movie or wide.")
         out["surround"] = mode
+    if "latency" in update:
+        latency = str(update.get("latency") or "")
+        if latency not in LATENCY:
+            raise ValueError("Delay is lowest, low or steady.")
+        out["latency"] = latency
     return out
 
 
@@ -322,6 +338,13 @@ def output_device(address: str, surround: str, ready: bool) -> str:
         return f"bluealsa:DEV={address},PROFILE=a2dp"
     return (f"sage_surround:DEV={address},WIDTH={preset['width']:g},SPACE={preset['space']:g},"
             f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g}")
+
+
+def passthrough_cmd(device: str, phone: str, latency: str) -> List[str]:
+    """bluealsa-aplay with the chosen buffer. Pure."""
+    lat = LATENCY.get(latency, LATENCY["low"])
+    return ["bluealsa-aplay", "--profile-a2dp", f"--pcm-buffer-time={lat['buffer']}",
+            f"--pcm-period-time={lat['period']}", "-D", device, phone]
 
 
 def surround_ready() -> bool:
@@ -571,7 +594,7 @@ class Speaker:
 
     async def _start_passthrough(self, soundbar: str, phone: str) -> None:
         settings = get_settings()
-        want = self.device(settings, soundbar)
+        want = self.device(settings, soundbar) + "|" + settings["latency"]
         if self._pass is not None and self._pass.returncode is None:
             if self._pass_device == want:
                 return
@@ -583,13 +606,13 @@ class Speaker:
             self._pass = None
             self._surround_failed("the phone pass-through stopped at once")
             self._pass_next = 0.0
-            want = self.device(settings, soundbar)
+            want = self.device(settings, soundbar) + "|" + settings["latency"]
         if time.time() < self._pass_next or not shutil.which("bluealsa-aplay"):
             return
         self._pass_next = time.time() + 10  # don't spin if it keeps dying
         try:
             self._pass = await asyncio.create_subprocess_exec(
-                "bluealsa-aplay", "--profile-a2dp", "-D", want, phone,
+                *passthrough_cmd(want.split("|")[0], phone, settings["latency"]),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
             self._pass_device = want
             self._pass_started = time.time()

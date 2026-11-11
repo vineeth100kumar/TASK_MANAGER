@@ -211,3 +211,18 @@ class SurroundPluginTests(unittest.TestCase):
         # full-scale input still stays inside the limit
         ol, orr = self.process([1.0] * 4800, [-1.0] * 4800, 1, 0.7, 9, 9)
         self.assertLessEqual(max(abs(v) for v in ol + orr), 1.0)
+
+
+class LatencyTests(unittest.TestCase):
+    def test_settings(self):
+        self.assertEqual(speaker.DEFAULTS["latency"], "low")
+        self.assertEqual(speaker.clean_settings({"latency": "lowest"})["latency"], "lowest")
+        with self.assertRaises(ValueError):
+            speaker.clean_settings({"latency": "zero"})
+
+    def test_command(self):
+        cmd = speaker.passthrough_cmd("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", "11:22:33:44:55:66", "low")
+        self.assertIn("--pcm-buffer-time=200000", cmd)
+        self.assertIn("--pcm-period-time=50000", cmd)
+        self.assertEqual(cmd[-1], "11:22:33:44:55:66")
+        self.assertIn("--pcm-buffer-time=500000", speaker.passthrough_cmd("x", "y", "steady"))
