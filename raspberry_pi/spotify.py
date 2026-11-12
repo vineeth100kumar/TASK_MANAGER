@@ -409,10 +409,31 @@ class SpotifyConnect:
         try:
             self.bridge = await asyncio.create_subprocess_shell(
                 bridge_cmd(PW_NODE, self.device), env=env,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
                 start_new_session=True)
+            asyncio.ensure_future(self._read_bridge_errors(self.bridge))
         except OSError as e:
             self._fail(f"Couldn't start the Spotify sound bridge: {e}")
+
+    async def _read_bridge_errors(self, proc: asyncio.subprocess.Process) -> None:
+        """Copy the first lines parec/aplay complain about into the log."""
+        assert proc.stderr is not None
+        shown = 0
+        while shown < 8:
+            raw = await proc.stderr.readline()
+            if not raw:
+                break
+            text = friendly_log(raw.decode(errors="replace"))
+            if text:
+                shown += 1
+                try:
+                    import logstore
+                    logstore.warn("soloist-bridge", text)
+                except Exception:
+                    pass
+        # keep draining so the pipe never fills
+        while await proc.stderr.readline():
+            pass
 
     async def _stop_bridge(self) -> None:
         proc, self.bridge = self.bridge, None
