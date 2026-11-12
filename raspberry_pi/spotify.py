@@ -237,6 +237,12 @@ class SpotifyConnect:
         self.running_key = ""        # name|apiKey Soloist is running with
         self.device = ""             # the ALSA device the PipeWire sink feeds now
         self.bridge: Optional[asyncio.subprocess.Process] = None
+        self._probe_at = 0.0         # when the last audio snapshot was taken
+        self._progress_pos = -1      # song position (s) from Soloist's status lines
+        self._progress_at = 0.0      # when that position last changed
+        self._stalled_at = 0.0       # last stall snapshot
+        self._line_status = ""       # playing / paused / buffering from the last status line
+        self._bridge_died_at = 0.0
         self.used_node = False       # the last start used the soundbar sink node
         self.node_fails = 0          # quick crashes while the soundbar sink was used
         self.state: Optional[dict] = None   # last playback_state
@@ -394,7 +400,42 @@ class SpotifyConnect:
         asyncio.ensure_future(self._read_log(self.proc))
         if use_node:
             await self._start_bridge()
+        self._progress_at, self._line_status, self._progress_pos = 0.0, "", -1
+        self.probe_later(10, "after start", min_gap=20)
         log.info("Spotify (Soloist) started as %r%s.", settings["name"], " on the soundbar" if use_node else "")
+
+    # --- Diagnostics (audio_probe.py writes a full snapshot to the log) ---
+
+    async def diagnose(self, reason: str, deep: bool = True) -> None:
+        """Write the full audio snapshot to sage_logs (source audio-probe)."""
+        self._probe_at = time.time()
+        try:
+            import audio_probe
+            await audio_probe.record(self, reason, deep)
+        except Exception as e:
+            log.debug("Audio snapshot failed: %s", e)
+
+    def probe_later(self, delay: float, reason: str, min_gap: float = 30.0) -> None:
+        """Take a snapshot `delay` seconds from now, unless one was just taken."""
+        async def go() -> None:
+            await asyncio.sleep(delay)
+            if time.time() - self._probe_at >= min_gap:
+                await self.diagnose(reason)
+        asyncio.ensure_future(go())
+
+    def check_stall(self) -> None:
+        """Soloist says "playing" but the song position hasn't moved: log why."""
+        now = time.time()
+        if (self._line_status == "playing" and self._progress_at and now - self._progress_at > 12
+                and now - self._stalled_at > 180 and self.alive()):
+            self._stalled_at = now
+            try:
+                import logstore
+                logstore.warn("spotify", f"Spotify says playing but the song hasn't moved for {int(now - self._progress_at)} s "
+                              "(no sound is draining). Taking an audio snapshot.")
+            except Exception:
+                pass
+            asyncio.ensure_future(self.diagnose("stalled"))
 
     def _bridge_alive(self) -> bool:
         return self.bridge is not None and self.bridge.returncode is None
@@ -409,10 +450,31 @@ class SpotifyConnect:
         try:
             self.bridge = await asyncio.create_subprocess_shell(
                 bridge_cmd(PW_NODE, self.device), env=env,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
                 start_new_session=True)
+            asyncio.ensure_future(self._read_bridge_errors(self.bridge))
         except OSError as e:
             self._fail(f"Couldn't start the Spotify sound bridge: {e}")
+
+    async def _read_bridge_errors(self, proc: asyncio.subprocess.Process) -> None:
+        """Copy the first lines parec/aplay complain about into the log."""
+        assert proc.stderr is not None
+        shown = 0
+        while shown < 8:
+            raw = await proc.stderr.readline()
+            if not raw:
+                break
+            text = friendly_log(raw.decode(errors="replace"))
+            if text:
+                shown += 1
+                try:
+                    import logstore
+                    logstore.warn("soloist-bridge", text)
+                except Exception:
+                    pass
+        # keep draining so the pipe never fills
+        while await proc.stderr.readline():
+            pass
 
     async def _stop_bridge(self) -> None:
         proc, self.bridge = self.bridge, None
@@ -451,7 +513,20 @@ class SpotifyConnect:
                 break
             line = raw.decode(errors="replace").rstrip()
             self.lines.append(line)
+            self._track_progress(line)
             self._log_line(line)
+
+    def _track_progress(self, line: str) -> None:
+        """Read Soloist's status lines (`playing <uri> ... [2:38 / 4:53]`) to know
+        whether the song position is moving."""
+        m = re.search(r"\b(playing|paused|buffering)\b.*\[(\d+):(\d\d) / ", line)
+        if not m:
+            return
+        status, pos = m.group(1), int(m.group(2)) * 60 + int(m.group(3))
+        now = time.time()
+        if status != self._line_status or pos != self._progress_pos:
+            self._progress_at = now
+        self._line_status, self._progress_pos = status, pos
 
     def _log_line(self, line: str) -> None:
         """Copy Soloist's own output into Sage's log (source "soloist") so it can
@@ -523,7 +598,16 @@ class SpotifyConnect:
                 await self.stop()
             else:
                 if self.used_node and not self._bridge_alive():
+                    if time.time() - self._bridge_died_at > 60:
+                        self._bridge_died_at = time.time()
+                        try:
+                            import logstore
+                            logstore.warn("spotify", "The Spotify sound bridge (parec | aplay) stopped; restarting it.")
+                        except Exception:
+                            pass
+                        self.probe_later(2, "bridge died")
                     await self._start_bridge()
+                self.check_stall()
                 return
         if self.proc is not None and self.proc.returncode is not None:
             code = self.proc.returncode
@@ -612,6 +696,8 @@ class SpotifyConnect:
             if self.is_active and not was_active:
                 asyncio.ensure_future(self.on_active())
         elif kind == "playback_state":
+            if ev.get("status") == "playing" and (self.state or {}).get("status") != "playing":
+                self.probe_later(6, "playing", min_gap=60)
             self.state = ev
             self.is_active = bool(ev.get("is_active", self.is_active))
         elif kind == "track_changed":
