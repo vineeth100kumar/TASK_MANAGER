@@ -185,7 +185,7 @@ async def start_recording(device: str = "", title: str = "", max_seconds: int = 
         }
         (rec_dir / "meta.json").write_text(json.dumps(meta, indent=2))
 
-        logstore.info("recorder", f"Recording started: {rec_id} on {device} (max {duration}s)")
+        logstore.append("info", f"Recording started: {rec_id} on {device} (max {duration}s)", source="recorder")
         return {"success": True, "id": rec_id, "device": device, "maxSeconds": duration}
 
     except Exception as e:
@@ -257,7 +257,7 @@ async def _finalize(rec_id: str, elapsed: float = 0) -> Dict[str, Any]:
         """, (rec_id, meta.get("title", rec_id), duration, meta.get("device", ""),
               meta.get("transcript", ""), meta.get("created_at", ""), file_size))
 
-    logstore.info("recorder", f"Recording saved: {rec_id} ({duration:.1f}s, {file_size} bytes)")
+    logstore.append("info", f"Recording saved: {rec_id} ({duration:.1f}s, {file_size} bytes)", source="recorder")
     return {"success": True, "id": rec_id, "duration": round(duration, 1), "fileSize": file_size}
 
 
@@ -331,7 +331,7 @@ def delete(rec_id: str) -> bool:
     shutil.rmtree(RECORDINGS_DIR / rec_id, ignore_errors=True)
     with _conn() as c:
         c.execute("DELETE FROM recordings WHERE id = ?", (rec_id,))
-    logstore.info("recorder", f"Recording deleted: {rec_id}")
+    logstore.append("info", f"Recording deleted: {rec_id}", source="recorder")
     return True
 
 
@@ -390,7 +390,7 @@ async def transcribe(rec_id: str) -> Dict[str, Any]:
             meta["transcribing"] = False
             meta_path.write_text(json.dumps(meta, indent=2))
 
-        logstore.info("recorder", f"Transcribed recording {rec_id}: {len(transcript)} chars")
+        logstore.append("info", f"Transcribed recording {rec_id}: {len(transcript)} chars", source="recorder")
         return {"success": True, "transcript": transcript}
 
     except Exception as e:
