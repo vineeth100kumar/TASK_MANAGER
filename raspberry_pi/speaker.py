@@ -39,6 +39,7 @@ import datetime
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -72,6 +73,7 @@ DEFAULTS: Dict[str, Any] = {
     "greet": True,          # say hello when you get home
     "reminders": True,      # speak reminders while you're home
     "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
+    "chimes": True,         # short spoken lines when things happen (soundbar on, back home, Spotify picked)
     "witty": True,          # let Groq write the greeting (falls back to the template)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
@@ -137,7 +139,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "phoneSpeaker", "witty"):
+    for key in ("greet", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:
@@ -302,6 +304,31 @@ Facts (JSON):
 
 
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
+
+
+# Short, quiet lines for things that happen around the house. One is picked at
+# random so it doesn't sound canned; each kind waits its cooldown before it is
+# said again, and a line that can't be said within EVENT_STALE_S is dropped.
+EVENT_LINES: Dict[str, List[str]] = {
+    "soundbar": ["Sound's on.", "Speaker's ready.", "Connected.", "All set."],
+    "home": ["Welcome back{name}.", "Good to have you back{name}.", "Welcome back."],
+    "spotify": ["Spotify's here.", "Playing here.", "Over to Spotify."],
+}
+EVENT_COOLDOWN_S: Dict[str, float] = {"soundbar": 600, "home": 1800, "spotify": 900}
+EVENT_STALE_S = 20.0
+
+
+def event_line(kind: str, call_me: str = "", pick: Callable[[List[str]], str] = random.choice) -> str:
+    """The line for an event, or "" for an unknown one. Pure apart from `pick`."""
+    lines = EVENT_LINES.get(kind)
+    if not lines:
+        return ""
+    return pick(lines).replace("{name}", f", {call_me}" if call_me else "")
+
+
+def event_due(kind: str, last: Dict[str, float], now: float) -> bool:
+    """Has this kind of line waited out its cooldown? Pure."""
+    return now - last.get(kind, 0.0) >= EVENT_COOLDOWN_S.get(kind, 600)
 
 
 def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> bool:
@@ -483,6 +510,9 @@ class Speaker:
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self._events_at: Dict[str, float] = {}   # when each event line was last queued
+        self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
+        self._last_spoke_at = 0.0
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -681,6 +711,9 @@ class Speaker:
         home = bool(self.phone and self.phone.available and self.phone.home)
         sb = links["soundbar"]
         now = time.time()
+        if sb["connected"] and self._soundbar_was is False:
+            self.event("soundbar")
+        self._soundbar_was = bool(sb["connected"])
 
         # Spotify has the soundbar while it plays; only one player can hold it.
         spotify_on = bool(self.music is not None and self.music.playing())
@@ -719,21 +752,44 @@ class Speaker:
         """Queue a line from any thread."""
         if self.loop is None or self.queue is None:
             return
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind})
+        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time()})
 
     async def say(self, text: str, kind: str = "line") -> None:
         if self.queue is not None:
-            await self.queue.put({"text": text, "kind": kind})
+            await self.queue.put({"text": text, "kind": kind, "at": time.time()})
+
+    def event(self, kind: str) -> bool:
+        """A short line for something that just happened (any thread). Lines
+        never overlap: they wait in the one queue, and a small line is skipped
+        when Sage is already talking or about to, or when the same kind was said
+        within its cooldown. True when queued."""
+        settings = get_settings()
+        now = time.time()
+        if not (settings["address"] and settings.get("chimes", True)) or self.queue is None:
+            return False
+        if self.speaking or not self.queue.empty() or now - self._last_spoke_at < 15:
+            return False
+        if not event_due(kind, self._events_at, now):
+            return False
+        line = event_line(kind, settings.get("callMe", ""))
+        if not line:
+            return False
+        self._events_at[kind] = now
+        self.say_soon(line, "event")
+        return True
 
     async def _speak_loop(self) -> None:
         while True:
             job = await self.queue.get()
+            if job["kind"] == "event" and (time.time() - job.get("at", 0) > EVENT_STALE_S or not self.queue.empty()):
+                continue    # late, or something more important is waiting
             try:
                 await self._speak(job["text"], job["kind"])
             except Exception as e:
                 self._fail(f"Speaking failed: {e}")
             finally:
                 self.speaking = ""
+                self._last_spoke_at = time.time()
                 await self._publish()
 
     async def _speak(self, text: str, kind: str) -> None:
@@ -793,12 +849,28 @@ class Speaker:
             return None
         return out
 
+    def passing(self) -> bool:
+        return self._pass is not None and self._pass.returncode is None
+
     async def make_room(self) -> None:
         """Spotify is about to play: stop passing the phone's audio through."""
         await self._stop_passthrough()
 
     async def _play(self, wav: str, settings: dict) -> bool:
-        """Pause Spotify, the phone's music and pass-through, speak, then carry on."""
+        """Speak over whatever is on. With Spotify's sound path up, the voice is
+        mixed into it: the music fades down, Sage speaks (through the same
+        surround), the music fades back. Otherwise the soundbar is free, so pause
+        what's on, speak straight to it, then carry on."""
+        if self.music is not None and self.music.mixable():
+            ducked = await self.music.duck()
+            try:
+                code, err = await self.music.play_into_sink(wav)
+            finally:
+                if ducked:
+                    await self.music.unduck()
+            if not code:
+                return True
+            log.info("Mixing the voice into the music failed (%s); speaking directly.", err.strip()[-160:])
         self._pass_paused += 1
         media = getattr(self.phone, "media", {}) or {}
         paused_phone = bool(media.get("playing")) and self._pass is not None
@@ -906,7 +978,9 @@ class Speaker:
         At most one greeting every GREET_EVERY_HOURS."""
         settings = get_settings()
         if not greet_due(float(settings.get("lastGreetAt") or 0), time.time()):
-            log.info("Greeted less than %s h ago; staying quiet.", GREET_EVERY_HOURS)
+            # Greeted recently: just a short "welcome back".
+            if self.loop:
+                self.loop.call_soon_threadsafe(self.event, "home")
             return
         if settings["address"] and settings["greet"] and self.loop:
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)

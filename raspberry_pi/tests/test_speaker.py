@@ -272,3 +272,52 @@ class GreetGapTests(unittest.TestCase):
     def test_template_says_sir_without_a_name(self):
         f = speaker.greeting_facts(at(19), [], [], False, None, [], "")
         self.assertIn("Good evening, sir.", speaker.template_greeting(f))
+
+
+class EventTests(unittest.TestCase):
+    def test_event_line(self):
+        first = lambda lines: lines[0]   # noqa: E731
+        self.assertEqual(speaker.event_line("home", "sir", first), "Welcome back, sir.")
+        self.assertEqual(speaker.event_line("home", "", first), "Welcome back.")
+        self.assertEqual(speaker.event_line("nope"), "")
+        for kind in speaker.EVENT_LINES:
+            for line in speaker.EVENT_LINES[kind]:
+                self.assertLessEqual(len(line.split()), 7, "event lines stay short")
+
+    def test_event_due(self):
+        self.assertTrue(speaker.event_due("soundbar", {}, 1000.0))
+        self.assertFalse(speaker.event_due("soundbar", {"soundbar": 900.0}, 1000.0))
+        self.assertTrue(speaker.event_due("soundbar", {"soundbar": 0.0}, 1000.0))
+
+    def test_chimes_setting(self):
+        self.assertTrue(speaker.DEFAULTS["chimes"])
+        self.assertFalse(speaker.clean_settings({"chimes": False})["chimes"])
+
+
+class PhoneBackoffTests(unittest.TestCase):
+    def test_gap(self):
+        import phone_link
+        self.assertEqual(phone_link.ble_retry_gap(1), 30)
+        self.assertEqual(phone_link.ble_retry_gap(3), 120)
+        self.assertEqual(phone_link.ble_retry_gap(20), 600)
+        self.assertEqual(phone_link.ble_retry_gap(1, busy=True), 600)
+        self.assertEqual(phone_link.ble_retry_gap(0, busy=True), 30)
+
+
+class MixTests(unittest.TestCase):
+    def test_voice_mixed_and_music_ducked(self):
+        import asyncio
+        calls = []
+
+        class Music:
+            def mixable(self): return True
+            async def duck(self): calls.append("duck"); return True
+            async def play_into_sink(self, wav): calls.append("play"); return 0, ""
+            async def unduck(self): calls.append("unduck")
+            async def hold(self): calls.append("hold"); return False
+
+        sp = speaker.Speaker()
+        sp.music = Music()
+        ok = asyncio.run(sp._play("/tmp/x.wav", dict(speaker.DEFAULTS)))
+        self.assertTrue(ok)
+        self.assertEqual(calls, ["duck", "play", "unduck"])

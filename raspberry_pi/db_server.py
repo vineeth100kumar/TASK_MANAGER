@@ -1846,6 +1846,9 @@ async def bluetooth_device(address: str, action: str):
 
 # --- Soundbar: greeting and spoken reminders (see speaker.py) ---
 life_mode.on_arrival = speaker.speaker.on_arrival
+# One Bluetooth radio: while music streams to the soundbar, the phone link
+# backs off its reconnect tries (each one stalled the music for a moment).
+phone_link.audio_busy = lambda: spotify.connect.playing() or speaker.speaker.passing()
 notifier.speak_reminder = speaker.speaker.on_reminder
 
 

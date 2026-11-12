@@ -210,11 +210,13 @@ part_audio() {
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Real-time priority: bluez-alsa encodes the soundbar's audio, and a late
+    # packet is a stutter you hear.
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
     # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload
-    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+    systemctl enable "$UNIT" >/dev/null 2>&1; systemctl restart "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi

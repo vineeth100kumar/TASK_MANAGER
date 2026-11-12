@@ -64,6 +64,27 @@ class CommandTests(unittest.TestCase):
         self.assertIn("parec -d sage-spotify.monitor", cmd)
         self.assertIn("aplay", cmd)
         self.assertIn("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", cmd)
+        self.assertIn("--latency-msec=200", cmd)
+        self.assertIn("--buffer-time=500000", cmd)
+        self.assertNotIn("chrt", cmd)
+        rt = spotify.bridge_cmd("sage-spotify", "x", 30)
+        self.assertEqual(rt.count("chrt -f 30 "), 2)
+
+    def test_music_inputs(self):
+        inputs = [
+            {"index": 5, "properties": {"application.name": "Spotify", "application.process.id": "77"}},
+            {"index": 6, "properties": {"application.name": "Sage voice", "application.process.binary": "paplay"}},
+            {"index": 7, "properties": {"application.name": "other", "application.process.id": "123"}},
+            {"index": 8, "properties": {"application.process.binary": "soloist"}},
+        ]
+        self.assertEqual(spotify.music_inputs(inputs, 123), [5, 7, 8])
+        self.assertEqual(spotify.music_inputs(inputs, 0), [5, 8])
+
+    def test_fade_steps(self):
+        down = spotify.fade_steps(1.0, 0.3)
+        self.assertEqual(down[-1], 0.3)
+        self.assertTrue(all(a > b for a, b in zip(down, down[1:])))
+        self.assertEqual(spotify.fade_steps(0.3, 1.0)[-1], 1.0)
 
     def test_audio_env(self):
         env = spotify.audio_env({"PATH": "/usr/bin"})
