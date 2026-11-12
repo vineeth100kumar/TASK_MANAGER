@@ -156,5 +156,28 @@ class ControlTests(unittest.TestCase):
         asyncio.run(go())
 
 
+class ProbeTests(unittest.TestCase):
+    def test_tidy_and_grep(self):
+        import audio_probe
+        self.assertEqual(audio_probe.tidy("a   b\n\n  c"), "a b | c")
+        self.assertEqual(len(audio_probe.tidy("x" * 5000)) <= audio_probe.MAX_LINE, True)
+        self.assertEqual(audio_probe.grep_lines("one\nBlueAlsa x\nthree", "bluealsa"), "BlueAlsa x")
+        self.assertEqual(audio_probe.grep_lines("one", "zzz"), "(none)")
+
+    def test_progress_tracking(self):
+        c = spotify.SpotifyConnect()
+        c._track_progress('t: playing spotify:track:x "S" by "A" [2:38 / 4:53]')
+        first = c._progress_at
+        self.assertEqual((c._line_status, c._progress_pos), ("playing", 158))
+        c._track_progress('t: playing spotify:track:x "S" by "A" [2:38 / 4:53]')
+        self.assertEqual(c._progress_at, first)       # same position: no progress
+        c._track_progress('t: playing spotify:track:x "S" by "A" [2:40 / 4:53]')
+        self.assertEqual(c._progress_pos, 160)
+
+    def test_summary_runs(self):
+        import audio_probe
+        self.assertIn("running=False", audio_probe.soloist_summary(spotify.SpotifyConnect()))
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1940,6 +1940,9 @@ async def spotify_action(action: str):
             await spotify.connect.sign_out()
         elif action == "restart":
             await spotify.connect.restart()
+            spotify.connect.probe_later(10, "after restart")
+        elif action == "diagnose":
+            await spotify.connect.diagnose("asked")
         else:
             await spotify.connect.control(action)
     except ValueError as e:
