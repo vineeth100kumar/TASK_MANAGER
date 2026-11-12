@@ -129,6 +129,20 @@ def public_settings(settings: dict) -> dict:
 
 # --- Pure helpers ---
 
+def audio_env(base: Optional[dict] = None) -> dict:
+    """The environment a child needs to reach the user's PipeWire/Pulse server.
+    Sage runs as a system service, which has no XDG_RUNTIME_DIR, so without
+    this Soloist can't find the sound server: it "plays" at 0:00 forever and
+    no stream ever reaches the sink. Pure."""
+    env = dict(os.environ if base is None else base)
+    runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    env["XDG_RUNTIME_DIR"] = runtime
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+    env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
+    env.setdefault("PIPEWIRE_RUNTIME_DIR", runtime)
+    return env
+
+
 def soloist_cmd(settings: dict, node: str) -> List[str]:
     """How to launch Soloist. The key is passed on argv as the docs show. Pure."""
     cmd = ["soloist", "--device-name", settings["name"], "--api-key", settings["apiKey"],
@@ -388,7 +402,7 @@ class SpotifyConnect:
         self.build_expired = False
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                *soloist_cmd(settings, PW_NODE if use_node else ""),
+                *soloist_cmd(settings, PW_NODE if use_node else ""), env=audio_env(),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         except OSError as e:
             self._fail(f"Soloist didn't start: {e}")
@@ -427,16 +441,41 @@ class SpotifyConnect:
         """Independent of the main loop (so nothing else can block it): while a
         song is playing or loading, write an audio snapshot about every 45 s,
         plus one the moment it starts, so there is always one from during play."""
+        beat = 0.0
         while True:
             await asyncio.sleep(4)
             try:
+                now = time.time()
                 st = (self.state or {}).get("status")
                 busy = self._line_status in ("playing", "buffering") or st in ("playing", "buffering")
-                if self.alive() and busy and time.time() - self._probe_at >= 45:
-                    await self.diagnose("playing")
+                # A one-line heartbeat of what this loop sees, so a snapshot that
+                # doesn't fire can be explained from the log alone.
+                if now - beat >= 20:
+                    beat = now
+                    try:
+                        import audio_probe
+                        import logstore
+                        logstore.info("spotify-loop",
+                                      f"alive={self.alive()} busy={busy} lineStatus={self._line_status!r} wsStatus={st!r} "
+                                      f"posAge={int(now - self._progress_at) if self._progress_at else None}s "
+                                      f"lastProbeAge={int(now - self._probe_at) if self._probe_at else None}s "
+                                      f"probeLockHeld={audio_probe._lock.locked()} bridgeAlive={self._bridge_alive()} "
+                                      f"lines={len(self.lines)}")
+                    except Exception:
+                        pass
+                # While a song plays, a snapshot about every 45 s; while merely
+                # running, one every 3 min, so there is always recent data.
+                gap = 45 if busy else 180
+                if self.alive() and now - self._probe_at >= gap:
+                    await asyncio.wait_for(self.diagnose("playing" if busy else "idle"), timeout=90)
                 self.check_stall()
             except Exception as e:
                 log.debug("Probe loop: %s", e)
+                try:
+                    import logstore
+                    logstore.warn("spotify-loop", f"probe loop error: {e!r}")
+                except Exception:
+                    pass
 
     def check_stall(self) -> None:
         """Soloist says "playing" but the song position hasn't moved: log why."""
@@ -787,7 +826,7 @@ class SpotifyConnect:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     exe, "--device-name", settings["name"], "--api-key", settings["apiKey"],
-                    "--data-dir", str(DATA_DIR), "--pair",
+                    "--data-dir", str(DATA_DIR), "--pair", env=audio_env(),
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 await asyncio.wait_for(proc.wait(), timeout=15)
             except (OSError, asyncio.TimeoutError) as e:
