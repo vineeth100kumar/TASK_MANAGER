@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import re
+import shlex
 import shutil
 import signal
 import sqlite3
@@ -137,25 +138,31 @@ def soloist_cmd(settings: dict, node: str) -> List[str]:
     return cmd
 
 
-def pipewire_sink_conf(node: str, alsa_device: str) -> str:
-    """A PipeWire config fragment: an ALSA sink named `node` that writes to the
-    soundbar's bluez-alsa device, so Soloist's audio reaches the soundbar. Pure."""
+def pipewire_sink_conf(node: str, alsa_device: str = "") -> str:
+    """A PipeWire config fragment: a silent virtual sink named `node` that
+    Soloist plays into. A bridge (bridge_cmd) then copies its monitor to the
+    soundbar's bluez-alsa device. (Feeding a bluez-alsa PCM from PipeWire's own
+    ALSA sink never drained, so Soloist froze and flipped play/pause.) Pure."""
     props = json.dumps({
-        "factory.name": "api.alsa.pcm.sink",
+        "factory.name": "support.null-audio-sink",
         "node.name": node,
         "node.description": "Spotify on the soundbar",
         "media.class": "Audio/Sink",
-        "api.alsa.path": alsa_device,
-        "audio.format": "S16LE",
+        "object.linger": True,
+        "audio.position": ["FL", "FR"],
         "audio.rate": 44100,
-        "audio.channels": 2,
-        "api.alsa.use-chmap": False,
     })
     return ("context.objects = [\n"
             "  { factory = adapter\n"
             f"    args = {props}\n"
             "  }\n"
             "]\n")
+
+
+def bridge_cmd(node: str, alsa_device: str) -> str:
+    """Shell pipeline: record the sink's monitor, play it on the soundbar. Pure."""
+    return (f"exec parec -d {shlex.quote(node + '.monitor')} --format=s16le --rate=44100 --channels=2 --latency-msec=60"
+            f" | exec aplay -q -D {shlex.quote(alsa_device)} -t raw -f S16_LE -r 44100 -c 2")
 
 
 def now_playing(state: Optional[dict]) -> Optional[dict]:
@@ -229,6 +236,7 @@ class SpotifyConnect:
         self.fails = 0
         self.running_key = ""        # name|apiKey Soloist is running with
         self.device = ""             # the ALSA device the PipeWire sink feeds now
+        self.bridge: Optional[asyncio.subprocess.Process] = None
         self.used_node = False       # the last start used the soundbar sink node
         self.node_fails = 0          # quick crashes while the soundbar sink was used
         self.state: Optional[dict] = None   # last playback_state
@@ -313,12 +321,13 @@ class SpotifyConnect:
                     pass
             self.device = ""
             return False
-        if self.device == alsa_device and PW_CONF.exists():
-            return True
+        conf = pipewire_sink_conf(PW_NODE, alsa_device)
         try:
-            PW_CONF.parent.mkdir(parents=True, exist_ok=True)
-            PW_CONF.write_text(pipewire_sink_conf(PW_NODE, alsa_device))
-            await self._restart_pipewire()
+            current = PW_CONF.read_text() if PW_CONF.exists() else ""
+            if current != conf:   # also replaces the older ALSA-sink version
+                PW_CONF.parent.mkdir(parents=True, exist_ok=True)
+                PW_CONF.write_text(conf)
+                await self._restart_pipewire()
             self.device = alsa_device
             return True
         except OSError as e:
@@ -383,7 +392,38 @@ class SpotifyConnect:
         self.used_node = use_node
         self.running_key = settings["name"] + "|" + settings["apiKey"]
         asyncio.ensure_future(self._read_log(self.proc))
+        if use_node:
+            await self._start_bridge()
         log.info("Spotify (Soloist) started as %r%s.", settings["name"], " on the soundbar" if use_node else "")
+
+    def _bridge_alive(self) -> bool:
+        return self.bridge is not None and self.bridge.returncode is None
+
+    async def _start_bridge(self) -> None:
+        """Copy the Spotify sink to the soundbar (parec | aplay)."""
+        await self._stop_bridge()
+        if not self.device:
+            return
+        env = dict(os.environ)
+        env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        try:
+            self.bridge = await asyncio.create_subprocess_shell(
+                bridge_cmd(PW_NODE, self.device), env=env,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL,
+                start_new_session=True)
+        except OSError as e:
+            self._fail(f"Couldn't start the Spotify sound bridge: {e}")
+
+    async def _stop_bridge(self) -> None:
+        proc, self.bridge = self.bridge, None
+        if proc is None or proc.returncode is not None:
+            return
+        self._signal_group(proc, signal.SIGTERM)
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=3)
+        except asyncio.TimeoutError:
+            self._signal_group(proc, signal.SIGKILL)
+            await proc.wait()
 
     async def _reap_strays(self) -> None:
         """Kill any Soloist process using our data dir, so a fresh start doesn't
@@ -437,6 +477,7 @@ class SpotifyConnect:
         self.is_active = False
         self.state = None
         await self._close_ws()
+        await self._stop_bridge()
         if proc is None or proc.returncode is not None:
             # Even with no tracked process, a detached Soloist may linger and
             # hold the lock; clear it so the next start is clean.
@@ -481,6 +522,8 @@ class SpotifyConnect:
                 log.info("Spotify settings changed; restarting Soloist.")
                 await self.stop()
             else:
+                if self.used_node and not self._bridge_alive():
+                    await self._start_bridge()
                 return
         if self.proc is not None and self.proc.returncode is not None:
             code = self.proc.returncode
