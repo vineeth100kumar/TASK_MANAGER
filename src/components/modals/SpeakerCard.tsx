@@ -115,6 +115,8 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             hint="When your phone gets home, connect and greet you with the time, the weather and what's left today. At most once every 6 hours." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
+          <Switch on={set.chimes !== false} onChange={on => save({ chimes: on })} label="Little responses"
+            hint="A few quiet words when things happen: the soundbar connects, you're back home, Spotify picks the Pi. Music fades down under the voice and back up." />
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />
           <Switch on={set.phoneSpeaker} onChange={on => save({ phoneSpeaker: on })} label="Be a speaker for my phone"
             hint="Optional. Your phone sees the Pi as a Bluetooth speaker and its sound plays on the soundbar. Laggier than Spotify below; it steps aside while Spotify plays." />

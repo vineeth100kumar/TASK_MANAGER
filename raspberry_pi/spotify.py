@@ -28,6 +28,7 @@ import json
 import logging
 import os
 import re
+import resource
 import shlex
 import shutil
 import signal
@@ -173,10 +174,73 @@ def pipewire_sink_conf(node: str, alsa_device: str = "") -> str:
             "]\n")
 
 
-def bridge_cmd(node: str, alsa_device: str) -> str:
+# Audio gets the CPU first. sage.service allows real-time priority
+# (LimitRTPRIO, deploy/systemd/sage.service), so the bridge runs SCHED_FIFO and
+# Soloist runs at a raised nice: a busy Pi (posts, reels, Radar) no longer
+# starves the soundbar mid-song.
+BRIDGE_RT = int(os.getenv("SAGE_AUDIO_RTPRIO", "30"))
+SOLOIST_NICE = int(os.getenv("SAGE_SOLOIST_NICE", "-10"))
+# Buffering on each hop. 60 ms in parec left no slack, so a short Bluetooth or
+# CPU hiccup emptied the soundbar's buffer (the stutter). Half a second of
+# buffer on the soundbar side rides those out; Spotify doesn't need low lag.
+BRIDGE_PAREC_MS = 200
+BRIDGE_BUFFER_US = 500000
+BRIDGE_PERIOD_US = 50000
+
+
+def rt_allowed(prio: int = BRIDGE_RT) -> bool:
+    """Can this process hand real-time priority to a child?"""
+    if not shutil.which("chrt") or prio <= 0:
+        return False
+    try:
+        soft, _hard = resource.getrlimit(resource.RLIMIT_RTPRIO)
+    except (ValueError, OSError):
+        return False
+    return os.getuid() == 0 or soft == resource.RLIM_INFINITY or soft >= prio
+
+
+def bridge_cmd(node: str, alsa_device: str, rt: int = 0) -> str:
     """Shell pipeline: record the sink's monitor, play it on the soundbar. Pure."""
-    return (f"exec parec -d {shlex.quote(node + '.monitor')} --format=s16le --rate=44100 --channels=2 --latency-msec=60"
-            f" | exec aplay -q -D {shlex.quote(alsa_device)} -t raw -f S16_LE -r 44100 -c 2")
+    pre = f"chrt -f {int(rt)} " if rt > 0 else ""
+    return (f"exec {pre}parec -d {shlex.quote(node + '.monitor')} --format=s16le --rate=44100 --channels=2"
+            f" --latency-msec={BRIDGE_PAREC_MS}"
+            f" | exec {pre}aplay -q -D {shlex.quote(alsa_device)} -t raw -f S16_LE -r 44100 -c 2"
+            f" --buffer-time={BRIDGE_BUFFER_US} --period-time={BRIDGE_PERIOD_US}")
+
+
+def _raise_priority() -> None:
+    """preexec for Soloist: a higher share of the CPU (needs LimitNICE)."""
+    try:
+        os.setpriority(os.PRIO_PROCESS, 0, SOLOIST_NICE)
+    except (OSError, PermissionError):
+        pass
+
+
+DUCK_LEVEL = 0.3     # music at 30% while Sage speaks
+FADE_STEP_S = 0.06
+
+
+def fade_steps(start: float, end: float, n: int = 5) -> List[float]:
+    """Volumes for a short fade, ending exactly on `end`. Pure."""
+    return [round(start + (end - start) * (i + 1) / n, 3) for i in range(n)]
+
+
+def music_inputs(inputs: list, soloist_pid: int = 0) -> List[int]:
+    """Sink-input ids that are Soloist's music (pactl -f json). Pure."""
+    out = []
+    for item in inputs or []:
+        props = item.get("properties") or {}
+        name = str(props.get("application.name") or props.get("media.name") or "")
+        pid = str(props.get("application.process.id") or "")
+        binary = str(props.get("application.process.binary") or "")
+        if name == "Sage voice" or binary == "paplay":
+            continue
+        if (soloist_pid and pid == str(soloist_pid)) or "soloist" in binary.lower() or name.lower() in ("spotify", "soloist"):
+            try:
+                out.append(int(item.get("index")))
+            except (TypeError, ValueError):
+                pass
+    return out
 
 
 def now_playing(state: Optional[dict]) -> Optional[dict]:
@@ -266,6 +330,7 @@ class SpotifyConnect:
         self.build_expired = False
         self.error: Optional[dict] = None
         self.held = False
+        self._ducked: List[int] = []
         self._ws = None
         self._connecting = False
         self._last_sent = ""
@@ -404,7 +469,8 @@ class SpotifyConnect:
         try:
             self.proc = await asyncio.create_subprocess_exec(
                 *soloist_cmd(settings, PW_NODE if use_node else ""), env=audio_env(),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True,
+                preexec_fn=_raise_priority)
         except OSError as e:
             self._fail(f"Soloist didn't start: {e}")
             self.next_start = time.time() + 60
@@ -500,11 +566,9 @@ class SpotifyConnect:
         await self._stop_bridge()
         if not self.device:
             return
-        env = dict(os.environ)
-        env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
         try:
             self.bridge = await asyncio.create_subprocess_shell(
-                bridge_cmd(PW_NODE, self.device), env=env,
+                bridge_cmd(PW_NODE, self.device, BRIDGE_RT if rt_allowed() else 0), env=audio_env(),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
                 start_new_session=True)
             asyncio.ensure_future(self._read_bridge_errors(self.bridge))
@@ -798,6 +862,8 @@ class SpotifyConnect:
         try:
             await self.speaker.make_room()   # stop any phone pass-through
             await self.speaker.ensure_connected()
+            if hasattr(self.speaker, "event"):
+                self.speaker.event("spotify")
             if want != self.device:
                 await self.rewire(want)
         finally:
@@ -842,8 +908,77 @@ class SpotifyConnect:
         p = now_playing(self.state)
         return bool(self.ready and p and p["playing"])
 
+    def mixable(self) -> bool:
+        """Can Sage's voice be mixed into the music? True while the sink and
+        the bridge to the soundbar are up (playing or not). The voice then goes
+        through the same surround and the soundbar never changes hands."""
+        return bool(self.alive() and self.used_node and self._bridge_alive())
+
+    async def play_into_sink(self, wav: str, timeout: float = 120) -> tuple:
+        """Play a wav into the Spotify sink, mixed with the music. (code, err)"""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "paplay", "-d", PW_NODE, "--client-name=Sage voice", wav, env=audio_env(),
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        except OSError as e:
+            return 127, str(e)
+        try:
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=timeout)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            err = b"timed out"
+        return proc.returncode, (err or b"").decode(errors="replace")
+
+    async def _music_inputs(self) -> List[int]:
+        """PipeWire stream ids of Soloist's playback (not Sage's voice)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "pactl", "-f", "json", "list", "sink-inputs", env=audio_env(),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=4)
+            return music_inputs(json.loads(out.decode() or "[]"), self.proc.pid if self.proc else 0)
+        except Exception as e:  # noqa: BLE001
+            log.debug("Couldn't list sink inputs: %s", e)
+            return []
+
+    async def _set_input_volume(self, ids: List[int], level: float) -> None:
+        pct = f"{max(0, min(100, int(round(level * 100))))}%"
+        for i in ids:
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    "pactl", "set-sink-input-volume", str(i), pct, env=audio_env(),
+                    stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
+                await asyncio.wait_for(proc.wait(), timeout=3)
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def duck(self, level: float = DUCK_LEVEL) -> bool:
+        """Fade the music down under Sage's voice (the stream's own volume, so
+        Spotify's volume on your phone doesn't move). True when it ducked."""
+        if not self.playing():
+            return False
+        ids = await self._music_inputs()
+        if not ids:
+            return False
+        self._ducked = ids
+        for step in fade_steps(1.0, level):
+            await self._set_input_volume(ids, step)
+            await asyncio.sleep(FADE_STEP_S)
+        return True
+
+    async def unduck(self) -> None:
+        ids, self._ducked = getattr(self, "_ducked", []), []
+        if not ids:
+            return
+        await asyncio.sleep(0.25)
+        for step in fade_steps(DUCK_LEVEL, 1.0):
+            await self._set_input_volume(ids, step)
+            await asyncio.sleep(FADE_STEP_S)
+
     async def hold(self) -> bool:
-        """Pause for Sage's voice. True when it was playing (so release() resumes)."""
+        """Pause for Sage's voice when it can't be mixed in. True when it was
+        playing (so release() resumes)."""
         if not self.playing():
             return False
         try:

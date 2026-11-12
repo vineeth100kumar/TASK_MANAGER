@@ -17,6 +17,11 @@ Environment=SAGE_BIND=127.0.0.1
 ExecStart=@REPO@/raspberry_pi/venv/bin/python -m uvicorn db_server:app --host ${SAGE_BIND} --port 8000
 Restart=always
 RestartSec=5
+# Music first: Sage may run the Spotify bridge (parec | aplay) at real-time
+# priority and Soloist at nice -10, so heavy work (posts, reels, Radar) can't
+# starve the soundbar mid-song (spotify.py BRIDGE_RT / SOLOIST_NICE).
+LimitRTPRIO=40
+LimitNICE=-15
 Environment=PYTHONUNBUFFERED=1
 # API_SECRET, SAGE_DB_PATH and the other settings. Written by deploy/install_pi.sh.
 EnvironmentFile=/etc/sage/sage.env
