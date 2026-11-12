@@ -55,10 +55,15 @@ class CommandTests(unittest.TestCase):
         self.assertNotIn("-d", spotify.soloist_cmd(s, ""))
 
     def test_pipewire_sink(self):
-        conf = spotify.pipewire_sink_conf("sage-spotify", "bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp")
-        self.assertIn("api.alsa.pcm.sink", conf)
-        self.assertIn("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", conf)
+        conf = spotify.pipewire_sink_conf("sage-spotify")
+        self.assertIn("support.null-audio-sink", conf)
         self.assertIn("sage-spotify", conf)
+
+    def test_bridge_cmd(self):
+        cmd = spotify.bridge_cmd("sage-spotify", "bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp")
+        self.assertIn("parec -d sage-spotify.monitor", cmd)
+        self.assertIn("aplay", cmd)
+        self.assertIn("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", cmd)
 
     def test_expired(self):
         self.assertTrue(spotify.expired(10))
