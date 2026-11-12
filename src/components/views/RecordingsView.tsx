@@ -1,7 +1,7 @@
 // RecordingsView - Record audio from the Pi's USB microphone, play back and
 // transcribe with Groq Whisper.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AlertTriangle, Check, Circle, Copy, FileText, Loader2, Mic, MicOff, Pause, Play, Square, Trash2, Type } from 'lucide-react';
+import { AlertTriangle, Copy, Loader2, Mic, MicOff, Pause, Play, Square, Trash2, Type } from 'lucide-react';
 import { Recording, CaptureDevice, RecordingStatus, recordingsApi, formatDuration, formatFileSize } from '../../services/recordings';
 import { useToast } from '../../context/ToastContext';
 
@@ -26,7 +26,7 @@ export function RecordingsView() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [elapsed, setElapsed] = useState(0);
-  const timerRef = useRef<ReturnType<typeof setInterval>>();
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined);
 
   // Currently playing
   const [playingId, setPlayingId] = useState<string | null>(null);
