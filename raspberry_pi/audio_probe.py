@@ -146,7 +146,9 @@ async def collect(connect: Any, deep: bool = True) -> List[Section]:
     # Live checks
     if deep:
         device = connect.device or connect.want_device()
-        if device:
+        if device and connect.bridge is not None and connect.bridge.returncode is None:
+            add("LIVE: silence test", "skipped: the Spotify bridge (aplay) already holds the soundbar's PCM, which only one program can open")
+        elif device:
             add(f"LIVE: 1 s of silence to {device}",
                 await sh(f"aplay -q -D {shlex.quote(device)} -t raw -f S16_LE -r 44100 -c 2 -d 1 /dev/zero; echo exit=$?", 10))
         if connect.alive() and connect.used_node:

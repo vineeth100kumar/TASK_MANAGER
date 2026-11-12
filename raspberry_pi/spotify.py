@@ -423,6 +423,21 @@ class SpotifyConnect:
                 await self.diagnose(reason)
         asyncio.ensure_future(go())
 
+    async def probe_loop(self) -> None:
+        """Independent of the main loop (so nothing else can block it): while a
+        song is playing or loading, write an audio snapshot about every 45 s,
+        plus one the moment it starts, so there is always one from during play."""
+        while True:
+            await asyncio.sleep(4)
+            try:
+                st = (self.state or {}).get("status")
+                busy = self._line_status in ("playing", "buffering") or st in ("playing", "buffering")
+                if self.alive() and busy and time.time() - self._probe_at >= 45:
+                    await self.diagnose("playing")
+                self.check_stall()
+            except Exception as e:
+                log.debug("Probe loop: %s", e)
+
     def check_stall(self) -> None:
         """Soloist says "playing" but the song position hasn't moved: log why."""
         now = time.time()
@@ -704,6 +719,8 @@ class SpotifyConnect:
             if self.state is not None:
                 self.state["item"] = ev.get("item")
         elif kind == "playback_changed":
+            if ev.get("status") == "playing" and (self.state or {}).get("status") != "playing":
+                self.probe_later(6, "playing", min_gap=30)
             if self.state is not None:
                 self.state["status"] = ev.get("status")
         elif kind == "volume_changed":
@@ -826,10 +843,11 @@ class SpotifyConnect:
         if not binary():
             log.info("Soloist isn't installed; Spotify is off (run: sudo deploy/install_pi.sh --only audio).")
         asyncio.ensure_future(self.ws_loop())
+        asyncio.ensure_future(self.probe_loop())
         while True:
             try:
                 await self.supervise()
-                await self.publish()
+                await asyncio.wait_for(self.publish(), timeout=10)
             except Exception as e:
                 log.debug("Spotify check failed: %s", e)
             await asyncio.sleep(CHECK_EVERY)
