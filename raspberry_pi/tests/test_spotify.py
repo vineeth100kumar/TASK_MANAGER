@@ -65,6 +65,12 @@ class CommandTests(unittest.TestCase):
         self.assertIn("aplay", cmd)
         self.assertIn("bluealsa:DEV=AA:BB:CC:DD:EE:FF,PROFILE=a2dp", cmd)
 
+    def test_audio_env(self):
+        env = spotify.audio_env({"PATH": "/usr/bin"})
+        self.assertTrue(env["XDG_RUNTIME_DIR"].startswith("/run/user/"))
+        self.assertEqual(env["PULSE_SERVER"], "unix:" + env["XDG_RUNTIME_DIR"] + "/pulse/native")
+        self.assertEqual(spotify.audio_env({"XDG_RUNTIME_DIR": "/x"})["PULSE_SERVER"], "unix:/x/pulse/native")
+
     def test_expired(self):
         self.assertTrue(spotify.expired(10))
         self.assertFalse(spotify.expired(0))

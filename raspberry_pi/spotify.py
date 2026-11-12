@@ -129,6 +129,20 @@ def public_settings(settings: dict) -> dict:
 
 # --- Pure helpers ---
 
+def audio_env(base: Optional[dict] = None) -> dict:
+    """The environment a child needs to reach the user's PipeWire/Pulse server.
+    Sage runs as a system service, which has no XDG_RUNTIME_DIR, so without
+    this Soloist can't find the sound server: it "plays" at 0:00 forever and
+    no stream ever reaches the sink. Pure."""
+    env = dict(os.environ if base is None else base)
+    runtime = env.get("XDG_RUNTIME_DIR") or f"/run/user/{os.getuid()}"
+    env["XDG_RUNTIME_DIR"] = runtime
+    env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+    env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
+    env.setdefault("PIPEWIRE_RUNTIME_DIR", runtime)
+    return env
+
+
 def soloist_cmd(settings: dict, node: str) -> List[str]:
     """How to launch Soloist. The key is passed on argv as the docs show. Pure."""
     cmd = ["soloist", "--device-name", settings["name"], "--api-key", settings["apiKey"],
@@ -388,7 +402,7 @@ class SpotifyConnect:
         self.build_expired = False
         try:
             self.proc = await asyncio.create_subprocess_exec(
-                *soloist_cmd(settings, PW_NODE if use_node else ""),
+                *soloist_cmd(settings, PW_NODE if use_node else ""), env=audio_env(),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT, start_new_session=True)
         except OSError as e:
             self._fail(f"Soloist didn't start: {e}")
@@ -812,7 +826,7 @@ class SpotifyConnect:
             try:
                 proc = await asyncio.create_subprocess_exec(
                     exe, "--device-name", settings["name"], "--api-key", settings["apiKey"],
-                    "--data-dir", str(DATA_DIR), "--pair",
+                    "--data-dir", str(DATA_DIR), "--pair", env=audio_env(),
                     stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
                 await asyncio.wait_for(proc.wait(), timeout=15)
             except (OSError, asyncio.TimeoutError) as e:
