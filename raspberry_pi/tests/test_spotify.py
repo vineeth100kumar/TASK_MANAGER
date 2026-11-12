@@ -152,6 +152,21 @@ class ControlTests(unittest.TestCase):
 
         asyncio.run(go())
 
+    def test_surround_change_moves_bridge_only(self):
+        c = spotify.SpotifyConnect()
+        calls = []
+
+        async def bridge():
+            calls.append("bridge")
+
+        async def restart():
+            calls.append("restart")
+        c._start_bridge, c.restart = bridge, restart
+        c.used_node, c.device = True, "sage_surround:DEV=A,WIDTH=0.7"
+        asyncio.run(c.rewire("sage_surround:DEV=A,WIDTH=0.55"))
+        self.assertEqual(calls, ["bridge"])          # Soloist keeps playing
+        self.assertEqual(c.device, "sage_surround:DEV=A,WIDTH=0.55")
+
     def test_auth_state_event(self):
         c = spotify.SpotifyConnect()
 

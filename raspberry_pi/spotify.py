@@ -269,6 +269,7 @@ class SpotifyConnect:
         self._ws = None
         self._connecting = False
         self._last_sent = ""
+        self._ops = asyncio.Lock()       # one start/stop/restart at a time
         self._log_at = 0.0
         self._log_last = ""
 
@@ -633,6 +634,10 @@ class SpotifyConnect:
                 pass
 
     async def restart(self) -> None:
+        async with self._ops:
+            await self._restart()
+
+    async def _restart(self) -> None:
         await self.stop()
         self.next_start = 0.0
         self.fails = 0
@@ -794,8 +799,7 @@ class SpotifyConnect:
             await self.speaker.make_room()   # stop any phone pass-through
             await self.speaker.ensure_connected()
             if want != self.device:
-                # Soundbar/surround changed since start: rewire and restart Soloist.
-                await self.restart()
+                await self.rewire(want)
         finally:
             self._connecting = False
 
@@ -867,11 +871,22 @@ class SpotifyConnect:
             except Exception:
                 pass
 
+    async def rewire(self, want: str) -> None:
+        """Point the music at a new soundbar device (surround changed, another
+        soundbar). Soloist plays into the fixed sage-spotify sink either way, so
+        only the parec | aplay bridge moves; Soloist keeps playing. (Restarting
+        Soloist here used to stop the music and race the supervisor.)"""
+        if self.used_node and want:
+            self.device = want
+            await self._start_bridge()
+        else:
+            await self.restart()   # switching between soundbar and Pi output
+
     async def follow_output(self) -> None:
-        """Surround switched or another soundbar picked: rewire and restart."""
+        """Surround switched or another soundbar picked: move the bridge."""
         want = self.want_device()
         if self.alive() and want != self.device:
-            await self.restart()
+            await self.rewire(want)
 
     # --- Running ---
 
@@ -885,7 +900,8 @@ class SpotifyConnect:
         asyncio.ensure_future(self.probe_loop())
         while True:
             try:
-                await self.supervise()
+                if not self._ops.locked():   # a restart is mid-way: don't start a second Soloist
+                    await self.supervise()
                 await asyncio.wait_for(self.publish(), timeout=10)
             except Exception as e:
                 log.debug("Spotify check failed: %s", e)
