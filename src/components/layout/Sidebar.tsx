@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, CheckCircle2, Mic } from 'lucide-react';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, CheckCircle2 } from 'lucide-react';
 import ClapperIcon from '../icons/ClapperIcon';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
@@ -385,8 +385,6 @@ export function Sidebar({
                 ...(lifeContext === 'personal' ? [] : [{ id: 'posts', name: 'Posts', icon: GalleryHorizontal, color: 'text-pink-500' }]),
                 // Vertical videos with a voice-over the Pi makes from a pasted script.
                 ...(lifeContext === 'personal' ? [] : [{ id: 'reels', name: 'Reels', icon: ClapperIcon, color: 'text-rose-500' }]),
-                // Record audio from the Pi's USB microphone.
-                { id: 'recordings', name: 'Recordings', icon: Mic, color: 'text-red-500' },
                 // Private tasks no other list shows, behind the password.
                 { id: 'hidden', name: 'Hidden', icon: EyeOff },
                 // Radar is work, so it stays out of the Personal space.
@@ -409,8 +407,7 @@ export function Sidebar({
                   item.id === 'lumo' ? activeView === 'lumo' : 
                   item.id === 'drop' ? activeView === 'drop' : 
                   item.id === 'posts' ? activeView === 'posts' : 
-                  item.id === 'reels' ? activeView === 'reels' :
-                  item.id === 'recordings' ? activeView === 'recordings' :
+                  item.id === 'reels' ? activeView === 'reels' : 
                   item.id === 'hidden' ? activeView === 'hidden' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
                   item.id === 'focus' ? activeView === 'focus' :
@@ -434,8 +431,6 @@ export function Sidebar({
                       openPosts();
                     } else if (item.id === 'reels') {
                       openReels();
-                    } else if (item.id === 'recordings') {
-                      setActiveView('recordings');
                     } else if (item.id === 'hidden') {
                       setActiveView('hidden');
                     } else if (item.id === 'inbox') {

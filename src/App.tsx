@@ -27,7 +27,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, ReelsView, RecordingsView, HiddenView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, ReelsView, HiddenView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -536,8 +536,6 @@ function MainApp() {
               <PostsView projectId={postsProject} focus={postsFocus} />
             ) : activeView === 'reels' ? (
               <ReelsView projectId={reelsProject} focus={reelsFocus} />
-            ) : activeView === 'recordings' ? (
-              <RecordingsView />
             ) : activeView === 'hidden' ? (
               <NotesLock title="Hidden tasks are locked" hint="Enter your password to see them.">
                 <HiddenView onSelectTask={setSelectedItemId} />

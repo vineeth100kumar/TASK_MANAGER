@@ -30,7 +30,6 @@ import industry
 import item_actions
 import life_mode
 import phone_link
-import recorder
 import speaker
 import spotify
 import quick_add
@@ -2409,10 +2408,6 @@ posts.set_media_auth(media_allowed)
 # Reels (reels.py): a script (and your voice-over) in, a 1080x1920 reel out, on the same engine as Posts.
 reels.connect(DB_PATH)
 app.include_router(reels.router)
-
-# Recorder (recorder.py): record audio from a USB microphone, play back and transcribe.
-recorder.connect(DB_PATH)
-app.include_router(recorder.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)
