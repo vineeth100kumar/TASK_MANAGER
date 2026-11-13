@@ -1089,6 +1089,15 @@ async def posts_create(body: NewPost):
     return {"success": True, "post": with_media(post)}
 
 
+@router.get("/api/posts/format")
+def posts_format():
+    """The post script format guide (POST_FORMAT.md), as a file to download."""
+    guide = ENGINE_DIR / "POST_FORMAT.md"
+    if not guide.is_file():
+        return JSONResponse({"success": False, "error": "The format guide isn't on this Pi."}, status_code=404)
+    return FileResponse(guide, media_type="text/markdown; charset=utf-8", filename="POST_FORMAT.md")
+
+
 @router.get("/api/posts/{post_id}")
 def posts_get(post_id: str):
     post = get(post_id)

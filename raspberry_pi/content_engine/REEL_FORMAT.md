@@ -52,6 +52,7 @@ Then each slide starts with `## <type>` exactly as in a post script (cover, stat
 say: <what the voice says over this slide>            (REQUIRED on every slide; plain sentences, no symbols or links)
 show: <cue> | <cue> | <cue>                            (optional: the words in `say:` at which each piece of the slide should appear, in order; copy them exactly from `say:`)
 motion: rise | pop | stagger | wipe | kenburns | fade  (optional, best left out: each piece always arrives in the way that suits it. This is only used for a piece the reel doesn't recognise.)
+objects: arrow-right @ 50,80 120 accent                (optional: overlay shapes and icons on the slide; see the Objects section below)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
 tone: hook | emphasis | calm | excited | serious | dramatic | slow | fast | normal   (optional: how this slide is delivered; sets its pace)
@@ -104,6 +105,7 @@ These are the reel's own lines.
 | `say:` | each slide | The narration. A continuation line may be indented under it. Single capitals in a row ("N X P") are spoken as letters and shown joined up on the caption. The order of the slide and the order of the words in `say:` must agree: the voice should mention the first piece first, the second one second, and so on. | `vo:`, `voiceover:`, `narration:`, `speak:` |
 | `show:` | each slide | **How you sync pieces to the voice.** Cue phrases copied verbatim from `say:`, separated by `\|` (`;`, `->` and `→` also work). One per piece. The piece lands 0.18 s before its cue word is spoken. With one fewer cue than pieces, the first piece opens the slide and the cues start at the second. A cue not found in `say:` is a warning and the pieces for that slide are spread evenly instead. See the sync section below. | `cue:`, `cues:` |
 | `motion:` | each slide | Only for a piece the reel doesn't recognise (see below); every known piece always gets its own. | `animation:`, `animate:` |
+| `objects:` | each slide | Overlay shapes and icons on the slide; pipe-separated, each `name @ x,y size colour anim rotation`. See the Objects section. | `overlay:`, `overlays:`, `obj:` |
 | `duration:` | each slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |
 | `pause:` | each slide | Extra silence after this slide's narration; 0 to 5 seconds. | |
 | `tone:` | each slide | `hook` 1.08×, `fast`/`excited` 1.1×, `normal` 1×, `calm` 0.95×, `warm` 0.96×, `serious` 0.93×, `emphasis` 0.92×, `slow` 0.9×, `dramatic` 0.88×. The slide's pace, on top of the reel's `speed:`. | `delivery:` |
@@ -202,6 +204,78 @@ recognise: **rise** (slides up and fades in), **pop** (grows in with a small ove
 slow push-in), **fade**. Everyday words are understood too: `slide`/`up` mean rise, `zoom`/`bounce`
 mean pop, `cascade`/`one-by-one` mean stagger, `reveal` means wipe, `pan`/`drift` mean kenburns,
 `none`/`plain` mean fade. Anything else is a warning. Best left out.
+
+## Objects and icons (overlays)
+
+You can place shapes, arrows, icons and visual markers on top of any slide with the `objects:` line.
+Each object gets its own entrance and exit animation, timed relative to the object itself so it
+composes correctly at any position on screen.
+
+```
+objects: arrow-right @ 50,80 120 accent | circle @ 30,40 80 muted
+```
+
+Each object is separated by `|`. The format for one object is:
+
+```
+<name> @ <x>,<y> <size> <colour> <animation> <rotation>
+```
+
+| Part | Required | What it is |
+|------|----------|------------|
+| `name` | yes | A built-in shape (`arrow-right`, `star`, `check`, `lightbulb`, …) or a Lucide icon (`icon:heart`, `icon:rocket`, `icon:trending-up`, …). |
+| `@ x,y` | no | Position as a percentage of the canvas, e.g. `50,80` means 50% from the left, 80% from the top. Default `50,50` (centre). |
+| `size` | no | Size in pixels (the larger dimension). Default 64. Write `120` or `120px`. |
+| `colour` | no | A palette token (`accent`, `muted`, `dark`, `light`, `success`, `warn`, `danger`) or a hex colour (`#E44425`, `#fff`). Default `accent`. |
+| `animation` | no | Override the default animation: `fly`, `scale`, `pop`, `spin`, `draw`, `flash`, `pulse`, `blink`, `wipe`, `fade`. Each shape has a fitting default. |
+| `rotation` | no | Degrees to rotate, e.g. `45deg` or `-30deg`. Default 0. |
+
+Also written as: `overlay:`, `overlays:`, `obj:`.
+
+### Built-in shapes (41)
+
+| Category | Shapes |
+|----------|--------|
+| **Arrows** | `arrow-right`, `arrow-left`, `arrow-up`, `arrow-down`, `arrow-up-right` |
+| **Basic** | `circle`, `circle-filled`, `square`, `square-filled`, `triangle`, `diamond`, `star`, `hexagon` |
+| **Lines** | `line`, `line-v`, `plus`, `minus`, `x`, `check` |
+| **Callouts** | `badge`, `callout`, `speech`, `underline`, `bracket-left`, `bracket-right`, `highlight` |
+| **Emphasis** | `sparkle`, `zap`, `flame`, `target` |
+| **Concepts** | `eye`, `money`, `chart-up`, `clock`, `lock`, `globe`, `users`, `lightbulb`, `shield`, `gear`, `heart` |
+
+Many have aliases: `tick` → `check`, `dollar` → `money`, `world` → `globe`, `bulb` → `lightbulb`, `cog` → `gear`, `people` → `users`, etc.
+
+### Lucide icons (2 300+)
+
+Any [Lucide](https://lucide.dev/icons/) icon works with the `icon:` prefix:
+
+```
+objects: icon:rocket @ 70,20 100 accent | icon:trending-up @ 30,60 80 success
+```
+
+### Animations
+
+Each animation runs as an entrance when the object appears, and in reverse as a quick exit before
+the slide changes. All transforms are relative to the object's own bounding box, so they compose
+at any position.
+
+| Animation | What it does | Default for |
+|-----------|-------------|-------------|
+| `fly` | Slides in from the side with overshoot | Arrows |
+| `scale` | Grows from the centre with overshoot | Circles, squares, triangles, hexagons, shields |
+| `pop` | Grows from 30% with a bounce | Badges, callouts, speech bubbles |
+| `spin` | Rotates in from 180° while scaling up | Diamonds, stars, sparkles, gears, clocks, x |
+| `draw` | Left-to-right wipe reveal | Lines, underlines, brackets, checks, chart-up |
+| `flash` | Bright flash then settles to normal | Zap, lightbulb |
+| `pulse` | Scale bounce 1→1.25→1 | Flames, hearts |
+| `blink` | Quick scale pinch 1→0.7→1.15→1 | Eye |
+| `wipe` | Left-to-right reveal | Highlights |
+| `fade` | Simple opacity fade | Fallback |
+
+Objects appear 0.25 s after the slide starts, staggered 0.18 s apart, and exit 0.24 s before
+the slide changes.
+
+---
 
 ## Your own voice
 
