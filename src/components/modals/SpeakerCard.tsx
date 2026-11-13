@@ -71,7 +71,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
   const active = usbOn || !!set.address;
   const status = !active ? 'Off'
     : s.speaking ? 'Speaking…'
-    : usbOn ? `USB sound card · ${s.usb?.card}` + (s.passing ? ' · playing your phone' : '')
+    : usbOn ? `USB sound card · ${s.usb?.card}` + (s.surroundOn ? ' · surround' : '') + (s.passing ? ' · playing your phone' : '')
     : s.soundbar.connected ? (s.passing ? 'Connected · playing your phone' : 'Connected') + (s.surroundOn ? ' · surround' : '')
     : 'Not connected · connects when you get home';
 
@@ -152,7 +152,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <div className="space-y-2">
             <Switch on={(set.surround || 'off') !== 'off'} onChange={on => save({ surround: on ? lastMode : 'off' })}
               label="Surround sound"
-              hint="Makes the soundbar sound wider and roomier, for Spotify, the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
+              hint="Makes the sound wider and roomier on either output — the USB sound card or a Bluetooth soundbar — for Spotify, the phone's audio and Sage's voice. Open-source virtual surround, not real Dolby Atmos." />
             {(set.surround || 'off') !== 'off' && (
               <div className="pl-[3.25rem] space-y-1.5">
                 <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Surround mode">

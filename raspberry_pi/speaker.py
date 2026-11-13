@@ -1,7 +1,9 @@
 """
-speaker.py - Sage's voice on a Bluetooth soundbar.
+speaker.py - Sage's voice on the soundbar.
 
-Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
+The soundbar is wired to a USB sound card on the Pi (the default output); a
+Bluetooth soundbar still works if picked as the output in Settings > Bluetooth.
+Then:
 
 - Coming home: when the phone link sees you arrive (life_mode.ArrivalWatch,
   15+ minutes away), the Pi connects to the soundbar and greets you, in the
@@ -21,15 +23,18 @@ Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
 - Leaving: once you've been away leaveAfterMinutes, a soundbar the Pi
   connected is disconnected again, so the TV or another device can have it.
 
-Audio goes through bluez-alsa (deploy/install_pi.sh installs it): `aplay -D
-bluealsa:DEV=<soundbar>,PROFILE=a2dp` speaks, and `bluealsa-aplay` passes the
-phone's stream through. With Surround on, both go through the
-`sage_surround` ALSA device instead (deploy/alsa/60-sage-surround.conf): a
-small LADSPA plugin (audio/sage_surround.c) widens the stereo, adds early
-reflections, lifts dialogue and bass, then hands the sound to bluez-alsa. If
-it can't open, Sage plays without it rather than staying silent. The voice is Kokoro, the same one Reels use, run in a
-short-lived low-priority process (speak_worker.py) so its ~300 MB goes away
-once a line is spoken.
+Audio goes to a USB sound card by default (the soundbar is wired to it), or to
+a Bluetooth soundbar when that's picked as the output (Settings > Bluetooth >
+Output). `aplay -D plughw:CARD=<card>,DEV=0` speaks on the USB card, `aplay -D
+bluealsa:DEV=<soundbar>,PROFILE=a2dp` over Bluetooth; `bluealsa-aplay` passes
+the phone's stream through. With Surround on, the sound goes through a small
+LADSPA plugin (audio/sage_surround.c) on either output: the `sage_surround_usb`
+ALSA device on the USB card, or `sage_surround` over bluez-alsa
+(deploy/alsa/60-sage-surround.conf). It widens the stereo, adds early
+reflections, lifts dialogue and bass, then hands the sound on. If it can't open,
+Sage plays without it rather than staying silent. The voice is Kokoro, the same
+one Reels use, run in a short-lived low-priority process (speak_worker.py) so
+its ~300 MB goes away once a line is spoken.
 
 Settings live in the metadata table under "speaker".
 """
@@ -395,14 +400,27 @@ def _val(v: Any) -> Any:
     return getattr(v, "value", v)
 
 
+def _surround_args(preset: dict) -> str:
+    return (f"WIDTH={preset['width']:g},SPACE={preset['space']:g},"
+            f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g},AIR={preset['air']:g},PUNCH={preset['punch']:g}")
+
+
 def output_device(address: str, surround: str, ready: bool) -> str:
-    """The ALSA device to play on: the soundbar, through surround when it's on
+    """The ALSA device for a Bluetooth soundbar, through surround when it's on
     and installed. Pure."""
     preset = SURROUND.get(surround) if ready else None
     if not preset:
         return f"bluealsa:DEV={address},PROFILE=a2dp"
-    return (f"sage_surround:DEV={address},WIDTH={preset['width']:g},SPACE={preset['space']:g},"
-            f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g},AIR={preset['air']:g},PUNCH={preset['punch']:g}")
+    return f"sage_surround:DEV={address},{_surround_args(preset)}"
+
+
+def usb_output_device(card_id: str, surround: str, ready: bool) -> str:
+    """The ALSA device for a USB sound card, through surround when it's on and
+    installed (sage_surround_usb, from 60-sage-surround.conf). Pure."""
+    preset = SURROUND.get(surround) if ready else None
+    if not preset:
+        return f"plughw:CARD={card_id},DEV=0"
+    return f"sage_surround_usb:CARD={card_id},{_surround_args(preset)}"
 
 
 def passthrough_cmd(device: str, phone: str, latency: str) -> List[str]:
@@ -697,8 +715,6 @@ class Speaker:
     # --- Surround ---
 
     def surround_on(self, settings: dict) -> bool:
-        if uses_usb(settings):
-            return False
         if settings["surround"] != self._surround_mode:
             # Switching it again is a fresh try after a failure.
             self._surround_mode = settings["surround"]
@@ -706,11 +722,15 @@ class Speaker:
         return settings["surround"] in SURROUND and not self.surround_broken and surround_ready()
 
     def device(self, settings: dict, address: str = "") -> str:
-        usb = usb_device(settings) if uses_usb(settings) else ""
-        if usb:
-            return usb
+        """The ALSA device to play on: the USB sound card when that's the output,
+        else the Bluetooth soundbar; through surround on either when it's on."""
         on = self.surround_on(settings)
-        return output_device(address or settings["address"], settings["surround"] if on else "off", on)
+        mode = settings["surround"] if on else "off"
+        if uses_usb(settings):
+            card = usb_card(settings.get("usbCard", ""))
+            if card:
+                return usb_output_device(card["id"], mode, on)
+        return output_device(address or settings["address"], mode, on)
 
     def _surround_failed(self, why: str) -> None:
         self.surround_broken = True

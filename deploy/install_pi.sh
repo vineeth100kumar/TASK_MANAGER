@@ -21,9 +21,10 @@
 #   4. Installs the sage and sage-autosync systemd units for one user and this
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
-#   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
-#      (speaker.py), and Spotify Soloist so the Pi is a Spotify Connect
-#      speaker on that soundbar (spotify.py). Run once with --only audio,server,web.
+#   5. Sets up Sage's sound output: a USB sound card (the default, the soundbar
+#      is wired to it) with virtual surround, plus bluez-alsa for an optional
+#      Bluetooth soundbar (speaker.py), and Spotify Soloist so the Pi is a
+#      Spotify Connect speaker (spotify.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -190,7 +191,9 @@ part_services() {
 }
 
 part_audio() {
-  step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
+  step "Sound output (USB sound card by default, Bluetooth soundbar optional)"
+  # The soundbar is wired to a USB sound card on the Pi, which is the default
+  # output; a Bluetooth soundbar still works if picked in Settings > Bluetooth.
   # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
   # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
   # source) and, when "Be a speaker for my phone" is on, takes the phone's
@@ -220,8 +223,11 @@ part_audio() {
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
-  # Virtual surround for the soundbar (Settings > Bluetooth > Surround): a small
-  # LADSPA plugin built here, and the ALSA device speaker.py plays through.
+  # Virtual surround (Settings > Bluetooth > Surround): a small LADSPA plugin
+  # built here, and the ALSA devices speaker.py plays through. The conf defines
+  # both outputs: sage_surround_usb for the USB sound card (the default output,
+  # the soundbar is wired to it) and sage_surround over bluez-alsa for a
+  # Bluetooth soundbar.
   apt-get install -y -qq gcc libc6-dev >/dev/null 2>&1 || true
   mkdir -p /usr/local/lib/sage/ladspa /etc/alsa/conf.d
   if gcc -O2 -fPIC -shared -o /usr/local/lib/sage/ladspa/sage_surround.so.new "$REPO/raspberry_pi/audio/sage_surround.c" -lm; then
