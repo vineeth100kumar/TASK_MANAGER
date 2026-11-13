@@ -104,8 +104,18 @@ async def collect(connect: Any, deep: bool = True) -> List[Section]:
     add("soloist (as Sage sees it)", soloist_summary(connect))
     add("soloist last output", "\n".join(list(connect.lines)[-6:]) or "(nothing yet)")
     links = (getattr(connect.speaker, "links", None) or {}) if connect.speaker else {}
-    add("soundbar link (Sage)", f"address={address or '(none picked)'} surround={settings.get('surround')} "
-        f"phoneSpeaker={settings.get('phoneSpeaker')} links={links}")
+    add("soundbar link (Sage)", f"output={settings.get('output', 'auto')} address={address or '(none picked)'} "
+        f"surround={settings.get('surround')} phoneSpeaker={settings.get('phoneSpeaker')} links={links}")
+    # USB sound card output (the soundbar is wired to it; the default output).
+    try:
+        import speaker as speaker_mod
+        on_usb = speaker_mod.uses_usb(settings)
+        card = speaker_mod.usb_card(settings.get("usbCard", "")) or {}
+        cards = [c for c in speaker_mod.usb_cards() if c.get("usb") and c.get("playback")]
+        add("usb sound card", f"usingUsb={on_usb} picked={card.get('id') or '(none)'} name={card.get('name', '')} "
+            f"playable={[c.get('id') for c in cards]} device={speaker_mod.speaker.device(settings)!r}")
+    except Exception as e:  # noqa: BLE001
+        add("usb sound card", f"unreadable: {e}")
     add("want_device", repr(connect.want_device()))
 
     # Soundbar over Bluetooth

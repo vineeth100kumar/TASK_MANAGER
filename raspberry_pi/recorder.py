@@ -13,6 +13,11 @@ Recordings live in DATA_DIR/sage_recordings/<id>/. Each has:
   - meta.json  (title, duration, device, created_at, transcript)
 
 Settings live in the metadata table under "recorder".
+
+Parked for now: the USB mic isn't working yet, so this is dormant. The
+Recordings page is hidden in the app and every route here answers 404 unless
+SAGE_MIC=1 is set in /etc/sage/sage.env. The code is kept, not deleted, so it
+can be switched back on once the mic works.
 """
 
 import asyncio
@@ -29,7 +34,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import httpx
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Request, Depends, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
@@ -50,7 +55,16 @@ DEFAULT_FORMAT = "S16_LE"
 GROQ_WHISPER_URL = "https://api.groq.com/openai/v1/audio/transcriptions"
 GROQ_WHISPER_MODEL = "whisper-large-v3"
 
-router = APIRouter()
+# The mic is parked until it works: every route answers 404 unless SAGE_MIC=1.
+MIC_ENABLED = os.getenv("SAGE_MIC") == "1"
+
+
+def _require_mic() -> None:
+    if not MIC_ENABLED:
+        raise HTTPException(status_code=404, detail="Recordings are off: the USB mic isn't set up yet.")
+
+
+router = APIRouter(dependencies=[Depends(_require_mic)])
 
 
 # --- Database ---
@@ -58,6 +72,8 @@ router = APIRouter()
 def connect(db_path: str):
     global DB_PATH
     DB_PATH = db_path
+    if not MIC_ENABLED:
+        return   # dormant: don't create tables or folders while the mic is parked
     _ensure_table()
     RECORDINGS_DIR.mkdir(parents=True, exist_ok=True)
 
