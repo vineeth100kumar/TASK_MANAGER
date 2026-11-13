@@ -134,18 +134,45 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             hint="Optional. Your phone sees the Pi as a Bluetooth speaker and its sound plays on the soundbar. Laggier than Spotify below; it steps aside while Spotify plays." />
 
           {set.phoneSpeaker && (
-            <div className="pl-[3.25rem] space-y-1.5 -mt-2">
-              <span className="block text-xs text-gray-500">Phone audio delay</span>
-              <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Phone audio delay">
-                {LATENCY_MODES.map(m => (
-                  <button key={m.mode} role="radio" aria-checked={(set.latency || 'low') === m.mode} disabled={busy}
-                    onClick={() => save({ latency: m.mode })}
-                    className={`px-3 py-1 rounded-lg text-xs font-semibold ${(set.latency || 'low') === m.mode ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'}`}>
-                    {m.label}
-                  </button>
-                ))}
+            <div className="pl-[3.25rem] space-y-3 -mt-2">
+              <div className="space-y-1.5">
+                <span className="block text-xs text-gray-500">Phone audio delay</span>
+                <div className="inline-flex rounded-xl bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 p-0.5" role="radiogroup" aria-label="Phone audio delay">
+                  {LATENCY_MODES.map(m => (
+                    <button key={m.mode} role="radio" aria-checked={(set.latency || 'low') === m.mode} disabled={busy}
+                      onClick={() => save({ latency: m.mode })}
+                      className={`px-3 py-1 rounded-lg text-xs font-semibold ${(set.latency || 'low') === m.mode ? 'bg-blue-600 text-white' : 'text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10'}`}>
+                      {m.label}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-[11px] text-gray-400">{LATENCY_MODES.find(m => m.mode === (set.latency || 'low'))?.hint}</p>
               </div>
-              <p className="text-[11px] text-gray-400">{LATENCY_MODES.find(m => m.mode === (set.latency || 'low'))?.hint}</p>
+
+              <div className="pt-1 border-t border-black/5 dark:border-white/5">
+                <Switch on={!!set.twoDevices} onChange={on => save({ twoDevices: on })} label="Separate speaker device (Lumo Speaker)"
+                  hint="Show the speaker as its own Bluetooth device, apart from the companion. Then you tap “Lumo Speaker” on your iPhone to use it and disconnect to stop — your presence and now-playing stay on the companion. Needs a second USB Bluetooth adapter on the Pi." />
+                {set.twoDevices && (
+                  <div className="mt-2 text-[11px] space-y-1">
+                    {s.split?.available ? (
+                      <>
+                        <p className="text-emerald-600 dark:text-emerald-400">
+                          Lumo Speaker is on adapter {s.split.adapter}.{' '}
+                          {s.split.phoneAudio ? 'Your phone is playing through it.'
+                            : s.split.phoneConnected ? 'Your phone is connected.'
+                            : s.split.phonePaired ? 'Paired — tap Lumo Speaker on your iPhone to connect.'
+                            : 'Open “Pair a device” below, then tap Lumo Speaker on your iPhone and confirm the code.'}
+                        </p>
+                        <p className="text-gray-400">Dropping Lumo Speaker on your iPhone never marks you away — the companion link stays up on its own adapter.</p>
+                      </>
+                    ) : (
+                      <p className="text-amber-600 dark:text-amber-400">
+                        No second Bluetooth adapter found. Plug a cheap USB Bluetooth dongle into the Pi: one adapter can only appear as a single device on your iPhone. Until then the phone speaker shares the companion device.
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

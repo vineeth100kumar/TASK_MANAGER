@@ -321,3 +321,46 @@ class MixTests(unittest.TestCase):
         ok = asyncio.run(sp._play("/tmp/x.wav", dict(speaker.DEFAULTS)))
         self.assertTrue(ok)
         self.assertEqual(calls, ["duck", "play", "unduck"])
+
+
+class SplitSpeakerTests(unittest.TestCase):
+    HCI0 = "/org/bluez/hci0"
+    HCI1 = "/org/bluez/hci1"
+
+    def _objs(self, adapters, phone_path=None, phone_addr="", connected=False, paired=False, transport=False):
+        class V:
+            def __init__(self, v): self.value = v
+        objs = {a: {"org.bluez.Adapter1": {"Address": V("00:00:00:00:00:0%d" % i)}} for i, a in enumerate(adapters)}
+        if phone_path:
+            objs[phone_path] = {"org.bluez.Device1": {
+                "Address": V(phone_addr), "Paired": V(paired), "Connected": V(connected)}}
+            if transport:
+                objs[phone_path + "/fd0"] = {"org.bluez.MediaTransport1": {}}
+        return objs
+
+    def test_list_adapters(self):
+        objs = self._objs([self.HCI1, self.HCI0])
+        self.assertEqual(speaker.list_adapters(objs), [self.HCI0, self.HCI1])
+
+    def test_pick_needs_a_second_adapter(self):
+        self.assertEqual(speaker.pick_speaker_adapter([self.HCI0], self.HCI0), "")
+        self.assertEqual(speaker.pick_speaker_adapter([self.HCI0, self.HCI1], self.HCI0), self.HCI1)
+
+    def test_pick_honours_preferred(self):
+        hci2 = "/org/bluez/hci2"
+        self.assertEqual(speaker.pick_speaker_adapter([self.HCI0, self.HCI1, hci2], self.HCI0, "hci2"), hci2)
+        # Preferred that isn't there falls back to the first non-companion.
+        self.assertEqual(speaker.pick_speaker_adapter([self.HCI0, self.HCI1], self.HCI0, "hci9"), self.HCI1)
+
+    def test_phone_on_adapter_audio(self):
+        p = self.HCI1 + "/dev_AA"
+        objs = self._objs([self.HCI0, self.HCI1], p, "AA:BB:CC:DD:EE:FF",
+                          connected=True, paired=True, transport=True)
+        got = speaker.phone_on_adapter(objs, self.HCI1, "aa:bb:cc:dd:ee:ff")
+        self.assertTrue(got["paired"] and got["connected"] and got["audio"])
+        # Looking on the companion adapter finds nothing.
+        self.assertFalse(speaker.phone_on_adapter(objs, self.HCI0, "aa:bb:cc:dd:ee:ff")["connected"])
+
+    def test_phone_on_adapter_no_phone(self):
+        got = speaker.phone_on_adapter({}, "", "AA:BB:CC:DD:EE:FF")
+        self.assertEqual(got, {"path": "", "paired": False, "connected": False, "audio": False})

@@ -18,6 +18,13 @@ Then:
   the soundbar. It steps aside while Spotify plays. When the
   soundbar isn't connected, or pass-through is off, the Pi drops the phone's
   audio link so the phone's sound doesn't go to a Pi with nothing to play it.
+- Separate speaker device ("twoDevices"): a single Bluetooth adapter can only
+  appear as one device on the iPhone, so the phone speaker normally shares the
+  companion. With a second (USB) Bluetooth adapter on the Pi and this on, that
+  adapter becomes a standalone classic device, "Lumo Speaker": the user taps it
+  on the iPhone to play and disconnects to stop, while presence and now playing
+  stay on the BLE companion (hci0) and so are never affected. Here the Pi
+  doesn't invite or drop the phone's audio; the user's tap drives it.
 - Quiet hours: nothing is said between quietStart and quietEnd, except the
   "Say hello now" test.
 - Leaving: once you've been away leaveAfterMinutes, a soundbar the Pi
@@ -63,7 +70,15 @@ WORKER = HERE / "speak_worker.py"
 SETTINGS_KEY = "speaker"
 A2DP_SOURCE = "0000110a-0000-1000-8000-00805f9b34fb"   # the phone's side of "phone plays on the Pi"
 DEVICE_IFACE = "org.bluez.Device1"
+ADAPTER_IFACE = "org.bluez.Adapter1"
 TRANSPORT_IFACE = "org.bluez.MediaTransport1"
+# The phone link (phone_link.py) owns this adapter as the always-on BLE
+# "Companion" (presence, notifications, now playing). When the phone speaker is
+# split onto its own device, a *second* Bluetooth adapter (a cheap USB dongle)
+# is the classic "Lumo Speaker"; a single adapter can only show as one device on
+# the iPhone, so without a second one the speaker stays on the companion.
+COMPANION_ADAPTER = os.getenv("SAGE_COMPANION_HCI", "/org/bluez/hci0")
+HCI = re.compile(r"^hci\d+$")
 CHECK_EVERY = 4.0
 SPEAK_NICE = int(os.getenv("SAGE_SPEAK_NICE", "10"))
 HHMM = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
@@ -78,6 +93,9 @@ DEFAULTS: Dict[str, Any] = {
     "greet": True,          # say hello when you get home
     "reminders": True,      # speak reminders while you're home
     "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
+    "twoDevices": False,    # show the phone speaker as its own Bluetooth device ("Lumo Speaker") on a second adapter, apart from the companion
+    "speakerHci": "",       # which adapter is the speaker ("" = auto: the first that isn't the companion), e.g. "hci1"
+    "speakerName": "Lumo Speaker",  # the speaker adapter's name, as it shows on the iPhone
     "chimes": True,         # short spoken lines when things happen (soundbar on, back home, Spotify picked)
     "witty": True,          # let Groq write the greeting (falls back to the template)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
@@ -146,9 +164,16 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("greet", "reminders", "phoneSpeaker", "witty", "chimes", "twoDevices"):
         if key in update:
             out[key] = bool(update[key])
+    if "speakerHci" in update:
+        hci = str(update.get("speakerHci") or "").strip().lower()
+        if hci and not HCI.match(hci):
+            raise ValueError("That isn't an adapter name like hci1.")
+        out["speakerHci"] = hci
+    if "speakerName" in update:
+        out["speakerName"] = str(update.get("speakerName") or "").strip()[:40] or "Lumo Speaker"
     if "address" in update:
         address = str(update.get("address") or "").strip().upper()
         if address and not ADDRESS.match(address):
@@ -400,6 +425,42 @@ def _val(v: Any) -> Any:
     return getattr(v, "value", v)
 
 
+def list_adapters(objects: dict) -> List[str]:
+    """Every Bluetooth adapter BlueZ knows, as object paths (sorted). Pure."""
+    return sorted(p for p, ifaces in objects.items() if ADAPTER_IFACE in ifaces)
+
+
+def pick_speaker_adapter(adapters: List[str], companion: str, preferred: str = "") -> str:
+    """The adapter path to use as the separate "Lumo Speaker", or "" when there
+    is none apart from the companion. A single adapter can only appear as one
+    device on the iPhone, so the split needs a second (USB) adapter. Pure."""
+    base = companion.rsplit("/", 1)[0] if "/" in companion else "/org/bluez"
+    others = [a for a in adapters if a != companion]
+    if preferred:
+        want = f"{base}/{preferred}"
+        if want in others:
+            return want
+    return others[0] if others else ""
+
+
+def phone_on_adapter(objects: dict, adapter_path: str, phone: str) -> dict:
+    """The phone's classic link on one adapter, for the split speaker: is it
+    paired, connected, and is its audio streaming to the Pi. Pure."""
+    want = (phone or "").upper()
+    if not adapter_path or not want:
+        return {"path": "", "paired": False, "connected": False, "audio": False}
+    for path, ifaces in objects.items():
+        dev = ifaces.get(DEVICE_IFACE)
+        if not dev or not path.startswith(adapter_path + "/"):
+            continue
+        if str(_val(dev.get("Address")) or "").upper() != want:
+            continue
+        streaming = any(t.startswith(path + "/") for t, i in objects.items() if TRANSPORT_IFACE in i)
+        return {"path": path, "paired": bool(_val(dev.get("Paired"))),
+                "connected": bool(_val(dev.get("Connected"))), "audio": streaming}
+    return {"path": "", "paired": False, "connected": False, "audio": False}
+
+
 def _surround_args(preset: dict) -> str:
     return (f"WIDTH={preset['width']:g},SPACE={preset['space']:g},"
             f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g},AIR={preset['air']:g},PUNCH={preset['punch']:g}")
@@ -585,6 +646,10 @@ class Speaker:
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
         self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
         self._last_spoke_at = 0.0
+        # The separate "Lumo Speaker" adapter (a second USB dongle), when split on.
+        self._speaker_adapter = ""          # its BlueZ path, or "" when there's no second adapter
+        self._speaker_alias = ""            # the alias last written to it, so it isn't rewritten each tick
+        self._phone_split = {"path": "", "paired": False, "connected": False, "audio": False}
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -598,6 +663,15 @@ class Speaker:
             "voices": VOICES,
             "soundbar": self.links["soundbar"],
             "phoneAudio": self.links["phoneAudio"],
+            "split": {
+                "on": bool(settings.get("twoDevices")),
+                "available": bool(self._speaker_adapter),
+                "adapter": self._speaker_adapter.rsplit("/", 1)[-1] if self._speaker_adapter else "",
+                "name": settings.get("speakerName") or "Lumo Speaker",
+                "phonePaired": bool(self._phone_split.get("paired")),
+                "phoneConnected": bool(self._phone_split.get("connected")),
+                "phoneAudio": bool(self._phone_split.get("audio")),
+            },
             "passing": self._pass is not None and self._pass.returncode is None,
             "surroundOn": self.surround_on(settings),
             "usb": {"on": uses_usb(settings), "card": (usb_card(settings.get("usbCard", "")) or {}).get("name", ""),
@@ -712,6 +786,42 @@ class Speaker:
         except Exception as e:
             log.info("Phone audio %s failed: %s", "connect" if connect else "disconnect", e)
 
+    # --- The separate "Lumo Speaker" adapter ---
+
+    def split_on(self, settings: dict) -> bool:
+        """The user wants the phone speaker as its own device, and a second
+        adapter is there to be it."""
+        return bool(settings.get("twoDevices")) and bool(self._speaker_adapter)
+
+    async def _resolve_speaker_adapter(self, objects: dict, settings: dict) -> str:
+        """Pick the second adapter for the split speaker and, once, give it the
+        'Lumo Speaker' name and make it discoverable so the iPhone can pair it.
+        Returns its path, or "" when there's only the one (companion) adapter."""
+        if not settings.get("twoDevices"):
+            self._speaker_adapter, self._speaker_alias = "", ""
+            return ""
+        path = pick_speaker_adapter(list_adapters(objects), COMPANION_ADAPTER, settings.get("speakerHci", ""))
+        self._speaker_adapter = path
+        alias = settings.get("speakerName") or "Lumo Speaker"
+        control = self._control()
+        want = f"{path}|{alias}"
+        if path and control and self._speaker_alias != want:
+            try:
+                await control.make_speaker_adapter(path, alias)
+                self._speaker_alias = want
+            except Exception as e:
+                self._fail(f"Couldn't set up the Lumo Speaker adapter: {e}")
+        return path
+
+    async def _split_device(self):
+        """The phone's device object on the speaker adapter (it pairs 'Lumo
+        Speaker' separately there), for connect/disconnect of its audio."""
+        control = self._control()
+        path = self._phone_split.get("path")
+        if control is None or not path:
+            raise RuntimeError("The phone isn't on the Lumo Speaker adapter yet.")
+        return (await control._obj(path)).get_interface(DEVICE_IFACE)
+
     # --- Surround ---
 
     def surround_on(self, settings: dict) -> bool:
@@ -790,7 +900,10 @@ class Speaker:
         """Every few seconds: keep pass-through, the phone's audio link and
         the leave-home disconnect in line with the settings."""
         settings = get_settings()
-        links = await self.refresh()
+        objects = await self._objects()
+        self.links = audio_links(objects, settings["address"],
+                                 ((getattr(self.phone, "link", None) or {}).get("address") or "") if self.phone else "")
+        links = self.links
         phone_addr = ((getattr(self.phone, "link", None) or {}).get("address") or "") if self.phone else ""
         home = bool(self.phone and self.phone.available and self.phone.home)
         sb = dict(links["soundbar"])
@@ -802,24 +915,42 @@ class Speaker:
             self.event("soundbar")
         self._soundbar_was = bool(sb["connected"])
 
+        # "Lumo Speaker" split: the phone's audio arrives on its own adapter,
+        # paired as a separate device. Presence/now-playing stay on the
+        # companion (BLE on hci0), so the user disconnecting the speaker on the
+        # iPhone never marks them away. On a single adapter the split is off and
+        # the phone speaker works as before.
+        split = await self._resolve_speaker_adapter(objects, settings)
+        if split:
+            self._phone_split = phone_on_adapter(objects, split, phone_addr)
+        else:
+            self._phone_split = {"path": "", "paired": False, "connected": False, "audio": False}
+        split_on = self.split_on(settings)
+        phone_audio = self._phone_split["audio"] if split_on else links["phoneAudio"]
+
         # Spotify has the soundbar while it plays; only one player can hold it.
         spotify_on = bool(self.music is not None and self.music.playing())
         want_pass = bool((settings["address"] or usb) and settings["phoneSpeaker"] and sb["connected"] and phone_addr and not spotify_on)
-        if want_pass and links["phoneAudio"] and not self._pass_paused:
+        if want_pass and phone_audio and not self._pass_paused:
             await self._start_passthrough(settings["address"], phone_addr)
-        elif not want_pass or not links["phoneAudio"]:
+        elif not want_pass or not phone_audio:
             if not self._pass_paused:
                 await self._stop_passthrough()
 
-        # Phone audio with nowhere to go would be silence: drop it (but not
-        # just because Spotify is playing for a moment).
-        if links["phoneAudio"] and not want_pass and not spotify_on and now - self._dropped_phone_at > 30:
-            self._dropped_phone_at = now
-            await self._phone_profile(False)
-        # Soundbar up and pass-through on: invite the phone once in a while.
-        if want_pass and home and not links["phoneAudio"] and now - self._asked_phone_at > 300:
-            self._asked_phone_at = now
-            await self._phone_profile(True)
+        if split_on:
+            # The user drives the speaker: they tap "Lumo Speaker" to connect and
+            # disconnect to stop. Sage doesn't invite or drop it; it just plays
+            # whatever comes in while the phone speaker is on.
+            pass
+        else:
+            # Shared single adapter (old behaviour): phone audio with nowhere to
+            # go would be silence, so drop it, and invite the phone when ready.
+            if links["phoneAudio"] and not want_pass and not spotify_on and now - self._dropped_phone_at > 30:
+                self._dropped_phone_at = now
+                await self._phone_profile(False)
+            if want_pass and home and not links["phoneAudio"] and now - self._asked_phone_at > 300:
+                self._asked_phone_at = now
+                await self._phone_profile(True)
 
         # Leaving home: let go of a soundbar the Pi connected.
         if home or not (self.phone and self.phone.available):

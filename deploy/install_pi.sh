@@ -200,6 +200,10 @@ part_audio() {
   # audio to pass on (A2DP sink). speaker.py drops the phone's audio link
   # whenever that's off or there's no soundbar to play it on. Spotify Connect
   # (below) is the low-lag way to play music.
+  # bluez-alsa's daemon runs without an adapter filter, so it already covers a
+  # second Bluetooth adapter. That second (USB) adapter is what Settings >
+  # Bluetooth > "Separate speaker device" uses as the standalone "Lumo Speaker",
+  # while the built-in adapter stays the BLE companion (presence/now-playing).
   # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
   as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"

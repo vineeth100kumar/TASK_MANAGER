@@ -11,6 +11,7 @@ export type LatencyMode = 'lowest' | 'low' | 'steady';
 export interface SpeakerSettings {
   address: string; name: string; greet: boolean; reminders: boolean; phoneSpeaker: boolean; witty: boolean; chimes?: boolean;
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
+  twoDevices?: boolean; speakerHci?: string; speakerName?: string;
   surround?: SurroundMode;
   latency?: LatencyMode;
   output?: 'auto' | 'usb' | 'bluetooth';
@@ -24,6 +25,7 @@ export interface SpeakerState {
   voices: string[];
   soundbar: { known: boolean; paired: boolean; connected: boolean; audio: boolean; name: string };
   phoneAudio: boolean;
+  split?: { on: boolean; available: boolean; adapter: string; name: string; phonePaired: boolean; phoneConnected: boolean; phoneAudio: boolean };
   passing: boolean;
   surroundOn?: boolean;
   usb?: { on: boolean; card: string; cards: { id: string; name: string }[] };
