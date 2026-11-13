@@ -415,8 +415,8 @@ class SceneClip:
     t1: float
     base: Image.Image
     pieces: List[Piece] = field(default_factory=list)
-    objects: List[ObjectPiece] = field(default_factory=list)
     motion: str = "rise"
+    objects: List[ObjectPiece] = field(default_factory=list)
     _base_arr: Optional[np.ndarray] = None
 
     @property
