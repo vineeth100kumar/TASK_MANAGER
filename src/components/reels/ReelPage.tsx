@@ -79,24 +79,30 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
 
   // Phones only: fetch the .mp4 ahead of the tap, because the share sheet must open inside it.
   const stamp = reel?.media ? `${reel.id}:${reel.media.v}` : '';
+  const [prep, setPrep] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  const [tries, setTries] = useState(0);
   useEffect(() => {
     setFile(null);
-    if (!reel?.media || reel.status !== 'done' || !phoneCanShare()) return;
+    if (!reel?.media || reel.status !== 'done' || !phoneCanShare()) { setPrep('idle'); return; }
     let alive = true;
-    const timer = setTimeout(async () => {
+    setPrep('loading');
+    (async () => {
       try {
-        const res = await fetch(videoUrl(reel), { priority: 'low' } as RequestInit);
+        const res = await fetch(videoUrl(reel));
         if (!res.ok) throw new Error(String(res.status));
         const f = new File([await res.blob()], fileName(reel), { type: 'video/mp4' });
-        if (alive && canShareVideo(f)) setFile(f);
-      } catch { /* Share falls back to Download */ }
-    }, 800);
-    return () => { alive = false; clearTimeout(timer); };
-  }, [stamp]); // eslint-disable-line react-hooks/exhaustive-deps
+        if (!alive) return;
+        if (canShareVideo(f)) { setFile(f); setPrep('ready'); } else setPrep('failed');
+      } catch { if (alive) setPrep('failed'); }
+    })();
+    return () => { alive = false; };
+  }, [stamp, tries]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const share = async () => {
     if (!reel || !file) return;
-    const copied = reel.caption ? await copyText(reel.caption) : false;
+    // Not awaited: iOS only opens the share sheet inside the tap, and an await can lose it.
+    const copied = !!reel.caption;
+    if (reel.caption) void copyText(reel.caption);
     try {
       await navigator.share({ files: [file] });
       showToast(copied ? 'Shared. Paste the caption in Instagram (it is copied).' : 'Shared');
@@ -275,7 +281,11 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
             <div className="max-w-3xl mx-auto space-y-2">
               {file ? (
                 <button onClick={share} className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
-                  <Share2 size={18} /> Share reel to Instagram
+                  <Share2 size={18} /> Save or share reel (Photos, Instagram)
+                </button>
+              ) : phoneCanShare() ? (
+                <button onClick={() => prep === 'failed' && setTries(t => t + 1)} disabled={prep !== 'failed'} className="w-full h-12 rounded-2xl bg-purple-600 disabled:opacity-70 text-white font-semibold text-[15px] flex items-center justify-center gap-2">
+                  {prep === 'failed' ? <><RefreshCw size={18} /> Video did not load. Retry</> : <><LoaderCircle size={18} className="animate-spin" /> Getting the video ready...</>}
                 </button>
               ) : (
                 <a href={videoUrl(reel, fileName(reel))} download={fileName(reel)} className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
@@ -295,7 +305,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
             <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 space-y-3">
               <h3 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400">More ways to get it</h3>
               <div className="flex flex-wrap gap-2">
-                {file && <a href={videoUrl(reel, fileName(reel))} download={fileName(reel)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> Download</a>}
+                {file && !phoneCanShare() && <a href={videoUrl(reel, fileName(reel))} download={fileName(reel)} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> Download</a>}
                 <button onClick={sendToPhone} disabled={busy === 'send'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5">
                   {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />} Send to my phone
                 </button>

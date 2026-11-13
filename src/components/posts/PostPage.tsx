@@ -69,26 +69,35 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
   // Phones only: Share hands the slides to the share sheet as Files, and the
   // sheet must open inside the tap, so the full JPEGs are fetched ahead of it,
   // quietly, after the previews. A PC never downloads them until asked.
-  const stamp = post?.media ? `${post.id}:${post.media.v}` : '';
+  const stamp = post?.media && post.status === 'done' ? `${post.id}:${post.media.v}` : '';
+  const postRef = useRef<Post | null>(null);
+  postRef.current = post;
+  const [prep, setPrep] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
+  const [tries, setTries] = useState(0);
+  // Depends on the stamp only: a refreshed post object (live events, polling) must not cancel the fetch.
   useEffect(() => {
-    if (!post?.media || post.status !== 'done' || loadedFor.current === stamp || !phoneCanShare()) return;
-    loadedFor.current = stamp;
+    const p = postRef.current;
     setFiles([]);
+    if (!stamp || !p || !phoneCanShare()) { setPrep('idle'); return; }
     let alive = true;
-    const timer = setTimeout(async () => {
+    setPrep('loading');
+    (async () => {
       try {
-        const jpegs = await Promise.all(post.slides.map(async (_, i) => {
-          const res = await fetch(mediaUrl(post, 'full', i + 1), { priority: 'low' } as RequestInit);
+        const jpegs = await Promise.all(p.slides.map(async (_, i) => {
+          const res = await fetch(mediaUrl(p, 'full', i + 1));
           if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
           return res.blob();
         }));
-        if (alive) setFiles(jpegs.map((b, i) => new File([b], fileName(post, i + 1, 'jpg'), { type: 'image/jpeg' })));
+        if (!alive) return;
+        const list = jpegs.map((b, i) => new File([b], fileName(p, i + 1, 'jpg'), { type: 'image/jpeg' }));
+        setFiles(list);
+        setPrep(canShareFiles(list) ? 'ready' : 'failed');
       } catch {
-        // Share falls back to the download links; nothing to show.
+        if (alive) setPrep('failed');
       }
-    }, 600);
-    return () => { alive = false; clearTimeout(timer); };
-  }, [post, stamp]);
+    })();
+    return () => { alive = false; };
+  }, [stamp, tries]);
 
   // The QR code opens this post on a phone (PC only; it needs a public link).
   useEffect(() => {
@@ -104,7 +113,9 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     if (!post) return;
     const caption = post.caption || '';
     // Instagram drops the caption of shared pictures, so it goes to the clipboard first.
-    const copied = caption ? await copyText(caption) : false;
+    // Not awaited: iOS only opens the share sheet inside the tap, and an await can lose it.
+    const copied = !!caption;
+    if (caption) void copyText(caption);
     try {
       // Files only: any title or text makes some apps, Instagram included, drop out of the list.
       await navigator.share({ files });
@@ -120,6 +131,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
     if (!post) return;
     try {
       if (list.length && canShareFiles(list)) { await navigator.share({ files: list }); return; }
+      if (phoneCanShare()) { showToast(prep === 'failed' ? 'Slides did not load. Tap Retry.' : 'Slides are still getting ready', 'info'); return; }
       numbers.forEach((n, i) => setTimeout(() => clickDownload(mediaUrl(post, 'full', n, fileName(post, n, 'jpg'))), i * 300));
       showToast(numbers.length > 1 ? `Saving ${numbers.length} images` : 'Saving image');
     } catch (e: any) {
@@ -261,7 +273,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
           <div className="flex gap-3 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0 pb-2 snap-x" aria-label="Slides">
             {post.slides.map((_, i) => (
               <div key={i} className="snap-start shrink-0 w-[62%] sm:w-[34%] md:w-[30%]">
-                <a href={mediaUrl(post, 'full', i + 1)} target="_blank" rel="noopener" aria-label={`Open slide ${i + 1} full size`}
+                <a href={mediaUrl(post, 'full', i + 1)} target="_blank" rel="noopener" onClick={e => { if (phoneCanShare()) e.preventDefault(); }} aria-label={`Open slide ${i + 1} full size`}
                   className={`block w-full rounded-2xl overflow-hidden border border-black/10 dark:border-white/10 skeleton ${post.format === 'square' ? 'aspect-square' : 'aspect-[4/5]'}`}>
                   <img src={mediaUrl(post, 'preview', i + 1)} alt={`Slide ${i + 1}`} loading={i < 3 ? 'eager' : 'lazy'} decoding="async"
                     width={540} height={post.format === 'square' ? 540 : 675} className="w-full h-full object-cover" />
@@ -270,7 +282,9 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
                   {i + 1}
                   {files[i]
                     ? <button onClick={() => saveSlides([files[i]], [i + 1])} aria-label={`Save slide ${i + 1} to photos`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><ImageDown size={13} /> Save</button>
-                    : <a href={mediaUrl(post, 'full', i + 1, fileName(post, i + 1, 'jpg'))} download={fileName(post, i + 1, 'jpg')} aria-label={`Download slide ${i + 1}`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><Download size={13} /> Download</a>}
+                    : phoneCanShare()
+                      ? (prep === 'loading' ? <LoaderCircle size={13} className="animate-spin" /> : null)
+                      : <a href={mediaUrl(post, 'full', i + 1, fileName(post, i + 1, 'jpg'))} download={fileName(post, i + 1, 'jpg')} aria-label={`Download slide ${i + 1}`} className="inline-flex items-center gap-1 font-semibold text-purple-600 dark:text-purple-300"><Download size={13} /> Download</a>}
                 </div>
               </div>
             ))}
@@ -289,7 +303,11 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             <div className="max-w-3xl mx-auto space-y-2">
               {shareable ? (
                 <button onClick={share} className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
-                  <Share2 size={18} /> Share {files.length} slides to Instagram
+                  <Share2 size={18} /> Save or share {files.length} slides (Photos, Instagram)
+                </button>
+              ) : phoneCanShare() ? (
+                <button onClick={() => prep === 'failed' && setTries(t => t + 1)} disabled={prep !== 'failed'} className="w-full h-12 rounded-2xl bg-purple-600 disabled:opacity-70 text-white font-semibold text-[15px] flex items-center justify-center gap-2">
+                  {prep === 'failed' ? <><RefreshCw size={18} /> Slides did not load. Retry</> : <><LoaderCircle size={18} className="animate-spin" /> Getting {post.slides.length} slides ready...</>}
                 </button>
               ) : (
                 <a href={zipUrl(post)} download className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
@@ -309,8 +327,8 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 space-y-3">
               <h3 className="text-[12px] font-semibold uppercase tracking-wider text-gray-400">More ways to get it</h3>
               <div className="flex flex-wrap gap-2">
-                <button onClick={() => saveSlides(files, post.slides.map((_, i) => i + 1))} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ImageDown size={14} /> {files.length ? 'Save all to photos' : 'Download each slide'}</button>
-                {shareable && <a href={zipUrl(post)} download className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> ZIP</a>}
+                <button onClick={() => saveSlides(files, post.slides.map((_, i) => i + 1))} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><ImageDown size={14} /> {files.length ? 'Save all to photos' : phoneCanShare() ? 'Save all to photos (preparing)' : 'Download each slide'}</button>
+                {shareable && !phoneCanShare() && <a href={zipUrl(post)} download className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5"><Download size={14} /> ZIP</a>}
                 <button onClick={sendToPhone} disabled={busy === 'send'} className="h-9 px-3.5 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center gap-1.5">
                   {busy === 'send' ? <LoaderCircle size={14} className="animate-spin" /> : <Send size={14} />} Send to my phone
                 </button>
