@@ -1872,8 +1872,8 @@ async def speaker_settings(update: Dict[str, Any]):
 @app.post("/api/speaker/say")
 async def speaker_say(body: Dict[str, Any]):
     """Say a line now, or (no text) the welcome-home greeting. Ignores quiet hours."""
-    if not speaker.get_settings()["address"]:
-        raise HTTPException(status_code=400, detail="Pick a soundbar first.")
+    if not speaker.has_output(speaker.get_settings()):
+        raise HTTPException(status_code=400, detail="Plug in a USB sound card or pick a soundbar first.")
     text = str(body.get("text") or "").strip()[:500]
     if text:
         await speaker.speaker.say(text, "test")

@@ -389,7 +389,7 @@ class SpotifyConnect:
         try:
             import speaker as speaker_mod
             settings = speaker_mod.get_settings()
-            if settings["address"] and self.speaker is not None:
+            if speaker_mod.has_output(settings) and self.speaker is not None:
                 return self.speaker.device(settings)
         except Exception as e:
             log.debug("No soundbar device: %s", e)

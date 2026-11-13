@@ -67,8 +67,11 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
 
   const candidates = devices.filter(d => d.paired && d.kind !== 'phone');
   const missing = [!s.tools.bluealsa && 'bluez-alsa', !s.tools.aplay && 'aplay', !s.tools.voice && 'the Kokoro voice'].filter(Boolean);
-  const status = !set.address ? 'Off'
+  const usbOn = !!s.usb?.on;
+  const active = usbOn || !!set.address;
+  const status = !active ? 'Off'
     : s.speaking ? 'Speaking…'
+    : usbOn ? `USB sound card · ${s.usb?.card}` + (s.passing ? ' · playing your phone' : '')
     : s.soundbar.connected ? (s.passing ? 'Connected · playing your phone' : 'Connected') + (s.surroundOn ? ' · surround' : '')
     : 'Not connected · connects when you get home';
 
@@ -80,7 +83,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <div className="text-sm font-semibold text-gray-900 dark:text-white">Sage's speaker</div>
           <div className="text-xs text-gray-400 flex items-center gap-1.5">
             {s.speaking && <Loader2 size={11} className="animate-spin" />}
-            <span className="truncate">{status}{s.quietNow && set.address ? ' · quiet hours now' : ''}</span>
+            <span className="truncate">{status}{s.quietNow && active ? ' · quiet hours now' : ''}</span>
           </div>
         </div>
       </div>
@@ -92,6 +95,15 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
       )}
       {s.error && <div className="px-3 py-2 rounded-xl bg-red-50 dark:bg-red-500/10 text-xs text-red-700 dark:text-red-300">{s.error.message}</div>}
 
+      <div className="flex flex-wrap items-center gap-2">
+        <Select className={`${field} min-w-[12rem]`} value={set.output || 'auto'} disabled={busy} aria-label="Output"
+          onChange={v => save({ output: v as 'auto' | 'usb' | 'bluetooth' })}>
+          <option value="auto">Output: automatic (USB card if plugged in)</option>
+          <option value="usb">Output: USB sound card</option>
+          <option value="bluetooth">Output: Bluetooth soundbar</option>
+        </Select>
+        {!usbOn && set.output === 'usb' && <span className="text-xs text-amber-600">No USB sound card found. Plug it in.</span>}
+      </div>
       <div className="flex flex-wrap items-center gap-2">
         <Select className={`${field} flex-1 min-w-[12rem]`} value={set.address} disabled={busy} aria-label="Speaker"
           onChange={v => {
@@ -105,11 +117,11 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
         {set.address && (s.soundbar.connected
           ? <button className={smallButton} disabled={busy} onClick={() => attempt(sp.disconnect)}><Unplug size={13} />Disconnect</button>
           : <button className={smallButton} disabled={busy} onClick={() => attempt(sp.connect)}><Link2 size={13} />Connect</button>)}
-        {set.address && <button className={primaryButton} disabled={busy || !!s.speaking} onClick={() => attempt(sp.sayHello, 'Saying hello on the soundbar…')}><Volume2 size={14} />Say hello now</button>}
+        {active && <button className={primaryButton} disabled={busy || !!s.speaking} onClick={() => attempt(sp.sayHello, 'Saying hello on the soundbar…')}><Volume2 size={14} />Say hello now</button>}
       </div>
-      {candidates.length === 0 && <p className="text-xs text-gray-400">Pair your soundbar first: put it in Bluetooth pairing mode, tap Scan above, then Pair.</p>}
+      {!usbOn && candidates.length === 0 && <p className="text-xs text-gray-400">Pair your soundbar first: put it in Bluetooth pairing mode, tap Scan above, then Pair.</p>}
 
-      {set.address && (
+      {active && (
         <div className="space-y-4 pt-3 border-t border-black/5 dark:border-white/5">
           <Switch on={set.greet} onChange={on => save({ greet: on })} label="Welcome me home"
             hint="When your phone gets home, connect and greet you with the time, the weather and what's left today. At most once every 6 hours." />

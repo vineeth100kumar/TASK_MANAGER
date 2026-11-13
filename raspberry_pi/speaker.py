@@ -85,6 +85,8 @@ DEFAULTS: Dict[str, Any] = {
     "lastGreetAt": 0,       # when the welcome-home greeting was last spoken (epoch s); not user-set
     "surround": "off",      # off | music | movie | wide (SURROUND below)
     "latency": "low",       # lowest | low | steady (LATENCY below): pass-through buffer
+    "output": "auto",       # auto | usb | bluetooth: where the sound goes (auto = USB sound card when one is plugged in)
+    "usbCard": "",          # ALSA card id to force ("" = first USB card that can play)
 }
 
 # How much the Pi buffers the phone's audio before the soundbar (bluealsa-aplay's
@@ -175,6 +177,13 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if mode != "off" and mode not in SURROUND:
             raise ValueError("Surround is off, music, movie or wide.")
         out["surround"] = mode
+    if "output" in update:
+        output = str(update.get("output") or "auto")
+        if output not in ("auto", "usb", "bluetooth"):
+            raise ValueError("Output is auto, usb or bluetooth.")
+        out["output"] = output
+    if "usbCard" in update:
+        out["usbCard"] = re.sub(r"[^\w.-]", "", str(update.get("usbCard") or ""))[:40]
     if "latency" in update:
         latency = str(update.get("latency") or "")
         if latency not in LATENCY:
@@ -403,6 +412,51 @@ def passthrough_cmd(device: str, phone: str, latency: str) -> List[str]:
             f"--pcm-period-time={lat['period']}", "-D", device, phone]
 
 
+def parse_cards(text: str, playback: Callable[[str], bool]) -> List[dict]:
+    """Sound cards from /proc/asound/cards. A card line looks like
+    ` 1 [Device         ]: USB-Audio - USB Audio Device`. Pure."""
+    cards = []
+    for m in re.finditer(r"^\s*(\d+)\s+\[(\S+)\s*\]:\s*(\S+)\s+-\s+(.+)$", text, re.M):
+        num, cid, driver, name = m.groups()
+        cards.append({"num": int(num), "id": cid, "usb": driver.lower().startswith("usb"),
+                      "name": name.strip(), "playback": playback(num)})
+    return cards
+
+
+def usb_cards() -> List[dict]:
+    try:
+        text = Path("/proc/asound/cards").read_text()
+    except OSError:
+        return []
+    return parse_cards(text, lambda n: Path(f"/proc/asound/card{n}/pcm0p").exists())
+
+
+def usb_card(preferred: str = "") -> Optional[dict]:
+    """The USB sound card to play on: the one asked for, else the first that can play."""
+    cards = [c for c in usb_cards() if c["usb"] and c["playback"]]
+    for c in cards:
+        if preferred and c["id"] == preferred:
+            return c
+    return cards[0] if cards else None
+
+
+def uses_usb(settings: dict) -> bool:
+    """True when sound goes to a USB card: asked for, or auto with one plugged in."""
+    if settings.get("output") == "bluetooth":
+        return False
+    return usb_card(settings.get("usbCard", "")) is not None
+
+
+def has_output(settings: dict) -> bool:
+    """Somewhere to play: a USB card, or a picked Bluetooth soundbar."""
+    return bool(settings.get("address")) or uses_usb(settings)
+
+
+def usb_device(settings: dict) -> str:
+    card = usb_card(settings.get("usbCard", ""))
+    return f"plughw:CARD={card['id']},DEV=0" if card else ""
+
+
 def surround_ready() -> bool:
     return SURROUND_PLUGIN.is_file() and SURROUND_CONF.is_file()
 
@@ -528,6 +582,8 @@ class Speaker:
             "phoneAudio": self.links["phoneAudio"],
             "passing": self._pass is not None and self._pass.returncode is None,
             "surroundOn": self.surround_on(settings),
+            "usb": {"on": uses_usb(settings), "card": (usb_card(settings.get("usbCard", "")) or {}).get("name", ""),
+                    "cards": [c for c in usb_cards() if c["usb"] and c["playback"]]},
             "speaking": self.speaking,
             "last": self.last,
             "error": self.error if self.error and time.time() - self.error["at"] < 600 else None,
@@ -581,7 +637,10 @@ class Speaker:
     async def ensure_connected(self) -> bool:
         """Connect to the soundbar and wait for its audio link. True when ready."""
         settings = get_settings()
+        if uses_usb(settings):
+            return True
         if not settings["address"]:
+            self._fail("No sound output: plug in a USB sound card or pick a soundbar.")
             return False
         links = await self.refresh()
         if links["soundbar"]["connected"]:
@@ -638,6 +697,8 @@ class Speaker:
     # --- Surround ---
 
     def surround_on(self, settings: dict) -> bool:
+        if uses_usb(settings):
+            return False
         if settings["surround"] != self._surround_mode:
             # Switching it again is a fresh try after a failure.
             self._surround_mode = settings["surround"]
@@ -645,6 +706,9 @@ class Speaker:
         return settings["surround"] in SURROUND and not self.surround_broken and surround_ready()
 
     def device(self, settings: dict, address: str = "") -> str:
+        usb = usb_device(settings) if uses_usb(settings) else ""
+        if usb:
+            return usb
         on = self.surround_on(settings)
         return output_device(address or settings["address"], settings["surround"] if on else "off", on)
 
@@ -709,15 +773,18 @@ class Speaker:
         links = await self.refresh()
         phone_addr = ((getattr(self.phone, "link", None) or {}).get("address") or "") if self.phone else ""
         home = bool(self.phone and self.phone.available and self.phone.home)
-        sb = links["soundbar"]
+        sb = dict(links["soundbar"])
+        usb = uses_usb(settings)
+        if usb:
+            sb["connected"] = True   # a sound card is always "connected"
         now = time.time()
-        if sb["connected"] and self._soundbar_was is False:
+        if not usb and sb["connected"] and self._soundbar_was is False:
             self.event("soundbar")
         self._soundbar_was = bool(sb["connected"])
 
         # Spotify has the soundbar while it plays; only one player can hold it.
         spotify_on = bool(self.music is not None and self.music.playing())
-        want_pass = bool(settings["address"] and settings["phoneSpeaker"] and sb["connected"] and phone_addr and not spotify_on)
+        want_pass = bool((settings["address"] or usb) and settings["phoneSpeaker"] and sb["connected"] and phone_addr and not spotify_on)
         if want_pass and links["phoneAudio"] and not self._pass_paused:
             await self._start_passthrough(settings["address"], phone_addr)
         elif not want_pass or not links["phoneAudio"]:
@@ -765,7 +832,7 @@ class Speaker:
         within its cooldown. True when queued."""
         settings = get_settings()
         now = time.time()
-        if not (settings["address"] and settings.get("chimes", True)) or self.queue is None:
+        if not (has_output(settings) and settings.get("chimes", True)) or self.queue is None:
             return False
         if self.speaking or not self.queue.empty() or now - self._last_spoke_at < 15:
             return False
@@ -794,7 +861,7 @@ class Speaker:
 
     async def _speak(self, text: str, kind: str) -> None:
         settings = get_settings()
-        if not settings["address"] or not text.strip():
+        if not has_output(settings) or not text.strip():
             return
         if kind != "test" and in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
             log.info("Quiet hours; not saying: %s", text[:60])
@@ -982,7 +1049,7 @@ class Speaker:
             if self.loop:
                 self.loop.call_soon_threadsafe(self.event, "home")
             return
-        if settings["address"] and settings["greet"] and self.loop:
+        if has_output(settings) and settings["greet"] and self.loop:
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
 
     async def greet(self, kind: str = "greeting") -> str:
@@ -994,7 +1061,7 @@ class Speaker:
         """notifier calls this (from its worker thread) as a reminder goes out."""
         settings = get_settings()
         home = bool(self.phone and self.phone.available and self.phone.home)
-        if settings["address"] and settings["reminders"] and home:
+        if has_output(settings) and settings["reminders"] and home:
             self.say_soon(reminder_line(message), "reminder")
 
     # --- Running ---
@@ -1008,7 +1075,7 @@ class Speaker:
         while True:
             try:
                 await self.wifi_guard()
-                if get_settings()["address"]:
+                if has_output(get_settings()):
                     await self.tick()
             except Exception as e:
                 log.debug("Speaker check failed: %s", e)
