@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..spec import parse_spec, SpecIssue, ParsedSpec
+from .objects import parse_objects, SceneObject
 
 _MARKER = re.compile(r"^(\s*autocontent\s*:\s*['\"]?)(?:reel|reels|video)\b", re.I)
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -30,6 +31,7 @@ SCENE_KEYS = {
     "motion": "motion", "animation": "motion", "animate": "motion",
     "duration": "duration", "hold": "duration", "pause": "pause",
     "speed": "speed", "tone": "tone", "delivery": "tone", "voice": "voice",
+    "objects": "objects", "overlay": "objects", "overlays": "objects", "obj": "objects",
 }
 # How a slide is delivered: a speed multiplier on top of the reel's own speed.
 TONES = {"hook": 1.08, "fast": 1.1, "excited": 1.1, "energetic": 1.08, "normal": 1.0, "neutral": 1.0,
@@ -109,6 +111,7 @@ class Scene:
     motion_given: bool = False      # the author named it, so every piece of the slide uses it
     duration: Optional[float] = None    # seconds to hold a scene that has no narration
     pause: float = 0.0                  # extra silence after the narration, seconds
+    objects: List[SceneObject] = field(default_factory=list)   # overlay objects on this slide
 
     @property
     def words(self) -> List[str]:
@@ -343,6 +346,8 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             scene.duration = _number(sec["duration"][0], 1.0, 30.0, "duration", sec["duration"][1], reel.issues, None)
         if "pause" in sec:
             scene.pause = _number(sec["pause"][0], 0.0, 5.0, "pause", sec["pause"][1], reel.issues, 0.0) or 0.0
+        if "objects" in sec:
+            scene.objects = parse_objects(sec["objects"][0])
         reel.scenes.append(scene)
     reel.post_text = post_text
     reel.issues += check_reel(reel)

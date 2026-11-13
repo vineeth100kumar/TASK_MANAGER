@@ -16,6 +16,8 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 from PIL import Image
 
+from .objects import SceneObject, OBJ_ANIMS, OBJ_EXIT_DUR, get_default_anim
+
 W, H = 1080, 1920
 
 # How each kind of thing arrives: (how long it takes, how far it travels). The author's `motion:`
@@ -301,11 +303,119 @@ class Piece:
 
 
 @dataclass
+class ObjectPiece:
+    """An overlay object that sits on top of a slide with its own animation."""
+    image: Image.Image              # RGBA
+    box: Tuple[int, int, int, int]  # x, y, w, h
+    at: float                       # when it starts arriving
+    anim: str = "scale"             # object-relative animation
+    exit_at: float = 0.0            # when exit animation starts (0 = no exit before slide change)
+    rotate: float = 0.0             # degrees
+    _rgba: Optional[np.ndarray] = None
+
+    @property
+    def array(self) -> np.ndarray:
+        if self._rgba is None:
+            self._rgba = np.asarray(self.image, dtype=np.uint8)
+        return self._rgba
+
+    def takes(self) -> float:
+        return OBJ_ANIMS.get(self.anim, OBJ_ANIMS["scale"])[0]
+
+
+def _obj_state(op: ObjectPiece, t: float, clip_t1: float) -> Optional[Tuple[np.ndarray, int, int, float]]:
+    """(pixels, x, y, opacity) for an overlay object at time t, or None if not showing."""
+    if t < op.at:
+        return None
+
+    x, y, w, h = op.box
+    arr = op.array
+    anim = op.anim
+    dur = OBJ_ANIMS.get(anim, OBJ_ANIMS["scale"])[0]
+    u = min(1.0, (t - op.at) / dur)
+
+    opacity = 1.0
+    exit_start = op.exit_at if op.exit_at > 0 else clip_t1 - EXIT - OBJ_EXIT_DUR
+    if t >= exit_start and exit_start > op.at + dur:
+        eu = min(1.0, (t - exit_start) / OBJ_EXIT_DUR)
+        opacity = max(0.0, 1.0 - ease_out_cubic(eu))
+        if opacity <= 0.001:
+            return None
+
+    if u >= 1.0:
+        return arr, x, y, opacity
+
+    e = ease_out_cubic(u)
+
+    if anim == "fly":
+        dx = int((1 - ease_out_back(u)) * w * 0.6)
+        return arr, x - dx, y, min(1.0, u * 3.0) * opacity
+
+    if anim == "scale":
+        s = 0.1 + 0.9 * ease_out_back(u)
+        arr2, nx, ny = _scaled(Image.fromarray(arr), op.box, s)
+        return arr2, nx, ny, min(1.0, u * 3.0) * opacity
+
+    if anim == "pop":
+        s = 0.3 + 0.7 * ease_out_back(u)
+        arr2, nx, ny = _scaled(Image.fromarray(arr), op.box, s)
+        return arr2, nx, ny, min(1.0, u * 4.0) * opacity
+
+    if anim == "spin":
+        s = max(0.05, e)
+        arr2, nx, ny = _scaled(Image.fromarray(arr), op.box, s)
+        angle = (1 - e) * 180
+        if abs(angle) > 2:
+            im = Image.fromarray(arr2).rotate(-angle, expand=False, resample=Image.BICUBIC,
+                                               fillcolor=(0, 0, 0, 0))
+            arr2 = np.asarray(im, dtype=np.uint8)
+        return arr2, nx, ny, min(1.0, u * 3.0) * opacity
+
+    if anim == "draw":
+        arr2 = _wiped(arr, e, "left")
+        return arr2, x, y, opacity
+
+    if anim == "flash":
+        bright = 1.0 + max(0.0, (1 - u * 3)) * 1.5
+        arr2 = arr.copy()
+        if bright > 1.01:
+            rgb = np.minimum(arr2[..., :3].astype(np.float32) * bright, 255).astype(np.uint8)
+            arr2[..., :3] = rgb
+        return arr2, x, y, min(1.0, u * 3.5) * opacity
+
+    if anim == "pulse":
+        if u < 0.5:
+            s = 1.0 + 0.25 * ease_out_cubic(u * 2)
+        else:
+            s = 1.25 - 0.25 * ease_out_cubic((u - 0.5) * 2)
+        arr2, nx, ny = _scaled(Image.fromarray(arr), op.box, s)
+        return arr2, nx, ny, min(1.0, u * 4.0) * opacity
+
+    if anim == "blink":
+        if u < 0.3:
+            s = 1.0 - 0.3 * (u / 0.3)
+        elif u < 0.6:
+            s = 0.7 + 0.45 * ((u - 0.3) / 0.3)
+        else:
+            s = 1.15 - 0.15 * ((u - 0.6) / 0.4)
+        arr2, nx, ny = _scaled(Image.fromarray(arr), op.box, max(0.1, s))
+        return arr2, nx, ny, min(1.0, u * 4.0) * opacity
+
+    if anim == "wipe":
+        arr2 = _wiped(arr, e, "left")
+        return arr2, x, y, opacity
+
+    # fallback: fade
+    return arr, x, y, e * opacity
+
+
+@dataclass
 class SceneClip:
     t0: float
     t1: float
     base: Image.Image
     pieces: List[Piece] = field(default_factory=list)
+    objects: List[ObjectPiece] = field(default_factory=list)
     motion: str = "rise"
     _base_arr: Optional[np.ndarray] = None
 
@@ -596,6 +706,11 @@ class Timeline:
             if state:
                 arr, x, y, op = state
                 _blend(frame, arr, x, y, op * back)
+        for obj in clip.objects:
+            ostate = _obj_state(obj, t, clip.t1)
+            if ostate:
+                arr, x, y, op = ostate
+                _blend(frame, arr, x, y, op)
         return frame
 
     def _with_bar(self, frame: np.ndarray, t: float) -> np.ndarray:
