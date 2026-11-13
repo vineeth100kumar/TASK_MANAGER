@@ -26,9 +26,10 @@ export interface LumoAlarm {
   tone: AlarmTone | null;    // null follows the clock's setting
   volume: number | null;
   snoozeMinutes: number | null;
+  wake: boolean;
 }
 
-export type AlarmDraft = Pick<LumoAlarm, 'label' | 'time' | 'days' | 'enabled' | 'tone' | 'volume' | 'snoozeMinutes'>;
+export type AlarmDraft = Pick<LumoAlarm, 'label' | 'time' | 'days' | 'enabled' | 'tone' | 'volume' | 'snoozeMinutes' | 'wake'>;
 
 export interface LumoTimer {
   state: 'idle' | 'running' | 'paused' | 'done';

@@ -275,6 +275,25 @@ def greeting_facts(now: datetime.datetime, due: List[dict], overdue: List[dict],
     }
 
 
+def template_wake(f: dict) -> str:
+    """The wake-up briefing without AI. Pure."""
+    name = f", {f['name']}" if f.get("name") else ", sir"
+    parts = [f"Good morning{name}. It's {f['time']} on {f['weekday']}."]
+    if f.get("tempC") is not None:
+        parts.append(f"{f['tempC']} degrees outside" + (f", {f['sky']}." if f.get("sky") else "."))
+    n = f["dueCount"]
+    if n == 0:
+        parts.append("Nothing is asked of you today.")
+    else:
+        shown = f["dueToday"][:3]
+        parts.append(f"You have {_number(n)} {'thing' if n == 1 else 'things'} today: " + ", ".join(shown) + ".")
+    if f.get("overdueCount"):
+        parts.append(f"{_number(f['overdueCount'])} overdue, when you're ready.")
+    if f.get("habitsLeft"):
+        parts.append(f"And don't forget {f['habitsLeft'][0]}.")
+    return " ".join(parts)
+
+
 def template_greeting(f: dict) -> str:
     """The greeting without AI: short, warm, and always something to say."""
     name = f", {f['name']}" if f.get("name") else ", sir"
@@ -316,6 +335,12 @@ Address them by the name given (as a butler would, e.g. "Master Vineeth" or \
 Facts (JSON):
 """
 
+
+WAKE_PROMPT = GREETING_PROMPT.replace(
+    "Write the one greeting spoken aloud on the soundbar as the person walks in the door.",
+    "Write the good-morning briefing spoken aloud on the soundbar just after the person switched off their wake-up alarm.",
+).replace("at most 45 words", "at most 70 words").replace(
+    "(name at most two items)", "(name at most three items, and the overdue count if any)")
 
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
@@ -1001,7 +1026,7 @@ class Speaker:
 
     # --- What to say ---
 
-    async def greeting(self) -> str:
+    async def greeting(self, wake: bool = False) -> str:
         settings = get_settings()
         facts = await asyncio.to_thread(self._facts, settings)
         try:
@@ -1013,10 +1038,10 @@ class Speaker:
             facts["tempC"] = round(weather["temp_c"])
             facts["sky"] = WEATHER_WORDS.get(weather.get("icon", ""), "")
         if settings["witty"]:
-            line = await self._ai_line(facts)
+            line = await self._ai_line(facts, WAKE_PROMPT if wake else GREETING_PROMPT)
             if line:
                 return line
-        return template_greeting(facts)
+        return template_wake(facts) if wake else template_greeting(facts)
 
     def _facts(self, settings: dict) -> dict:
         import life_mode
@@ -1036,7 +1061,7 @@ class Speaker:
             pass
         return greeting_facts(now, due, overdue, chill, None, [h for h in habits_left if h], settings["callMe"])
 
-    async def _ai_line(self, facts: dict) -> str:
+    async def _ai_line(self, facts: dict, prompt: str = GREETING_PROMPT) -> str:
         try:
             import canvas_thinker
             import httpx
@@ -1047,8 +1072,8 @@ class Speaker:
             async with httpx.AsyncClient(timeout=8) as client:
                 for m in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
                     res = await client.post(canvas_thinker.GROQ_URL, headers={"Authorization": f"Bearer {key}"}, json={
-                        "model": m, "temperature": 0.8, "max_tokens": 400,
-                        "messages": [{"role": "user", "content": GREETING_PROMPT + json.dumps(facts)}],
+                        "model": m, "temperature": 0.8, "max_tokens": 500,
+                        "messages": [{"role": "user", "content": prompt + json.dumps(facts)}],
                     })
                     if res.status_code == 200:
                         line = clean_line(res.json()["choices"][0]["message"].get("content") or "")
@@ -1077,11 +1102,24 @@ class Speaker:
         await self.say(line, kind)
         return line
 
-    def on_reminder(self, item: dict, message: dict) -> None:
-        """notifier calls this (from its worker thread) as a reminder goes out."""
+    def on_wake(self) -> None:
+        """An alarm marked "Wake me up" was stopped (called on the loop): speak
+        the morning briefing, if there is a speaker and you're home."""
         settings = get_settings()
         home = bool(self.phone and self.phone.available and self.phone.home)
-        if has_output(settings) and settings["reminders"] and home:
+        if self.loop and has_output(settings) and home:
+            async def brief() -> None:
+                await self.say(await self.greeting(wake=True), "wake")
+            asyncio.ensure_future(brief())
+
+    def on_reminder(self, item: dict, message: dict) -> None:
+        """notifier calls this (from its worker thread) as a reminder goes out.
+        Only reminders switched to "Read aloud" are spoken (default off, so a
+        private one stays silent), and only while you're home."""
+        settings = get_settings()
+        home = bool(self.phone and self.phone.available and self.phone.home)
+        wanted = bool((item.get("customFields") or {}).get("readAloud"))
+        if has_output(settings) and settings["reminders"] and home and wanted:
             self.say_soon(reminder_line(message), "reminder")
 
     # --- Running ---

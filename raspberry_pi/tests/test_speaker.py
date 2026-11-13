@@ -108,6 +108,30 @@ class WifiTests(unittest.TestCase):
                 speaker.set_wifi(False)
 
 
+class WakeAndReadAloudTests(unittest.TestCase):
+    def test_wake_briefing_names_the_day(self):
+        f = speaker.greeting_facts(datetime.datetime(2026, 11, 14, 7, 0), [{"title": "Gym"}, {"title": "Report"}], [{"title": "Tax"}], False, None, [], "Vineeth")
+        line = speaker.template_wake(f)
+        self.assertIn("Good morning, Vineeth", line)
+        self.assertIn("Gym, Report", line)
+        self.assertIn("overdue", line)
+
+    def test_reminders_are_silent_unless_read_aloud(self):
+        sp = speaker.Speaker()
+        spoken = []
+        sp.say_soon = lambda text, kind="line": spoken.append(text)
+        sp.phone = type("P", (), {"available": True, "home": True})()
+        orig = speaker.has_output
+        speaker.has_output = lambda s: True
+        try:
+            sp.on_reminder({"customFields": {}}, {"title": "Secret"})
+            sp.on_reminder({"customFields": {"readAloud": True}}, {"title": "Pills"})
+        finally:
+            speaker.has_output = orig
+        self.assertEqual(len(spoken), 1)
+        self.assertIn("Pills", spoken[0])
+
+
 if __name__ == "__main__":
     unittest.main()
 
