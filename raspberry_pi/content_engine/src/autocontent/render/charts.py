@@ -52,12 +52,12 @@ def bar_chart_svg(series: Sequence[Dict[str, Any]], colors: Dict[str, str], widt
     bar_h = 64 if n <= 3 else 52 if n == 4 else 40
     label_gap = 12
     row_h = LABEL_PX + label_gap + bar_h + (34 if n <= 4 else 20)
-    value_w = max(_text_w(str(s.get("value_raw", "")), VALUE_PX, 0.52) for s in series) + 24
+    value_w = max(_text_w(str(s.get("value_raw", "")), VALUE_PX, 0.66) for s in series) + 40
     bar_max = max(120.0, width - value_w)
     muted = _mix(colors["ink"], colors["bg"], 0.32)
     height = row_h * n
 
-    parts = [f'<svg class="chart-svg" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+    parts = [f'<svg class="chart-svg" overflow="visible" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
              f'viewBox="0 0 {width} {height}" role="img">']
     for i, s in enumerate(series):
         y0 = i * row_h
@@ -83,7 +83,7 @@ def pie_chart_svg(series: Sequence[Dict[str, Any]], colors: Dict[str, str], widt
     hi = _highlight_index(values)
     # The legend gets the room its longest label needs; the donut shrinks for it (not below 150)
     legend_px = 36
-    legend_w = max(max(_text_w(str(s.get("label", "")), legend_px), _text_w(str(s.get("value_raw", "")), VALUE_PX, 0.52))
+    legend_w = max(max(_text_w(str(s.get("label", "")), legend_px), _text_w(str(s.get("value_raw", "")), VALUE_PX, 0.66))
                    for s in series)
     r = int(max(150, min(215, (width - 56 - 44 - legend_w - 12) / 2)))
     inner = int(r * 0.56)
@@ -101,7 +101,7 @@ def pie_chart_svg(series: Sequence[Dict[str, Any]], colors: Dict[str, str], widt
     legend_x = 2 * r + 56
     row_h = min(120, max(92, (max_height - 20) // max(n, 1)))
     height = max(2 * r + 12, row_h * n)
-    parts = [f'<svg class="chart-svg" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+    parts = [f'<svg class="chart-svg" overflow="visible" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
              f'viewBox="0 0 {width} {height}" role="img">']
     total = 100.0
     start = -math.pi / 2
@@ -138,14 +138,14 @@ def line_chart_svg(series: Sequence[Dict[str, Any]], colors: Dict[str, str], wid
     height = max_height
     plot_h = height - top_pad - bottom_pad
     # room at both ends for the widest value label and period label (centred on the first/last point)
-    side = max(max(_text_w(str(s.get("value_raw", "")), VALUE_PX, 0.52) for s in series),
+    side = max(max(_text_w(str(s.get("value_raw", "")), VALUE_PX, 0.66) for s in series),
                max(_text_w(str(s.get("label", "")), LABEL_PX) for s in series)) / 2 + 10
     xs = [side + (width - 2 * side) * (i / (n - 1) if n > 1 else 0.5) for i in range(n)]
     ys = [top_pad + plot_h * (1 - v / vmax) for v in values]
     base_y = top_pad + plot_h
     muted = _mix(colors["ink"], colors["bg"], 0.25)
 
-    parts = [f'<svg class="chart-svg" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+    parts = [f'<svg class="chart-svg" overflow="visible" xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
              f'viewBox="0 0 {width} {height}" role="img">']
     parts.append(f'<line x1="0" y1="{base_y:.1f}" x2="{width}" y2="{base_y:.1f}" stroke="{muted}" stroke-width="3"/>')
     area = " ".join(f"{x:.1f},{y:.1f}" for x, y in zip(xs, ys))
