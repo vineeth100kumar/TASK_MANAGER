@@ -2,10 +2,10 @@
 // the slides. The script is checked as you type (line numbers, no drawing),
 // and Make is pinned to the bottom of a phone so it is always under the thumb.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, ClipboardPaste, FileUp, LoaderCircle, Mail, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, BookOpen, ClipboardPaste, FileUp, LoaderCircle, Mail, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { EXAMPLE_SCRIPT, FORMAT_LABELS, MakerStatus, STYLE_LABELS, ScriptCheck, postsApi } from '../../services/posts';
+import { EXAMPLE_SCRIPT, downloadPostFormat, FORMAT_LABELS, MakerStatus, STYLE_LABELS, ScriptCheck, postsApi } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
 
@@ -107,6 +107,11 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
               <Sparkles size={15} /> Try an example
             </button>
           )}
+          <button type="button" title="Download the script format guide (POST_FORMAT.md)"
+            onClick={() => downloadPostFormat().catch(() => showToast("Couldn't download the format guide.", 'error'))}
+            className="flex items-center gap-1.5 h-9 px-3 rounded-xl text-[13px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">
+            <BookOpen size={15} /> Format guide
+          </button>
           <input ref={file} type="file" accept=".md,.markdown,.txt,text/plain,text/markdown" className="hidden" onChange={e => { upload(e.target.files?.[0]); e.target.value = ''; }} />
         </div>
 

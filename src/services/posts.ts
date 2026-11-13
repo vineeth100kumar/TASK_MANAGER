@@ -117,6 +117,20 @@ export const postsApi = {
 };
 
 /** A file from the Pi as a Blob (slides, the ZIP, the QR code). */
+/** Download the post script format guide (POST_FORMAT.md) from the Pi. */
+export async function downloadPostFormat(): Promise<void> {
+  const res = await fetch(`${piBackendUrl()}/api/posts/format`, { headers: piHeaders({}) });
+  if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'POST_FORMAT.md';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
 export async function fetchBlob(path: string): Promise<Blob> {
   const res = await fetch(`${piBackendUrl()}${path}`, { headers: piHeaders() });
   if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
