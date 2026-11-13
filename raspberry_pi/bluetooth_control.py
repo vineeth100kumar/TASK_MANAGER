@@ -228,6 +228,18 @@ class BluetoothControl:
             self._decide(False)
         await self.refresh()
 
+    async def make_speaker_adapter(self, path: str, alias: str) -> None:
+        """Set up a second adapter as the standing "Lumo Speaker": powered,
+        named, and always pairable/discoverable so the iPhone can find and tap
+        it. The shared pairing agent still gates the passkey through the UI."""
+        await self._set(path, ADAPTER_IFACE, "Powered", "b", True)
+        if alias:
+            await self._set(path, ADAPTER_IFACE, "Alias", "s", alias[:40])
+        await self._set(path, ADAPTER_IFACE, "PairableTimeout", "u", 0)
+        await self._set(path, ADAPTER_IFACE, "DiscoverableTimeout", "u", 0)
+        await self._set(path, ADAPTER_IFACE, "Pairable", "b", True)
+        await self._set(path, ADAPTER_IFACE, "Discoverable", "b", True)
+
     async def set_scan(self, on: bool) -> None:
         adapter = (await self._obj(self._adapter_path)).get_interface(ADAPTER_IFACE)
         try:
@@ -332,7 +344,16 @@ class BluetoothControl:
         }
         await self.refresh()
         try:
-            return await asyncio.wait_for(asyncio.shield(self._decision), timeout=CONFIRM_SECONDS)
+            accepted = await asyncio.wait_for(asyncio.shield(self._decision), timeout=CONFIRM_SECONDS)
+            if accepted:
+                # Confirming the passkey is the user's consent: trust it so an
+                # audio device (e.g. the Lumo Speaker) can reconnect on its own
+                # when they tap it again, without a pairing window each time.
+                try:
+                    await self._set(device_path, DEVICE_IFACE, "Trusted", "b", True)
+                except Exception as e:
+                    log.info("Couldn't trust %s after pairing: %s", address, e)
+            return accepted
         except asyncio.TimeoutError:
             return False
         finally:
