@@ -53,6 +53,10 @@ FIT_TEST_SECONDS = 180   # the Fit test pattern goes by itself after this long
 log = logging.getLogger("desk")
 
 SOURCE = "desk"
+
+# Set by db_server: called (from the event loop) when an alarm marked "Wake me up"
+# is stopped by a person, so Sage can say good morning and read the day.
+on_wake: Optional[Callable[[], None]] = None
 WEATHER_EVERY = 30 * 60
 REFRESH_EVERY = 60
 REMINDER_SNOOZE_MINUTES = 60
@@ -467,7 +471,7 @@ class Desk:
             await self.link.send(self.ring_command())
             await self.announce()
         elif now.timestamp() - self.ringing_since > self.settings["alarm"]["ringMinutes"] * 60:
-            await self.stop_alarm(snooze=False)
+            await self.stop_alarm(snooze=False, woke=False)  # rang itself out: nobody woke
 
     def ring_command(self) -> dict:
         """ALARM_RING with the alarm's name and sound (firmware 2.6 rings its
@@ -485,11 +489,16 @@ class Desk:
     def snooze_minutes(self, alarm) -> int:
         return (alarm and alarm.snooze) or self.settings["alarm"]["snoozeMinutes"]
 
-    async def stop_alarm(self, snooze: bool) -> None:
+    async def stop_alarm(self, snooze: bool, woke: bool = True) -> None:
         alarm, self.alarms.ringing = self.alarms.ringing, None
         await self.link.send({"cmd": "ALARM_OFF"})
         if alarm is None:
             return
+        if woke and not snooze and alarm.wake and on_wake is not None:
+            try:
+                on_wake()
+            except Exception as e:
+                log.warning("Wake-up briefing failed: %s", e)
         now = self.now()
         fields = Alarms.snoozed(now, self.snooze_minutes(alarm)) if snooze else Alarms.rolled(alarm, now)
         await self.change(self.actions.set_fields, alarm.id, fields, SOURCE)
@@ -518,7 +527,7 @@ class Desk:
             if ringing and ringing.rings_at:
                 rang_at.add((ringing.rings_at.hour, ringing.rings_at.minute))
             if (h, m) in rang_at:
-                await self.stop_alarm(snooze=action == "snooze")
+                await self.stop_alarm(snooze=action == "snooze", woke=action == "stop")
                 continue
             # The Pi wasn't ringing it: it was down, or its own ring had ended.
             alarm = next((a for a in self.alarms.alarms if a.rings_at and (a.rings_at.hour, a.rings_at.minute) == (h, m)

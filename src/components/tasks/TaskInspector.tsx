@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch, Eye, EyeOff } from 'lucide-react';
+import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch, Eye, EyeOff, Volume2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { PRIORITIES, WORK_ITEM_TYPES, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
@@ -356,6 +356,13 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                       }
 
+                                            <PropertyRow icon={Volume2} label="Read aloud">
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                          onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
+                          <option value="">Off (silent)</option>
+                          <option value="on">On, when I'm home</option>
+                        </Select>
+                      </PropertyRow>
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <Select align="end" className="prop-control"
                           value={task.reminderLeadMinutes ?? ''} onChange={async v => {
@@ -408,6 +415,13 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
                       }
 
+                                            <PropertyRow icon={Volume2} label="Read aloud">
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                          onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
+                          <option value="">Off (silent)</option>
+                          <option value="on">On, when I'm home</option>
+                        </Select>
+                      </PropertyRow>
                       <PropertyRow icon={Bell} label="Remind Me" isLast>
                         <Select align="end" className="prop-control"
                           value={task.reminderLeadMinutes ?? ''} onChange={async v => {
@@ -437,6 +451,13 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                             await onUpdateDetails(task, { remindAt: val || null, dueDate: val ? val.slice(0, 10) : null, startDate: val ? val.slice(0, 10) : null }); 
                             loadData(); 
                           }} />
+                      </PropertyRow>
+                                            <PropertyRow icon={Volume2} label="Read aloud">
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                          onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
+                          <option value="">Off (silent)</option>
+                          <option value="on">On, when I'm home</option>
+                        </Select>
                       </PropertyRow>
                       <PropertyRow icon={Activity} label="Repeat Rule" isLast>
                         <RepeatSelect align="end" className="prop-control"

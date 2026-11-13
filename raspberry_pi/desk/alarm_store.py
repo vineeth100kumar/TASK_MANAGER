@@ -40,6 +40,7 @@ def describe(item: dict, tz) -> dict:
         "tone": alarm.tone,
         "volume": alarm.volume,
         "snoozeMinutes": alarm.snooze,
+        "wake": alarm.wake,
     }
 
 
@@ -50,7 +51,7 @@ def _check(spec: Any, partial: bool) -> Dict[str, Any]:
     # What describe() adds is only shown, never set: an alarm sent back as it
     # was read (the page's editor does that) saves its own fields.
     spec = {k: v for k, v in spec.items() if k not in READ_ONLY}
-    unknown = set(spec) - {"label", "time", "days", "enabled", "tone", "volume", "snoozeMinutes"}
+    unknown = set(spec) - {"label", "time", "days", "enabled", "tone", "volume", "snoozeMinutes", "wake"}
     if unknown:
         raise ValueError(f"Unknown alarm field: {', '.join(sorted(unknown))}.")
     out: Dict[str, Any] = {}
@@ -73,6 +74,10 @@ def _check(spec: Any, partial: bool) -> Dict[str, Any]:
         if not isinstance(spec["enabled"], bool):
             raise ValueError("enabled must be true or false.")
         out["enabled"] = spec["enabled"]
+    if "wake" in spec:
+        if not isinstance(spec["wake"], bool):
+            raise ValueError("wake must be true or false.")
+        out["wake"] = spec["wake"]
     if "tone" in spec:
         if spec["tone"] is not None and spec["tone"] not in TONES:
             raise ValueError(f"tone must be one of: {', '.join(TONES)}.")
@@ -112,6 +117,7 @@ def create(spec: Any, now: datetime.datetime):
             "tone": fields.get("tone"),
             "volume": fields.get("volume"),
             "snoozeMinutes": fields.get("snoozeMinutes"),
+            "wake": bool(fields.get("wake")),
         }},
         **_schedule(h, m, days, fields.get("enabled", True), now),
     }
@@ -131,7 +137,7 @@ def update(item_id: str, spec: Any, now: datetime.datetime, tz):
         extra = dict(options(item) or {"days": current.days})
         if "label" in fields:
             item["title"] = fields["label"]
-        for name in ("days", "tone", "volume", "snoozeMinutes"):
+        for name in ("days", "tone", "volume", "snoozeMinutes", "wake"):
             if name in fields:
                 extra[name] = fields[name]
         item["customFields"] = {**(item.get("customFields") or {}), "alarm": extra}

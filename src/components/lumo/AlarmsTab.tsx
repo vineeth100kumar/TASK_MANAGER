@@ -96,7 +96,7 @@ const PRESETS: { name: string; days: number[] }[] = [
 
 const SNOOZES = [1, 3, 5, 9, 10, 15, 20, 30];
 
-const BLANK: AlarmDraft = { label: 'Alarm', time: '07:00', days: [0, 1, 2, 3, 4], enabled: true, tone: null, volume: null, snoozeMinutes: null };
+const BLANK: AlarmDraft = { label: 'Alarm', time: '07:00', days: [0, 1, 2, 3, 4], enabled: true, tone: null, volume: null, snoozeMinutes: null, wake: false };
 
 interface AlarmsTabProps {
   alarms: LumoAlarm[] | null;
@@ -261,7 +261,7 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
   // Only the fields an alarm is saved with (an existing alarm also carries id, nextRing and snoozed).
   const [d, setD] = useState<AlarmDraft>({
     label: draft.label, time: draft.time, days: draft.days, enabled: draft.enabled,
-    tone: draft.tone, volume: draft.volume, snoozeMinutes: draft.snoozeMinutes,
+    tone: draft.tone, volume: draft.volume, snoozeMinutes: draft.snoozeMinutes, wake: !!draft.wake,
   });
   const [saving, setSaving] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -355,6 +355,11 @@ function AlarmEditor({ draft, settings, hour24, isNew, connected, tonesSupported
           </Select>
         </div>
       </div>
+
+      <label className="flex items-center gap-2 text-[13px] text-gray-600 dark:text-gray-300">
+        <input type="checkbox" checked={d.wake} onChange={e => set({ wake: e.target.checked })} />
+        Wake me up: after I stop this alarm, Sage says good morning and reads my day (when I'm home)
+      </label>
 
       <div className="flex items-center gap-2 pt-1 flex-wrap">
         <button onClick={submit} disabled={saving} className={btnPrimary}>{saving && <Loader2 size={14} className="animate-spin" />}{isNew ? 'Set alarm' : 'Save'}</button>

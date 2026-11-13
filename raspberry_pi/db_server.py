@@ -1851,6 +1851,8 @@ life_mode.on_arrival = speaker.speaker.on_arrival
 # backs off its reconnect tries (each one stalled the music for a moment).
 phone_link.audio_busy = lambda: spotify.connect.playing() or speaker.speaker.passing()
 notifier.speak_reminder = speaker.speaker.on_reminder
+from desk import desk as desk_wake  # noqa: E402
+desk_wake.on_wake = speaker.speaker.on_wake
 
 
 @app.get("/api/speaker")

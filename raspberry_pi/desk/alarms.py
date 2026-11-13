@@ -100,6 +100,8 @@ class Alarm:
         snooze = extra.get("snoozeMinutes") if extra else None
         self.snooze: Optional[int] = snooze if isinstance(snooze, int) and not isinstance(snooze, bool) and 1 <= snooze <= 60 else None
 
+        self.wake: bool = bool(extra.get("wake")) if extra else False
+
     @property
     def once(self) -> bool:
         return not self.days
