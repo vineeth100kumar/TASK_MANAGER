@@ -52,7 +52,7 @@ Then each slide starts with `## <type>` exactly as in a post script (cover, stat
 say: <what the voice says over this slide>            (REQUIRED on every slide; plain sentences, no symbols or links)
 show: <cue> | <cue> | <cue>                            (optional: the words in `say:` at which each piece of the slide should appear, in order; copy them exactly from `say:`)
 motion: rise | pop | stagger | wipe | kenburns | fade  (optional, best left out: each piece always arrives in the way that suits it. This is only used for a piece the reel doesn't recognise.)
-objects: arrow-right @ 50,80 120 accent                (optional: overlay shapes and icons on the slide; see the Objects section below)
+objects: arrow-right @ 50,80 120 accent | icon:rocket @ 30,40 80 success   (optional: overlay shapes and icons; pipe-separated, each: name @ x%,y% size colour animation rotation)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
 tone: hook | emphasis | calm | excited | serious | dramatic | slow | fast | normal   (optional: how this slide is delivered; sets its pace)
@@ -73,6 +73,20 @@ LAYOUT RULES (a reel is 9:16; Instagram covers the top and bottom, so the slide 
 - Anything that still doesn't fit is made to fit: the slide is set smaller, then its kicker goes, then its source line. Write to the limits above and none of that has to happen.
 - cta: the subtext sits beside the pill, so keep it to 3 or 4 short words (SAVE THIS + COMMENT 1, 2 OR 3).
 - Do not write `music:`; music is added in Instagram.
+
+OBJECTS AND ICONS (optional overlays on any slide)
+Add `objects:` to place shapes, arrows, icons or visual markers on top of a slide. Each object gets its own entrance animation (timed to the slide) and a quick exit before the slide changes. Pipe-separated, format: `name @ x,y size colour animation rotation`.
+- `name`: a built-in shape or `icon:<lucide-name>` for any of 2300+ Lucide icons.
+- `@ x,y`: position as % of the canvas (50,50 = centre). Default 50,50.
+- `size`: pixels for the larger dimension. Default 64. Write `120` or `120px`.
+- `colour`: a palette token (accent, muted, dark, light, success, warn, danger) or a hex (#E44425). Default accent.
+- `animation`: override the default: fly, scale, pop, spin, draw, flash, pulse, blink, wipe, fade. Each shape has a fitting default.
+- `rotation`: degrees, e.g. 45deg or -30deg. Default 0.
+Built-in shapes (41): arrow-right, arrow-left, arrow-up, arrow-down, arrow-up-right, circle, circle-filled, square, square-filled, triangle, diamond, star, hexagon, line, line-v, plus, minus, x, check, badge, callout, speech, underline, bracket-left, bracket-right, highlight, sparkle, zap, flame, target, eye, money, chart-up, clock, lock, globe, users, lightbulb, shield, gear, heart. Aliases: tick=check, dollar=money, world=globe, bulb=lightbulb, cog=gear, people=users.
+Lucide icons: `icon:rocket`, `icon:trending-up`, `icon:brain`, `icon:shield-check`, etc. — any icon from lucide.dev/icons.
+Animations and defaults: fly (arrows), scale (circles/squares/triangles/hexagons/shields), pop (badges/callouts/speech), spin (diamonds/stars/sparkles/gears/clocks/x), draw (lines/underlines/brackets/checks/chart-up), flash (zap/lightbulb), pulse (flames/hearts), blink (eye), wipe (highlights), fade (fallback).
+Example: `objects: arrow-right @ 70,50 100 accent | icon:trending-up @ 30,60 80 success draw`
+Use objects sparingly — one or two per slide for emphasis, not decoration.
 
 EXAMPLE
 (see example_reel.md in the same folder; it is returned with this guide)
