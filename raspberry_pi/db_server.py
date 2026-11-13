@@ -30,6 +30,7 @@ import industry
 import item_actions
 import life_mode
 import phone_link
+import recorder
 import speaker
 import spotify
 import quick_add
@@ -1871,8 +1872,8 @@ async def speaker_settings(update: Dict[str, Any]):
 @app.post("/api/speaker/say")
 async def speaker_say(body: Dict[str, Any]):
     """Say a line now, or (no text) the welcome-home greeting. Ignores quiet hours."""
-    if not speaker.get_settings()["address"]:
-        raise HTTPException(status_code=400, detail="Pick a soundbar first.")
+    if not speaker.has_output(speaker.get_settings()):
+        raise HTTPException(status_code=400, detail="Plug in a USB sound card or pick a soundbar first.")
     text = str(body.get("text") or "").strip()[:500]
     if text:
         await speaker.speaker.say(text, "test")
@@ -2408,6 +2409,10 @@ posts.set_media_auth(media_allowed)
 # Reels (reels.py): a script (and your voice-over) in, a 1080x1920 reel out, on the same engine as Posts.
 reels.connect(DB_PATH)
 app.include_router(reels.router)
+
+# Recorder (recorder.py): record audio from a USB microphone, play back and transcribe.
+recorder.connect(DB_PATH)
+app.include_router(recorder.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)

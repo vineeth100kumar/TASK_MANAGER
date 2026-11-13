@@ -13,6 +13,8 @@ export interface SpeakerSettings {
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
   surround?: SurroundMode;
   latency?: LatencyMode;
+  output?: 'auto' | 'usb' | 'bluetooth';
+  usbCard?: string;
 }
 
 export interface SpeakerState {
@@ -24,6 +26,7 @@ export interface SpeakerState {
   phoneAudio: boolean;
   passing: boolean;
   surroundOn?: boolean;
+  usb?: { on: boolean; card: string; cards: { id: string; name: string }[] };
   speaking: string;
   last: { text: string; kind: string; at: number } | null;
   error: { message: string } | null;
