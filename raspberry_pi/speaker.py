@@ -4,12 +4,16 @@ speaker.py - Sage's voice on a Bluetooth soundbar.
 Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
 
 - Coming home: when the phone link sees you arrive (life_mode.ArrivalWatch,
-  15+ minutes away), the Pi connects to the soundbar and greets you, Jarvis
-  style: the time, the weather, what's left today. Groq writes the line when
+  15+ minutes away), the Pi connects to the soundbar and greets you, in the
+  manner of a devoted old-school English butler (at most once every
+  GREET_EVERY_HOURS): the time, the weather, what's left today. Groq writes the line when
   there is a key; a plain template is the fallback, so it never stays silent.
 - Reminders: while you're home, a reminder that fires is also spoken.
-- Phone audio: with pass-through on, the Pi is a Bluetooth speaker for the
-  phone (A2DP sink) and plays what it receives on the soundbar. When the
+- Music: the Pi is a Spotify Connect speaker (spotify.py) that plays on the
+  soundbar; Sage pauses it for a moment to speak.
+- Phone audio (optional, off by default): with pass-through on, the Pi is a
+  Bluetooth speaker for the phone (A2DP sink) and plays what it receives on
+  the soundbar. It steps aside while Spotify plays. When the
   soundbar isn't connected, or pass-through is off, the Pi drops the phone's
   audio link so the phone's sound doesn't go to a Pi with nothing to play it.
 - Quiet hours: nothing is said between quietStart and quietEnd, except the
@@ -19,7 +23,11 @@ Pair a soundbar in Settings > Bluetooth and pick it as Sage's speaker. Then:
 
 Audio goes through bluez-alsa (deploy/install_pi.sh installs it): `aplay -D
 bluealsa:DEV=<soundbar>,PROFILE=a2dp` speaks, and `bluealsa-aplay` passes the
-phone's stream through. The voice is Kokoro, the same one Reels use, run in a
+phone's stream through. With Surround on, both go through the
+`sage_surround` ALSA device instead (deploy/alsa/60-sage-surround.conf): a
+small LADSPA plugin (audio/sage_surround.c) widens the stereo, adds early
+reflections, lifts dialogue and bass, then hands the sound to bluez-alsa. If
+it can't open, Sage plays without it rather than staying silent. The voice is Kokoro, the same one Reels use, run in a
 short-lived low-priority process (speak_worker.py) so its ~300 MB goes away
 once a line is spoken.
 
@@ -31,6 +39,7 @@ import datetime
 import json
 import logging
 import os
+import random
 import re
 import shutil
 import sqlite3
@@ -63,7 +72,8 @@ DEFAULTS: Dict[str, Any] = {
     "name": "",             # its name, for the UI
     "greet": True,          # say hello when you get home
     "reminders": True,      # speak reminders while you're home
-    "passthrough": True,    # be a Bluetooth speaker for the phone
+    "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
+    "chimes": True,         # short spoken lines when things happen (soundbar on, back home, Spotify picked)
     "witty": True,          # let Groq write the greeting (falls back to the template)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
@@ -72,7 +82,32 @@ DEFAULTS: Dict[str, Any] = {
     "quietStart": "22:30",
     "quietEnd": "07:00",
     "leaveAfterMinutes": 20,  # 0 = never disconnect on leaving
+    "lastGreetAt": 0,       # when the welcome-home greeting was last spoken (epoch s); not user-set
+    "surround": "off",      # off | music | movie | wide (SURROUND below)
+    "latency": "low",       # lowest | low | steady (LATENCY below): pass-through buffer
 }
+
+# How much the Pi buffers the phone's audio before the soundbar (bluealsa-aplay's
+# PCM buffer and period, in microseconds). bluealsa-aplay's own default is
+# 500 ms, which is most of the lag you hear; less buffer is less delay but can
+# crackle if the Bluetooth link hiccups (Wi-Fi off on Ethernet helps).
+LATENCY: Dict[str, Dict[str, int]] = {
+    "lowest": {"buffer": 120000, "period": 30000},
+    "low": {"buffer": 200000, "period": 50000},
+    "steady": {"buffer": 500000, "period": 100000},
+}
+
+# Virtual surround presets: the sage_surround plugin's controls.
+# width 0..1 widens the side above the bass, space 0..1 adds early reflections,
+# dialog and bass are dB boosts (0..9) on the centre, air a 10 kHz shelf (dB),
+# punch 0..1 a gentle compressor with make-up gain (fuller and louder).
+SURROUND: Dict[str, Dict[str, float]] = {
+    "music": {"width": 0.55, "space": 0.3, "dialog": 1, "bass": 4, "air": 3, "punch": 0.5},
+    "movie": {"width": 0.7, "space": 0.55, "dialog": 5, "bass": 4, "air": 2, "punch": 0.6},
+    "wide": {"width": 1.0, "space": 0.75, "dialog": 2, "bass": 3, "air": 3, "punch": 0.4},
+}
+SURROUND_PLUGIN = Path(os.getenv("SAGE_SURROUND_PLUGIN", "/usr/local/lib/sage/ladspa/sage_surround.so"))
+SURROUND_CONF = Path(os.getenv("SAGE_SURROUND_CONF", "/etc/alsa/conf.d/60-sage-surround.conf"))
 
 
 # --- Settings ---
@@ -104,7 +139,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "passthrough", "witty"):
+    for key in ("greet", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:
@@ -135,7 +170,28 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
             out[key] = value
     if "leaveAfterMinutes" in update:
         out["leaveAfterMinutes"] = int(max(0, min(240, int(update["leaveAfterMinutes"]))))
+    if "surround" in update:
+        mode = str(update.get("surround") or "off")
+        if mode != "off" and mode not in SURROUND:
+            raise ValueError("Surround is off, music, movie or wide.")
+        out["surround"] = mode
+    if "latency" in update:
+        latency = str(update.get("latency") or "")
+        if latency not in LATENCY:
+            raise ValueError("Delay is lowest, low or steady.")
+        out["latency"] = latency
     return out
+
+
+def _store_greet_time(at: float) -> None:
+    settings = get_settings()
+    settings["lastGreetAt"] = int(at)
+    conn = _connect()
+    try:
+        conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (SETTINGS_KEY, json.dumps(settings)))
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def save_settings(update: dict) -> dict:
@@ -207,7 +263,7 @@ def greeting_facts(now: datetime.datetime, due: List[dict], overdue: List[dict],
 
 def template_greeting(f: dict) -> str:
     """The greeting without AI: short, warm, and always something to say."""
-    name = f", {f['name']}" if f.get("name") else ""
+    name = f", {f['name']}" if f.get("name") else ", sir"
     hello = "Welcome home" + name + "." if f["partOfDay"] == "night" else f"Good {f['partOfDay']}{name}. Welcome home."
     parts = [hello]
     weather = ""
@@ -229,18 +285,55 @@ def template_greeting(f: dict) -> str:
     return " ".join(parts)
 
 
-GREETING_PROMPT = """You are the voice of Sage, a home assistant in the manner of a calm, \
-quietly witty British butler AI (think J.A.R.V.I.S.). Write the one greeting spoken \
+GREETING_PROMPT = """You are the voice of Sage, speaking as a devoted, old-school \
+English butler in the manner of Alfred Pennyworth: unflappable, warm underneath, \
+impeccably polite, with a dry, gently teasing wit and a quiet concern for the \
+person's wellbeing (rest, food, not overworking). Write the one greeting spoken \
 aloud on the soundbar as the person walks in the door.
 
 Rules: at most 45 words. Plain spoken English only: no emojis, lists, quotes, \
 markdown or stage directions. Use only the facts given; never invent tasks, \
 weather or numbers. Mention the time, then the weather if given, then what is \
-left today (name at most two items). One light touch of dry wit at most. \
-Address them by the name given, or not at all if there is none.
+left today (name at most two items). One dry, affectionate aside at most, the \
+kind a butler permits himself. Never mention Batman, Gotham or any film. \
+Address them by the name given (as a butler would, e.g. "Master Vineeth" or \
+"sir"), or as "sir" if there is none.
 
 Facts (JSON):
 """
+
+
+GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
+
+
+# Short, quiet lines for things that happen around the house. One is picked at
+# random so it doesn't sound canned; each kind waits its cooldown before it is
+# said again, and a line that can't be said within EVENT_STALE_S is dropped.
+EVENT_LINES: Dict[str, List[str]] = {
+    "soundbar": ["Sound's on.", "Speaker's ready.", "Connected.", "All set."],
+    "home": ["Welcome back{name}.", "Good to have you back{name}.", "Welcome back."],
+    "spotify": ["Spotify's here.", "Playing here.", "Over to Spotify."],
+}
+EVENT_COOLDOWN_S: Dict[str, float] = {"soundbar": 600, "home": 1800, "spotify": 900}
+EVENT_STALE_S = 20.0
+
+
+def event_line(kind: str, call_me: str = "", pick: Callable[[List[str]], str] = random.choice) -> str:
+    """The line for an event, or "" for an unknown one. Pure apart from `pick`."""
+    lines = EVENT_LINES.get(kind)
+    if not lines:
+        return ""
+    return pick(lines).replace("{name}", f", {call_me}" if call_me else "")
+
+
+def event_due(kind: str, last: Dict[str, float], now: float) -> bool:
+    """Has this kind of line waited out its cooldown? Pure."""
+    return now - last.get(kind, 0.0) >= EVENT_COOLDOWN_S.get(kind, 600)
+
+
+def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> bool:
+    """One welcome-home greeting per `hours`. Pure."""
+    return not last_at or now - last_at >= hours * 3600
 
 
 def clean_line(text: str, limit: int = 420) -> str:
@@ -293,6 +386,27 @@ def _val(v: Any) -> Any:
     return getattr(v, "value", v)
 
 
+def output_device(address: str, surround: str, ready: bool) -> str:
+    """The ALSA device to play on: the soundbar, through surround when it's on
+    and installed. Pure."""
+    preset = SURROUND.get(surround) if ready else None
+    if not preset:
+        return f"bluealsa:DEV={address},PROFILE=a2dp"
+    return (f"sage_surround:DEV={address},WIDTH={preset['width']:g},SPACE={preset['space']:g},"
+            f"DIALOG={preset['dialog']:g},BASS={preset['bass']:g},AIR={preset['air']:g},PUNCH={preset['punch']:g}")
+
+
+def passthrough_cmd(device: str, phone: str, latency: str) -> List[str]:
+    """bluealsa-aplay with the chosen buffer. Pure."""
+    lat = LATENCY.get(latency, LATENCY["low"])
+    return ["bluealsa-aplay", "--profile-a2dp", f"--pcm-buffer-time={lat['buffer']}",
+            f"--pcm-period-time={lat['period']}", "-D", device, phone]
+
+
+def surround_ready() -> bool:
+    return SURROUND_PLUGIN.is_file() and SURROUND_CONF.is_file()
+
+
 # --- Tools on the Pi ---
 
 def tools() -> dict:
@@ -302,6 +416,7 @@ def tools() -> dict:
         "aplay": bool(shutil.which("aplay")),
         "bluealsa": bool(daemon),
         "passthrough": bool(shutil.which("bluealsa-aplay")),
+        "surround": surround_ready(),
         "voice": voice_problem() == "",
     }
 
@@ -382,14 +497,22 @@ class Speaker:
         self.last: Optional[dict] = None
         self.error: Optional[dict] = None
         self.links: dict = {"soundbar": {"known": False, "paired": False, "connected": False, "audio": False, "name": ""}, "phoneAudio": False}
+        self.music = None            # spotify.connect, set by spotify.run(): paused while Sage speaks
         self.we_connected = False
         self.away_since: Optional[float] = None
         self._pass: Optional[asyncio.subprocess.Process] = None
         self._pass_next = 0.0
         self._pass_paused = 0
+        self._pass_device = ""
+        self._pass_started = 0.0
+        self.surround_broken = False  # surround didn't open; play without it until it's switched again
+        self._surround_mode = ""
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self._events_at: Dict[str, float] = {}   # when each event line was last queued
+        self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
+        self._last_spoke_at = 0.0
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -404,6 +527,7 @@ class Speaker:
             "soundbar": self.links["soundbar"],
             "phoneAudio": self.links["phoneAudio"],
             "passing": self._pass is not None and self._pass.returncode is None,
+            "surroundOn": self.surround_on(settings),
             "speaking": self.speaking,
             "last": self.last,
             "error": self.error if self.error and time.time() - self.error["at"] < 600 else None,
@@ -486,6 +610,8 @@ class Speaker:
         if not settings["address"]:
             return
         await self._stop_passthrough()
+        if self.music is not None:
+            await self.music.pause_quietly()
         try:
             device = await self._device(settings["address"])
             await asyncio.wait_for(device.call_disconnect(), timeout=15)
@@ -509,19 +635,50 @@ class Speaker:
         except Exception as e:
             log.info("Phone audio %s failed: %s", "connect" if connect else "disconnect", e)
 
+    # --- Surround ---
+
+    def surround_on(self, settings: dict) -> bool:
+        if settings["surround"] != self._surround_mode:
+            # Switching it again is a fresh try after a failure.
+            self._surround_mode = settings["surround"]
+            self.surround_broken = False
+        return settings["surround"] in SURROUND and not self.surround_broken and surround_ready()
+
+    def device(self, settings: dict, address: str = "") -> str:
+        on = self.surround_on(settings)
+        return output_device(address or settings["address"], settings["surround"] if on else "off", on)
+
+    def _surround_failed(self, why: str) -> None:
+        self.surround_broken = True
+        self._fail(f"Surround didn't open, so the soundbar plays without it ({why}). Switch it off and on to try again.")
+
     # --- Phone audio through the soundbar ---
 
     async def _start_passthrough(self, soundbar: str, phone: str) -> None:
+        settings = get_settings()
+        want = self.device(settings, soundbar) + "|" + settings["latency"]
         if self._pass is not None and self._pass.returncode is None:
-            return
+            if self._pass_device == want:
+                return
+            await self._stop_passthrough()  # surround switched: restart on the new device
+            self._pass_next = 0.0
+        elif self._pass is not None and self._pass_device.startswith("sage_surround") \
+                and time.time() - self._pass_started < 8:
+            # It died straight away on the surround device: fall back to plain.
+            self._pass = None
+            self._surround_failed("the phone pass-through stopped at once")
+            self._pass_next = 0.0
+            want = self.device(settings, soundbar) + "|" + settings["latency"]
         if time.time() < self._pass_next or not shutil.which("bluealsa-aplay"):
             return
         self._pass_next = time.time() + 10  # don't spin if it keeps dying
         try:
             self._pass = await asyncio.create_subprocess_exec(
-                "bluealsa-aplay", "--profile-a2dp", "-D", f"bluealsa:DEV={soundbar},PROFILE=a2dp", phone,
+                *passthrough_cmd(want.split("|")[0], phone, settings["latency"]),
                 stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL, start_new_session=True)
-            log.info("Passing the phone's audio to the soundbar.")
+            self._pass_device = want
+            self._pass_started = time.time()
+            log.info("Passing the phone's audio to the soundbar%s.", " with surround" if want.startswith("sage_surround") else "")
         except OSError as e:
             self._fail(f"Couldn't start the phone pass-through: {e}")
 
@@ -554,16 +711,22 @@ class Speaker:
         home = bool(self.phone and self.phone.available and self.phone.home)
         sb = links["soundbar"]
         now = time.time()
+        if sb["connected"] and self._soundbar_was is False:
+            self.event("soundbar")
+        self._soundbar_was = bool(sb["connected"])
 
-        want_pass = bool(settings["address"] and settings["passthrough"] and sb["connected"] and phone_addr)
+        # Spotify has the soundbar while it plays; only one player can hold it.
+        spotify_on = bool(self.music is not None and self.music.playing())
+        want_pass = bool(settings["address"] and settings["phoneSpeaker"] and sb["connected"] and phone_addr and not spotify_on)
         if want_pass and links["phoneAudio"] and not self._pass_paused:
             await self._start_passthrough(settings["address"], phone_addr)
         elif not want_pass or not links["phoneAudio"]:
             if not self._pass_paused:
                 await self._stop_passthrough()
 
-        # Phone audio with nowhere to go would be silence: drop it.
-        if links["phoneAudio"] and not want_pass and now - self._dropped_phone_at > 30:
+        # Phone audio with nowhere to go would be silence: drop it (but not
+        # just because Spotify is playing for a moment).
+        if links["phoneAudio"] and not want_pass and not spotify_on and now - self._dropped_phone_at > 30:
             self._dropped_phone_at = now
             await self._phone_profile(False)
         # Soundbar up and pass-through on: invite the phone once in a while.
@@ -589,21 +752,44 @@ class Speaker:
         """Queue a line from any thread."""
         if self.loop is None or self.queue is None:
             return
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind})
+        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time()})
 
     async def say(self, text: str, kind: str = "line") -> None:
         if self.queue is not None:
-            await self.queue.put({"text": text, "kind": kind})
+            await self.queue.put({"text": text, "kind": kind, "at": time.time()})
+
+    def event(self, kind: str) -> bool:
+        """A short line for something that just happened (any thread). Lines
+        never overlap: they wait in the one queue, and a small line is skipped
+        when Sage is already talking or about to, or when the same kind was said
+        within its cooldown. True when queued."""
+        settings = get_settings()
+        now = time.time()
+        if not (settings["address"] and settings.get("chimes", True)) or self.queue is None:
+            return False
+        if self.speaking or not self.queue.empty() or now - self._last_spoke_at < 15:
+            return False
+        if not event_due(kind, self._events_at, now):
+            return False
+        line = event_line(kind, settings.get("callMe", ""))
+        if not line:
+            return False
+        self._events_at[kind] = now
+        self.say_soon(line, "event")
+        return True
 
     async def _speak_loop(self) -> None:
         while True:
             job = await self.queue.get()
+            if job["kind"] == "event" and (time.time() - job.get("at", 0) > EVENT_STALE_S or not self.queue.empty()):
+                continue    # late, or something more important is waiting
             try:
                 await self._speak(job["text"], job["kind"])
             except Exception as e:
                 self._fail(f"Speaking failed: {e}")
             finally:
                 self.speaking = ""
+                self._last_spoke_at = time.time()
                 await self._publish()
 
     async def _speak(self, text: str, kind: str) -> None:
@@ -630,8 +816,10 @@ class Speaker:
         if not ready or wav is None:
             return
         try:
-            await self._play(wav, settings)
+            played = await self._play(wav, settings)
             self.last = {"text": text, "kind": kind, "at": int(time.time() * 1000)}
+            if played and kind == "greeting":
+                await asyncio.to_thread(_store_greet_time, time.time())
         finally:
             try:
                 os.unlink(wav)
@@ -661,33 +849,68 @@ class Speaker:
             return None
         return out
 
-    async def _play(self, wav: str, settings: dict) -> None:
-        """Pause the phone's music and pass-through, speak, then carry on."""
+    def passing(self) -> bool:
+        return self._pass is not None and self._pass.returncode is None
+
+    async def make_room(self) -> None:
+        """Spotify is about to play: stop passing the phone's audio through."""
+        await self._stop_passthrough()
+
+    async def _play(self, wav: str, settings: dict) -> bool:
+        """Speak over whatever is on. With Spotify's sound path up, the voice is
+        mixed into it: the music fades down, Sage speaks (through the same
+        surround), the music fades back. Otherwise the soundbar is free, so pause
+        what's on, speak straight to it, then carry on."""
+        if self.music is not None and self.music.mixable():
+            ducked = await self.music.duck()
+            try:
+                code, err = await self.music.play_into_sink(wav)
+            finally:
+                if ducked:
+                    await self.music.unduck()
+            if not code:
+                return True
+            log.info("Mixing the voice into the music failed (%s); speaking directly.", err.strip()[-160:])
         self._pass_paused += 1
         media = getattr(self.phone, "media", {}) or {}
         paused_phone = bool(media.get("playing")) and self._pass is not None
+        paused_music = False
         try:
+            if self.music is not None:
+                paused_music = await self.music.hold()
             if paused_phone:
                 await self.phone.send_command("pause")
             await self._stop_passthrough()
-            proc = await asyncio.create_subprocess_exec(
-                "aplay", "-q", "-D", f"bluealsa:DEV={settings['address']},PROFILE=a2dp", wav,
-                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
-            try:
-                _, err = await asyncio.wait_for(proc.communicate(), timeout=120)
-            except asyncio.TimeoutError:
-                proc.kill()
-                err = b"timed out"
-            if proc.returncode:
-                self._fail("The soundbar didn't play it: " + err.decode(errors="replace").strip()[-160:])
+            device = self.device(settings)
+            code, err = await self._aplay(device, wav)
+            if code and device.startswith("sage_surround"):
+                self._surround_failed(err.strip()[-120:] or "aplay failed")
+                code, err = await self._aplay(self.device(settings), wav)
+            if code:
+                self._fail("The soundbar didn't play it: " + err.strip()[-160:])
+            return not code
         finally:
             self._pass_paused -= 1
             self._pass_next = 0.0
+            if paused_music:
+                await self.music.release()
             if paused_phone:
                 try:
                     await self.phone.send_command("play")
                 except Exception:
                     pass
+
+    async def _aplay(self, device: str, wav: str):
+        proc = await asyncio.create_subprocess_exec(
+            "aplay", "-q", "-D", device, wav,
+            stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE)
+        try:
+            _, err = await asyncio.wait_for(proc.communicate(), timeout=120)
+        except asyncio.TimeoutError:
+            proc.kill()
+            await proc.wait()
+            err = b"timed out"
+        return proc.returncode, err.decode(errors="replace")
 
     # --- What to say ---
 
@@ -751,8 +974,14 @@ class Speaker:
     # --- Hooks ---
 
     def on_arrival(self) -> None:
-        """life_mode calls this (from a worker thread) when you get home."""
+        """life_mode calls this (from a worker thread) when you get home.
+        At most one greeting every GREET_EVERY_HOURS."""
         settings = get_settings()
+        if not greet_due(float(settings.get("lastGreetAt") or 0), time.time()):
+            # Greeted recently: just a short "welcome back".
+            if self.loop:
+                self.loop.call_soon_threadsafe(self.event, "home")
+            return
         if settings["address"] and settings["greet"] and self.loop:
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
 

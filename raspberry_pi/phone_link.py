@@ -90,6 +90,18 @@ HINTS = {
 }
 
 
+# Set by db_server: True while music streams to the soundbar. The Pi has one
+# radio; reconnect attempts to the phone then cost audible stutters.
+audio_busy: Callable[[], bool] = lambda: False
+
+
+def ble_retry_gap(tries: int, busy: bool = False) -> float:
+    """Seconds before the next BLE connect try: 30 s doubling to 10 min, and
+    never more often than every 10 min while music plays. Pure."""
+    gap = min(600.0, 30.0 * (2 ** max(0, tries - 1)))
+    return max(gap, 600.0) if busy and tries >= 1 else gap
+
+
 def hint_for(error: str) -> str:
     low = error.lower()
     return next((h for key, h in HINTS.items() if key in low), "")
@@ -353,7 +365,9 @@ class PhoneLink:
             # Poll faster while scanning, pairing or connecting so the page keeps up.
             # Also fast while waiting for the phone's BLE link, which can be up
             # for only a few seconds before the phone drops it again.
-            waiting_for_ble = self.link["classic"] and not self.link["ble"]
+            # Only for the first few tries: after that the phone is refusing, and
+            # polling BlueZ every 1.5 s just keeps the radio busy.
+            waiting_for_ble = self.link["classic"] and not self.link["ble"] and self._ble_tries < 3
             await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") or waiting_for_ble else 5)
 
     async def _objects(self) -> dict:
@@ -432,10 +446,11 @@ class PhoneLink:
         connected for classic audio doesn't open its BLE link on its own after
         Sage restarts, and without it there are no songs or notifications.
         BlueZ 5.78+ takes PreferredBearer=le for this; older BlueZ connects
-        whatever is missing. Tried every 30 s, so a phone that refuses isn't
-        hammered."""
+        whatever is missing. Each failed try waits longer (ble_retry_gap):
+        a Connect on the one radio stalls the soundbar's music for a moment,
+        and trying every 30 s was the stutter you heard mid-song."""
         now = time.time()
-        if now - self._ble_last_try < 30:
+        if now - self._ble_last_try < ble_retry_gap(self._ble_tries, audio_busy()):
             return
         self._ble_last_try = now
         self._ble_tries += 1

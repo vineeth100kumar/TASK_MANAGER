@@ -22,7 +22,8 @@
 #      checkout path. Stops and disables the old sage-backend, lumo and
 #      lumo-obex units: Sage drives the desk clock itself now.
 #   5. Sets up Bluetooth audio with bluez-alsa, for Sage's soundbar speaker
-#      (speaker.py). Run once with --only audio,server,web.
+#      (speaker.py), and Spotify Soloist so the Pi is a Spotify Connect
+#      speaker on that soundbar (spotify.py). Run once with --only audio,server,web.
 
 set -euo pipefail
 
@@ -192,8 +193,10 @@ part_audio() {
   step "Bluetooth audio through bluez-alsa (Sage's soundbar speaker)"
   # PipeWire/WirePlumber stays out of Bluetooth (headless Pi, no desktop
   # session); bluez-alsa owns it instead: the Pi plays to a soundbar (A2DP
-  # source) and can take the phone's audio to pass on (A2DP sink). speaker.py
-  # drops the phone's audio link whenever there's no soundbar to play it on.
+  # source) and, when "Be a speaker for my phone" is on, takes the phone's
+  # audio to pass on (A2DP sink). speaker.py drops the phone's audio link
+  # whenever that's off or there's no soundbar to play it on. Spotify Connect
+  # (below) is the low-lag way to play music.
   # Both spellings: WirePlumber 0.4 (Bookworm) reads Lua, 0.5 reads .conf.
   HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
   as_user mkdir -p "$HOME_DIR/.config/wireplumber/bluetooth.lua.d" "$HOME_DIR/.config/wireplumber/wireplumber.conf.d"
@@ -207,14 +210,27 @@ part_audio() {
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    # Real-time priority: bluez-alsa encodes the soundbar's audio, and a late
+    # packet is a stutter you hear.
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
     # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload
-    systemctl enable --now "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
+    systemctl enable "$UNIT" >/dev/null 2>&1; systemctl restart "$UNIT" >/dev/null 2>&1 || echo "Couldn't start $UNIT; see: journalctl -u $UNIT -n 30"
   else
     echo "bluez-alsa's daemon wasn't found after install; the soundbar speaker won't work."
   fi
+  # Virtual surround for the soundbar (Settings > Bluetooth > Surround): a small
+  # LADSPA plugin built here, and the ALSA device speaker.py plays through.
+  apt-get install -y -qq gcc libc6-dev >/dev/null 2>&1 || true
+  mkdir -p /usr/local/lib/sage/ladspa /etc/alsa/conf.d
+  if gcc -O2 -fPIC -shared -o /usr/local/lib/sage/ladspa/sage_surround.so.new "$REPO/raspberry_pi/audio/sage_surround.c" -lm; then
+    mv -f /usr/local/lib/sage/ladspa/sage_surround.so.new /usr/local/lib/sage/ladspa/sage_surround.so
+    install -m 644 "$REPO/deploy/alsa/60-sage-surround.conf" /etc/alsa/conf.d/60-sage-surround.conf
+  else
+    echo "The surround plugin didn't build, so Surround stays off. Try: sudo apt-get install gcc libc6-dev"
+  fi
+  install_spotify
   # Sage's Wi-Fi switch (Settings > Bluetooth): with Ethernet, Wi-Fi off frees the
   # radio for Bluetooth audio. Only these two exact commands.
   NMCLI="$(command -v nmcli || echo /usr/bin/nmcli)"
@@ -223,6 +239,49 @@ part_audio() {
   if visudo -cf /etc/sudoers.d/sage-wifi.tmp >/dev/null; then mv /etc/sudoers.d/sage-wifi.tmp /etc/sudoers.d/sage-wifi; else rm -f /etc/sudoers.d/sage-wifi.tmp; fi
   # The Sage user talks to bluez-alsa over D-Bus; its policy allows the audio group.
   usermod -aG audio,bluetooth "$RUN_AS" 2>/dev/null || true
+}
+
+# Spotify (spotify.py): Spotify Soloist, Spotify's own player for headless
+# devices. Spotify refuses the audio key to open-source players, so we use the
+# official binary instead. It can't be redistributed, so it is downloaded from
+# Spotify at install time. You make a free Soloist key (Premium account) and
+# paste it into Sage; no developer app. Soloist plays through PipeWire, so we
+# set PipeWire up for the Sage user and Sage routes it to the soundbar.
+install_spotify() {
+  step "Spotify Soloist (official Spotify player)"
+  apt-get install -y -qq curl ca-certificates pipewire pipewire-pulse wireplumber \
+    dbus-user-session pulseaudio-utils libpulse0 >/dev/null 2>&1 \
+    || echo "Some audio packages didn't install; Spotify may not play. Try: sudo apt-get install pipewire pipewire-pulse wireplumber"
+  local arch
+  case "$(uname -m)" in
+    aarch64|arm64) arch=arm64 ;;
+    armv7l|armhf) arch=arm32 ;;
+    x86_64|amd64) arch=x86_64 ;;
+    *) echo "No Spotify Soloist build for this Pi ($(uname -m)), so Spotify stays off."; return 0 ;;
+  esac
+  # Soloist builds expire 90 days after they're built, so always fetch the
+  # current one (the download is small). Keep the old binary if the fetch fails.
+  local tmp; tmp="$(mktemp -d)"
+  if curl --fail --location --retry 3 -o "$tmp/soloist.tar.gz" \
+       "https://soloist-builds.spotifycdn.com/soloist_release_$arch.tar.gz" \
+     && tar -xzf "$tmp/soloist.tar.gz" -C "$tmp" \
+     && test -x "$tmp/soloist"; then
+    install -m 755 "$tmp/soloist" /usr/local/bin/soloist
+    echo "Installed Spotify Soloist ($arch): $(/usr/local/bin/soloist --version 2>/dev/null | head -1 || echo ok)."
+  elif [ -x /usr/local/bin/soloist ]; then
+    echo "Couldn't fetch Soloist; keeping the one already installed."
+  else
+    echo "Soloist didn't install, so Spotify stays off (check the Pi's internet)."
+  fi
+  rm -rf "$tmp"
+  # PipeWire has to run in the Sage user's session even with no one logged in.
+  loginctl enable-linger "$RUN_AS" >/dev/null 2>&1 || true
+  HOME_DIR="$(getent passwd "$RUN_AS" | cut -d: -f6)"
+  as_user mkdir -p "$HOME_DIR/.config/pipewire/pipewire.conf.d" \
+    "$HOME_DIR/.local/share/sage-soloist" "$HOME_DIR/.cache/sage-soloist"
+  as_user env XDG_RUNTIME_DIR="/run/user/$(id -u "$RUN_AS")" \
+    systemctl --user enable --now pipewire pipewire-pulse wireplumber >/dev/null 2>&1 || true
+  usermod -aG audio "$RUN_AS" 2>/dev/null || true
 }
 
 part_check() {

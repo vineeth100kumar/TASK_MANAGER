@@ -21,6 +21,7 @@ const MAX_RETRY_MS = 60000;
 export const PHONE_EVENT = 'sage:phone';
 export const BLUETOOTH_EVENT = 'sage:bluetooth';
 export const SPEAKER_EVENT = 'sage:speaker';
+export const SPOTIFY_EVENT = 'sage:spotify';
 
 export class LiveStream {
   private socket: WebSocket | null = null;
@@ -93,6 +94,9 @@ export class LiveStream {
       } else if (event?.type === 'SPEAKER_STATE') {
         // The soundbar card in Bluetooth settings (see SpeakerCard).
         window.dispatchEvent(new CustomEvent(SPEAKER_EVENT, { detail: event }));
+      } else if (event?.type === 'SPOTIFY_STATE') {
+        // The Spotify card in Bluetooth settings (see SpotifyCard).
+        window.dispatchEvent(new CustomEvent(SPOTIFY_EVENT, { detail: event }));
       }
     };
     socket.onclose = () => {

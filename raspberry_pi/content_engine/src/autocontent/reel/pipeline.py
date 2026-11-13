@@ -14,9 +14,35 @@ from . import captions as caps
 from . import compose, timing, voice
 from . import layers as layers_mod
 from .layers import extract_scene
+from .objects import SceneObject, render_object_svg, get_default_anim, obj_position, OBJ_ANIMS
 from .script import ReelScript, parse_reel
 
 PosterAt = 1.2   # seconds into the reel for the poster picture: the cover once its headline is up
+
+
+def _render_svg_to_png(page, svg_str: str, obj, out_path: Path, canvas_w: int, canvas_h: int) -> None:
+    """Render an SVG string to a transparent PNG using the open Playwright page."""
+    from .objects import obj_position
+    ox, oy = obj_position(obj, canvas_w, canvas_h)
+    w, h = obj.size, obj.size
+    # for non-square SVGs (like underline), parse actual dimensions
+    import re
+    wm = re.search(r'width="(\d+)"', svg_str)
+    hm = re.search(r'height="(\d+)"', svg_str)
+    if wm:
+        w = int(wm.group(1))
+    if hm:
+        h = int(hm.group(1))
+    html = f"""<!DOCTYPE html><html><head><style>
+    html, body {{ margin: 0; padding: 0; background: transparent; width: {w}px; height: {h}px; overflow: hidden; }}
+    svg {{ display: block; }}
+    </style></head><body>{svg_str}</body></html>"""
+    page.set_content(html, wait_until="domcontentloaded")
+    page.set_viewport_size({"width": max(2, w), "height": max(2, h)})
+    page.screenshot(path=str(out_path), clip={"x": 0, "y": 0, "width": w, "height": h},
+                    omit_background=True, full_page=False)
+    # restore viewport for next slide
+    page.set_viewport_size({"width": canvas_w, "height": canvas_h})
 
 
 class ReelError(Exception):
@@ -199,6 +225,25 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     seq=step, decos=ly.decos, word_rgb=ly.word_rgb,
                     backing=Image.open(ly.backing).convert("RGBA") if ly.backing else None,
                     zoom=picture))
+            # --- overlay objects ---
+            sc_objects = sc.objects if hasattr(sc, 'objects') else []
+            if sc_objects:
+                obj_dir = work / "objects"
+                obj_dir.mkdir(exist_ok=True)
+                for oi, obj in enumerate(sc_objects):
+                    svg_str = render_object_svg(obj, theme=sl.theme,
+                                                accent=brand.get("accent_hex"))
+                    obj_path = obj_dir / f"s{i + 1:02d}_obj{oi + 1:02d}.png"
+                    _render_svg_to_png(page, svg_str, obj, obj_path, compose.W, compose.H)
+                    ox, oy = obj_position(obj, compose.W, compose.H)
+                    with Image.open(obj_path) as oim:
+                        ow, oh = oim.size
+                    anim = obj.anim or get_default_anim(obj.kind)
+                    obj_arrive = t0 + 0.25 + oi * 0.18
+                    clip.objects.append(compose.ObjectPiece(
+                        image=Image.open(obj_path).convert("RGBA"),
+                        box=(ox, oy, ow, oh), at=obj_arrive, anim=anim,
+                        rotate=obj.rotate))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 

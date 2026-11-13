@@ -988,3 +988,7 @@
 /* Hollow nodes in the project branches graph take the card's colour. */
 :root { --branch-bg: #ffffff; }
 .dark { --branch-bg: #1c1c1e; }
+
+/* Safety net: any native dropdown list that does slip in stays readable in both themes. */
+select, select option, select optgroup { background-color: #ffffff; color: #111827; }
+html.dark select, html.dark select option, html.dark select optgroup { background-color: #1c1c1e; color: #f5f5f7; }
