@@ -1849,7 +1849,7 @@ async def bluetooth_device(address: str, action: str):
 life_mode.on_arrival = speaker.speaker.on_arrival
 life_mode.on_leave = speaker.speaker.on_leave
 # Phone drops off Bluetooth = you've left, unless the 5 minute delay is switched on.
-phone_link.away_after = lambda: 0 if speaker.get_settings().get("leaveInstantly", True) else phone_link.AWAY_AFTER
+phone_link.away_after = lambda: phone_link.QUICK_AWAY_AFTER if speaker.get_settings().get("leaveInstantly", True) else phone_link.AWAY_AFTER
 # One Bluetooth radio: while music streams to the soundbar, the phone link
 # backs off its reconnect tries (each one stalled the music for a moment).
 phone_link.audio_busy = lambda: spotify.connect.playing() or speaker.speaker.passing()

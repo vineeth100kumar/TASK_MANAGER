@@ -390,8 +390,24 @@ def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> b
 
 
 DAILY_LINES: Dict[str, List[str]] = {
-    "welcome": ["Welcome back{name}.", "Good to have you back{name}.", "Welcome back. All is in order."],
-    "goodbye": ["Goodbye{name}.", "Off you go{name}. I'll mind the house.", "See you soon{name}.", "Take care out there{name}."],
+    "welcome": [
+        "Welcome back{name}. I kept the house exactly as you left it. Mostly.",
+        "Ah, you're back{name}. The place felt rather quiet without you.",
+        "Welcome home{name}. Everything is in order, and I have been entirely well behaved.",
+        "Good to see you again{name}. I took the liberty of keeping everything warm.",
+        "There you are{name}. I was beginning to talk to the furniture.",
+        "Welcome back{name}. All systems are humming, and so, I confess, am I.",
+        "Back so soon{name}? Splendid. The house is yours.",
+    ],
+    "goodbye": [
+        "Off you go{name}. I shall mind the house, and not touch a thing.",
+        "Safe travels{name}. I'll keep the lights on, figuratively speaking.",
+        "Goodbye for now{name}. Do try to come back in one piece.",
+        "Until later{name}. I shall be here, being quietly magnificent.",
+        "Take care out there{name}. The house is in excellent hands. Mine.",
+        "Leaving already{name}? Very well. I'll keep an eye on everything.",
+        "Mind how you go{name}. I'll have everything ready for your return.",
+    ],
 }
 
 
@@ -673,6 +689,7 @@ class Speaker:
         self._last_sent = ""
         self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
         self._last_welcome_at = 0.0
+        self._last_goodbye_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
         self._daily_try = 0.0
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
@@ -1182,7 +1199,7 @@ class Speaker:
         now = time.time()
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
-        elif now - self._last_welcome_at >= 120:    # a Bluetooth flap must not repeat it
+        elif now - self._last_welcome_at >= 600:    # a Bluetooth flap must not repeat it
             self._last_welcome_at = now
             text, cache = self._daily("welcome", settings)
             self.say_soon(text, "welcome", cache)
@@ -1190,7 +1207,9 @@ class Speaker:
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""
         settings = get_settings()
-        if has_output(settings) and settings["goodbye"] and self.loop:
+        now = time.time()
+        if has_output(settings) and settings["goodbye"] and self.loop and now - self._last_goodbye_at >= 600:
+            self._last_goodbye_at = now
             text, cache = self._daily("goodbye", settings)
             self.say_soon(text, "goodbye", cache)
 
