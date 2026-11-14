@@ -298,6 +298,18 @@ class GreetGapTests(unittest.TestCase):
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(h, "d"))
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(f, "e"))
 
+    def test_daily_line_is_kept_in_a_text_file(self):
+        import asyncio, os, tempfile
+        d = tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"SAGE_SPEECH_CACHE": d}):
+            sp = speaker.Speaker()
+            settings = {**speaker.get_settings(), "witty": False, "callMe": "sir"}
+            text, cache = asyncio.run(sp._daily("welcome", settings))
+            self.assertTrue(text)
+            again, cache2 = asyncio.run(sp._daily("welcome", settings))
+            self.assertEqual((text, cache), (again, cache2))
+            self.assertTrue(any(f.endswith(".txt") for f in os.listdir(d)))
+
     def test_leave_instantly_default_and_toggle(self):
         self.assertTrue(speaker.get_settings()["leaveInstantly"])
         self.assertFalse(speaker.clean_settings({"leaveInstantly": False})["leaveInstantly"])
