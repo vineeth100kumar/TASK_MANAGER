@@ -134,6 +134,14 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           </label>
           <Switch on={set.leaveInstantly !== false} onChange={on => save({ leaveInstantly: on })} label="Count me as away quickly"
             hint="On: you count as away after the phone has been off Bluetooth for 30 seconds, so a brief blip is ignored. Off: wait 5 minutes." />
+          {!!s.herald?.length && (
+            <div className="rounded-xl bg-black/[0.03] dark:bg-white/5 px-3 py-2 text-[11px] text-gray-500 space-y-0.5">
+              <span className="block font-semibold text-gray-600 dark:text-gray-300">What Herald did lately</span>
+              {[...s.herald].reverse().slice(0, 5).map(h => (
+                <span key={h.at} className="block">{new Date(h.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })} · {h.event}: {h.action}{h.why ? ` (${h.why})` : ''}</span>
+              ))}
+            </div>
+          )}
           <Switch on={set.goodbye !== false} onChange={on => save({ goodbye: on })} label="Herald: say goodbye when I leave"
             hint="Herald plays a soft chime before everything it says. Welcome-back and goodbye lines are made once a day and kept." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"

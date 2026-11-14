@@ -308,6 +308,8 @@ class PhoneLink:
             self.device_name = name or self.device_name
         home = connected or (self.last_seen and now - self.last_seen < away_after())
         if changed or bool(home) != self.home:
+            if bool(home) != self.home:
+                log.info("Presence: you are now %s (phone %s)", "home" if home else "away", "connected" if connected else "not connected")
             self.home = bool(home)
             await self._emit_status()
 
