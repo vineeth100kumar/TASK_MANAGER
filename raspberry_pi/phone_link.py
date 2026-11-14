@@ -31,8 +31,10 @@ log = logging.getLogger("phone_link")
 ENABLED = os.getenv("SAGE_PHONE_LINK", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEVICE_NAME = os.getenv("SAGE_PHONE_LINK_NAME", "Sage Companion")
 AWAY_AFTER = int(os.getenv("SAGE_PHONE_AWAY_AFTER", "300"))
+# The quick setting: a Bluetooth blip shorter than this is not "you left".
+QUICK_AWAY_AFTER = int(os.getenv("SAGE_PHONE_QUICK_AWAY", "90"))
 # Seconds the phone may stay disconnected before you count as away. db_server
-# swaps this for the speaker's "leave instantly" switch (0 = the moment it drops).
+# swaps this for the speaker card's "count me as away quickly" switch (QUICK_AWAY_AFTER or AWAY_AFTER).
 away_after: Callable[[], float] = lambda: AWAY_AFTER
 # Bundle ids whose notifications are passed on. Empty means every app.
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}

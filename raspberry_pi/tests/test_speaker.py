@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 os.environ.setdefault("SAGE_DB_PATH", str(Path(tempfile.mkdtemp()) / "test.db"))
@@ -277,7 +278,10 @@ class PassThroughOptionTests(unittest.TestCase):
         self.assertFalse(speaker.DEFAULTS["phoneSpeaker"])
         # an old saved "passthrough: true" no longer turns it on
         self.assertNotIn("passthrough", speaker.DEFAULTS)
-        self.assertTrue(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
+        # The Pi is only the phone's notification companion unless SAGE_PHONE_SPEAKER=1.
+        self.assertFalse(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
+        with mock.patch.object(speaker, "PHONE_SPEAKER_ALLOWED", True):
+            self.assertTrue(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
 
 
 class GreetGapTests(unittest.TestCase):
@@ -293,6 +297,18 @@ class GreetGapTests(unittest.TestCase):
         self.assertEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(g, "d"))
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(h, "d"))
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(f, "e"))
+
+    def test_daily_line_is_kept_in_a_text_file(self):
+        import asyncio, os, tempfile
+        d = tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"SAGE_SPEECH_CACHE": d}):
+            sp = speaker.Speaker()
+            settings = {**speaker.get_settings(), "witty": False, "callMe": "sir"}
+            text, cache = asyncio.run(sp._daily("welcome", settings))
+            self.assertTrue(text)
+            again, cache2 = asyncio.run(sp._daily("welcome", settings))
+            self.assertEqual((text, cache), (again, cache2))
+            self.assertTrue(any(f.endswith(".txt") for f in os.listdir(d)))
 
     def test_leave_instantly_default_and_toggle(self):
         self.assertTrue(speaker.get_settings()["leaveInstantly"])

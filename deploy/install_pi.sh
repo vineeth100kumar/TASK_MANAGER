@@ -209,13 +209,17 @@ part_audio() {
 
   apt-get install -y -qq bluez-alsa-utils libasound2-plugin-bluez alsa-utils ffmpeg >/dev/null 2>&1 \
     || { echo "bluez-alsa didn't install, so the soundbar speaker is off. Try: sudo apt-get install bluez-alsa-utils libasound2-plugin-bluez"; return 0; }
+  # The Pi only plays TO a soundbar (a2dp-source). Offering a speaker (a2dp-sink)
+  # to the phone made the phone treat the Pi as an audio device and disturbed the
+  # notification companion, so it is off unless you run with SAGE_PHONE_SPEAKER=1.
+  PHONE_SINK=""; [ "${SAGE_PHONE_SPEAKER:-0}" = "1" ] && PHONE_SINK=" -p a2dp-sink"
   DAEMON="$(command -v bluealsad || command -v bluealsa || true)"
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
     # Real-time priority: bluez-alsa encodes the soundbar's audio, and a late
     # packet is a stutter you hear.
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source -p a2dp-sink\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source${PHONE_SINK}\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
     # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload

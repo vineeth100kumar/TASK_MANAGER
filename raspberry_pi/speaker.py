@@ -73,6 +73,10 @@ ADDRESS = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
 # Kokoro's voices that suit a butler; bm_george is the default (British, male).
 VOICES = ["bm_george", "bm_lewis", "bm_daniel", "am_michael", "am_adam", "bf_emma", "bf_isabella", "af_heart", "af_bella"]
 
+# The Pi is only the phone's notification companion; "be a speaker for my phone"
+# is off unless SAGE_PHONE_SPEAKER=1 (and install_pi.sh was run with it too).
+PHONE_SPEAKER_ALLOWED = os.getenv("SAGE_PHONE_SPEAKER", "0") == "1"
+
 DEFAULTS: Dict[str, Any] = {
     "address": "",          # the soundbar; empty means the speaker is off
     "name": "",             # its name, for the UI
@@ -144,6 +148,8 @@ def get_settings() -> dict:
     out = dict(DEFAULTS)
     if isinstance(saved, dict):
         out.update({k: v for k, v in saved.items() if k in DEFAULTS})
+    if not PHONE_SPEAKER_ALLOWED:
+        out["phoneSpeaker"] = False
     return out
 
 
@@ -153,6 +159,8 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     for key in ("greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
+    if not PHONE_SPEAKER_ALLOWED:
+        out["phoneSpeaker"] = False
     if "address" in update:
         address = str(update.get("address") or "").strip().upper()
         if address and not ADDRESS.match(address):
@@ -342,6 +350,37 @@ Facts (JSON):
 """
 
 
+_DAILY_PERSONA = """You are the voice of Sage, the AI that runs the person's home, speaking as \
+Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, \
+warm underneath, dry and gently teasing, never stuffy. """
+
+DAILY_PROMPTS = {
+    "welcome": _DAILY_PERSONA + """Write the short line spoken aloud when the person comes back home. \
+It is nice, sweet and a little fun: a warm welcome with one light, affectionate quip.
+
+Rules: 12 to 25 words, one or two sentences. Plain spoken English only: no emojis, \
+lists, quotes, markdown or stage directions. Do not mention tasks, the weather or any \
+numbers. Never mention Batman, Gotham or any film. Use the part of day and weekday \
+if it helps, and address them by the name given (e.g. "Master Vineeth" or "sir"), \
+or as "sir" if there is none.
+
+Facts (JSON):
+""",
+    "goodbye": _DAILY_PERSONA + """Write the short line spoken aloud as the person heads out of the house. \
+It is nice, sweet and a little fun: a fond send-off with one light, affectionate quip \
+about minding the house.
+
+Rules: 12 to 25 words, one or two sentences. Plain spoken English only: no emojis, \
+lists, quotes, markdown or stage directions. Do not mention tasks, the weather or any \
+numbers. Never mention Batman, Gotham or any film. Use the part of day and weekday \
+if it helps, and address them by the name given (e.g. "Master Vineeth" or "sir"), \
+or as "sir" if there is none.
+
+Facts (JSON):
+""",
+}
+
+
 WAKE_PROMPT = GREETING_PROMPT.replace(
     "Write the one greeting spoken aloud on the soundbar as the person walks in the door.",
     "Write the good-morning briefing spoken aloud on the soundbar just after the person switched off their wake-up alarm.",
@@ -382,8 +421,24 @@ def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> b
 
 
 DAILY_LINES: Dict[str, List[str]] = {
-    "welcome": ["Welcome back{name}.", "Good to have you back{name}.", "Welcome back. All is in order."],
-    "goodbye": ["Goodbye{name}.", "Off you go{name}. I'll mind the house.", "See you soon{name}.", "Take care out there{name}."],
+    "welcome": [
+        "Welcome back{name}. I kept the house exactly as you left it. Mostly.",
+        "Ah, you're back{name}. The place felt rather quiet without you.",
+        "Welcome home{name}. Everything is in order, and I have been entirely well behaved.",
+        "Good to see you again{name}. I took the liberty of keeping everything warm.",
+        "There you are{name}. I was beginning to talk to the furniture.",
+        "Welcome back{name}. All systems are humming, and so, I confess, am I.",
+        "Back so soon{name}? Splendid. The house is yours.",
+    ],
+    "goodbye": [
+        "Off you go{name}. I shall mind the house, and not touch a thing.",
+        "Safe travels{name}. I'll keep the lights on, figuratively speaking.",
+        "Goodbye for now{name}. Do try to come back in one piece.",
+        "Until later{name}. I shall be here, being quietly magnificent.",
+        "Take care out there{name}. The house is in excellent hands. Mine.",
+        "Leaving already{name}? Very well. I'll keep an eye on everything.",
+        "Mind how you go{name}. I'll have everything ready for your return.",
+    ],
 }
 
 
@@ -416,7 +471,7 @@ def speech_cache_dir() -> Path:
 
 def speech_cache_path(kind: str, day: str, text: str, settings: dict) -> Path:
     """Where today's line is kept; the name changes with the words or the voice, so a changed setting re-renders. Pure."""
-    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime2".encode()).hexdigest()[:10]
+    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime3".encode()).hexdigest()[:10]
     return speech_cache_dir() / f"{day}-{kind}-{key}.wav"
 
 
@@ -665,6 +720,7 @@ class Speaker:
         self._last_sent = ""
         self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
         self._last_welcome_at = 0.0
+        self._last_goodbye_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
         self._daily_try = 0.0
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
@@ -982,7 +1038,7 @@ class Speaker:
         self.error = None
         await self._publish()
         # Make the speech while the soundbar connects; both take a few seconds.
-        wav_task = asyncio.ensure_future(self._render(text, settings, chime=True, cache=cache))
+        wav_task = asyncio.ensure_future(self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache))
         ready = await self.ensure_connected()
         wav = await wav_task
         if not ready or wav is None:
@@ -999,7 +1055,7 @@ class Speaker:
                 except OSError:
                     pass
 
-    async def _render(self, text: str, settings: dict, chime: bool, cache: Optional[Path] = None) -> Optional[str]:
+    async def _render(self, text: str, settings: dict, chime: str, cache: Optional[Path] = None) -> Optional[str]:
         if cache and cache_ok(cache):
             return str(cache)
         fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav")
@@ -1158,11 +1214,33 @@ class Speaker:
     def _day(self) -> str:
         return self.now().strftime("%Y-%m-%d")
 
-    def _daily(self, kind: str, settings: dict) -> tuple:
-        """Today's (text, cache path) for "welcome" or "goodbye"."""
+    async def _daily(self, kind: str, settings: dict) -> tuple:
+        """Today's (text, cache path) for "welcome" or "goodbye". Groq writes the
+        line once a day in the butler voice; it is kept in a small text file so it
+        stays the same all day. Without Groq, one of the curated lines is used."""
         day = self._day()
-        text = daily_line(kind, day, settings.get("callMe", ""))
+        call_me = settings.get("callMe", "")
+        txt = speech_cache_dir() / f"{day}-{kind}.txt"
+        text = ""
+        try:
+            text = txt.read_text().strip()
+        except OSError:
+            pass
+        if not text:
+            if settings["witty"]:
+                now = self.now()
+                text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me}, DAILY_PROMPTS[kind])
+            text = text or daily_line(kind, day, call_me)
+            try:
+                txt.parent.mkdir(parents=True, exist_ok=True)
+                txt.write_text(text)
+            except OSError as e:
+                log.info("Couldn't keep today's %s line: %s", kind, e)
         return text, speech_cache_path(kind, day, text, settings)
+
+    async def _say_daily(self, kind: str) -> None:
+        text, cache = await self._daily(kind, get_settings())
+        await self.say(text, kind, cache)
 
     def on_arrival(self, away_s: float = 0.0) -> None:
         """life_mode calls this (from a worker thread) whenever the phone comes back.
@@ -1174,24 +1252,24 @@ class Speaker:
         now = time.time()
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
-        elif now - self._last_welcome_at >= 120:    # a Bluetooth flap must not repeat it
+        elif now - self._last_welcome_at >= 600:    # a Bluetooth flap must not repeat it
             self._last_welcome_at = now
-            text, cache = self._daily("welcome", settings)
-            self.say_soon(text, "welcome", cache)
+            asyncio.run_coroutine_threadsafe(self._say_daily("welcome"), self.loop)
 
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""
         settings = get_settings()
-        if has_output(settings) and settings["goodbye"] and self.loop:
-            text, cache = self._daily("goodbye", settings)
-            self.say_soon(text, "goodbye", cache)
+        now = time.time()
+        if has_output(settings) and settings["goodbye"] and self.loop and now - self._last_goodbye_at >= 600:
+            self._last_goodbye_at = now
+            asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
 
     async def ensure_daily(self) -> None:
         """Once a day (and again if a file went missing or the voice changed):
         make today's welcome-back and goodbye lines, and clear older days."""
         settings = get_settings()
         day = self._day()
-        todo = [(k,) + self._daily(k, settings) for k in DAILY_LINES]
+        todo = [(k,) + tuple(await self._daily(k, settings)) for k in DAILY_LINES]
         if all(cache_ok(c) for _, _, c in todo):
             self._daily_day = day
             return
@@ -1199,8 +1277,8 @@ class Speaker:
             return
         for kind, text, cache in todo:
             if not cache_ok(cache) and text:
-                await self._render(text, settings, chime=True, cache=cache)
-        for old in speech_cache_dir().glob("*.wav"):
+                await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
+        for old in list(speech_cache_dir().glob("*.wav")) + list(speech_cache_dir().glob("*.txt")):
             if not old.name.startswith(day):
                 try:
                     old.unlink()
