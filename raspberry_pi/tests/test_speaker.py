@@ -393,11 +393,11 @@ class EventTests(unittest.TestCase):
 class PhoneBackoffTests(unittest.TestCase):
     def test_gap(self):
         import phone_link
-        self.assertEqual(phone_link.ble_retry_gap(1), 30)
-        self.assertEqual(phone_link.ble_retry_gap(3), 120)
-        self.assertEqual(phone_link.ble_retry_gap(20), 600)
+        self.assertEqual(phone_link.ble_retry_gap(1), 5)
+        self.assertEqual(phone_link.ble_retry_gap(3), 20)
+        self.assertEqual(phone_link.ble_retry_gap(20), 60)
         self.assertEqual(phone_link.ble_retry_gap(1, busy=True), 600)
-        self.assertEqual(phone_link.ble_retry_gap(0, busy=True), 30)
+        self.assertEqual(phone_link.ble_retry_gap(0, busy=True), 5)
 
 
 class MixTests(unittest.TestCase):

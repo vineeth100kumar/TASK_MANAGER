@@ -1854,7 +1854,8 @@ phone_link.on_phone_battery = speaker.speaker.on_phone_battery
 phone_link.away_after = lambda: phone_link.QUICK_AWAY_AFTER if speaker.get_settings().get("leaveInstantly", True) else phone_link.AWAY_AFTER
 # One Bluetooth radio: while music streams to the soundbar, the phone link
 # backs off its reconnect tries (each one stalled the music for a moment).
-phone_link.audio_busy = lambda: spotify.connect.playing() or speaker.speaker.passing()
+# Only when that music goes over Bluetooth: with the USB sound card the radio is free.
+phone_link.audio_busy = lambda: (not speaker.uses_usb(speaker.get_settings())) and (spotify.connect.playing() or speaker.speaker.passing())
 notifier.speak_reminder = speaker.speaker.on_reminder
 from desk import desk as desk_wake  # noqa: E402
 desk_wake.on_wake = speaker.speaker.on_wake
