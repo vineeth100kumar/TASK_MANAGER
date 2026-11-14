@@ -471,7 +471,7 @@ def speech_cache_dir() -> Path:
 
 def speech_cache_path(kind: str, day: str, text: str, settings: dict) -> Path:
     """Where today's line is kept; the name changes with the words or the voice, so a changed setting re-renders. Pure."""
-    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime2".encode()).hexdigest()[:10]
+    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime3".encode()).hexdigest()[:10]
     return speech_cache_dir() / f"{day}-{kind}-{key}.wav"
 
 
@@ -1038,7 +1038,7 @@ class Speaker:
         self.error = None
         await self._publish()
         # Make the speech while the soundbar connects; both take a few seconds.
-        wav_task = asyncio.ensure_future(self._render(text, settings, chime=True, cache=cache))
+        wav_task = asyncio.ensure_future(self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache))
         ready = await self.ensure_connected()
         wav = await wav_task
         if not ready or wav is None:
@@ -1055,7 +1055,7 @@ class Speaker:
                 except OSError:
                     pass
 
-    async def _render(self, text: str, settings: dict, chime: bool, cache: Optional[Path] = None) -> Optional[str]:
+    async def _render(self, text: str, settings: dict, chime: str, cache: Optional[Path] = None) -> Optional[str]:
         if cache and cache_ok(cache):
             return str(cache)
         fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav")
@@ -1277,7 +1277,7 @@ class Speaker:
             return
         for kind, text, cache in todo:
             if not cache_ok(cache) and text:
-                await self._render(text, settings, chime=True, cache=cache)
+                await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
         for old in list(speech_cache_dir().glob("*.wav")) + list(speech_cache_dir().glob("*.txt")):
             if not old.name.startswith(day):
                 try:
