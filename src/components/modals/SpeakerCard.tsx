@@ -124,7 +124,16 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
       {active && (
         <div className="space-y-4 pt-3 border-t border-black/5 dark:border-white/5">
           <Switch on={set.greet} onChange={on => save({ greet: on })} label="Welcome me home"
-            hint="When your phone gets home, connect and greet you with the time, the weather and what's left today. At most once every 6 hours." />
+            hint="When your phone gets home after a long trip, greet you with the time, the weather and what's left today. After a shorter trip, just a quick welcome back." />
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Full briefing after being away<span className="block text-xs text-gray-400">Shorter trips get only a short welcome back.</span></span>
+            <select className="rounded-lg border border-black/10 dark:border-white/10 bg-transparent px-2 py-1 text-sm" value={String(set.briefAfterHours ?? 2.5)}
+              onChange={e => save({ briefAfterHours: Number(e.target.value) })}>
+              {[1, 2, 2.5, 3, 4, 6].map(h => <option key={h} value={String(h)}>{h} hours</option>)}
+            </select>
+          </label>
+          <Switch on={set.goodbye !== false} onChange={on => save({ goodbye: on })} label="Say goodbye when I leave"
+            hint="Welcome-back and goodbye lines are made once a day and kept, not made again each time." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
           <Switch on={set.chimes !== false} onChange={on => save({ chimes: on })} label="Little responses"

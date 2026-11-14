@@ -41,6 +41,7 @@ Settings live in the metadata table under "speaker".
 
 import asyncio
 import datetime
+import hashlib
 import json
 import logging
 import os
@@ -76,6 +77,8 @@ DEFAULTS: Dict[str, Any] = {
     "address": "",          # the soundbar; empty means the speaker is off
     "name": "",             # its name, for the UI
     "greet": True,          # say hello when you get home
+    "goodbye": True,        # say a short goodbye when you leave
+    "briefAfterHours": 2.5, # away at least this long = full task briefing; shorter = a short welcome back
     "reminders": True,      # speak reminders while you're home
     "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
     "chimes": True,         # short spoken lines when things happen (soundbar on, back home, Spotify picked)
@@ -146,7 +149,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("greet", "goodbye", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:
@@ -175,6 +178,8 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
             if not HHMM.match(value):
                 raise ValueError("Quiet hours need times like 22:30.")
             out[key] = value
+    if "briefAfterHours" in update:
+        out["briefAfterHours"] = round(max(0.25, min(24.0, float(update["briefAfterHours"]))), 2)
     if "leaveAfterMinutes" in update:
         out["leaveAfterMinutes"] = int(max(0, min(240, int(update["leaveAfterMinutes"]))))
     if "surround" in update:
@@ -373,6 +378,50 @@ def event_due(kind: str, last: Dict[str, float], now: float) -> bool:
 def greet_due(last_at: float, now: float, hours: float = GREET_EVERY_HOURS) -> bool:
     """One welcome-home greeting per `hours`. Pure."""
     return not last_at or now - last_at >= hours * 3600
+
+
+DAILY_LINES: Dict[str, List[str]] = {
+    "welcome": ["Welcome back{name}.", "Good to have you back{name}.", "Welcome back. All is in order."],
+    "goodbye": ["Goodbye{name}.", "Off you go{name}. I'll mind the house.", "See you soon{name}.", "Take care out there{name}."],
+}
+
+
+def brief_due(away_s: float, last_at: float, now: float, hours: float) -> bool:
+    """Full task briefing only after a long absence (`away_s` known), else
+    fall back to `hours` since the last briefing. Pure."""
+    if away_s > 0:
+        return away_s >= hours * 3600
+    return not last_at or now - last_at >= hours * 3600
+
+
+def daily_line(kind: str, day: str, call_me: str = "") -> str:
+    """Today's welcome-back or goodbye line: one pick per day, stable all day. Pure."""
+    lines = DAILY_LINES.get(kind) or []
+    if not lines:
+        return ""
+    pick = lines[int(hashlib.sha1(f"{kind}{day}".encode()).hexdigest(), 16) % len(lines)]
+    return pick.replace("{name}", f", {call_me}" if call_me else "")
+
+
+def speech_cache_dir() -> Path:
+    return Path(os.getenv("SAGE_SPEECH_CACHE") or (Path(DB_PATH).resolve().parent / "speech-cache"))
+
+
+def speech_cache_path(kind: str, day: str, text: str, settings: dict) -> Path:
+    """Where today's line is kept; the name changes with the words or the voice, so a changed setting re-renders. Pure."""
+    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}".encode()).hexdigest()[:10]
+    return speech_cache_dir() / f"{day}-{kind}-{key}.wav"
+
+
+def cache_ok(path: Path) -> bool:
+    """A cached wav is usable when it exists, has a RIFF header and some audio."""
+    try:
+        if path.stat().st_size < 4000:
+            return False
+        with open(path, "rb") as f:
+            return f.read(4) == b"RIFF"
+    except OSError:
+        return False
 
 
 def clean_line(text: str, limit: int = 420) -> str:
@@ -607,6 +656,8 @@ class Speaker:
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self._daily_day = ""      # the day whose welcome/goodbye lines are made
+        self._daily_try = 0.0
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
         self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
         self._last_spoke_at = 0.0
@@ -860,15 +911,15 @@ class Speaker:
 
     # --- Speaking ---
 
-    def say_soon(self, text: str, kind: str = "line") -> None:
+    def say_soon(self, text: str, kind: str = "line", cache: Optional[Path] = None) -> None:
         """Queue a line from any thread."""
         if self.loop is None or self.queue is None:
             return
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time()})
+        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time(), "cache": cache})
 
-    async def say(self, text: str, kind: str = "line") -> None:
+    async def say(self, text: str, kind: str = "line", cache: Optional[Path] = None) -> None:
         if self.queue is not None:
-            await self.queue.put({"text": text, "kind": kind, "at": time.time()})
+            await self.queue.put({"text": text, "kind": kind, "at": time.time(), "cache": cache})
 
     def event(self, kind: str) -> bool:
         """A short line for something that just happened (any thread). Lines
@@ -896,7 +947,7 @@ class Speaker:
             if job["kind"] == "event" and (time.time() - job.get("at", 0) > EVENT_STALE_S or not self.queue.empty()):
                 continue    # late, or something more important is waiting
             try:
-                await self._speak(job["text"], job["kind"])
+                await self._speak(job["text"], job["kind"], job.get("cache"))
             except Exception as e:
                 self._fail(f"Speaking failed: {e}")
             finally:
@@ -904,7 +955,7 @@ class Speaker:
                 self._last_spoke_at = time.time()
                 await self._publish()
 
-    async def _speak(self, text: str, kind: str) -> None:
+    async def _speak(self, text: str, kind: str, cache: Optional[Path] = None) -> None:
         settings = get_settings()
         if not has_output(settings) or not text.strip():
             return
@@ -922,7 +973,7 @@ class Speaker:
         self.error = None
         await self._publish()
         # Make the speech while the soundbar connects; both take a few seconds.
-        wav_task = asyncio.ensure_future(self._render(text, settings, chime=kind in ("greeting", "test")))
+        wav_task = asyncio.ensure_future(self._render(text, settings, chime=kind in ("greeting", "test"), cache=cache))
         ready = await self.ensure_connected()
         wav = await wav_task
         if not ready or wav is None:
@@ -933,12 +984,15 @@ class Speaker:
             if played and kind == "greeting":
                 await asyncio.to_thread(_store_greet_time, time.time())
         finally:
-            try:
-                os.unlink(wav)
-            except OSError:
-                pass
+            if not cache or wav != str(cache):    # a cached line stays for the rest of the day
+                try:
+                    os.unlink(wav)
+                except OSError:
+                    pass
 
-    async def _render(self, text: str, settings: dict, chime: bool) -> Optional[str]:
+    async def _render(self, text: str, settings: dict, chime: bool, cache: Optional[Path] = None) -> Optional[str]:
+        if cache and cache_ok(cache):
+            return str(cache)
         fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav")
         os.close(fd)
         job = json.dumps({"text": text, "voice": settings["voice"], "speed": settings["speed"],
@@ -959,6 +1013,13 @@ class Speaker:
             except OSError:
                 pass
             return None
+        if cache:
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                os.replace(out, cache)
+                return str(cache)
+            except OSError as e:
+                log.info("Couldn't keep the cached line: %s", e)
         return out
 
     def passing(self) -> bool:
@@ -1085,17 +1146,56 @@ class Speaker:
 
     # --- Hooks ---
 
-    def on_arrival(self) -> None:
+    def _day(self) -> str:
+        return self.now().strftime("%Y-%m-%d")
+
+    def _daily(self, kind: str, settings: dict) -> tuple:
+        """Today's (text, cache path) for "welcome" or "goodbye"."""
+        day = self._day()
+        text = daily_line(kind, day, settings.get("callMe", ""))
+        return text, speech_cache_path(kind, day, text, settings)
+
+    def on_arrival(self, away_s: float = 0.0) -> None:
         """life_mode calls this (from a worker thread) when you get home.
-        At most one greeting every GREET_EVERY_HOURS."""
+        Away for a long while (briefAfterHours): the full task briefing.
+        A shorter trip: just today's cached "welcome back"."""
         settings = get_settings()
-        if not greet_due(float(settings.get("lastGreetAt") or 0), time.time()):
-            # Greeted recently: just a short "welcome back".
-            if self.loop:
-                self.loop.call_soon_threadsafe(self.event, "home")
+        if not (has_output(settings) and settings["greet"] and self.loop):
             return
-        if has_output(settings) and settings["greet"] and self.loop:
+        if brief_due(away_s, float(settings.get("lastGreetAt") or 0), time.time(), float(settings["briefAfterHours"])):
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
+        else:
+            text, cache = self._daily("welcome", settings)
+            self.say_soon(text, "welcome", cache)
+
+    def on_leave(self) -> None:
+        """life_mode calls this when the phone has left: today's cached goodbye."""
+        settings = get_settings()
+        if has_output(settings) and settings["goodbye"] and self.loop:
+            text, cache = self._daily("goodbye", settings)
+            self.say_soon(text, "goodbye", cache)
+
+    async def ensure_daily(self) -> None:
+        """Once a day (and again if a file went missing or the voice changed):
+        make today's welcome-back and goodbye lines, and clear older days."""
+        settings = get_settings()
+        day = self._day()
+        todo = [(k,) + self._daily(k, settings) for k in DAILY_LINES]
+        if all(cache_ok(c) for _, _, c in todo):
+            self._daily_day = day
+            return
+        if self.speaking or voice_problem() or not shutil.which("ffmpeg"):
+            return
+        for kind, text, cache in todo:
+            if not cache_ok(cache) and text:
+                await self._render(text, settings, chime=False, cache=cache)
+        for old in speech_cache_dir().glob("*.wav"):
+            if not old.name.startswith(day):
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        self._daily_day = day
 
     async def greet(self, kind: str = "greeting") -> str:
         line = await self.greeting()
@@ -1135,6 +1235,9 @@ class Speaker:
                 await self.wifi_guard()
                 if has_output(get_settings()):
                     await self.tick()
+                    if self._daily_day != self._day() and time.time() - self._daily_try >= 600:
+                        self._daily_try = time.time()
+                        await self.ensure_daily()
             except Exception as e:
                 log.debug("Speaker check failed: %s", e)
             await asyncio.sleep(CHECK_EVERY)
