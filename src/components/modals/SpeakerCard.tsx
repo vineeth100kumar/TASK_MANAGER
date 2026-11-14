@@ -141,8 +141,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.chimes !== false} onChange={on => save({ chimes: on })} label="Little responses"
             hint="A few quiet words when things happen: the soundbar connects, you're back home, Spotify picks the Pi. Music fades down under the voice and back up." />
           <Switch on={set.reminders} onChange={on => save({ reminders: on })} label="Speak reminders" hint="While you're home, reminders are also said out loud." />
-          <Switch on={set.phoneSpeaker} onChange={on => save({ phoneSpeaker: on })} label="Be a speaker for my phone"
-            hint="Optional. Your phone sees the Pi as a Bluetooth speaker and its sound plays on the soundbar. Laggier than Spotify below; it steps aside while Spotify plays." />
+          {/* "Be a speaker for my phone" is off: the Pi is only the phone's notification companion (SAGE_PHONE_SPEAKER=1 brings it back). */}
 
           {set.phoneSpeaker && (
             <div className="pl-[3.25rem] space-y-1.5 -mt-2">

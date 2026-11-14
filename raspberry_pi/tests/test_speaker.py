@@ -8,6 +8,7 @@ import os
 import sys
 import tempfile
 import unittest
+from unittest import mock
 from pathlib import Path
 
 os.environ.setdefault("SAGE_DB_PATH", str(Path(tempfile.mkdtemp()) / "test.db"))
@@ -277,7 +278,10 @@ class PassThroughOptionTests(unittest.TestCase):
         self.assertFalse(speaker.DEFAULTS["phoneSpeaker"])
         # an old saved "passthrough: true" no longer turns it on
         self.assertNotIn("passthrough", speaker.DEFAULTS)
-        self.assertTrue(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
+        # The Pi is only the phone's notification companion unless SAGE_PHONE_SPEAKER=1.
+        self.assertFalse(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
+        with mock.patch.object(speaker, "PHONE_SPEAKER_ALLOWED", True):
+            self.assertTrue(speaker.clean_settings({"phoneSpeaker": True})["phoneSpeaker"])
 
 
 class GreetGapTests(unittest.TestCase):

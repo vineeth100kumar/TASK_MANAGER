@@ -73,6 +73,10 @@ ADDRESS = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
 # Kokoro's voices that suit a butler; bm_george is the default (British, male).
 VOICES = ["bm_george", "bm_lewis", "bm_daniel", "am_michael", "am_adam", "bf_emma", "bf_isabella", "af_heart", "af_bella"]
 
+# The Pi is only the phone's notification companion; "be a speaker for my phone"
+# is off unless SAGE_PHONE_SPEAKER=1 (and install_pi.sh was run with it too).
+PHONE_SPEAKER_ALLOWED = os.getenv("SAGE_PHONE_SPEAKER", "0") == "1"
+
 DEFAULTS: Dict[str, Any] = {
     "address": "",          # the soundbar; empty means the speaker is off
     "name": "",             # its name, for the UI
@@ -144,6 +148,8 @@ def get_settings() -> dict:
     out = dict(DEFAULTS)
     if isinstance(saved, dict):
         out.update({k: v for k, v in saved.items() if k in DEFAULTS})
+    if not PHONE_SPEAKER_ALLOWED:
+        out["phoneSpeaker"] = False
     return out
 
 
@@ -153,6 +159,8 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     for key in ("greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
+    if not PHONE_SPEAKER_ALLOWED:
+        out["phoneSpeaker"] = False
     if "address" in update:
         address = str(update.get("address") or "").strip().upper()
         if address and not ADDRESS.match(address):
