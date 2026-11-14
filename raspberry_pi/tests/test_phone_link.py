@@ -116,17 +116,28 @@ class State(unittest.TestCase):
 
     def test_presence_waits_before_away(self):
         async def go():
-            with mock.patch.object(phone_link.time, "time", return_value=1000):
-                await self.link.set_presence(True, "iPhone")
-            with mock.patch.object(phone_link.time, "time", return_value=1100):
-                await self.link.set_presence(False)
-            self.assertTrue(self.link.home)
-            with mock.patch.object(phone_link.time, "time", return_value=1000 + phone_link.AWAY_AFTER + 1):
-                await self.link.set_presence(False)
+          with mock.patch.object(phone_link, "away_after", lambda: phone_link.AWAY_AFTER):
+              with mock.patch.object(phone_link.time, "time", return_value=1000):
+                  await self.link.set_presence(True, "iPhone")
+              with mock.patch.object(phone_link.time, "time", return_value=1100):
+                  await self.link.set_presence(False)
+              self.assertTrue(self.link.home)
+              with mock.patch.object(phone_link.time, "time", return_value=1000 + phone_link.AWAY_AFTER + 1):
+                  await self.link.set_presence(False)
         self.run_async(go())
         self.assertFalse(self.link.home)
         self.assertEqual(self.sent[-1]["type"], "PHONE_STATUS")
         self.assertFalse(self.sent[-1]["home"])
+
+    def test_instant_away_when_grace_is_zero(self):
+        async def go():
+            with mock.patch.object(phone_link, "away_after", lambda: 0):
+                with mock.patch.object(phone_link.time, "time", return_value=1000):
+                    await self.link.set_presence(True, "iPhone")
+                with mock.patch.object(phone_link.time, "time", return_value=1001):
+                    await self.link.set_presence(False)
+        self.run_async(go())
+        self.assertFalse(self.link.home)
 
     def test_media_updates(self):
         async def go():
