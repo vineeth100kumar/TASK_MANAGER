@@ -16,14 +16,18 @@ sys.path.insert(0, str(HERE / "content_engine" / "src"))
 
 
 def chime(rate: int):
-    """A soft two-note rise, like an assistant waking up."""
+    """A soft three-note rising bell (C, E, G), each note ringing out into the next."""
     import numpy as np
-    out = []
-    for freq, secs in ((660.0, 0.16), (990.0, 0.30)):
-        t = np.arange(int(rate * secs)) / rate
-        env = np.minimum(1, t / 0.02) * np.exp(-t * 6)
-        out.append(0.22 * env * np.sin(2 * math.pi * freq * t))
-    return np.concatenate(out).astype("float32")
+    notes = (523.25, 659.25, 783.99)
+    step, ring = 0.2, 1.1
+    out = np.zeros(int(rate * (step * (len(notes) - 1) + ring)), dtype="float32")
+    t = np.arange(int(rate * ring)) / rate
+    for i, freq in enumerate(notes):
+        env = np.minimum(1, t / 0.03) * np.exp(-t * 3.2)
+        tone = np.sin(2 * math.pi * freq * t) + 0.25 * np.sin(2 * math.pi * 2 * freq * t) * np.exp(-t * 3)
+        start = int(rate * step * i)
+        out[start:start + len(t)] += (0.09 * env * tone).astype("float32")
+    return out
 
 
 def main() -> int:
