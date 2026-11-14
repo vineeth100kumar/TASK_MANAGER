@@ -92,6 +92,7 @@ DEFAULTS: Dict[str, Any] = {
     "voice": "bm_george",
     "speed": 1.0,
     "volume": 80,           # 10..100, applied to the speech itself
+    "masterVolume": 100,    # 5..100, the sound card's own volume: everything the Pi plays (voice, Spotify, chimes)
     "quietStart": "22:30",
     "quietEnd": "07:00",
     "leaveAfterMinutes": 20,  # 0 = never disconnect on leaving
@@ -179,6 +180,8 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         out["voice"] = voice
     if "speed" in update:
         out["speed"] = round(max(0.7, min(1.4, float(update["speed"]))), 2)
+    if "masterVolume" in update:
+        out["masterVolume"] = int(max(5, min(100, int(update["masterVolume"]))))
     if "volume" in update:
         out["volume"] = int(max(10, min(100, int(update["volume"]))))
     for key in ("quietStart", "quietEnd"):
@@ -611,6 +614,40 @@ def usb_device(settings: dict) -> str:
     return f"plughw:CARD={card['id']},DEV=0" if card else ""
 
 
+MIXER_PREFER = ("Master", "PCM", "Speaker", "Headphone", "Headset", "Line Out")
+
+
+def pick_mixer_control(scontrols: str) -> str:
+    """Which of `amixer scontrols` to move for the card's output volume. Pure."""
+    names = re.findall(r"Simple mixer control '([^']+)'", scontrols)
+    for want in MIXER_PREFER:
+        for n in names:
+            if n.lower() == want.lower():
+                return n
+    return names[0] if names else ""
+
+
+def apply_master(settings: dict) -> dict:
+    """Set the USB sound card's own volume to masterVolume %, so everything the
+    Pi plays goes down (or up) together. Returns {ok, control, why}."""
+    card = usb_card(settings.get("usbCard", ""))
+    if settings.get("output") == "bluetooth" or not card:
+        return {"ok": False, "control": "", "why": "Master volume works on the USB sound card; a Bluetooth soundbar has its own volume."}
+    if not shutil.which("amixer"):
+        return {"ok": False, "control": "", "why": "amixer isn't installed (run deploy/install_pi.sh)."}
+    try:
+        controls = _run(["amixer", "-c", card["id"], "scontrols"])
+        name = pick_mixer_control(controls.stdout)
+        if not name:
+            return {"ok": False, "control": "", "why": "This sound card has no volume control; use the volume knob on the speaker."}
+        res = _run(["amixer", "-c", card["id"], "sset", name, f"{int(settings['masterVolume'])}%"])
+        if res.returncode:
+            return {"ok": False, "control": name, "why": (res.stderr or "amixer failed").strip()[-120:]}
+        return {"ok": True, "control": name, "why": ""}
+    except Exception as e:
+        return {"ok": False, "control": "", "why": str(e)[:120]}
+
+
 def surround_ready() -> bool:
     return SURROUND_PLUGIN.is_file() and SURROUND_CONF.is_file()
 
@@ -718,6 +755,7 @@ class Speaker:
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self.master: dict = {"ok": None, "control": "", "why": ""}   # result of the last master volume set
         self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
         self._last_welcome_at = 0.0
         self._last_goodbye_at = 0.0
@@ -741,6 +779,7 @@ class Speaker:
             "phoneAudio": self.links["phoneAudio"],
             "passing": self._pass is not None and self._pass.returncode is None,
             "surroundOn": self.surround_on(settings),
+            "master": self.master,
             "usb": {"on": uses_usb(settings), "card": (usb_card(settings.get("usbCard", "")) or {}).get("name", ""),
                     "cards": [c for c in usb_cards() if c["usb"] and c["playback"]]},
             "speaking": self.speaking,
@@ -1150,6 +1189,14 @@ class Speaker:
             err = b"timed out"
         return proc.returncode, err.decode(errors="replace")
 
+    async def set_master(self) -> None:
+        """Put the sound card's volume where the master slider says (at start, and when it moves)."""
+        settings = get_settings()
+        if int(settings.get("masterVolume", 100)) >= 100 and self.master["ok"] is None:
+            return    # never touched: leave the card's own level alone
+        self.master = await asyncio.to_thread(apply_master, settings)
+        await self._publish()
+
     # --- What to say ---
 
     async def greeting(self, wake: bool = False) -> str:
@@ -1332,6 +1379,7 @@ class Speaker:
         self.phone = phone
         self.queue = asyncio.Queue()
         asyncio.ensure_future(self._speak_loop())
+        asyncio.ensure_future(self.set_master())
         while True:
             try:
                 await self.wifi_guard()

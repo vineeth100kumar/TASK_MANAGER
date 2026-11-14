@@ -202,6 +202,12 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
               <input className={`${field} w-full`} defaultValue={set.callMe} placeholder="sir, Vineeth, or leave empty" maxLength={30}
                 onBlur={e => e.target.value !== set.callMe && save({ callMe: e.target.value })} />
             </label>
+            <label className="text-xs text-gray-500 space-y-1"><span className="block">Master volume (everything the Pi plays) · {set.masterVolume ?? 100}%</span>
+              <input type="range" min={5} max={100} step={5} defaultValue={set.masterVolume ?? 100} className="w-full"
+                onPointerUp={e => save({ masterVolume: Number((e.target as HTMLInputElement).value) })}
+                onKeyUp={e => save({ masterVolume: Number((e.target as HTMLInputElement).value) })} />
+              {s.master && s.master.ok === false && <span className="block text-[11px] text-amber-600">{s.master.why}</span>}
+            </label>
             <label className="text-xs text-gray-500 space-y-1"><span className="block">Volume of the voice · {set.volume}%</span>
               <input type="range" min={10} max={100} step={5} defaultValue={set.volume} className="w-full"
                 onPointerUp={e => save({ volume: Number((e.target as HTMLInputElement).value) })}

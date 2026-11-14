@@ -1869,6 +1869,10 @@ async def speaker_settings(update: Dict[str, Any]):
         await asyncio.to_thread(speaker.save_settings, update)
     except (ValueError, TypeError) as e:
         raise HTTPException(status_code=400, detail=str(e))
+    if "masterVolume" in update:
+        speaker.speaker.master = {"ok": None, "control": "", "why": ""}
+        settings_now = await asyncio.to_thread(speaker.get_settings)
+        speaker.speaker.master = await asyncio.to_thread(speaker.apply_master, settings_now)
     await speaker.speaker._publish(force=True)
     await spotify.connect.follow_output()  # surround or soundbar changed: move the music too
     return await speaker_state()

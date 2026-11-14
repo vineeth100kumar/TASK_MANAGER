@@ -310,6 +310,14 @@ class GreetGapTests(unittest.TestCase):
             self.assertEqual((text, cache), (again, cache2))
             self.assertTrue(any(f.endswith(".txt") for f in os.listdir(d)))
 
+    def test_mixer_control_choice_and_master_clamp(self):
+        text = "Simple mixer control 'Mic',0\nSimple mixer control 'PCM',0\nSimple mixer control 'Speaker',0"
+        self.assertEqual(speaker.pick_mixer_control(text), "PCM")
+        self.assertEqual(speaker.pick_mixer_control("Simple mixer control 'Weird',0"), "Weird")
+        self.assertEqual(speaker.pick_mixer_control(""), "")
+        self.assertEqual(speaker.clean_settings({"masterVolume": 1})["masterVolume"], 5)
+        self.assertEqual(speaker.clean_settings({"masterVolume": 500})["masterVolume"], 100)
+
     def test_leave_instantly_default_and_toggle(self):
         self.assertTrue(speaker.get_settings()["leaveInstantly"])
         self.assertFalse(speaker.clean_settings({"leaveInstantly": False})["leaveInstantly"])
