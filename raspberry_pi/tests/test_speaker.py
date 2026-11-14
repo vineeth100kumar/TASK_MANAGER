@@ -417,3 +417,35 @@ class MixTests(unittest.TestCase):
         ok = asyncio.run(sp._play("/tmp/x.wav", dict(speaker.DEFAULTS)))
         self.assertTrue(ok)
         self.assertEqual(calls, ["duck", "play", "unduck"])
+
+
+class HeraldNoticeTest(unittest.TestCase):
+
+    def test_notice_kind_and_fallback_line(self):
+        assert speaker.notice_kind("net.whatsapp.WhatsApp") == "whatsapp"
+        assert speaker.notice_kind("com.google.Gmail") == "email"
+        assert speaker.notice_kind("com.apple.MobileSMS") == ""
+        assert "WhatsApp message from Shreyansh" in speaker.notice_line("whatsapp", "Shreyansh")
+        assert "email from Asha" in speaker.notice_line("email", "Asha")
+        assert "battery" in speaker.notice_line("battery", "")
+
+
+    def test_notice_only_when_home_and_once_per_sender(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=False)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Shreyansh"})
+            assert not run.called
+            s.phone.home = True
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Shreyansh"})
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Shreyansh"})
+            assert run.call_count == 1
+            s.on_phone_battery(15); s.on_phone_battery(12)
+            assert run.call_count == 2
+            s.on_phone_battery(40); s.on_phone_battery(18)
+            assert run.call_count == 3
+            for c in run.call_args_list:
+                c.args[0].close()

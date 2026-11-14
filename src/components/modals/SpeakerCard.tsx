@@ -144,6 +144,12 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           )}
           <Switch on={set.goodbye !== false} onChange={on => save({ goodbye: on })} label="Herald: say goodbye when I leave"
             hint="Herald plays a soft chime before everything it says. Welcome-back and goodbye lines are made once a day and kept." />
+          <Switch on={set.announceWhatsApp !== false} onChange={on => save({ announceWhatsApp: on })} label="Herald: announce WhatsApp messages"
+            hint="Only who it's from, never what it says. Only while you're home." />
+          <Switch on={set.announceEmail !== false} onChange={on => save({ announceEmail: on })} label="Herald: announce emails"
+            hint="Only the sender, never the subject or the email itself." />
+          <Switch on={set.announceBattery !== false} onChange={on => save({ announceBattery: on })} label="Herald: tell me when my phone battery is low"
+            hint="Once at 20% or below, again after it has charged past 30%." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
           <Switch on={set.chimes !== false} onChange={on => save({ chimes: on })} label="Little responses"

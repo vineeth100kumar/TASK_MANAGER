@@ -37,6 +37,12 @@ QUICK_AWAY_AFTER = int(os.getenv("SAGE_PHONE_QUICK_AWAY", "30"))
 # swaps this for the speaker card's "count me as away quickly" switch (QUICK_AWAY_AFTER or AWAY_AFTER).
 away_after: Callable[[], float] = lambda: AWAY_AFTER
 # Bundle ids whose notifications are passed on. Empty means every app.
+# Set by db_server: Herald announces some phone notifications and a low battery.
+on_phone_notification = None   # fn(entry dict)
+on_phone_battery = None        # fn(level 0..100)
+BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"  # the iPhone shares it with bonded accessories
+BATTERY_EVERY_S = 300
+
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
 
@@ -240,6 +246,8 @@ class PhoneLink:
         self._title_next = 0.0
         self.link: Dict[str, Any] = {"phone": None, "address": None, "classic": False, "ble": False,
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
+        self.battery: Optional[int] = None
+        self._battery_at = 0.0
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -255,6 +263,7 @@ class PhoneLink:
             "mediaAt": int(self.media_at * 1000) if self.media_at else None,
             "notifications": list(reversed(self.notifications)),
             "link": self.link,
+            "battery": self.battery,
         }
 
     async def _emit(self, event: dict) -> None:
@@ -426,6 +435,28 @@ class PhoneLink:
             await self._subscribe(objects, phone_path)
         if self._chars:
             await self._check_title()
+        await self._check_battery(objects, phone_path)
+
+    async def _check_battery(self, objects: dict, device_path: str) -> None:
+        """Read the phone's battery level every few minutes (Battery Service)."""
+        if time.time() - self._battery_at < BATTERY_EVERY_S:
+            return
+        self._battery_at = time.time()
+        for path, ifaces in objects.items():
+            char = ifaces.get("org.bluez.GattCharacteristic1")
+            if char and path.startswith(device_path + "/") and char["UUID"].value.lower() == BATTERY_LEVEL:
+                try:
+                    value = await (await self._char(path)).get_interface("org.bluez.GattCharacteristic1").call_read_value({})
+                    self.battery = int(bytes(value)[0])
+                except Exception as e:
+                    self.say("battery", f"could not read the phone's battery: {e}")
+                    return
+                if on_phone_battery:
+                    try:
+                        on_phone_battery(self.battery)
+                    except Exception as e:
+                        log.info("Herald battery hook failed: %s", e)
+                return
 
     def _stale_reason(self, objects: dict, device_path: str) -> str:
         """Why the songs subscription is no longer live, or "" when it is.
@@ -673,6 +704,11 @@ class PhoneLink:
             self._data_buffer = b""
             note = self._pending.pop(attrs["uid"], {})
             await self.add_notification({**note, **attrs})
+            if on_phone_notification and self.notifications:
+                try:
+                    on_phone_notification(dict(self.notifications[-1]))
+                except Exception as e:
+                    log.info("Herald notification hook failed: %s", e)
         elif uuid == AMS_ENTITY_UPDATE:
             update = parse_entity_update(data)
             if not update:
