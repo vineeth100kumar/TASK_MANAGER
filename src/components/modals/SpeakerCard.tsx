@@ -133,7 +133,7 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             </select>
           </label>
           <Switch on={set.leaveInstantly !== false} onChange={on => save({ leaveInstantly: on })} label="Count me as away quickly"
-            hint="On: you count as away after the phone has been off Bluetooth for 90 seconds, so a brief blip is ignored. Off: wait 5 minutes." />
+            hint="On: you count as away after the phone has been off Bluetooth for 30 seconds, so a brief blip is ignored. Off: wait 5 minutes." />
           <Switch on={set.goodbye !== false} onChange={on => save({ goodbye: on })} label="Herald: say goodbye when I leave"
             hint="Herald plays a soft chime before everything it says. Welcome-back and goodbye lines are made once a day and kept." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
