@@ -77,6 +77,7 @@ DEFAULTS: Dict[str, Any] = {
     "address": "",          # the soundbar; empty means the speaker is off
     "name": "",             # its name, for the UI
     "greet": True,          # say hello when you get home
+    "leaveInstantly": True, # phone drops off Bluetooth = you've left at once (off = wait 5 minutes first)
     "goodbye": True,        # say a short goodbye when you leave
     "briefAfterHours": 2.5, # away at least this long = full task briefing; shorter = a short welcome back
     "reminders": True,      # speak reminders while you're home
@@ -149,7 +150,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "goodbye", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if "address" in update:

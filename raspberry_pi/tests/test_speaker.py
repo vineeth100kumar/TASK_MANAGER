@@ -286,6 +286,10 @@ class GreetGapTests(unittest.TestCase):
         self.assertFalse(speaker.greet_due(1_000_000, 1_000_000 + 5.9 * 3600, 6))
         self.assertTrue(speaker.greet_due(1_000_000, 1_000_000 + 6 * 3600, 6))
 
+    def test_leave_instantly_default_and_toggle(self):
+        self.assertTrue(speaker.get_settings()["leaveInstantly"])
+        self.assertFalse(speaker.clean_settings({"leaveInstantly": False})["leaveInstantly"])
+
     def test_brief_only_after_a_long_absence(self):
         self.assertFalse(speaker.brief_due(20 * 60, 0, 1_000_000, 2.5))
         self.assertTrue(speaker.brief_due(3 * 3600, 1_000_000, 1_000_100, 2.5))

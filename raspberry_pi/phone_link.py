@@ -31,6 +31,9 @@ log = logging.getLogger("phone_link")
 ENABLED = os.getenv("SAGE_PHONE_LINK", "1").strip().lower() not in {"0", "false", "no", "off"}
 DEVICE_NAME = os.getenv("SAGE_PHONE_LINK_NAME", "Sage Companion")
 AWAY_AFTER = int(os.getenv("SAGE_PHONE_AWAY_AFTER", "300"))
+# Seconds the phone may stay disconnected before you count as away. db_server
+# swaps this for the speaker's "leave instantly" switch (0 = the moment it drops).
+away_after: Callable[[], float] = lambda: AWAY_AFTER
 # Bundle ids whose notifications are passed on. Empty means every app.
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -301,7 +304,7 @@ class PhoneLink:
         if connected:
             self.last_seen = now
             self.device_name = name or self.device_name
-        home = connected or (self.last_seen and now - self.last_seen < AWAY_AFTER)
+        home = connected or (self.last_seen and now - self.last_seen < away_after())
         if changed or bool(home) != self.home:
             self.home = bool(home)
             await self._emit_status()
