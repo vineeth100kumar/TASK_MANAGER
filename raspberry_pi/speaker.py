@@ -89,6 +89,9 @@ DEFAULTS: Dict[str, Any] = {
     "phoneSpeaker": False,  # (was "passthrough", which defaulted on) be a Bluetooth speaker for the phone (laggier than Spotify; off by default)
     "chimes": True,         # short spoken lines when things happen (soundbar on, back home, Spotify picked)
     "witty": True,          # let Groq write the greeting (falls back to the template)
+    "announceWhatsApp": True,  # Herald: "a message from X" for WhatsApp (never the text)
+    "announceEmail": True,     # Herald: "an email from X" (never the subject or body)
+    "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
     "speed": 1.0,
@@ -158,7 +161,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("announceWhatsApp", "announceEmail", "announceBattery", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if not PHONE_SPEAKER_ALLOWED:
@@ -349,6 +352,40 @@ left today (name at most two items). One dry, affectionate aside at most, the \
 kind a butler permits himself. Never mention Batman, Gotham or any film. \
 Address them by the name given (as a butler would, e.g. "Master Vineeth" or \
 "sir"), or as "sir" if there is none.
+
+Facts (JSON):
+"""
+
+
+WHATSAPP_APPS = {"net.whatsapp.WhatsApp", "net.whatsapp.WhatsAppSMB"}
+EMAIL_APPS = {"com.apple.mobilemail", "com.google.Gmail", "com.microsoft.Office.Outlook",
+              "com.readdle.smartemail", "ch.protonmail.protonmail", "com.yahoo.Aerogram"}
+NOTICE_GAP_S = 60       # the same sender is announced at most once a minute
+BATTERY_LOW = 20
+BATTERY_RESET = 30
+
+
+def notice_kind(app_id: str) -> str:
+    return "whatsapp" if app_id in WHATSAPP_APPS else "email" if app_id in EMAIL_APPS else ""
+
+
+def notice_line(kind: str, sender: str, call_me: str = "") -> str:
+    """The plain fallback when Groq can't write it. Only who, never what."""
+    who = sender or "someone"
+    name = f", {call_me}" if call_me else ""
+    if kind == "battery":
+        return f"Pardon me{name}, your phone is running low on battery. Perhaps a charger is in order."
+    what = "a WhatsApp message" if kind == "whatsapp" else "an email"
+    return f"Pardon the interruption{name}. You have {what} from {who}."
+
+
+NOTICE_PROMPT = """You are the voice of Sage, the AI that runs the person's home, speaking as \
+Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, warm, \
+dry and gently witty. Write ONE short line (at most 20 words) spoken aloud to tell the person \
+about what is in the facts: a new WhatsApp message or email (say who it is from, by the exact \
+name given; you do not know and must never guess what it says), or that their phone's battery \
+is low (give the percentage). Plain spoken English only: no emojis, quotes, lists or stage \
+directions. Address them by the name given, or "sir" if none.
 
 Facts (JSON):
 """
@@ -739,6 +776,8 @@ class Speaker:
         self.loop: Optional[asyncio.AbstractEventLoop] = None
         self.emit: Optional[Emit] = None
         self.phone = None            # phone_link.link, set by run()
+        self._notice_at: Dict[str, float] = {}   # last announce per sender
+        self._battery_warned = False
         self.queue: Optional[asyncio.Queue] = None  # made in run()
         self.speaking = ""
         self.last: Optional[dict] = None
@@ -1324,6 +1363,61 @@ class Speaker:
             asyncio.run_coroutine_threadsafe(self._say_daily("welcome"), self.loop)
         else:
             self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
+
+    def _may_announce(self, event: str, settings: dict) -> bool:
+        if not self.loop:
+            self._note(event, "silent", "Sage's speaker isn't running yet"); return False
+        if not getattr(self.phone, "home", False):
+            self._note(event, "silent", "you're not home"); return False
+        if not has_output(settings):
+            self._note(event, "silent", "no sound card or soundbar to play on"); return False
+        if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+            self._note(event, "silent", "quiet hours"); return False
+        return True
+
+    def on_phone_notification(self, entry: dict) -> None:
+        """phone_link calls this for each new notification from the phone."""
+        kind = notice_kind(entry.get("appId", ""))
+        if not kind:
+            return
+        settings = get_settings()
+        if not settings["announceWhatsApp" if kind == "whatsapp" else "announceEmail"]:
+            return
+        sender = (entry.get("title") or "").strip()[:60]
+        event = f"{'WhatsApp' if kind == 'whatsapp' else 'email'} from {sender or 'someone'}"
+        if not self._may_announce(event, settings):
+            return
+        key = f"{kind}:{sender.lower()}"
+        now = time.time()
+        if now - self._notice_at.get(key, 0) < NOTICE_GAP_S:
+            return self._note(event, "silent", "same sender under a minute ago")
+        self._notice_at[key] = now
+        self._note(event, "announced")
+        asyncio.run_coroutine_threadsafe(self._notice(kind, {"what": kind, "from": sender}, settings), self.loop)
+
+    def on_phone_battery(self, level: int) -> None:
+        """phone_link calls this every few minutes with the phone's battery %."""
+        if level >= BATTERY_RESET:
+            self._battery_warned = False
+            return
+        if level > BATTERY_LOW or self._battery_warned:
+            return
+        settings = get_settings()
+        if not settings["announceBattery"]:
+            return
+        event = f"phone battery {level}%"
+        if not self._may_announce(event, settings):
+            return
+        self._battery_warned = True
+        self._note(event, "announced")
+        asyncio.run_coroutine_threadsafe(self._notice("battery", {"what": "phone battery low", "percent": level}, settings), self.loop)
+
+    async def _notice(self, kind: str, facts: dict, settings: dict) -> None:
+        call_me = settings.get("callMe", "")
+        text = ""
+        if settings["witty"]:
+            text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT)
+        await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
 
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""

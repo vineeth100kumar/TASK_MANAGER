@@ -9,7 +9,7 @@ export type SurroundMode = 'off' | 'music' | 'movie' | 'wide';
 export type LatencyMode = 'lowest' | 'low' | 'steady';
 
 export interface SpeakerSettings {
-  address: string; name: string; greet: boolean; goodbye?: boolean; masterVolume?: number; leaveInstantly?: boolean; briefAfterHours?: number; reminders: boolean; phoneSpeaker: boolean; witty: boolean; chimes?: boolean;
+  address: string; name: string; greet: boolean; goodbye?: boolean; announceWhatsApp?: boolean; announceEmail?: boolean; announceBattery?: boolean; masterVolume?: number; leaveInstantly?: boolean; briefAfterHours?: number; reminders: boolean; phoneSpeaker: boolean; witty: boolean; chimes?: boolean;
   callMe: string; voice: string; speed: number; volume: number; quietStart: string; quietEnd: string; leaveAfterMinutes: number;
   surround?: SurroundMode;
   latency?: LatencyMode;
