@@ -51,7 +51,9 @@ last_seen: Callable[[], float] = lambda: 0.0
 presence: Callable[[], Tuple[bool, bool]] = lambda: (False, False)
 
 # Set by db_server: called (from a worker thread) once per arrival, e.g. the soundbar greeting.
-on_arrival: Optional[Callable[[], None]] = None
+on_arrival: Optional[Callable[[float], None]] = None
+# Called (from a worker thread) when the phone leaves, e.g. the soundbar goodbye.
+on_leave: Optional[Callable[[], None]] = None
 
 
 # --- Storage ---
@@ -258,16 +260,21 @@ class ArrivalWatch:
         self.away_minutes = away_minutes
         self.left_at: Optional[float] = None
         self.was_home: Optional[bool] = None
+        self.away_s = 0.0       # how long the last absence lasted (set on arrival)
+        self.just_left = False  # True for the reading where the phone left
 
     def update(self, known: bool, home: bool, now: float, last_seen: float = 0.0) -> bool:
         """True exactly when this reading is an arrival."""
         at_home = bool(known and home)
         arrived = False
+        self.just_left = False
         if self.was_home is not None:
             if self.was_home and not at_home:
                 self.left_at = last_seen or now
+                self.just_left = True
             elif at_home and not self.was_home and self.left_at is not None:
-                arrived = now - self.left_at >= self.away_minutes * 60
+                self.away_s = now - self.left_at
+                arrived = self.away_s >= self.away_minutes * 60
                 self.left_at = None
         self.was_home = at_home
         return arrived
@@ -287,11 +294,17 @@ async def run(broadcast: Broadcast, every: float = 3.0) -> None:
         system_health.beat(max(every, 1))
         try:
             known, home = presence()
-            if watch.update(known, home, time.time(), last_seen()):
+            arrived = watch.update(known, home, time.time(), last_seen())
+            if watch.just_left and on_leave:
+                try:
+                    await asyncio.to_thread(on_leave)
+                except Exception as e:
+                    print(f"Leave hook failed: {e}")
+            if arrived:
                 await asyncio.to_thread(record_arrival)
                 if on_arrival:
                     try:
-                        await asyncio.to_thread(on_arrival)
+                        await asyncio.to_thread(on_arrival, watch.away_s)
                     except Exception as e:
                         print(f"Arrival hook failed: {e}")
             state = await asyncio.to_thread(current)

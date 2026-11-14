@@ -228,6 +228,15 @@ class ArrivalTests(unittest.TestCase):
         self.assertTrue(w.update(True, True, 100 + 20 * 60))
         self.assertFalse(w.update(True, True, 100 + 21 * 60))
 
+    def test_leave_and_away_time(self):
+        w = life_mode.ArrivalWatch(away_minutes=15)
+        w.update(True, True, 0)
+        w.update(True, False, 100, last_seen=100)
+        self.assertTrue(w.just_left)
+        w.update(True, True, 100 + 3600)
+        self.assertEqual(w.away_s, 3600)
+        self.assertFalse(w.just_left)
+
     def test_a_short_trip_is_not(self):
         w = life_mode.ArrivalWatch(away_minutes=15)
         w.update(True, True, 0)

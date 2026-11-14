@@ -286,6 +286,30 @@ class GreetGapTests(unittest.TestCase):
         self.assertFalse(speaker.greet_due(1_000_000, 1_000_000 + 5.9 * 3600, 6))
         self.assertTrue(speaker.greet_due(1_000_000, 1_000_000 + 6 * 3600, 6))
 
+    def test_brief_only_after_a_long_absence(self):
+        self.assertFalse(speaker.brief_due(20 * 60, 0, 1_000_000, 2.5))
+        self.assertTrue(speaker.brief_due(3 * 3600, 1_000_000, 1_000_100, 2.5))
+        self.assertTrue(speaker.brief_due(0, 0, 1_000_000, 2.5))   # unknown away time, never briefed
+        self.assertFalse(speaker.brief_due(0, 1_000_000, 1_000_100, 2.5))
+
+    def test_daily_line_is_stable_per_day(self):
+        a = speaker.daily_line("goodbye", "2026-11-14", "sir")
+        self.assertEqual(a, speaker.daily_line("goodbye", "2026-11-14", "sir"))
+        self.assertTrue(a)
+
+    def test_cache_path_changes_with_voice_and_ok_check(self):
+        s = speaker.get_settings()
+        p1 = speaker.speech_cache_path("welcome", "2026-11-14", "Hi.", s)
+        p2 = speaker.speech_cache_path("welcome", "2026-11-14", "Hi.", {**s, "voice": "am_adam"})
+        self.assertNotEqual(p1, p2)
+        import tempfile, pathlib
+        d = pathlib.Path(tempfile.mkdtemp())
+        good = d / "a.wav"; good.write_bytes(b"RIFF" + b"\0" * 5000)
+        bad = d / "b.wav"; bad.write_bytes(b"junk")
+        self.assertTrue(speaker.cache_ok(good))
+        self.assertFalse(speaker.cache_ok(bad))
+        self.assertFalse(speaker.cache_ok(d / "none.wav"))
+
     def test_stored(self):
         speaker._store_greet_time(1234)
         self.assertEqual(speaker.get_settings()["lastGreetAt"], 1234)
