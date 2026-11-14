@@ -34,6 +34,7 @@ import system_health
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 MODES = ("work", "chill")
 HELD_KEEP = 50
+REJOIN_MIN_S = float(os.getenv("SAGE_REJOIN_MIN_SECONDS", "10"))   # any return after this long gets a spoken welcome back
 AWAY_MINUTES = int(os.getenv("SAGE_ARRIVAL_AWAY_MINUTES", "15"))
 
 DEFAULTS: Dict[str, Any] = {
@@ -262,12 +263,14 @@ class ArrivalWatch:
         self.was_home: Optional[bool] = None
         self.away_s = 0.0       # how long the last absence lasted (set on arrival)
         self.just_left = False  # True for the reading where the phone left
+        self.rejoined = False   # True when the phone is back after at least REJOIN_MIN_S (any trip)
 
     def update(self, known: bool, home: bool, now: float, last_seen: float = 0.0) -> bool:
         """True exactly when this reading is an arrival."""
         at_home = bool(known and home)
         arrived = False
         self.just_left = False
+        self.rejoined = False
         if self.was_home is not None:
             if self.was_home and not at_home:
                 self.left_at = last_seen or now
@@ -275,6 +278,7 @@ class ArrivalWatch:
             elif at_home and not self.was_home and self.left_at is not None:
                 self.away_s = now - self.left_at
                 arrived = self.away_s >= self.away_minutes * 60
+                self.rejoined = self.away_s >= REJOIN_MIN_S
                 self.left_at = None
         self.was_home = at_home
         return arrived
@@ -302,11 +306,11 @@ async def run(broadcast: Broadcast, every: float = 3.0) -> None:
                     print(f"Leave hook failed: {e}")
             if arrived:
                 await asyncio.to_thread(record_arrival)
-                if on_arrival:
-                    try:
-                        await asyncio.to_thread(on_arrival, watch.away_s)
-                    except Exception as e:
-                        print(f"Arrival hook failed: {e}")
+            if (arrived or watch.rejoined) and on_arrival:
+                try:
+                    await asyncio.to_thread(on_arrival, watch.away_s)
+                except Exception as e:
+                    print(f"Arrival hook failed: {e}")
             state = await asyncio.to_thread(current)
             state = {**state, "welcome": await asyncio.to_thread(pending_welcome)}
             if state != last:

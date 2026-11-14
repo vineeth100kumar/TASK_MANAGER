@@ -395,6 +395,12 @@ def brief_due(away_s: float, last_at: float, now: float, hours: float) -> bool:
     return not last_at or now - last_at >= hours * 3600
 
 
+def briefing_key(facts: dict, day: str) -> str:
+    """Identifies today's briefing by what it says about your tasks. Time of day and weather are left out, so they don't force a new one. Pure."""
+    keep = {k: facts.get(k) for k in ("name", "dueToday", "dueCount", "overdueCount", "habitsLeft", "chill")}
+    return hashlib.sha1(json.dumps([day, keep], sort_keys=True).encode()).hexdigest()[:12]
+
+
 def daily_line(kind: str, day: str, call_me: str = "") -> str:
     """Today's welcome-back or goodbye line: one pick per day, stable all day. Pure."""
     lines = DAILY_LINES.get(kind) or []
@@ -657,6 +663,8 @@ class Speaker:
         self._dropped_phone_at = 0.0
         self._asked_phone_at = 0.0
         self._last_sent = ""
+        self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
+        self._last_welcome_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
         self._daily_try = 0.0
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
@@ -1157,15 +1165,17 @@ class Speaker:
         return text, speech_cache_path(kind, day, text, settings)
 
     def on_arrival(self, away_s: float = 0.0) -> None:
-        """life_mode calls this (from a worker thread) when you get home.
-        Away for a long while (briefAfterHours): the full task briefing.
-        A shorter trip: just today's cached "welcome back"."""
+        """life_mode calls this (from a worker thread) whenever the phone comes back.
+        Away for a long while (briefAfterHours): the day's task briefing (kept
+        while your tasks are unchanged). Any other return: today's kept "welcome back"."""
         settings = get_settings()
         if not (has_output(settings) and settings["greet"] and self.loop):
             return
-        if brief_due(away_s, float(settings.get("lastGreetAt") or 0), time.time(), float(settings["briefAfterHours"])):
+        now = time.time()
+        if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
-        else:
+        elif now - self._last_welcome_at >= 120:    # a Bluetooth flap must not repeat it
+            self._last_welcome_at = now
             text, cache = self._daily("welcome", settings)
             self.say_soon(text, "welcome", cache)
 
@@ -1199,8 +1209,21 @@ class Speaker:
         self._daily_day = day
 
     async def greet(self, kind: str = "greeting") -> str:
-        line = await self.greeting()
-        await self.say(line, kind)
+        """The full briefing. The same one is reused all day while your tasks are
+        unchanged; a change in them makes a new one. A "test" is never kept."""
+        if kind != "greeting":
+            line = await self.greeting()
+            await self.say(line, kind)
+            return line
+        settings = get_settings()
+        facts = await asyncio.to_thread(self._facts, settings)
+        key = briefing_key(facts, self._day())
+        cache = speech_cache_path("brief", self._day(), key, settings)
+        line = self._briefs.get(key) or ("Today's briefing." if cache_ok(cache) else "")
+        if not line:
+            line = await self.greeting()
+            self._briefs = {key: line}
+        await self.say(line, kind, cache)
         return line
 
     def on_wake(self) -> None:

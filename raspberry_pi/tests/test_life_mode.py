@@ -237,6 +237,15 @@ class ArrivalTests(unittest.TestCase):
         self.assertEqual(w.away_s, 3600)
         self.assertFalse(w.just_left)
 
+    def test_any_return_is_a_rejoin(self):
+        w = life_mode.ArrivalWatch(away_minutes=15)
+        w.update(True, True, 0)
+        w.update(True, False, 100, last_seen=100)
+        self.assertFalse(w.update(True, True, 160))   # a minute: no arrival, but a rejoin
+        self.assertTrue(w.rejoined)
+        w.update(True, True, 170)
+        self.assertFalse(w.rejoined)
+
     def test_a_short_trip_is_not(self):
         w = life_mode.ArrivalWatch(away_minutes=15)
         w.update(True, True, 0)
