@@ -26,6 +26,7 @@ export interface SpeakerState {
   phoneAudio: boolean;
   passing: boolean;
   surroundOn?: boolean;
+  herald?: { at: number; event: string; action: string; why: string }[];
   master?: { ok: boolean | null; control: string; why: string };
   usb?: { on: boolean; card: string; cards: { id: string; name: string }[] };
   speaking: string;

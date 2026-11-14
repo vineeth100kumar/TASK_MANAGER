@@ -318,6 +318,18 @@ class GreetGapTests(unittest.TestCase):
         self.assertEqual(speaker.clean_settings({"masterVolume": 1})["masterVolume"], 5)
         self.assertEqual(speaker.clean_settings({"masterVolume": 500})["masterVolume"], 100)
 
+    def test_herald_explains_a_silent_arrival(self):
+        sp = speaker.Speaker()
+        sp.loop = object()
+        speaker.save_settings({"greet": False})
+        sp.on_arrival(3600)
+        self.assertEqual(sp._herald[-1]["action"], "silent")
+        self.assertIn("off", sp._herald[-1]["why"])
+        speaker.save_settings({"greet": True, "goodbye": False})
+        sp.on_leave()
+        self.assertEqual(sp._herald[-1]["action"], "silent")
+        speaker.save_settings({"goodbye": True})
+
     def test_leave_instantly_default_and_toggle(self):
         self.assertTrue(speaker.get_settings()["leaveInstantly"])
         self.assertFalse(speaker.clean_settings({"leaveInstantly": False})["leaveInstantly"])

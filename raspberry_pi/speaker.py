@@ -53,8 +53,9 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections import deque
 from pathlib import Path
-from typing import Any, Awaitable, Callable, Dict, List, Optional
+from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 log = logging.getLogger("speaker")
 
@@ -390,6 +391,7 @@ WAKE_PROMPT = GREETING_PROMPT.replace(
 ).replace("at most 45 words", "at most 70 words").replace(
     "(name at most two items)", "(name at most three items, and the overdue count if any)")
 
+HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
 
@@ -757,6 +759,7 @@ class Speaker:
         self._last_sent = ""
         self.master: dict = {"ok": None, "control": "", "why": ""}   # result of the last master volume set
         self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
+        self._herald: Deque[dict] = deque(maxlen=8)   # what Herald last decided, newest last
         self._last_welcome_at = 0.0
         self._last_goodbye_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
@@ -780,6 +783,7 @@ class Speaker:
             "passing": self._pass is not None and self._pass.returncode is None,
             "surroundOn": self.surround_on(settings),
             "master": self.master,
+            "herald": list(self._herald),
             "usb": {"on": uses_usb(settings), "card": (usb_card(settings.get("usbCard", "")) or {}).get("name", ""),
                     "cards": [c for c in usb_cards() if c["usb"] and c["playback"]]},
             "speaking": self.speaking,
@@ -1065,6 +1069,7 @@ class Speaker:
             return
         if kind != "test" and in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
             log.info("Quiet hours; not saying: %s", text[:60])
+            self._note(kind, "silent", "quiet hours")
             return
         problem = voice_problem()
         if problem:
@@ -1085,6 +1090,7 @@ class Speaker:
         try:
             played = await self._play(wav, settings)
             self.last = {"text": text, "kind": kind, "at": int(time.time() * 1000)}
+            self._note(kind, "spoke" if played else "silent", "" if played else "the sound didn't play")
             if played and kind == "greeting":
                 await asyncio.to_thread(_store_greet_time, time.time())
         finally:
@@ -1289,27 +1295,54 @@ class Speaker:
         text, cache = await self._daily(kind, get_settings())
         await self.say(text, kind, cache)
 
+    def _note(self, event: str, action: str, why: str = "") -> None:
+        """Remember (and log) what Herald decided, so a silent moment can be explained."""
+        self._herald.append({"at": int(time.time() * 1000), "event": event, "action": action, "why": why})
+        log.info("Herald: %s -> %s%s", event, action, f" ({why})" if why else "")
+
     def on_arrival(self, away_s: float = 0.0) -> None:
         """life_mode calls this (from a worker thread) whenever the phone comes back.
         Away for a long while (briefAfterHours): the day's task briefing (kept
         while your tasks are unchanged). Any other return: today's kept "welcome back"."""
         settings = get_settings()
-        if not (has_output(settings) and settings["greet"] and self.loop):
-            return
+        event = f"you're back after {int(away_s // 60)} min {int(away_s % 60)} s"
+        if not self.loop:
+            return self._note(event, "silent", "Sage's speaker isn't running yet")
+        if not settings["greet"]:
+            return self._note(event, "silent", "'Welcome me home' is off")
+        if not has_output(settings):
+            return self._note(event, "silent", "no sound card or soundbar to play on")
+        if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+            return self._note(event, "silent", "quiet hours")
         now = time.time()
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
+            self._note(event, "briefing")
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
-        elif now - self._last_welcome_at >= 600:    # a Bluetooth flap must not repeat it
+        elif now - self._last_welcome_at >= HERALD_GAP_S:
             self._last_welcome_at = now
+            self._note(event, "welcome back")
             asyncio.run_coroutine_threadsafe(self._say_daily("welcome"), self.loop)
+        else:
+            self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
 
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""
         settings = get_settings()
+        event = "you left"
+        if not self.loop:
+            return self._note(event, "silent", "Sage's speaker isn't running yet")
+        if not settings["goodbye"]:
+            return self._note(event, "silent", "'Say goodbye' is off")
+        if not has_output(settings):
+            return self._note(event, "silent", "no sound card or soundbar to play on")
+        if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+            return self._note(event, "silent", "quiet hours")
         now = time.time()
-        if has_output(settings) and settings["goodbye"] and self.loop and now - self._last_goodbye_at >= 600:
-            self._last_goodbye_at = now
-            asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
+        if now - self._last_goodbye_at < HERALD_GAP_S:
+            return self._note(event, "silent", f"another goodbye was said under {int(HERALD_GAP_S)} s ago")
+        self._last_goodbye_at = now
+        self._note(event, "goodbye")
+        asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
 
     async def ensure_daily(self) -> None:
         """Once a day (and again if a file went missing or the voice changed):
