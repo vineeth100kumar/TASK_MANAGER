@@ -286,6 +286,14 @@ class GreetGapTests(unittest.TestCase):
         self.assertFalse(speaker.greet_due(1_000_000, 1_000_000 + 5.9 * 3600, 6))
         self.assertTrue(speaker.greet_due(1_000_000, 1_000_000 + 6 * 3600, 6))
 
+    def test_briefing_key_ignores_time_and_weather(self):
+        f = speaker.greeting_facts(at(9), [{"title": "Gym"}], [], False, {"temp_c": 20, "icon": "sun"}, [], "")
+        g = speaker.greeting_facts(at(15), [{"title": "Gym"}], [], False, {"temp_c": 31, "icon": "rain"}, [], "")
+        h = speaker.greeting_facts(at(15), [{"title": "Gym"}, {"title": "Tax"}], [], False, None, [], "")
+        self.assertEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(g, "d"))
+        self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(h, "d"))
+        self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(f, "e"))
+
     def test_leave_instantly_default_and_toggle(self):
         self.assertTrue(speaker.get_settings()["leaveInstantly"])
         self.assertFalse(speaker.clean_settings({"leaveInstantly": False})["leaveInstantly"])
