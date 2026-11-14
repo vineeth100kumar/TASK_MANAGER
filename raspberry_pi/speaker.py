@@ -409,7 +409,7 @@ def speech_cache_dir() -> Path:
 
 def speech_cache_path(kind: str, day: str, text: str, settings: dict) -> Path:
     """Where today's line is kept; the name changes with the words or the voice, so a changed setting re-renders. Pure."""
-    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}".encode()).hexdigest()[:10]
+    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime2".encode()).hexdigest()[:10]
     return speech_cache_dir() / f"{day}-{kind}-{key}.wav"
 
 
@@ -973,7 +973,7 @@ class Speaker:
         self.error = None
         await self._publish()
         # Make the speech while the soundbar connects; both take a few seconds.
-        wav_task = asyncio.ensure_future(self._render(text, settings, chime=kind in ("greeting", "test"), cache=cache))
+        wav_task = asyncio.ensure_future(self._render(text, settings, chime=True, cache=cache))
         ready = await self.ensure_connected()
         wav = await wav_task
         if not ready or wav is None:
@@ -1188,7 +1188,7 @@ class Speaker:
             return
         for kind, text, cache in todo:
             if not cache_ok(cache) and text:
-                await self._render(text, settings, chime=False, cache=cache)
+                await self._render(text, settings, chime=True, cache=cache)
         for old in speech_cache_dir().glob("*.wav"):
             if not old.name.startswith(day):
                 try:
