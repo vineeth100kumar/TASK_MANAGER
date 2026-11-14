@@ -107,9 +107,10 @@ audio_busy: Callable[[], bool] = lambda: False
 
 
 def ble_retry_gap(tries: int, busy: bool = False) -> float:
-    """Seconds before the next BLE connect try: 30 s doubling to 10 min, and
-    never more often than every 10 min while music plays. Pure."""
-    gap = min(600.0, 30.0 * (2 ** max(0, tries - 1)))
+    """Seconds before the next BLE connect try: 5 s doubling to 60 s, so the
+    phone shows up in Sage within seconds; never more often than every 10 min
+    while music streams over Bluetooth. Pure."""
+    gap = min(60.0, 5.0 * (2 ** max(0, tries - 1)))
     return max(gap, 600.0) if busy and tries >= 1 else gap
 
 
@@ -383,7 +384,7 @@ class PhoneLink:
             # for only a few seconds before the phone drops it again.
             # Only for the first few tries: after that the phone is refusing, and
             # polling BlueZ every 1.5 s just keeps the radio busy.
-            waiting_for_ble = self.link["classic"] and not self.link["ble"] and self._ble_tries < 3
+            waiting_for_ble = self.link["classic"] and not self.link["ble"] and self._ble_tries < 6
             await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") or waiting_for_ble else 5)
 
     async def _objects(self) -> dict:
@@ -503,6 +504,11 @@ class PhoneLink:
                                  f"BlueZ accepted; waiting for ServicesResolved.")
         except Exception as e:
             error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
+            if "already in progress" in error.lower():
+                # BlueZ is already connecting it: not a refusal, look again soon.
+                self._ble_tries = max(0, self._ble_tries - 1)
+                self.say("open-ble", f"{name} is already connecting; waiting for it to finish.")
+                return
             advice = ("If this keeps failing: on the iPhone open Settings > Bluetooth, tap (i) next to the Pi and "
                       "check 'Share System Notifications' is on; if it still fails, forget the Pi there and pair "
                       "again from Sage Settings > Bluetooth.") if self._ble_tries >= 3 else ""
