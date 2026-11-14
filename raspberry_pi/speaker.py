@@ -471,7 +471,7 @@ def speech_cache_dir() -> Path:
 
 def speech_cache_path(kind: str, day: str, text: str, settings: dict) -> Path:
     """Where today's line is kept; the name changes with the words or the voice, so a changed setting re-renders. Pure."""
-    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime3".encode()).hexdigest()[:10]
+    key = hashlib.sha1(f"{text}|{settings['voice']}|{settings['speed']}|{settings['volume']}|chime4".encode()).hexdigest()[:10]
     return speech_cache_dir() / f"{day}-{kind}-{key}.wav"
 
 
