@@ -344,6 +344,25 @@ class GreetGapTests(unittest.TestCase):
         self.assertTrue(speaker.brief_due(0, 0, 1_000_000, 2.5))   # unknown away time, never briefed
         self.assertFalse(speaker.brief_due(0, 1_000_000, 1_000_100, 2.5))
 
+    def test_made_ahead_line_expires_when_the_part_of_day_changes(self):
+        import pathlib, tempfile, time
+        sp = speaker.Speaker()
+        wav = pathlib.Path(tempfile.mkdtemp()) / "r.wav"
+        wav.write_bytes(b"RIFF" + b"\0" * 5000)
+        now = sp.now()
+        sp._ready["welcome"] = ("Good evening, sir.", wav, time.time(), speaker.part_of_day(now.hour))
+        self.assertTrue(sp._ready_ok("welcome"))
+        other = "night" if speaker.part_of_day(now.hour) != "night" else "morning"
+        sp._ready["welcome"] = ("Good evening, sir.", wav, time.time(), other)
+        self.assertFalse(sp._ready_ok("welcome"))
+
+    def test_daily_prompts_forbid_times_and_ask_for_butler_voice(self):
+        for kind in speaker.DAILY_PROMPTS:
+            p = speaker.DAILY_PROMPTS[kind]
+            self.assertIn("Alfred", p)
+            self.assertIn("Never state a clock time", p)
+            self.assertIn("avoid", p)
+
     def test_fresh_fallback_skips_recent(self):
         lines = speaker.DAILY_LINES["goodbye"]
         recent = [l.replace("{name}", "") for l in lines[:-1]]

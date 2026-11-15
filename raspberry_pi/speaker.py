@@ -510,7 +510,10 @@ Facts (JSON):
 for _k in DAILY_PROMPTS:
     DAILY_PROMPTS[_k] = DAILY_PROMPTS[_k].replace(
         "Facts (JSON):",
-        'Every line must sound new: never reuse the wording, opening or joke of any line listed under "avoid".\n\nFacts (JSON):')
+        'Every line must sound new: never reuse the wording, opening or joke of any line listed under "avoid". '
+        'Never state a clock time, a date or any number: the line is spoken a minute or two after it is written, '
+        'so keep it timeless. A plain greeting for the part of day given (good morning, good afternoon, good evening) '
+        'is welcome; never say "now", "just now", "tonight at" or an hour.\n\nFacts (JSON):')
 
 
 WAKE_PROMPT = GREETING_PROMPT.replace(
@@ -1428,6 +1431,7 @@ class Speaker:
         """Write and voice the next line for `kind` ahead of time, so the next
         arrival or departure is as quick as a cached line was."""
         settings = get_settings()
+        made_part = part_of_day(self.now().hour)
         text = await self._fresh(kind, settings)
         if not text:
             return
@@ -1439,14 +1443,14 @@ class Speaker:
                 pass
         await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
         if cache_ok(cache):
-            self._ready[kind] = (text, cache, time.time())
+            self._ready[kind] = (text, cache, time.time(), made_part)
 
     async def _say_daily(self, kind: str) -> None:
         """Say a new welcome or goodbye: the one made ahead if it's still fresh
         (and the settings haven't changed), else write one now. Then make the next."""
         settings = get_settings()
         ready = self._ready.pop(kind, None)
-        if ready and time.time() - ready[2] < READY_MAX_AGE_S and cache_ok(ready[1]):
+        if ready and self._ready_ok_tuple(ready):
             await self.say(ready[0], kind, ready[1])
         else:
             await self.say(await self._fresh(kind, settings), kind)
@@ -1575,15 +1579,23 @@ class Speaker:
         self._note(event, "goodbye")
         asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
 
+    def _ready_ok(self, kind: str) -> bool:
+        """The line made ahead is still usable: its file is there, it isn't hours old,
+        and the part of day it greets is still the part of day it is."""
+        ready = self._ready.get(kind)
+        return bool(ready and self._ready_ok_tuple(ready))
+
+    def _ready_ok_tuple(self, ready: tuple) -> bool:
+        return time.time() - ready[2] < READY_MAX_AGE_S and ready[3] == part_of_day(self.now().hour) and cache_ok(ready[1])
+
     def _ready_all(self) -> bool:
-        return all(k in self._ready for k in DAILY_LINES)
+        return all(self._ready_ok(k) for k in DAILY_LINES)
 
     async def ensure_daily(self) -> None:
         """Keep the next welcome-back and goodbye made ahead (they're new each time);
         a made line goes stale after a few hours, as the time of day changes."""
         for kind in DAILY_LINES:
-            ready = self._ready.get(kind)
-            if ready and time.time() - ready[2] < READY_MAX_AGE_S and cache_ok(ready[1]):
+            if self._ready_ok(kind):
                 continue
             if self.speaking or voice_problem() or not shutil.which("ffmpeg"):
                 return
@@ -1648,7 +1660,7 @@ class Speaker:
                 await self.wifi_guard()
                 if has_output(get_settings()):
                     await self.tick()
-                    if time.time() - self._daily_try >= (60 if self._ready_all() else 600):
+                    if time.time() - self._daily_try >= 120:
                         self._daily_try = time.time()
                         await self.ensure_daily()
             except Exception as e:
