@@ -444,6 +444,40 @@ Facts (JSON):
 """
 
 
+COMMAND_PROMPT = """You are the voice of Sage, the AI that runs the person's home, speaking as \
+Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, warm, \
+dry and gently witty. The person just gave a spoken command and it has been carried out. \
+Write ONE short line (at most 18 words) spoken aloud to confirm it, in your own words. \
+State exactly what was done using the times and lengths given in "what", unchanged (say \
+"6:30" as 6:30, never round or invent a time). Plain spoken English only: no emojis, quotes, \
+lists or stage directions. Address them by the name given, or "sir" if none.
+
+Facts (JSON):
+"""
+
+_COMMAND_LINES = [
+    "Very good{name}. {What}.",
+    "Consider it done{name}. {What}.",
+    "Right away{name}. {What}, as you wish.",
+    "Of course{name}. {What}.",
+]
+_command_idx = [0]
+
+
+def command_line(what: str, call_me: str = "") -> str:
+    """A curated Alfred/Jarvis confirmation, used when Groq is unavailable."""
+    what = " ".join((what or "Done").split()).rstrip(".")
+    name = f", {call_me}" if call_me else ""
+    line = _COMMAND_LINES[_command_idx[0] % len(_COMMAND_LINES)]
+    _command_idx[0] += 1
+    return line.format(name=name, What=what[:1].upper() + what[1:])
+
+
+def command_line_ok(line: str, what: str) -> bool:
+    """A Groq confirmation must keep every number of what was done."""
+    return all(n in line for n in re.findall(r"\d+", what or ""))
+
+
 _DAILY_PERSONA = """You are the voice of Sage, the AI that runs the person's home, speaking as \
 Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, \
 warm underneath, dry and gently teasing, never stuffy. """
@@ -1159,7 +1193,7 @@ class Speaker:
         settings = get_settings()
         if not has_output(settings) or not text.strip():
             return
-        if kind != "test" and in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+        if kind not in ("test", "command") and in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
             log.info("Quiet hours; not saying: %s", text[:60])
             self._note(kind, "silent", "quiet hours")
             return
@@ -1475,6 +1509,21 @@ class Speaker:
             await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
         else:
             await self.say(notice_line(kind, facts.get("from", ""), call_me), "notice")
+
+    async def announce_command(self, what: str) -> str:
+        """Confirm a spoken command that has been carried out ("alarm set for 6:30
+        AM"): Groq phrases it as Alfred or Jarvis would, a curated line if Groq
+        is unavailable. Said even in quiet hours, as it was asked for."""
+        settings = get_settings()
+        call_me = settings.get("callMe", "")
+        text = ""
+        if settings.get("witty", True):
+            text = await self._ai_line({"what": what, "name": call_me}, COMMAND_PROMPT)
+            if text and not command_line_ok(text, what):
+                text = ""
+        text = text or command_line(what, call_me)
+        await self.say(text, "command")
+        return text
 
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""

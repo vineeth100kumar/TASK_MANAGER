@@ -472,3 +472,14 @@ class HeraldNoticeTest(unittest.TestCase):
             assert run.call_count == 2
             for c in run.call_args_list:
                 c.args[0].close()
+
+
+class CommandLineTests(unittest.TestCase):
+    def test_fallback_line_keeps_the_fact(self):
+        line = speaker.command_line("alarm set for 6:30 AM", "sir")
+        self.assertIn("Alarm set for 6:30 AM", line)
+        self.assertIn("sir", line)
+
+    def test_ai_line_must_keep_numbers(self):
+        self.assertTrue(speaker.command_line_ok("Your 6:30 alarm is set, sir.", "alarm set for 6:30 AM"))
+        self.assertFalse(speaker.command_line_ok("Your alarm is set, sir.", "alarm set for 6:30 AM"))

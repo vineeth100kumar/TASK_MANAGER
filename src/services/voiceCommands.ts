@@ -6,6 +6,7 @@
 // is quick and testable. Start small: alarms and timers for the LUMO clock.
 
 import { LumoAlarm, lumoApi, clockText } from './lumo';
+import { piBackendUrl, piHeaders } from './piBackend';
 
 export type VoiceCommand =
   | { kind: 'alarm_set'; time: string; days: number[]; label: string }
@@ -237,5 +238,21 @@ export async function runVoice(cmd: VoiceCommand, hour24 = false): Promise<Voice
     }
   } catch (e: any) {
     return { ok: false, say: e?.message || 'LUMO did not answer.' };
+  }
+}
+
+// Herald (the Pi's soundbar voice) confirms a command that was carried out, in
+// Alfred/Jarvis words Groq writes. Returns what it said, or null when the Pi has
+// no speaker, so the caller can speak it in the browser instead.
+export async function heraldConfirms(what: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${piBackendUrl()}/api/speaker/announce`, {
+      method: 'POST', headers: piHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ what }),
+    });
+    if (!res.ok) return null;
+    const data = await res.json();
+    return typeof data.text === 'string' ? data.text : null;
+  } catch {
+    return null;
   }
 }

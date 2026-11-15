@@ -5,7 +5,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, Ear, Loader2 } from 'lucide-react';
 import { lumoAvailable, lumoApi } from '../../services/lumo';
-import { afterWakeWord, parseVoice, runVoice } from '../../services/voiceCommands';
+import { afterWakeWord, heraldConfirms, parseVoice, runVoice } from '../../services/voiceCommands';
 
 const Recognition: any = typeof window !== 'undefined' ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition : null;
 // iPhone and iPad Safari stop the mic when the screen locks or the page hides, and
@@ -29,12 +29,12 @@ export function VoiceAssistant() {
 
   useEffect(() => { lumoApi.settings().then(s => { hour24.current = s.clock.hour24; }).catch(() => {}); }, []);
 
-  const show = useCallback((ok: boolean, say: string) => {
+  const show = useCallback((ok: boolean, say: string, spoken = true) => {
     setReply({ ok, say });
     window.clearTimeout(clearTimer.current);
     clearTimer.current = window.setTimeout(() => { setReply(null); setHeard(''); }, 6000);
     try {
-      if (ok && 'speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(say); u.rate = 1.05; window.speechSynthesis.speak(u); }
+      if (ok && spoken && 'speechSynthesis' in window) { const u = new SpeechSynthesisUtterance(say); u.rate = 1.05; window.speechSynthesis.speak(u); }
     } catch { /* speaking is a bonus */ }
   }, []);
 
@@ -42,7 +42,10 @@ export function VoiceAssistant() {
     setPhase('working');
     const cmd = parseVoice(text);
     const result = cmd ? await runVoice(cmd, hour24.current) : { ok: false, say: `I didn't get a command from "${text}". Try "set a timer for 10 minutes".` };
-    show(result.ok, result.say);
+    if (!result.ok) { show(false, result.say); return; }
+    // Herald says it on the soundbar in Alfred/Jarvis words; the browser speaks it only when there is no speaker.
+    const herald = await heraldConfirms(result.say);
+    show(true, herald ?? result.say, herald === null);
   }, [show]);
 
   const stop = useCallback(() => {
