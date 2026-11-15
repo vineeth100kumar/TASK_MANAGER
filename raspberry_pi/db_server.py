@@ -33,6 +33,7 @@ import phone_link
 import recorder
 import speaker
 import spotify
+import room_music
 import quick_add
 import markets
 import passkeys
@@ -747,6 +748,7 @@ async def startup_event():
     _background(life_mode.run(events.broadcast))
     _background(speaker.speaker.run(events.broadcast, phone_link.link))
     _background(spotify.connect.run(events.broadcast, speaker.speaker))
+    room_music.room.attach(asyncio.get_running_loop(), spotify.connect, speaker.speaker, spotify.get_settings)
     _background(drop.run())
     if desk.ENABLED:
         from desk import run as desk_run
@@ -1846,8 +1848,19 @@ async def bluetooth_device(address: str, action: str):
 
 
 # --- Soundbar: greeting and spoken reminders (see speaker.py) ---
-life_mode.on_arrival = speaker.speaker.on_arrival
-life_mode.on_leave = speaker.speaker.on_leave
+def _on_arrival(away_s: float = 0.0) -> None:
+    speaker.speaker.on_arrival(away_s)      # Herald first...
+    room_music.room.on_arrival(away_s)      # ...then soft music (waits for Herald to finish)
+
+
+def _on_leave() -> None:
+    speaker.speaker.on_leave()
+    room_music.room.on_leave()
+
+
+life_mode.on_arrival = _on_arrival
+life_mode.on_leave = _on_leave
+phone_link.on_phone_call = room_music.room.on_call_event
 phone_link.on_phone_notification = speaker.speaker.on_phone_notification
 phone_link.on_phone_battery = speaker.speaker.on_phone_battery
 # Phone drops off Bluetooth = you've left, unless the 5 minute delay is switched on.
@@ -1946,6 +1959,24 @@ async def spotify_shuffle(body: Dict[str, Any]):
         await spotify.connect.shuffle(bool(body.get("on")))
     except RuntimeError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    return await spotify_state()
+
+
+@app.post("/api/spotify/call-over")
+async def spotify_call_over():
+    await room_music.room.call_over("asked")
+    await spotify.connect.publish(force=True)
+    return await spotify_state()
+
+
+@app.post("/api/spotify/arrival-test")
+async def spotify_arrival_test():
+    """Play the arrival music now, as if you'd just walked in."""
+    room = room_music.room
+    if room.session and not room.session.done():
+        raise HTTPException(status_code=409, detail="Arrival music is already playing.")
+    room.last_arrival_at = time.time()
+    room.session = asyncio.ensure_future(room._arrival(spotify.get_settings()))
     return await spotify_state()
 
 

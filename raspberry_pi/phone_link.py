@@ -39,6 +39,7 @@ away_after: Callable[[], float] = lambda: AWAY_AFTER
 # Bundle ids whose notifications are passed on. Empty means every app.
 # Set by db_server: Herald announces some phone notifications and a low battery.
 on_phone_notification = None   # fn(entry dict)
+on_phone_call = None           # fn(event: ringing|ringing_stopped|missed, uid) (room_music.py)
 on_phone_battery = None        # fn(level 0..100)
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"  # the iPhone shares it with bonded accessories
 BATTERY_EVERY_S = 300
@@ -187,6 +188,19 @@ CATEGORY_COLORS = {
 }
 APP_PALETTE = ["#5AC8FA", "#FF9F0A", "#BF5AF2", "#30D158", "#FF375F", "#64D2FF", "#FFD60A", "#FF6482"]
 DEFAULT_COLOR = "#5AC8FA"
+
+
+def call_event_for(note: dict) -> Optional[str]:
+    """What an ANCS event means for a call: ringing, ringing_stopped, missed, or None. Pure."""
+    cat, ev = note.get("category"), note.get("event")
+    if cat == "incoming call":
+        if ev == "added" and not note.get("preExisting"):
+            return "ringing"
+        if ev == "removed":
+            return "ringing_stopped"
+    if cat == "missed call" and ev == "added" and not note.get("preExisting"):
+        return "missed"
+    return None
 
 
 def app_color(app_id: str, category: str = "other") -> str:
@@ -713,6 +727,12 @@ class PhoneLink:
             if not note:
                 return
             log.info("ANCS event: %s uid=%s cat=%s pre=%s", note["event"], note["uid"], note.get("category"), note.get("preExisting"))
+            call_event = call_event_for(note)
+            if call_event and on_phone_call:
+                try:
+                    on_phone_call(call_event, str(note["uid"]))
+                except Exception as e:
+                    log.info("Call hook failed: %s", e)
             if note["event"] == "removed":
                 await self.remove_notification(str(note["uid"]), from_phone=True)
             elif not note["preExisting"] and ANCS_CONTROL_POINT in self._chars:

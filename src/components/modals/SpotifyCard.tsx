@@ -3,7 +3,7 @@
 // in the Spotify app. Now playing, controls and a few settings.
 
 import { useState } from 'react';
-import { Music2, Loader2, Play, Pause, SkipBack, SkipForward, Shuffle, ExternalLink, LogOut, RotateCw, Volume2, KeyRound } from 'lucide-react';
+import { Music2, Loader2, Play, Pause, SkipBack, SkipForward, Shuffle, ExternalLink, LogOut, RotateCw, Volume2, KeyRound, Home, PhoneCall } from 'lucide-react';
 import { useSpotify, type SpotifySettings } from '../../services/spotify';
 import { useToast } from '../../context/ToastContext';
 
@@ -12,6 +12,15 @@ const smallButton = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:
 const primaryButton = 'px-3.5 py-2 rounded-xl text-xs font-semibold bg-green-600 hover:bg-green-700 text-white disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap';
 const roundButton = 'w-9 h-9 rounded-full flex items-center justify-center text-gray-700 dark:text-gray-200 hover:bg-gray-200/70 dark:hover:bg-white/10 disabled:opacity-40';
 const field = 'px-2.5 py-1.5 rounded-lg bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500';
+
+function Toggle({ on, label, disabled, onChange }: { on: boolean; label: string; disabled?: boolean; onChange: () => void }) {
+  return (
+    <button role="switch" aria-checked={on} aria-label={label} disabled={disabled} onClick={onChange}
+      className={`relative w-10 h-6 rounded-full transition-colors shrink-0 ${on ? 'bg-green-600' : 'bg-gray-300 dark:bg-white/20'}`}>
+      <span className={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${on ? 'translate-x-4' : ''}`} />
+    </button>
+  );
+}
 
 export function SpotifyCard() {
   const sp = useSpotify();
@@ -126,6 +135,67 @@ export function SpotifyCard() {
             </div>
           )}
         </>
+      )}
+
+
+      {set.enabled && s.installed && set.hasKey && !s.expired && (
+        <div className="space-y-3 pt-3 border-t border-black/5 dark:border-white/5">
+          <div className="flex items-start gap-3">
+            <Home size={15} className="text-gray-400 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Music when I arrive</div>
+              <p className="text-xs text-gray-500">After Herald's welcome, a calm playlist drifts in softly, stays in the background for a little while, then fades away by itself. Touch Spotify and it's yours.</p>
+            </div>
+            <Toggle on={!!set.arrivalMusic} label="Music when I arrive" disabled={busy} onChange={() => save({ arrivalMusic: !set.arrivalMusic })} />
+          </div>
+          {set.arrivalMusic && (
+            <div className="pl-7 space-y-2.5">
+              <div className="flex flex-wrap gap-1.5">
+                {(s.playlists || []).map(p => (
+                  <button key={p.uri} className={`${smallButton} ${set.arrivalPlaylist === p.uri ? '!bg-green-600 !text-white !border-green-600' : ''}`} disabled={busy}
+                    onClick={() => save({ arrivalPlaylist: p.uri })}>{p.name}</button>
+                ))}
+              </div>
+              <input className={`${field} w-full max-w-sm`} key={set.arrivalPlaylist} placeholder="…or paste a Spotify playlist link"
+                defaultValue={(s.playlists || []).some(p => p.uri === set.arrivalPlaylist) ? '' : set.arrivalPlaylist}
+                onBlur={e => e.target.value.trim() && e.target.value.trim() !== set.arrivalPlaylist && save({ arrivalPlaylist: e.target.value.trim() })} />
+              <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
+                <label className="flex items-center gap-2">Volume
+                  <select className={field} value={set.arrivalVolume} disabled={busy} onChange={e => save({ arrivalVolume: Number(e.target.value) })}>
+                    {[25, 30, 35, 40, 45, 50].map(v => <option key={v} value={v}>{v}%</option>)}
+                  </select>
+                </label>
+                <label className="flex items-center gap-2">For
+                  <select className={field} value={set.arrivalMinutes} disabled={busy} onChange={e => save({ arrivalMinutes: Number(e.target.value) })}>
+                    {[1, 2, 3, 5].map(v => <option key={v} value={v}>{v} min</option>)}
+                  </select>
+                </label>
+                <button className={smallButton} disabled={busy || !!s.room?.playing} onClick={() => attempt(() => sp.control('arrival-test'), 'Fading in…')}>
+                  <Play size={13} />{s.room?.playing ? 'Playing…' : 'Try it now'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-start gap-3">
+            <PhoneCall size={15} className="text-gray-400 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Quieter on calls</div>
+              <p className="text-xs text-gray-500">When your iPhone rings, Spotify drops to {set.callVolume ?? 30}% (left alone if it's already lower) and goes back after. The iPhone doesn't say when an answered call ends, so it comes back after {set.callHoldMinutes ?? 15} min, when you move the volume, or when you press Call's over.</p>
+            </div>
+            <Toggle on={set.callDuck !== false} label="Quieter on calls" disabled={busy} onChange={() => save({ callDuck: !(set.callDuck !== false) })} />
+          </div>
+          {set.callDuck !== false && (
+            <div className="pl-7 flex flex-wrap items-center gap-4 text-xs text-gray-500">
+              <label className="flex items-center gap-2">Back after
+                <select className={field} value={set.callHoldMinutes} disabled={busy} onChange={e => save({ callHoldMinutes: Number(e.target.value) })}>
+                  {[5, 10, 15, 20, 30, 45, 60].map(v => <option key={v} value={v}>{v} min</option>)}
+                </select>
+              </label>
+              {s.room?.onCall && <button className={primaryButton} disabled={busy} onClick={() => attempt(() => sp.control('call-over'), 'Volume back')}>Call's over</button>}
+            </div>
+          )}
+        </div>
       )}
 
       {set.enabled && s.installed && (
