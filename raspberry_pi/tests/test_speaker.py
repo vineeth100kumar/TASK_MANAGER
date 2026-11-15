@@ -356,6 +356,27 @@ class GreetGapTests(unittest.TestCase):
         sp._ready["welcome"] = ("Good evening, sir.", wav, time.time(), other)
         self.assertFalse(sp._ready_ok("welcome"))
 
+    def test_made_ahead_line_is_kept_with_age_but_not_across_voice_changes(self):
+        import pathlib, tempfile, time
+        sp = speaker.Speaker()
+        wav = pathlib.Path(tempfile.mkdtemp()) / "r.wav"
+        wav.write_bytes(b"RIFF" + b"\0" * 5000)
+        part = speaker.part_of_day(sp.now().hour)
+        fp = speaker.settings_fp(speaker.get_settings())
+        sp._ready["welcome"] = ("Hello.", wav, time.time() - 20 * 3600, part, fp)
+        self.assertTrue(sp._ready_ok("welcome"))
+        sp._ready["welcome"] = ("Hello.", wav, time.time(), part, "other")
+        self.assertFalse(sp._ready_ok("welcome"))
+
+    def test_weather_counts_as_changed_from_a_degree_or_a_new_sky(self):
+        made = {"temp_c": 24.0, "icon": "sun"}
+        self.assertFalse(speaker.weather_changed(made, {"temp_c": 24.5, "icon": "sun"}))
+        self.assertFalse(speaker.weather_changed(made, {"temp_c": 23.1, "icon": "sun"}))
+        self.assertTrue(speaker.weather_changed(made, {"temp_c": 25.0, "icon": "sun"}))
+        self.assertTrue(speaker.weather_changed(made, {"temp_c": 24.0, "icon": "rain"}))
+        self.assertFalse(speaker.weather_changed(made, None))
+        self.assertTrue(speaker.weather_changed(None, made))
+
     def test_daily_prompts_forbid_times_and_ask_for_butler_voice(self):
         for kind in speaker.DAILY_PROMPTS:
             p = speaker.DAILY_PROMPTS[kind]
