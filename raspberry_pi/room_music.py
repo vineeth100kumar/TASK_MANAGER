@@ -145,6 +145,18 @@ class RoomMusic:
     def _leave(self) -> None:
         if self.session and not self.session.done():
             self.session.cancel()
+        if self.settings().get("pauseOnLeave", True):
+            asyncio.ensure_future(self._pause_on_leave())
+
+    async def _pause_on_leave(self) -> None:
+        """Nobody is in the room: pause whatever is playing (after a cancelled arrival has settled)."""
+        await asyncio.sleep(2.0)
+        try:
+            if self.music.playing():
+                await self.music.control("pause")
+                self._note("paused", "you left the room")
+        except Exception as e:
+            log.info("Pause on leave skipped: %s", e)
 
     async def _wait_for_herald(self, since: float, limit: float = 90.0) -> None:
         """Herald first: when it chose to speak for this arrival, wait for its

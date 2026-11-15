@@ -151,6 +151,31 @@ class ArrivalTests(unittest.TestCase):
         self.assertEqual(m.state["volume"], 70)
 
 
+class LeaveTests(unittest.TestCase):
+    def go(self, status, on=True):
+        async def run():
+            r = room_music.RoomMusic()
+            r.music, r.speaker = FakeMusic(status=status), FakeSpeaker()
+            r.music.control = lambda a: r.music.pause_quietly()
+            r.settings = lambda: {**spotify.DEFAULTS, "pauseOnLeave": on}
+            r.loop = asyncio.get_running_loop()
+            real = asyncio.sleep
+            room_music.asyncio.sleep = lambda s: real(0)
+            try:
+                r._leave()
+                await real(0.05)
+            finally:
+                room_music.asyncio.sleep = real
+            return r.music.state["status"]
+        return asyncio.run(run())
+
+    def test_pauses_playing_music_when_you_leave(self):
+        self.assertEqual(self.go("playing"), "paused")
+
+    def test_leaves_it_alone_when_switched_off(self):
+        self.assertEqual(self.go("playing", on=False), "playing")
+
+
 class CallTests(unittest.TestCase):
     def setUp(self):
         fast()
