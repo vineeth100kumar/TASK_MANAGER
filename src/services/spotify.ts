@@ -8,7 +8,7 @@ import { SPOTIFY_EVENT } from './liveStream';
 export interface SpotifySettings {
   enabled: boolean; name: string; hasKey: boolean;
   arrivalMusic: boolean; arrivalPlaylist: string; arrivalVolume: number; arrivalMinutes: number;
-  callDuck: boolean; callVolume: number; callHoldMinutes: number;
+  pauseOnLeave: boolean; callDuck: boolean; callVolume: number; callHoldMinutes: number;
 }
 
 export interface SpotifyPlaylist { name: string; uri: string }

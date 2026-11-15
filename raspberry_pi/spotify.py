@@ -60,6 +60,7 @@ DEFAULTS: Dict[str, Any] = {
     "arrivalPlaylist": "spotify:playlist:37i9dQZF1DX4sWSpwq3LiO",   # Peaceful Piano
     "arrivalVolume": 40,                                    # % it rises to
     "arrivalMinutes": 2,                                    # how long, fades included
+    "pauseOnLeave": True,                                   # pause the music when you leave the room
     "callDuck": True,                                       # turn Spotify down while you're on a call
     "callVolume": 30,                                       # % during a call (left alone if already lower)
     "callHoldMinutes": 15,                                  # answered call: volume back after this at the latest
@@ -131,7 +132,7 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if key and not re.fullmatch(r"[\w.-]{8,200}", key):
             raise ValueError("That doesn't look like a Soloist API key.")
         out["apiKey"] = key
-    for k in ("arrivalMusic", "callDuck"):
+    for k in ("arrivalMusic", "callDuck", "pauseOnLeave"):
         if k in update:
             out[k] = bool(update[k])
     if "arrivalPlaylist" in update:

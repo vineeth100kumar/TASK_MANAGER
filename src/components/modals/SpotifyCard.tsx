@@ -178,6 +178,15 @@ export function SpotifyCard() {
           )}
 
           <div className="flex items-start gap-3">
+            <Pause size={15} className="text-gray-400 mt-0.5 shrink-0" />
+            <div className="min-w-0 flex-1">
+              <div className="text-sm font-medium text-gray-900 dark:text-white">Pause when I leave</div>
+              <p className="text-xs text-gray-500">When you leave the room, whatever is playing is paused.</p>
+            </div>
+            <Toggle on={set.pauseOnLeave !== false} label="Pause when I leave" disabled={busy} onChange={() => save({ pauseOnLeave: !(set.pauseOnLeave !== false) })} />
+          </div>
+
+          <div className="flex items-start gap-3">
             <PhoneCall size={15} className="text-gray-400 mt-0.5 shrink-0" />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-gray-900 dark:text-white">Quieter on calls</div>
