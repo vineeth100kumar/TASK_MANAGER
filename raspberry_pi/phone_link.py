@@ -236,6 +236,7 @@ class PhoneLink:
         # The link's state as the Pi sees it, for the log and /api/phone.
         self._ble_last_try = 0.0
         self._ble_tries = 0
+        self._ble_stuck_since = 0.0  # when ServicesResolved first stayed false
         self._advertising = False
         self._adv_exported = False
         self._adv_last_try = 0.0
@@ -420,6 +421,23 @@ class PhoneLink:
         address = dev["Address"].value if dev.get("Address") else phone_path.rsplit("dev_", 1)[-1].replace("_", ":")
         self._set_link(phone=phone_name, address=address, classic=True, ble=ble)
         if not ble:
+            now = time.time()
+            if not self._ble_stuck_since:
+                self._ble_stuck_since = now
+            stuck_for = now - self._ble_stuck_since
+            if stuck_for >= 120:
+                self.say("state", f"{phone_name} ({address}) has been connected without BLE for "
+                                  f"{int(stuck_for)} s; disconnecting to force a fresh link.")
+                self._ble_stuck_since = 0.0
+                self._ble_tries = 0
+                self._chars.clear()
+                self._unwatch()
+                try:
+                    dev_obj = (await self._char(phone_path)).get_interface("org.bluez.Device1")
+                    await asyncio.wait_for(dev_obj.call_disconnect(), timeout=10)
+                except Exception as e:
+                    self.say("disconnect", f"disconnect failed: {e}")
+                return
             self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
                               f"(ServicesResolved=no), so notifications and now playing can't be read. "
                               f"Opening the BLE link from the Pi.")
@@ -427,6 +445,7 @@ class PhoneLink:
             await self._open_ble(phone_path, phone_name, address)
             return
         self._ble_tries = 0
+        self._ble_stuck_since = 0.0
         stale = self._stale_reason(objects, phone_path) if self._chars else ""
         if stale:
             self.say("state", f"now playing from {phone_name} went quiet ({stale}); subscribing again.")
