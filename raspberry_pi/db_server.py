@@ -1907,6 +1907,19 @@ async def speaker_say(body: Dict[str, Any]):
     return {"success": True, "text": text}
 
 
+@app.post("/api/speaker/announce")
+async def speaker_announce(body: Dict[str, Any]):
+    """Herald confirms a voice command that was just carried out. 400 when there is
+    no speaker, so the browser can say it instead."""
+    if not speaker.has_output(speaker.get_settings()):
+        raise HTTPException(status_code=400, detail="No speaker is set up.")
+    what = str(body.get("what") or "").strip()[:200]
+    if not what:
+        raise HTTPException(status_code=400, detail="What was done?")
+    text = await speaker.speaker.announce_command(what)
+    return {"success": True, "text": text}
+
+
 @app.post("/api/speaker/wifi")
 async def speaker_wifi(body: Dict[str, Any]):
     try:
