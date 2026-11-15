@@ -298,17 +298,21 @@ class GreetGapTests(unittest.TestCase):
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(h, "d"))
         self.assertNotEqual(speaker.briefing_key(f, "d"), speaker.briefing_key(f, "e"))
 
-    def test_daily_line_is_kept_in_a_text_file(self):
-        import asyncio, os, tempfile
-        d = tempfile.mkdtemp()
-        with mock.patch.dict(os.environ, {"SAGE_SPEECH_CACHE": d}):
-            sp = speaker.Speaker()
-            settings = {**speaker.get_settings(), "witty": False, "callMe": "sir"}
-            text, cache = asyncio.run(sp._daily("welcome", settings))
-            self.assertTrue(text)
-            again, cache2 = asyncio.run(sp._daily("welcome", settings))
-            self.assertEqual((text, cache), (again, cache2))
-            self.assertTrue(any(f.endswith(".txt") for f in os.listdir(d)))
+    def test_welcome_is_new_each_time(self):
+        import asyncio
+        sp = speaker.Speaker()
+        settings = {**speaker.get_settings(), "witty": False, "callMe": "sir"}
+        seen = [asyncio.run(sp._fresh("welcome", settings)) for _ in range(len(speaker.DAILY_LINES["welcome"]))]
+        self.assertEqual(len(set(seen)), len(seen))      # nothing repeats until the list is used up
+
+    def test_groq_line_that_repeats_is_dropped(self):
+        import asyncio
+        sp = speaker.Speaker()
+        settings = {**speaker.get_settings(), "witty": True, "callMe": ""}
+        sp._recent["goodbye"].append("Same old line, sir.")
+        with mock.patch.object(sp, "_ai_line", mock.AsyncMock(return_value="Same old line, sir.")):
+            text = asyncio.run(sp._fresh("goodbye", settings))
+        self.assertNotEqual(text, "Same old line, sir.")
 
     def test_mixer_control_choice_and_master_clamp(self):
         text = "Simple mixer control 'Mic',0\nSimple mixer control 'PCM',0\nSimple mixer control 'Speaker',0"
@@ -339,6 +343,30 @@ class GreetGapTests(unittest.TestCase):
         self.assertTrue(speaker.brief_due(3 * 3600, 1_000_000, 1_000_100, 2.5))
         self.assertTrue(speaker.brief_due(0, 0, 1_000_000, 2.5))   # unknown away time, never briefed
         self.assertFalse(speaker.brief_due(0, 1_000_000, 1_000_100, 2.5))
+
+    def test_made_ahead_line_expires_when_the_part_of_day_changes(self):
+        import pathlib, tempfile, time
+        sp = speaker.Speaker()
+        wav = pathlib.Path(tempfile.mkdtemp()) / "r.wav"
+        wav.write_bytes(b"RIFF" + b"\0" * 5000)
+        now = sp.now()
+        sp._ready["welcome"] = ("Good evening, sir.", wav, time.time(), speaker.part_of_day(now.hour))
+        self.assertTrue(sp._ready_ok("welcome"))
+        other = "night" if speaker.part_of_day(now.hour) != "night" else "morning"
+        sp._ready["welcome"] = ("Good evening, sir.", wav, time.time(), other)
+        self.assertFalse(sp._ready_ok("welcome"))
+
+    def test_daily_prompts_forbid_times_and_ask_for_butler_voice(self):
+        for kind in speaker.DAILY_PROMPTS:
+            p = speaker.DAILY_PROMPTS[kind]
+            self.assertIn("Alfred", p)
+            self.assertIn("Never state a clock time", p)
+            self.assertIn("avoid", p)
+
+    def test_fresh_fallback_skips_recent(self):
+        lines = speaker.DAILY_LINES["goodbye"]
+        recent = [l.replace("{name}", "") for l in lines[:-1]]
+        self.assertEqual(speaker.fresh_fallback("goodbye", "", recent), lines[-1].replace("{name}", ""))
 
     def test_daily_line_is_stable_per_day(self):
         a = speaker.daily_line("goodbye", "2026-11-14", "sir")
