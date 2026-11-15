@@ -522,7 +522,10 @@ WAKE_PROMPT = GREETING_PROMPT.replace(
 ).replace("at most 45 words", "at most 70 words").replace(
     "(name at most two items)", "(name at most three items, and the overdue count if any)")
 
-READY_MAX_AGE_S = 3 * 3600    # a line made ahead is rewritten after this: the time of day has moved on
+READY_MAX_AGE_S = 3 * 3600    # (no longer used: a made line is kept until something it depends on changes)
+BRIEF_MIN_GAP_S = 300         # the briefing is rebuilt at most this often, however often your tasks change
+WEATHER_EVERY_S = 600         # how often the weather is looked at
+WEATHER_STEP_C = 1.0          # the weather counts as changed from this many degrees, or a new sky
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
@@ -585,6 +588,27 @@ def brief_due(away_s: float, last_at: float, now: float, hours: float) -> bool:
     if away_s > 0:
         return away_s >= hours * 3600
     return not last_at or now - last_at >= hours * 3600
+
+
+def settings_fp(settings: dict) -> str:
+    """What about the settings changes how a made line sounds. Pure."""
+    keep = [settings.get(k) for k in ("voice", "speed", "volume", "callMe", "witty")]
+    return hashlib.sha1(json.dumps(keep, default=str).encode()).hexdigest()[:8]
+
+
+def weather_changed(made: Optional[dict], now: Optional[dict], step: float = WEATHER_STEP_C) -> bool:
+    """Has the weather moved enough to say something new? A degree or more, or a different sky.
+    Not being able to see the weather now is no change. Pure."""
+    if not now:
+        return False
+    if not made:
+        return True
+    if (made.get("icon") or "") != (now.get("icon") or ""):
+        return True
+    try:
+        return abs(float(now["temp_c"]) - float(made["temp_c"])) >= step
+    except (KeyError, TypeError, ValueError):
+        return False
 
 
 def briefing_key(facts: dict, day: str) -> str:
@@ -911,6 +935,10 @@ class Speaker:
         self._last_sent = ""
         self.master: dict = {"ok": None, "control": "", "why": ""}   # result of the last master volume set
         self._briefs: Dict[str, str] = {}   # briefing key -> the words, for today's kept briefing
+        self._brief_ready: Optional[dict] = None   # the briefing made ahead: {key, fp, weather, line, cache}
+        self._brief_at = 0.0                       # when the briefing was last (re)built, or may next be
+        self._weather: Optional[dict] = None       # last weather seen: {temp_c, icon}
+        self._weather_at = 0.0
         self._herald: Deque[dict] = deque(maxlen=8)   # what Herald last decided, newest last
         self._last_welcome_at = 0.0
         self._last_goodbye_at = 0.0
@@ -1257,7 +1285,14 @@ class Speaker:
     async def _render(self, text: str, settings: dict, chime: str, cache: Optional[Path] = None) -> Optional[str]:
         if cache and cache_ok(cache):
             return str(cache)
-        fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav")
+        tmp_dir = None
+        if cache:        # same disk as the cache, so the final rename can't fail across disks (the cache is on the SD card)
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                tmp_dir = str(cache.parent)
+            except OSError:
+                tmp_dir = None
+        fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav", dir=tmp_dir)
         os.close(fd)
         job = json.dumps({"text": text, "voice": settings["voice"], "speed": settings["speed"],
                           "volume": settings["volume"], "chime": chime, "out": out})
@@ -1283,7 +1318,11 @@ class Speaker:
                 os.replace(out, cache)
                 return str(cache)
             except OSError as e:
-                log.info("Couldn't keep the cached line: %s", e)
+                try:
+                    shutil.move(out, str(cache))      # across disks: copy, then remove
+                    return str(cache)
+                except OSError as e2:
+                    log.info("Couldn't keep the cached line: %s / %s", e, e2)
         return out
 
     def passing(self) -> bool:
@@ -1359,14 +1398,15 @@ class Speaker:
 
     # --- What to say ---
 
-    async def greeting(self, wake: bool = False) -> str:
+    async def greeting(self, wake: bool = False, weather: Optional[dict] = None) -> str:
         settings = get_settings()
         facts = await asyncio.to_thread(self._facts, settings)
-        try:
-            from desk import ambient
-            weather = await ambient.fetch_weather()
-        except Exception:
-            weather = None
+        if weather is None:
+            try:
+                from desk import ambient
+                weather = await ambient.fetch_weather()
+            except Exception:
+                weather = None
         if weather:
             facts["tempC"] = round(weather["temp_c"])
             facts["sky"] = WEATHER_WORDS.get(weather.get("icon", ""), "")
@@ -1454,18 +1494,18 @@ class Speaker:
                 pass
         await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
         if cache_ok(cache):
-            self._ready[kind] = (text, cache, time.time(), made_part)
+            self._ready[kind] = (text, cache, time.time(), made_part, settings_fp(settings))
 
     async def _say_daily(self, kind: str) -> None:
         """Say a new welcome or goodbye: the one made ahead if it's still fresh
         (and the settings haven't changed), else write one now. Then make the next."""
         settings = get_settings()
-        ready = self._ready.pop(kind, None)
+        ready = self._ready.get(kind)      # kept: the same stored line plays every time
         if ready and self._ready_ok_tuple(ready):
             await self.say(ready[0], kind, ready[1])
         else:
+            self._ready.pop(kind, None)
             await self.say(await self._fresh(kind, settings), kind)
-        self._daily_try = 0.0        # the run loop makes the next one at its next check
 
     def _note(self, event: str, action: str, why: str = "") -> None:
         """Remember (and log) what Herald decided, so a silent moment can be explained."""
@@ -1591,20 +1631,24 @@ class Speaker:
         asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
 
     def _ready_ok(self, kind: str) -> bool:
-        """The line made ahead is still usable: its file is there, it isn't hours old,
-        and the part of day it greets is still the part of day it is."""
+        """The line made ahead is still usable: its file is there, the voice settings
+        are as they were, and it's still the part of day it greets."""
         ready = self._ready.get(kind)
         return bool(ready and self._ready_ok_tuple(ready))
 
     def _ready_ok_tuple(self, ready: tuple) -> bool:
-        return time.time() - ready[2] < READY_MAX_AGE_S and ready[3] == part_of_day(self.now().hour) and cache_ok(ready[1])
+        """Kept until something it depends on changes: the part of day, how the voice is
+        set, or the file itself. Not because time has passed."""
+        if len(ready) > 4 and ready[4] != settings_fp(get_settings()):
+            return False
+        return ready[3] == part_of_day(self.now().hour) and cache_ok(ready[1])
 
     def _ready_all(self) -> bool:
         return all(self._ready_ok(k) for k in DAILY_LINES)
 
     async def ensure_daily(self) -> None:
-        """Keep the next welcome-back and goodbye made ahead (they're new each time);
-        a made line goes stale after a few hours, as the time of day changes."""
+        """Keep the welcome-back, goodbye and briefing made ahead and stored. Each is
+        remade only when something it depends on changes, never because time passed."""
         for kind in DAILY_LINES:
             if self._ready_ok(kind):
                 continue
@@ -1612,12 +1656,58 @@ class Speaker:
                 return
             self._ready.pop(kind, None)
             await self._prepare(kind)
+            if not self._ready_ok(kind):      # it didn't stick: don't rebuild the voice every 2 minutes
+                self._daily_try = time.time() + 900
+                self._note("prepare", "retry later", f"the {kind} line wasn't kept")
+                return
+        await self.ensure_brief(get_settings())
         for old in list(speech_cache_dir().glob("*.wav")) + list(speech_cache_dir().glob("*.txt")):
             if not old.name.startswith("ready-") and not old.name.startswith(self._day()):
                 try:
                     old.unlink()
                 except OSError:
                     pass
+
+    async def _current_weather(self) -> Optional[dict]:
+        if time.time() - self._weather_at >= WEATHER_EVERY_S:
+            self._weather_at = time.time()
+            try:
+                from desk import ambient
+                w = await ambient.fetch_weather()
+            except Exception:
+                w = None
+            if w and w.get("temp_c") is not None:
+                self._weather = {"temp_c": float(w["temp_c"]), "icon": w.get("icon", "")}
+        return self._weather
+
+    async def ensure_brief(self, settings: dict) -> None:
+        """Keep the day's briefing made ahead and stored. It is rebuilt only when
+        something it says changes: your tasks, the weather by a degree or more (or a
+        new sky), the day, or the voice settings. Never because time passed."""
+        if self.speaking or voice_problem() or not shutil.which("ffmpeg") or not settings.get("greet"):
+            return
+        facts = await asyncio.to_thread(self._facts, settings)
+        key = briefing_key(facts, self._day())
+        weather = await self._current_weather()
+        made, fp = self._brief_ready, settings_fp(settings)
+        stale = (not made or made["key"] != key or made["fp"] != fp or not cache_ok(made["cache"])
+                 or weather_changed(made["weather"], weather))
+        if not stale or time.time() < self._brief_at:
+            return
+        self._brief_at = time.time() + BRIEF_MIN_GAP_S
+        line = await self.greeting(weather=weather)
+        cache = speech_cache_dir() / f"ready-brief-{int(time.time())}.wav"
+        await self._render(line, settings, chime="up", cache=cache)
+        if not cache_ok(cache):
+            self._brief_at = time.time() + 600       # didn't stick: try again later, not every 2 minutes
+            return
+        for old in speech_cache_dir().glob("ready-brief-*.wav"):
+            if old != cache:
+                try:
+                    old.unlink()
+                except OSError:
+                    pass
+        self._brief_ready = {"key": key, "fp": fp, "weather": dict(weather) if weather else None, "line": line, "cache": cache}
 
     async def greet(self, kind: str = "greeting") -> str:
         """The full briefing. The same one is reused all day while your tasks are
@@ -1629,6 +1719,10 @@ class Speaker:
         settings = get_settings()
         facts = await asyncio.to_thread(self._facts, settings)
         key = briefing_key(facts, self._day())
+        made = self._brief_ready
+        if made and made["key"] == key and made["fp"] == settings_fp(settings) and cache_ok(made["cache"]):
+            await self.say(made["line"], kind, made["cache"])      # made ahead: just play it
+            return made["line"]
         cache = speech_cache_path("brief", self._day(), key, settings)
         line = self._briefs.get(key) or ("Today's briefing." if cache_ok(cache) else "")
         if not line:
