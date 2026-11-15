@@ -15,6 +15,7 @@ import { countDoneToday, doneMessage, haptic } from './utils/progress';
 import { Sidebar } from './components/layout/Sidebar';
 import { Header } from './components/layout/Header';
 import { MobileTabBar } from './components/layout/MobileTabBar';
+import { VoiceAssistant } from './components/layout/VoiceAssistant';
 import { DashboardView } from './components/views/DashboardView';
 import { InboxView } from './components/views/InboxView';
 import { FocusView } from './components/views/FocusView';
@@ -613,6 +614,7 @@ function MainApp() {
         </div>
         )}
 
+        <VoiceAssistant />
         <MobileTabBar
           activeView={activeView} activeWorkspace={activeWorkspace} lifeContext={lifeContext}
           onCreate={() => setIsCreateModalOpen(true)}
