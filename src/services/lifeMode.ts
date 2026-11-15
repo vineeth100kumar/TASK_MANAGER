@@ -121,6 +121,27 @@ export async function setLifeMode(mode: LifeMode): Promise<void> {
   }
 }
 
+// The "Leaving the room" button: tell the Pi you've gone so Herald says its
+// goodbye straight away, without waiting for Bluetooth to drop. The Pi reuses
+// today's cached goodbye line and switches to Work; the next real arrival
+// still welcomes you as usual. Without a Pi there's nothing to say, so it just
+// flips this browser to Work.
+export async function leaveRoom(): Promise<void> {
+  const base = piBackendUrl();
+  if (!base) { set({ mode: 'work' }); return; }
+  let res: Response;
+  try {
+    res = await fetch(`${base}/api/life-mode/leave`, {
+      method: 'POST',
+      headers: piHeaders({ 'Content-Type': 'application/json' }),
+    });
+  } catch {
+    throw new Error("Couldn't reach the Pi to say goodbye");
+  }
+  if (!res.ok) throw new Error(failure(res.status));
+  set(fromPi(await res.json()));
+}
+
 // Welcome home was shown: tell the Pi so it isn't shown again for this arrival.
 export async function markWelcomed(): Promise<void> {
   const id = state.welcome?.id;

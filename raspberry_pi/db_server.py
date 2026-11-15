@@ -1743,6 +1743,19 @@ async def life_mode_welcomed(body: Dict[str, Any]):
     return state
 
 
+@app.post("/api/life-mode/leave")
+async def life_mode_leave():
+    """The "Leaving the room" button: say the goodbye now and switch to Work,
+    instead of waiting for Bluetooth to notice the phone has gone. The cached
+    goodbye line is reused (Herald won't repeat it if the phone drops seconds
+    later), and the next real arrival still welcomes you as usual."""
+    await asyncio.to_thread(_on_leave)
+    await asyncio.to_thread(life_mode.set_mode, "work")
+    state = _life_mode_state()
+    await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return state
+
+
 @app.post("/api/phone/notifications")
 async def phone_add_notification(item: PhoneNotification):
     """Shows a notification as if the phone sent it. Handy for trying the
