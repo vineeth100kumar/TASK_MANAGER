@@ -589,6 +589,14 @@ class PhoneLink:
             # the phone again. Stopping and starting makes BlueZ write it anew.
             await self._try(f"turning off {CHAR_NAMES[AMS_ENTITY_UPDATE]}", self._chars[AMS_ENTITY_UPDATE].call_stop_notify())
             notifying[AMS_ENTITY_UPDATE] = False
+        # Same for ANCS: BlueZ can report Notifying from an earlier link while
+        # the iPhone dropped the subscription (it forgets on reconnect), so no
+        # notification ever arrives. Always turn both off and on so BlueZ
+        # writes the subscription to the phone afresh (Data Source first).
+        for uuid in (ANCS_NOTIFICATION_SOURCE, ANCS_DATA_SOURCE):
+            if uuid in self._chars and notifying.get(uuid):
+                await self._try(f"turning off {CHAR_NAMES[uuid]}", self._chars[uuid].call_stop_notify())
+                notifying[uuid] = False
         started_ams = False
         for uuid in (ANCS_DATA_SOURCE, ANCS_NOTIFICATION_SOURCE, AMS_ENTITY_UPDATE):
             if uuid in self._chars and not notifying.get(uuid):
@@ -723,10 +731,12 @@ class PhoneLink:
 
     async def _on_value(self, uuid: str, data: bytes) -> None:
         if uuid == ANCS_NOTIFICATION_SOURCE:
+            self.say("ancs-raw", f"ANCS Notification Source sent {len(data)} bytes")
             note = parse_notification_source(data)
             if not note:
                 return
-            log.info("ANCS event: %s uid=%s cat=%s pre=%s", note["event"], note["uid"], note.get("category"), note.get("preExisting"))
+            self.say("ancs-event", f"ANCS event from the phone: {note['event']} uid={note['uid']} cat={note.get('category')} "
+                                   f"pre={note.get('preExisting')}")
             call_event = call_event_for(note)
             if call_event and on_phone_call:
                 try:
@@ -749,7 +759,7 @@ class PhoneLink:
                 return
             self._data_buffer = b""
             note = self._pending.pop(attrs["uid"], {})
-            log.info("ANCS detail: uid=%s app=%s title=%s", attrs.get("uid"), attrs.get("appId", "")[:40], (attrs.get("title") or "")[:30])
+            self.say("ancs-detail", f"ANCS details: uid={attrs.get('uid')} app={attrs.get('appId', '')[:40]}")
             await self.add_notification({**note, **attrs})
             if on_phone_notification and self.notifications:
                 try:
