@@ -1,36 +1,37 @@
-// The mic button: talk to Sage with the browser's own microphone (the phone's
-// on a phone, the laptop's on a laptop; nothing to pick). Tap it and say one
-// command. Or switch on the ear and just say "Sage, set a timer for ten minutes".
-//
-// The browser only listens: it cuts out each spoken clip (silence is never sent)
-// and the Pi turns it into words with Groq Whisper, so it works the same on a
-// laptop, Android and iPhone Safari.
+// Push to talk, on a computer only: hold the ` key (or hold the mic button), say the
+// command, let go. The browser's own microphone records while it is held and the Pi
+// turns it into words with Groq Whisper. No "Sage" wake word, and nothing on phones.
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Mic, Ear, Loader2 } from 'lucide-react';
+import { Mic, Loader2 } from 'lucide-react';
 import { lumoAvailable, lumoApi } from '../../services/lumo';
-import { afterWakeWord, askAssistant, heraldConfirms, heraldSays, parseVoice, runVoice, transcribeClip, VoiceCommand } from '../../services/voiceCommands';
+import { askAssistant, heraldConfirms, heraldSays, parseVoice, runVoice, transcribeClip, VoiceCommand } from '../../services/voiceCommands';
 import { VoiceListener, micAvailable } from '../../services/voiceListener';
 
-const WAKE_KEY = 'sage:voice-wake';
-const ARMED_MS = 8000;
-const MUTE_AFTER_COMMAND_MS = 10000;   // Herald's confirmation is playing: don't hear it as speech
-const TAP_GIVE_UP_MS = 9000;
+const MUTE_AFTER_COMMAND_MS = 10000;   // Herald's confirmation is playing: don't talk over it
+const SHORTCUT = 'Backquote';          // the ` key
+const MAX_HOLD_MS = 30000;
 
-type Phase = 'idle' | 'tap' | 'wake' | 'armed' | 'working';
+// Phones and tablets are left out for now.
+const isComputer = () => typeof window !== 'undefined' && !window.matchMedia('(pointer: coarse)').matches && !/Android|iPhone|iPad|iPod|Mobi/i.test(navigator.userAgent);
+
+const typing = (t: EventTarget | null) => {
+  const el = t as HTMLElement | null;
+  return !!el && (el.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName));
+};
+
+type Phase = 'idle' | 'recording' | 'working';
 
 export function VoiceAssistant() {
   const [phase, setPhase] = useState<Phase>('idle');
-  const [wake, setWake] = useState<boolean>(() => { try { return localStorage.getItem(WAKE_KEY) === '1'; } catch { return false; } });
   const [heard, setHeard] = useState('');
   const [reply, setReply] = useState<{ ok: boolean; say: string } | null>(null);
   const [speaking, setSpeaking] = useState(false);
   const listener = useRef<VoiceListener | null>(null);
-  const mode = useRef<'tap' | 'wake' | 'off'>('off');
-  const armedUntil = useRef(0);
+  const holding = useRef(false);
   const mutedUntil = useRef(0);
   const busy = useRef(false);
   const hour24 = useRef(false);
-  const timers = useRef<{ reply?: number; heard?: number; tap?: number }>({});
+  const timers = useRef<{ reply?: number; heard?: number; max?: number }>({});
 
   useEffect(() => { lumoApi.settings().then(s => { hour24.current = s.clock.hour24; }).catch(() => {}); }, []);
 
@@ -73,117 +74,90 @@ export function VoiceAssistant() {
     return true;
   }, [runLocal, show]);
 
-  const stop = useCallback(() => {
-    mode.current = 'off';
-    window.clearTimeout(timers.current.tap);
-    listener.current?.stop();
-    listener.current = null;
+  // The held key or button was let go: the mic closes and what was said goes off to be understood.
+  const release = useCallback(() => {
+    if (!holding.current) return;
+    holding.current = false;
+    window.clearTimeout(timers.current.max);
     setSpeaking(false);
-    setPhase('idle');
-  }, []);
+    const l = listener.current;
+    listener.current = null;
+    if (!l) { setPhase('idle'); return; }
+    if (!l.running) { setPhase('idle'); return; }
+    setPhase('working');
+    l.stop();                               // hands over the clip, if anything was said
+    window.setTimeout(() => { if (!busy.current) { setPhase(p => (p === 'working' ? 'idle' : p)); show(false, 'I did not hear anything.'); } }, 500);
+  }, [show]);
 
-  // A clip of speech arrived: to words, then to a command.
   const onClip = useCallback(async (wav: Blob, seconds: number) => {
-    const m = mode.current;
-    if (m === 'off' || Date.now() < mutedUntil.current) return;
-    if (busy.current) return;               // one at a time; the next clip is heard once this one is done
+    if (busy.current) return;
     busy.current = true;
-    const back: Phase = m === 'wake' ? 'wake' : 'working';
     try {
       setPhase('working');
-      const text = await transcribeClip(wav, seconds, m === 'wake');
-      if (!text) { setPhase(m === 'wake' ? 'wake' : 'idle'); return; }
+      const text = await transcribeClip(wav, seconds, false);
+      if (!text) { show(false, 'I did not catch that.'); return; }
       setHeard(text);
       window.clearTimeout(timers.current.heard);
       timers.current.heard = window.setTimeout(() => setHeard(''), 5000);
-      if (m === 'tap') { stop(); await runCommand(text, false); return; }
-      const after = afterWakeWord(text);
-      const armed = Date.now() < armedUntil.current;
-      if (after === null && !armed) { setPhase('wake'); return; }       // not for Sage
-      const command = (after ?? text).trim();
-      if (!command) {                                                     // "Sage" alone: the command comes next
-        armedUntil.current = Date.now() + ARMED_MS;
-        setPhase('armed');
-        window.setTimeout(() => setPhase(p => (p === 'armed' ? 'wake' : p)), ARMED_MS);
-        return;
-      }
-      armedUntil.current = 0;
-      await runCommand(command, !/\bsage\b/i.test(text));
-      setPhase(back);
+      await runCommand(text, false);
     } catch (e: any) {
       show(false, e?.message || 'Voice failed.');
-      setPhase(mode.current === 'wake' ? 'wake' : 'idle');
     } finally {
       busy.current = false;
+      setPhase('idle');
     }
-  }, [runCommand, show, stop]);
+  }, [runCommand, show]);
 
-  const begin = useCallback(async (m: 'tap' | 'wake') => {
-    if (listener.current) { listener.current.stop(); listener.current = null; }
-    mode.current = m;
+  const press = useCallback(async () => {
+    if (holding.current || busy.current) return;
+    if (Date.now() < mutedUntil.current) return;     // Herald is still talking
+    holding.current = true;
+    setPhase('recording');
+    // Hold as long as you like: only the release ends the clip.
     const l = new VoiceListener({
       clip: (wav, seconds) => { void onClip(wav, seconds); },
       level: setSpeaking,
-      error: msg => { mode.current = 'off'; setPhase('idle'); if (m === 'wake') { setWake(false); try { localStorage.setItem(WAKE_KEY, '0'); } catch { /* optional */ } } show(false, msg); },
-    });
+      error: msg => { holding.current = false; listener.current = null; setPhase('idle'); show(false, msg); },
+    }, { endSilenceMs: 600000, maxMs: MAX_HOLD_MS, minSpeechMs: 250 });
     listener.current = l;
-    setPhase(m);
     await l.start();
-    if (!l.running) return;
-    if (m === 'tap') {
-      window.clearTimeout(timers.current.tap);
-      timers.current.tap = window.setTimeout(() => {
-        if (mode.current === 'tap' && !busy.current) { stop(); show(false, 'I did not hear anything.'); }
-      }, TAP_GIVE_UP_MS);
-    }
-  }, [onClip, show, stop]);
+    if (!holding.current) { l.stop(); return; }      // let go before the mic was ready
+    timers.current.max = window.setTimeout(release, MAX_HOLD_MS);
+  }, [onClip, release, show]);
 
-  // Always-listening: on while the page is visible, picked up again when you come back to it.
+  // The shortcut: hold ` anywhere except while typing.
   useEffect(() => {
-    if (!wake || !micAvailable()) return;
-    const onVis = () => {
-      if (document.hidden) { if (mode.current === 'wake') { listener.current?.stop(); listener.current = null; } }
-      else if (mode.current !== 'tap') void begin('wake');
+    if (!isComputer() || !micAvailable()) return;
+    const down = (e: KeyboardEvent) => {
+      if (e.code !== SHORTCUT || e.repeat || e.ctrlKey || e.metaKey || e.altKey || typing(e.target)) return;
+      e.preventDefault();
+      void press();
     };
-    void begin('wake');
-    document.addEventListener('visibilitychange', onVis);
-    return () => { document.removeEventListener('visibilitychange', onVis); if (mode.current === 'wake') stop(); };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [wake]);
+    const up = (e: KeyboardEvent) => { if (e.code === SHORTCUT) release(); };
+    window.addEventListener('keydown', down);
+    window.addEventListener('keyup', up);
+    window.addEventListener('blur', release);
+    return () => { window.removeEventListener('keydown', down); window.removeEventListener('keyup', up); window.removeEventListener('blur', release); };
+  }, [press, release]);
 
-  if (!micAvailable() || !lumoAvailable()) return null;
+  if (!isComputer() || !micAvailable() || !lumoAvailable()) return null;
 
-  const onMic = () => {
-    if (phase === 'tap') { stop(); if (wake) void begin('wake'); return; }
-    void begin('tap');
-  };
-  const toggleWake = () => {
-    const next = !wake;
-    setWake(next);
-    try { localStorage.setItem(WAKE_KEY, next ? '1' : '0'); } catch { /* optional */ }
-    if (!next) stop();
-  };
-  const listening = phase === 'tap' || phase === 'armed';
-  const status = phase === 'armed' ? 'Listening…' : phase === 'tap' ? (speaking ? 'Listening…' : 'Go ahead…') : phase === 'working' ? 'On it…' : wake ? 'Say "Sage…"' : '';
+  const recording = phase === 'recording';
+  const status = recording ? (speaking ? 'Listening…' : 'Go ahead…') : phase === 'working' ? 'On it…' : '';
 
   return (
-    <div className="fixed right-4 z-40 flex flex-col items-end gap-2 bottom-[calc(5.25rem+env(safe-area-inset-bottom))] md:bottom-6 md:right-6">
-      {(heard || reply || (phase !== 'idle' && status)) && (
+    <div className="fixed right-6 bottom-6 z-40 flex flex-col items-end gap-2">
+      {(heard || reply || status) && (
         <div role="status" className={`max-w-[18rem] rounded-2xl border px-3 py-2 text-sm shadow-lg backdrop-blur bg-white/90 dark:bg-[#18181b]/90 ${reply && !reply.ok ? 'border-red-500/30 text-red-700 dark:text-red-300' : 'border-black/10 dark:border-white/10 text-gray-800 dark:text-gray-100'}`}>
           {heard && <div className="text-xs text-gray-500 dark:text-gray-400 mb-0.5">“{heard}”</div>}
           <div>{reply ? reply.say : status}</div>
         </div>
       )}
-      <div className="flex items-center gap-2">
-        <button type="button" onClick={toggleWake} aria-pressed={wake} aria-label={wake ? 'Stop listening for "Sage"' : 'Listen for "Sage"'} title={wake ? 'Listening for "Sage"' : 'Listen for "Sage"'}
-          className={`h-10 w-10 rounded-full flex items-center justify-center border shadow-md transition-colors ${wake ? (speaking ? 'bg-blue-500 text-white border-blue-500 animate-pulse' : 'bg-blue-600 text-white border-blue-600') : 'bg-white dark:bg-[#18181b] text-gray-600 dark:text-gray-300 border-black/10 dark:border-white/10'}`}>
-          <Ear size={18} />
-        </button>
-        <button type="button" onClick={onMic} aria-label={listening ? 'Stop listening' : 'Talk to Sage'} title="Talk to Sage"
-          className={`h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-colors ${listening ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
-          {phase === 'working' ? <Loader2 size={22} className="animate-spin" /> : <Mic size={22} />}
-        </button>
-      </div>
+      <button type="button" aria-label="Hold to talk to Sage" title="Hold to talk (or hold the ` key)"
+        onPointerDown={e => { e.preventDefault(); void press(); }} onPointerUp={release} onPointerLeave={release} onPointerCancel={release}
+        className={`h-12 w-12 rounded-full flex items-center justify-center shadow-lg transition-colors select-none touch-none ${recording ? 'bg-red-500 text-white animate-pulse' : 'bg-blue-600 text-white hover:bg-blue-500'}`}>
+        {phase === 'working' ? <Loader2 size={22} className="animate-spin" /> : <Mic size={22} />}
+      </button>
     </div>
   );
 }
