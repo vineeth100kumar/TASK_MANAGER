@@ -4,6 +4,7 @@ import { Menu, Search, Plus, LayoutList, Columns, Table as TableIcon, CalendarDa
 import { api } from '../../services/api';
 import { SyncEngineStatus } from '../../services/syncEngine';
 import { ModeSwitch } from '../common/ModeSwitch';
+import { LeaveRoomButton } from '../common/LeaveRoomButton';
 
 const VIEWS = [
   { id: 'list', icon: LayoutList, label: 'List' },
@@ -77,13 +78,13 @@ function SyncBadge({ onClick }: { onClick?: () => void }) {
   );
 }
 
-export function Header({ 
-  isSidebarOpen, setIsSidebarOpen, 
-  activeView, activeWorkspace, 
-  filters, setFilters, 
-  setActiveView, 
-  presentationMode, setPresentationMode, 
-  setIsCreateModalOpen, 
+export function Header({
+  isSidebarOpen, setIsSidebarOpen,
+  activeView, activeWorkspace,
+  filters, setFilters,
+  setActiveView,
+  presentationMode, setPresentationMode,
+  setIsCreateModalOpen,
   setIsDiagnosticsOpen,
   lifeContext
 }: HeaderProps) {
@@ -150,8 +151,11 @@ export function Header({
            </AnimatePresence>
         </div>
       </div>
-      
+
       <div className="flex items-center gap-2 md:gap-3 justify-end">
+        {/* Leaving the room: a quick goodbye to Herald, beside the mode switch. */}
+        <LeaveRoomButton />
+
         {/* Work or Chill: on every screen size, phones included. */}
         <ModeSwitch />
 
@@ -184,7 +188,7 @@ export function Header({
                 <span className="sr-only">{currentViewObj?.label} view</span>
                 <ChevronDown size={14} />
               </button>
-              
+
               {isViewMenuOpen && (
                 <>
                   <div className="fixed inset-0 z-10" onClick={() => setIsViewMenuOpen(false)}></div>
