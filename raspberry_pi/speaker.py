@@ -1285,7 +1285,14 @@ class Speaker:
     async def _render(self, text: str, settings: dict, chime: str, cache: Optional[Path] = None) -> Optional[str]:
         if cache and cache_ok(cache):
             return str(cache)
-        fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav")
+        tmp_dir = None
+        if cache:        # same disk as the cache, so the final rename can't fail across disks (the cache is on the SD card)
+            try:
+                cache.parent.mkdir(parents=True, exist_ok=True)
+                tmp_dir = str(cache.parent)
+            except OSError:
+                tmp_dir = None
+        fd, out = tempfile.mkstemp(prefix="sage-say-", suffix=".wav", dir=tmp_dir)
         os.close(fd)
         job = json.dumps({"text": text, "voice": settings["voice"], "speed": settings["speed"],
                           "volume": settings["volume"], "chime": chime, "out": out})
@@ -1311,7 +1318,11 @@ class Speaker:
                 os.replace(out, cache)
                 return str(cache)
             except OSError as e:
-                log.info("Couldn't keep the cached line: %s", e)
+                try:
+                    shutil.move(out, str(cache))      # across disks: copy, then remove
+                    return str(cache)
+                except OSError as e2:
+                    log.info("Couldn't keep the cached line: %s / %s", e, e2)
         return out
 
     def passing(self) -> bool:
@@ -1636,8 +1647,8 @@ class Speaker:
         return all(self._ready_ok(k) for k in DAILY_LINES)
 
     async def ensure_daily(self) -> None:
-        """Keep the next welcome-back and goodbye made ahead (they're new each time);
-        a made line goes stale after a few hours, as the time of day changes."""
+        """Keep the welcome-back, goodbye and briefing made ahead and stored. Each is
+        remade only when something it depends on changes, never because time passed."""
         for kind in DAILY_LINES:
             if self._ready_ok(kind):
                 continue
@@ -1645,6 +1656,10 @@ class Speaker:
                 return
             self._ready.pop(kind, None)
             await self._prepare(kind)
+            if not self._ready_ok(kind):      # it didn't stick: don't rebuild the voice every 2 minutes
+                self._daily_try = time.time() + 900
+                self._note("prepare", "retry later", f"the {kind} line wasn't kept")
+                return
         await self.ensure_brief(get_settings())
         for old in list(speech_cache_dir().glob("*.wav")) + list(speech_cache_dir().glob("*.txt")):
             if not old.name.startswith("ready-") and not old.name.startswith(self._day()):
