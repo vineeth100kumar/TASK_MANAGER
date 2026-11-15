@@ -363,6 +363,13 @@ class GreetGapTests(unittest.TestCase):
             self.assertIn("Never state a clock time", p)
             self.assertIn("avoid", p)
 
+    def test_chime_only_for_coming_and_going(self):
+        self.assertEqual(speaker.chime_for("welcome"), "up")
+        self.assertEqual(speaker.chime_for("greeting"), "up")
+        self.assertEqual(speaker.chime_for("goodbye"), "down")
+        for kind in ("notice", "reminder", "command", "event", "line", "test", "brief"):
+            self.assertEqual(speaker.chime_for(kind), "", kind)
+
     def test_fresh_fallback_skips_recent(self):
         lines = speaker.DAILY_LINES["goodbye"]
         recent = [l.replace("{name}", "") for l in lines[:-1]]
