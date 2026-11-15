@@ -31,10 +31,9 @@ WAKE_PER_DAY = 1300           # always-listening stops here; taps still work
 AUDIO_PER_HOUR = 6600.0
 AUDIO_PER_DAY = 26000.0
 
-# Whisper biased toward the words this app listens for.
-PROMPT = ("Sage, set an alarm for 7:30 AM. Sage, set a timer for 10 minutes. "
-          "Sage, cancel the 6 PM alarm. Sage, snooze. Sage, stop. Sage, start the stopwatch. "
-          "Sage, lights to 40 percent. Sage, next song. Sage, volume up. Sage, what's playing?")
+# A one-word hint so "Sage" is spelled right. Never put example commands here: Whisper
+# repeats its hint when it hears noise, and that ran commands nobody had spoken.
+PROMPT = "Sage."
 
 # What Whisper makes up from silence or noise.
 _HALLUCINATIONS = {
@@ -43,10 +42,18 @@ _HALLUCINATIONS = {
 }
 
 
+# What older builds put in the hint: if Whisper hands any of it back it was made up.
+_OLD_HINT = ("set an alarm for 7 30 am", "set a timer for 10 minutes", "cancel the 6 pm alarm", "start the stopwatch",
+             "lights to 40 percent", "next song", "volume up", "what's playing")
+
+
 def is_noise(text: str) -> bool:
-    """Words Whisper hears in silence ("Thank you.") are not speech."""
-    plain = re.sub(r"[^a-z' ]", "", (text or "").lower()).strip()
-    return not plain or plain in _HALLUCINATIONS
+    """Words Whisper hears in silence ("Thank you.", or its own hint) are not speech."""
+    plain = re.sub(r"[^a-z0-9' ]", " ", (text or "").lower())
+    plain = re.sub(r"\s+", " ", plain).strip()
+    if not plain or plain in _HALLUCINATIONS:
+        return True
+    return any(h in plain for h in _OLD_HINT)
 
 
 class Budget:
@@ -104,7 +111,7 @@ def pick_text(data: Dict[str, Any]) -> str:
     if not segments:
         return str(data.get("text") or "").strip()
     kept = [str(s.get("text", "")).strip() for s in segments
-            if float(s.get("no_speech_prob", 0) or 0) < 0.6 and float(s.get("avg_logprob", 0) or 0) > -1.3]
+            if float(s.get("no_speech_prob", 0) or 0) < 0.4 and float(s.get("avg_logprob", 0) or 0) > -1.0]
     return " ".join(t for t in kept if t).strip()
 
 

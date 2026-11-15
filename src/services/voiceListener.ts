@@ -68,7 +68,7 @@ export class Segmenter {
   private opts: Required<SegmenterOptions>;
 
   constructor(opts: SegmenterOptions = {}) {
-    this.opts = { minSpeechMs: 350, endSilenceMs: 800, maxMs: 9000, prerollMs: 350, ...opts };
+    this.opts = { minSpeechMs: 500, endSilenceMs: 800, maxMs: 9000, prerollMs: 350, ...opts };
   }
 
   get inSpeech(): boolean { return this.speaking; }
@@ -76,7 +76,7 @@ export class Segmenter {
   push(frame: Float32Array): Clip | null {
     const level = rms(frame);
     const ms = (frame.length / RATE) * 1000;
-    const threshold = Math.max(0.012, this.floor * 3);
+    const threshold = Math.max(0.022, this.floor * 3.5);
     const voiced = level > threshold;
     if (!this.speaking) {
       if (!voiced && level < threshold) this.floor = this.floor * 0.95 + level * 0.05;   // learn the room's noise

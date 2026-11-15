@@ -39,6 +39,11 @@ class TextTests(unittest.TestCase):
             self.assertTrue(voice_stt.is_noise(t), t)
         self.assertFalse(voice_stt.is_noise("Sage, set a timer for 5 minutes."))
 
+    def test_its_own_old_hint_is_noise(self):
+        self.assertTrue(voice_stt.is_noise("Sage, set an alarm for 7:30 AM."))
+        self.assertTrue(voice_stt.is_noise("Sage, set a timer for 10 minutes."))
+        self.assertEqual(voice_stt.PROMPT, "Sage.")
+
     def test_doubtful_segments_are_dropped(self):
         data = {"segments": [
             {"text": " Sage, set a timer.", "no_speech_prob": 0.01, "avg_logprob": -0.2},
