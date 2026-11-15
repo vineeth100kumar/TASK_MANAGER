@@ -148,6 +148,8 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             hint="Only who it's from, never what it says. Only while you're home." />
           <Switch on={set.announceEmail !== false} onChange={on => save({ announceEmail: on })} label="Herald: announce emails"
             hint="Only the sender, never the subject or the email itself." />
+          <Switch on={set.announceMessages !== false} onChange={on => save({ announceMessages: on })} label="Herald: announce other messages"
+            hint="Instagram, Telegram, iMessage, Messenger and others. Only who, never what." />
           <Switch on={set.announceBattery !== false} onChange={on => save({ announceBattery: on })} label="Herald: tell me when my phone battery is low"
             hint="Once at 20% or below, again after it has charged past 30%." />
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"

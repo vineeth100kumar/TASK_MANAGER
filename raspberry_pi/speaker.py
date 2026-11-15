@@ -91,6 +91,7 @@ DEFAULTS: Dict[str, Any] = {
     "witty": True,          # let Groq write the greeting (falls back to the template)
     "announceWhatsApp": True,  # Herald: "a message from X" for WhatsApp (never the text)
     "announceEmail": True,     # Herald: "an email from X" (never the subject or body)
+    "announceMessages": True,  # Herald: "a message from X" for Instagram, Telegram, iMessage, etc.
     "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
@@ -161,7 +162,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("announceWhatsApp", "announceEmail", "announceBattery", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if not PHONE_SPEAKER_ALLOWED:
@@ -360,23 +361,75 @@ Facts (JSON):
 WHATSAPP_APPS = {"net.whatsapp.WhatsApp", "net.whatsapp.WhatsAppSMB"}
 EMAIL_APPS = {"com.apple.mobilemail", "com.google.Gmail", "com.microsoft.Office.Outlook",
               "com.readdle.smartemail", "ch.protonmail.protonmail", "com.yahoo.Aerogram"}
+MESSAGING_APPS = {
+    "com.burbn.instagram", "com.facebook.Messenger", "ph.telegra.Telegraph",
+    "com.apple.MobileSMS", "com.tinyspeck.chatlyio", "com.microsoft.skype.teams",
+    "com.toyopagroup.picaboo", "com.discord", "com.hammerandchisel.discord",
+    "com.viber.app", "jp.naver.line.Phone", "org.thoughtcrime.securesms",
+    "com.linkedin.LinkedIn",
+}
+IGNORED_APPS = {
+    "in.swiggy.ios", "com.application.zomato", "com.ubercab.UberEats",
+    "com.ubercab.UberClient", "net.dunzo.user", "com.blinkit.Blinkit",
+    "com.bigbasket.mobileapp", "com.instamart.consumer",
+    "com.amazon.Amazon", "com.flipkart.app", "in.amazon.mShop.android.shopping",
+    "com.myntra.app", "com.meesho.supply",
+    "com.phonepe.PhonePe", "net.one97.paytm", "com.google.android.apps.nbu.paisa.user",
+    "com.bharatpe.app",
+    "com.cleartrip.android", "com.makemytrip", "com.goibibo.app",
+    "in.redbus.android", "com.olacabs.customer",
+    "com.nykaa.app", "com.healthkart.app",
+}
 NOTICE_GAP_S = 60       # the same sender is announced at most once a minute
 BATTERY_LOW = 20
 BATTERY_RESET = 30
 
+_PHONE_NUMBER_RE = re.compile(r"^[\d\s\+\-\(\)]{7,}$")
+
 
 def notice_kind(app_id: str) -> str:
-    return "whatsapp" if app_id in WHATSAPP_APPS else "email" if app_id in EMAIL_APPS else ""
+    if app_id in WHATSAPP_APPS:
+        return "whatsapp"
+    if app_id in EMAIL_APPS:
+        return "email"
+    if app_id in MESSAGING_APPS:
+        return "message"
+    if app_id in IGNORED_APPS:
+        return "ignored"
+    return ""
+
+
+_NOTICE_LINES = {
+    "whatsapp": [
+        "Pardon the interruption{name}. You have a WhatsApp message from {who}.",
+        "A WhatsApp message from {who}{name}. Whenever you're ready.",
+        "If I may{name}, {who} has sent you a message on WhatsApp.",
+    ],
+    "email": [
+        "Pardon the interruption{name}. You have an email from {who}.",
+        "An email from {who} has just arrived{name}. At your convenience.",
+        "If I may{name}, there's an email from {who} awaiting your attention.",
+    ],
+    "message": [
+        "Pardon the interruption{name}. You have a message from {who}.",
+        "A message from {who}{name}. Whenever you're ready.",
+        "If I may{name}, {who} has sent you a message.",
+    ],
+    "battery": [
+        "Pardon me{name}, your phone is running low on battery. Perhaps a charger is in order.",
+    ],
+}
+_notice_idx: dict[str, int] = {}
 
 
 def notice_line(kind: str, sender: str, call_me: str = "") -> str:
-    """The plain fallback when Groq can't write it. Only who, never what."""
+    """Hardcoded Alfred/Jarvis phrases that cycle. Only who, never what."""
     who = sender or "someone"
     name = f", {call_me}" if call_me else ""
-    if kind == "battery":
-        return f"Pardon me{name}, your phone is running low on battery. Perhaps a charger is in order."
-    what = "a WhatsApp message" if kind == "whatsapp" else "an email"
-    return f"Pardon the interruption{name}. You have {what} from {who}."
+    lines = _NOTICE_LINES.get(kind, _NOTICE_LINES["message"])
+    idx = _notice_idx.get(kind, 0) % len(lines)
+    _notice_idx[kind] = idx + 1
+    return lines[idx].format(who=who, name=name)
 
 
 NOTICE_PROMPT = """You are the voice of Sage, the AI that runs the person's home, speaking as \
@@ -1378,13 +1431,16 @@ class Speaker:
     def on_phone_notification(self, entry: dict) -> None:
         """phone_link calls this for each new notification from the phone."""
         kind = notice_kind(entry.get("appId", ""))
-        if not kind:
+        if not kind or kind == "ignored":
             return
         settings = get_settings()
-        if not settings["announceWhatsApp" if kind == "whatsapp" else "announceEmail"]:
+        setting_key = {"whatsapp": "announceWhatsApp", "email": "announceEmail", "message": "announceMessages"}
+        if not settings[setting_key.get(kind, "announceMessages")]:
             return
         sender = (entry.get("title") or "").strip()[:60]
-        event = f"{'WhatsApp' if kind == 'whatsapp' else 'email'} from {sender or 'someone'}"
+        if kind in ("whatsapp", "message") and sender and _PHONE_NUMBER_RE.match(sender):
+            return self._note(f"{kind} from {sender}", "silent", "unknown number, skipping")
+        event = f"{kind} from {sender or 'someone'}"
         if not self._may_announce(event, settings):
             return
         key = f"{kind}:{sender.lower()}"
@@ -1414,10 +1470,11 @@ class Speaker:
 
     async def _notice(self, kind: str, facts: dict, settings: dict) -> None:
         call_me = settings.get("callMe", "")
-        text = ""
-        if settings["witty"]:
+        if kind == "battery" and settings["witty"]:
             text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT)
-        await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
+            await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
+        else:
+            await self.say(notice_line(kind, facts.get("from", ""), call_me), "notice")
 
     def on_leave(self) -> None:
         """life_mode calls this when the phone has left: today's cached goodbye."""
