@@ -26,6 +26,8 @@ export function VoiceAssistant() {
   const armedUntil = useRef(0);
   const hour24 = useRef(false);
   const clearTimer = useRef<number | undefined>(undefined);
+  const heardTimer = useRef<number | undefined>(undefined);
+  const scheduleClearHeard = () => { window.clearTimeout(heardTimer.current); heardTimer.current = window.setTimeout(() => setHeard(''), 4000); };
 
   useEffect(() => { lumoApi.settings().then(s => { hour24.current = s.clock.hour24; }).catch(() => {}); }, []);
 
@@ -38,9 +40,10 @@ export function VoiceAssistant() {
     } catch { /* speaking is a bonus */ }
   }, []);
 
-  const handle = useCallback(async (text: string) => {
+  const handle = useCallback(async (text: string, quiet = false) => {
     setPhase('working');
     const cmd = parseVoice(text);
+    if (!cmd && quiet) { setPhase('wake'); return; }       // always-listening: not a command, say nothing
     const result = cmd ? await runVoice(cmd, hour24.current) : { ok: false, say: `I didn't get a command from "${text}". Try "set a timer for 10 minutes".` };
     if (!result.ok) { show(false, result.say); return; }
     // Herald says it on the soundbar in Alfred/Jarvis words; the browser speaks it only when there is no speaker.
@@ -79,17 +82,18 @@ export function VoiceAssistant() {
       }
       const text = (finalText || interim).trim();
       if (!text) return;
-      if (Date.now() < armedUntil.current) {            // "Sage" came just before: this is the command
-        setHeard(text);
-        if (finalText) { armedUntil.current = 0; setPhase('wake'); handle(finalText.trim()).then(() => setPhase('wake')); }
-        return;
-      }
       const after = afterWakeWord(text);
-      if (after === null) return;                       // not for Sage
+      // "Sage" is spotted the moment it is heard, even before the sentence ends, and
+      // arms the mic for a few seconds so the command is taken even if the recogniser
+      // splits "Sage" from what follows or mishears it in the final text.
+      if (after !== null && Date.now() >= armedUntil.current) { armedUntil.current = Date.now() + ARMED_MS; setPhase('armed'); window.setTimeout(() => setPhase(p => (p === 'armed' ? 'wake' : p)), ARMED_MS); }
+      if (Date.now() >= armedUntil.current) { setHeard(text); scheduleClearHeard(); return; }   // not for Sage
       setHeard(text);
       if (!finalText) return;
-      if (after === '') { armedUntil.current = Date.now() + ARMED_MS; setPhase('armed'); window.setTimeout(() => setPhase(p => (p === 'armed' ? 'wake' : p)), ARMED_MS); }
-      else handle(after).then(() => setPhase('wake'));
+      const command = (after ?? text).trim();
+      if (!command) return;                              // "Sage" alone: keep waiting for the command
+      armedUntil.current = 0;
+      handle(command, true).then(() => setPhase('wake'));
     };
     r.onerror = (e: any) => {
       if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { mode.current = 'off'; setWake(false); show(false, 'The microphone is blocked. Allow it for this site in the browser, then try again.'); }

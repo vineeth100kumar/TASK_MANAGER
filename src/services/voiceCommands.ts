@@ -20,13 +20,31 @@ export interface VoiceResult { ok: boolean; say: string }
 
 // ---- wake word -------------------------------------------------------------
 
-const WAKE = /^\s*(?:hey|hi|ok|okay)?[\s,.]*(?:sage|saj|sedge|saige|sayge|sage's)\b[\s,.:!-]*/i;
+// What speech recognition writes when someone says "Sage": the real word, its
+// sound-alikes, and the usual mishearings (accents included).
+const WAKE_WORDS = new Set([
+  'sage', "sage's", 'sages', 'sedge', 'saj', 'sayj', 'sej', 'sayge', 'saige', 'saeg', 'sagay',
+  'sayage', 'sheikh', 'sage.', 'say', 'says', "say's", 'stage', 'sagen', 'sagg', 'sag', 'sach',
+  'sa', 'sedj', 'saage', 'sayg', 'siege', 'sagë',
+]);
+// Said before "Sage": still counts as the wake word being first.
+const LEAD_INS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'oh', 'um', 'uh', 'so', 'yo', 'hey,', 'ok,']);
 
 // What follows "Sage": the command text, or null when the wake word wasn't said.
-// `''` means "Sage" alone: a command is coming next.
+// `''` means "Sage" alone: a command is coming next. The word may follow a lead-in
+// ("hey", "okay") and be spelled any of the ways the recogniser mishears it.
 export function afterWakeWord(text: string): string | null {
-  const m = text.match(WAKE);
-  return m ? text.slice(m[0].length).trim() : null;
+  const words = text.trim().split(/\s+/);
+  for (let i = 0; i < Math.min(words.length, 3); i++) {
+    const w = words[i].toLowerCase().replace(/^[^a-zë']+|[^a-zë']+$/g, '');
+    if (WAKE_WORDS.has(w)) {
+      // "say" and "stage" are real words: only a wake word when nothing but lead-ins come before them.
+      if (/^(say|says|stage|sa|sag|siege)$/.test(w) && i > 1) return null;
+      return words.slice(i + 1).join(' ').replace(/^[\s,.:!-]+/, '').trim();
+    }
+    if (!LEAD_INS.has(w)) return null;
+  }
+  return null;
 }
 
 // ---- numbers and time ------------------------------------------------------
