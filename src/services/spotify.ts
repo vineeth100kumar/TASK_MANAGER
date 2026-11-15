@@ -5,7 +5,13 @@ import { useCallback, useEffect, useState } from 'react';
 import { piBackendUrl, piHeaders } from './piBackend';
 import { SPOTIFY_EVENT } from './liveStream';
 
-export interface SpotifySettings { enabled: boolean; name: string; hasKey: boolean }
+export interface SpotifySettings {
+  enabled: boolean; name: string; hasKey: boolean;
+  arrivalMusic: boolean; arrivalPlaylist: string; arrivalVolume: number; arrivalMinutes: number;
+  callDuck: boolean; callVolume: number; callHoldMinutes: number;
+}
+
+export interface SpotifyPlaylist { name: string; uri: string }
 
 export interface SpotifyTrack { name: string; artists: string; album: string; cover: string; duration: number; position: number; uri: string }
 
@@ -19,9 +25,11 @@ export interface SpotifyState {
   player: { playing: boolean; paused: boolean; stopped: boolean; buffering: boolean; volume: number; shuffle: boolean; context: string; active: boolean; track: SpotifyTrack | null } | null;
   soundbar: { address: string; name: string; connected: boolean };
   error: { message: string } | null;
+  playlists?: SpotifyPlaylist[];
+  room?: { playing: boolean; onCall: boolean; last: { at: number; what: string; why: string } | null };
 }
 
-export type SpotifyControl = 'playpause' | 'next' | 'prev' | 'signout' | 'restart';
+export type SpotifyControl = 'playpause' | 'next' | 'prev' | 'signout' | 'restart' | 'call-over' | 'arrival-test';
 
 const call = async (path: string, body?: unknown) => {
   const res = await fetch(`${piBackendUrl()}/api/spotify${path}`, {

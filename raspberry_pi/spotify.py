@@ -55,7 +55,31 @@ DEFAULTS: Dict[str, Any] = {
     "enabled": True,      # run the Spotify speaker
     "name": "Sage",       # the name in Spotify's device list
     "apiKey": "",         # the Soloist API key (developer.spotify.com/dashboard/soloist)
+    # Arrival music and call ducking (room_music.py)
+    "arrivalMusic": False,                                  # soft music when you come home
+    "arrivalPlaylist": "spotify:playlist:37i9dQZF1DX4sWSpwq3LiO",   # Peaceful Piano
+    "arrivalVolume": 40,                                    # % it rises to
+    "arrivalMinutes": 2,                                    # how long, fades included
+    "callDuck": True,                                       # turn Spotify down while you're on a call
+    "callVolume": 30,                                       # % during a call (left alone if already lower)
+    "callHoldMinutes": 15,                                  # answered call: volume back after this at the latest
 }
+
+PLAYLISTS = [   # calm picks shown in Settings; any playlist link works too
+    {"name": "Peaceful Piano", "uri": "spotify:playlist:37i9dQZF1DX4sWSpwq3LiO"},
+    {"name": "Deep Focus", "uri": "spotify:playlist:37i9dQZF1DWZeKCadgRdKQ"},
+    {"name": "Lofi Beats", "uri": "spotify:playlist:37i9dQZF1DWWQRwui0ExPn"},
+]
+
+
+def playlist_uri(text: str) -> str:
+    """A Spotify playlist/album URI from a URI or an open.spotify.com link, or "". Pure."""
+    text = str(text or "").strip()
+    m = re.fullmatch(r"spotify:(playlist|album):([A-Za-z0-9]{10,40})", text)
+    if m:
+        return text
+    m = re.match(r"https?://open\.spotify\.com/(?:intl-[a-z-]+/)?(playlist|album)/([A-Za-z0-9]{10,40})", text)
+    return f"spotify:{m.group(1)}:{m.group(2)}" if m else ""
 
 
 def binary() -> str:
@@ -107,6 +131,20 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if key and not re.fullmatch(r"[\w.-]{8,200}", key):
             raise ValueError("That doesn't look like a Soloist API key.")
         out["apiKey"] = key
+    for k in ("arrivalMusic", "callDuck"):
+        if k in update:
+            out[k] = bool(update[k])
+    if "arrivalPlaylist" in update:
+        uri = playlist_uri(update["arrivalPlaylist"])
+        if not uri:
+            raise ValueError("Paste a Spotify playlist or album link.")
+        out["arrivalPlaylist"] = uri
+    for k, lo, hi in (("arrivalVolume", 5, 80), ("callVolume", 5, 80), ("arrivalMinutes", 1, 10), ("callHoldMinutes", 1, 120)):
+        if k in update:
+            try:
+                out[k] = max(lo, min(hi, int(update[k])))
+            except (TypeError, ValueError):
+                raise ValueError("That number doesn't fit.")
     return out
 
 
@@ -298,6 +336,14 @@ def expired(code: Optional[int]) -> bool:
     return code == 10
 
 
+def _room_snapshot() -> dict:
+    try:
+        import room_music
+        return room_music.room.snapshot()
+    except Exception:
+        return {"playing": False, "onCall": False, "last": None}
+
+
 # --- The speaker ---
 
 Emit = Callable[[dict], Awaitable[None]]
@@ -358,6 +404,8 @@ class SpotifyConnect:
             "player": now_playing(self.state),
             "soundbar": {"address": soundbar.get("address", ""), "name": soundbar.get("name", ""), "connected": bool(sb.get("connected"))},
             "error": self.error if self.error and time.time() - self.error["at"] < 600 else None,
+            "playlists": PLAYLISTS,
+            "room": _room_snapshot(),
         }
 
     async def publish(self, force: bool = False) -> None:
