@@ -609,6 +609,17 @@ def fresh_fallback(kind: str, call_me: str = "", recent: Optional[List[str]] = N
     return pick(fresh) if fresh else ""
 
 
+def chime_for(kind: str) -> str:
+    """The chime is only for you coming in or going out: "up" for a welcome (and the
+    briefing that follows a long absence), "down" for a goodbye. Every other line
+    (notices, reminders, voice-command replies, event lines) is spoken without one."""
+    if kind == "goodbye":
+        return "down"
+    if kind in ("welcome", "greeting"):
+        return "up"
+    return ""
+
+
 def speech_cache_dir() -> Path:
     return Path(os.getenv("SAGE_SPEECH_CACHE") or (Path(DB_PATH).resolve().parent / "speech-cache"))
 
@@ -1225,7 +1236,7 @@ class Speaker:
         self.error = None
         await self._publish()
         # Make the speech while the soundbar connects; both take a few seconds.
-        wav_task = asyncio.ensure_future(self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache))
+        wav_task = asyncio.ensure_future(self._render(text, settings, chime=chime_for(kind), cache=cache))
         ready = await self.ensure_connected()
         wav = await wav_task
         if not ready or wav is None:

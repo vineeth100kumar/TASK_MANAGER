@@ -155,5 +155,36 @@ class FrontDoor(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(res["command"], {"kind": "timer_start", "seconds": 1800})
 
 
+class VolumeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_without_music_it_moves_the_pi_master_volume(self):
+        from unittest import mock
+        import speaker
+        saved = {}
+        fake = mock.Mock()
+        fake.set_master = mock.AsyncMock()
+        fake.master = {"ok": True, "why": ""}
+        with mock.patch.object(va, "_spotify_in_use", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value={"masterVolume": 60}), \
+             mock.patch.object(speaker, "save_settings", side_effect=lambda u: saved.update(u)), \
+             mock.patch.object(speaker, "speaker", fake):
+            res = await va.execute({"intent": "volume", "delta": 15})
+        self.assertEqual(saved["masterVolume"], 75)
+        self.assertEqual(res["say"], "Volume at 75 percent")
+
+    async def test_reports_failure_honestly(self):
+        from unittest import mock
+        import speaker
+        fake = mock.Mock()
+        fake.set_master = mock.AsyncMock()
+        fake.master = {"ok": False, "why": "Bluetooth soundbar has its own volume."}
+        with mock.patch.object(va, "_spotify_in_use", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value={"masterVolume": 60}), \
+             mock.patch.object(speaker, "save_settings", return_value={}), \
+             mock.patch.object(speaker, "speaker", fake):
+            res = await va.execute({"intent": "volume", "level": 30})
+        self.assertFalse(res["ok"])
+        self.assertIn("soundbar", res["say"])
+
+
 if __name__ == "__main__":
     unittest.main()

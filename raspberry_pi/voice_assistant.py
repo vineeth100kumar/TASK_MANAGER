@@ -20,6 +20,7 @@ never saved as a task by accident.
 
 from __future__ import annotations
 
+import asyncio
 import datetime
 import difflib
 import json
@@ -468,22 +469,7 @@ async def execute(cmd: dict) -> dict:
         return {"say": {"play": "Music resumed", "pause": "Music paused", "next": "Skipping to the next song", "previous": "Back to the previous song"}[action]}
 
     if name == "volume":
-        import spotify
-        try:
-            state = spotify.now_playing(spotify.connect.state) or {}
-            now = int(state.get("volume") or 0)
-            if cmd.get("mute") is True:
-                _muted_volume["v"] = now or _muted_volume.get("v", 40)
-                await spotify.connect.set_volume(0)
-                return {"say": "Music muted"}
-            if cmd.get("mute") is False:
-                await spotify.connect.set_volume(_muted_volume.pop("v", 40))
-                return {"say": "Music unmuted"}
-            level = cmd["level"] if cmd.get("level") is not None else max(0, min(100, now + cmd.get("delta", 0)))
-            await spotify.connect.set_volume(level)
-        except RuntimeError as e:
-            return {"say": f"The music isn't ready, sir: {e}", "ok": False, "answer": True}
-        return {"say": f"Volume at {level} percent"}
+        return await _volume(cmd)
 
     if name == "now_playing":
         import spotify
@@ -510,6 +496,56 @@ async def execute(cmd: dict) -> dict:
         return {"say": "Your briefing, sir", "spoken": True}
 
     return {"say": "I didn't follow that, sir.", "ok": False}
+
+
+def _spotify_in_use() -> bool:
+    """Is there Spotify music to turn up or down (playing, or paused mid-song)?"""
+    try:
+        import spotify
+        p = spotify.now_playing(spotify.connect.state)
+        return bool(spotify.connect._ws is not None and p and (p["playing"] or p["paused"] or p["buffering"]))
+    except Exception:
+        return False
+
+
+async def _volume(cmd: dict) -> dict:
+    """Volume goes to what is making the sound: the Spotify music when it is on,
+    else the Pi's own master volume (voice, chimes, everything it plays)."""
+    if _spotify_in_use():
+        import spotify
+        now = int((spotify.now_playing(spotify.connect.state) or {}).get("volume") or 0)
+        try:
+            if cmd.get("mute") is True:
+                _muted_volume["v"] = now or _muted_volume.get("v", 40)
+                await spotify.connect.set_volume(0)
+                return {"say": "Music muted"}
+            if cmd.get("mute") is False:
+                await spotify.connect.set_volume(_muted_volume.pop("v", 40))
+                return {"say": "Music unmuted"}
+            level = cmd["level"] if cmd.get("level") is not None else max(0, min(100, now + cmd.get("delta", 0)))
+            await spotify.connect.set_volume(level)
+            return {"say": f"Music volume at {level} percent"}
+        except RuntimeError as e:
+            return {"say": f"The music isn't ready, sir: {e}", "ok": False, "answer": True}
+    import speaker
+    settings = speaker.get_settings()
+    now = int(settings.get("masterVolume", 100))
+    if cmd.get("mute") is True:
+        _muted_volume["m"] = now if now > 5 else 60
+        level = 5
+    elif cmd.get("mute") is False:
+        level = _muted_volume.pop("m", 60)
+    elif cmd.get("level") is not None:
+        level = cmd["level"]
+    else:
+        level = now + cmd.get("delta", 0)
+    level = max(5, min(100, int(level)))
+    await asyncio.to_thread(speaker.save_settings, {"masterVolume": level})
+    await speaker.speaker.set_master()
+    result = speaker.speaker.master
+    if not result.get("ok"):
+        return {"say": f"I couldn't change the volume, sir. {result.get('why') or ''}".strip(), "ok": False, "answer": True}
+    return {"say": f"Volume at {level} percent"}
 
 
 # ---- the front door -----------------------------------------------------------
