@@ -712,6 +712,7 @@ class PhoneLink:
             note = parse_notification_source(data)
             if not note:
                 return
+            log.info("ANCS event: %s uid=%s cat=%s pre=%s", note["event"], note["uid"], note.get("category"), note.get("preExisting"))
             if note["event"] == "removed":
                 await self.remove_notification(str(note["uid"]), from_phone=True)
             elif not note["preExisting"] and ANCS_CONTROL_POINT in self._chars:
@@ -728,6 +729,7 @@ class PhoneLink:
                 return
             self._data_buffer = b""
             note = self._pending.pop(attrs["uid"], {})
+            log.info("ANCS detail: uid=%s app=%s title=%s", attrs.get("uid"), attrs.get("appId", "")[:40], (attrs.get("title") or "")[:30])
             await self.add_notification({**note, **attrs})
             if on_phone_notification and self.notifications:
                 try:
