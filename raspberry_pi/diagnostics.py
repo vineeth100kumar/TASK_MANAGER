@@ -501,12 +501,137 @@ async def _tick(client: httpx.AsyncClient, loop_lag_ms: float, do_heavy: bool) -
     return sample
 
 
+# --- Hotspots: who is busy when the Pi heats up ------------------------------
+
+HOT_EVERY = max(1, _int("SAGE_DIAG_HOT_EVERY", 3))            # seconds between cheap temp/memory looks
+HOT_TEMP_RISE = max(2, _int("SAGE_DIAG_HOT_TEMP_RISE", 6))     # degrees above the recent low
+HOT_MEM_RISE = max(2, _int("SAGE_DIAG_HOT_MEM_RISE", 6))       # memory-used points above the recent low
+HOT_COOLDOWN = max(5, _int("SAGE_DIAG_HOT_COOLDOWN", 20))      # seconds between captures
+HOT_KEEP = 60
+_CLK_TCK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+_PAGE = os.sysconf("SC_PAGE_SIZE") if hasattr(os, "sysconf") else 4096
+
+HOT_CPU_PCT = max(30, _int("SAGE_DIAG_HOT_CPU_PCT", 85))       # whole-CPU busy % that counts as a spike
+hotspots: Deque[dict] = deque(maxlen=HOT_KEEP)
+_hot_prev_cpu: Optional[tuple] = None
+
+
+def _cpu_busy_pct() -> Optional[int]:
+    """Whole-CPU busy % since the previous call (all cores, idle+iowait excluded)."""
+    global _hot_prev_cpu
+    for line in _read("/proc/stat").splitlines():
+        if line.startswith("cpu "):
+            try:
+                vals = [int(x) for x in line.split()[1:]]
+            except ValueError:
+                return None
+            total, idle = sum(vals), vals[3] + (vals[4] if len(vals) > 4 else 0)
+            prev, _hot_prev_cpu = _hot_prev_cpu, (total, idle)
+            if prev and total > prev[0]:
+                return round(100 * (1 - (idle - prev[1]) / (total - prev[0])))
+            return None
+    return None
+
+
+def _procs() -> Dict[int, dict]:
+    """pid -> {name, cpu ticks, rss MB, cmd}. Cheap /proc reads, no subprocess."""
+    out: Dict[int, dict] = {}
+    try:
+        names = os.listdir("/proc")
+    except OSError:
+        return out
+    for n in names:
+        if not n.isdigit():
+            continue
+        stat = _read(f"/proc/{n}/stat")
+        if not stat:
+            continue
+        try:
+            rest = stat[stat.rindex(")") + 2:].split()
+            name = stat[stat.index("(") + 1:stat.rindex(")")]
+            ticks = int(rest[11]) + int(rest[12])
+            rss = int(_read(f"/proc/{n}/statm").split()[1]) * _PAGE / 1048576
+        except (ValueError, IndexError):
+            continue
+        out[int(n)] = {"name": name, "ticks": ticks, "rssMb": round(rss), "ppid": int(rest[1])}
+    return out
+
+
+def _cmd(pid: int) -> str:
+    return _read(f"/proc/{pid}/cmdline").replace("\0", " ").strip()[:110]
+
+
+def _parent_chain(table: Dict[int, dict], pid: int) -> str:
+    chain, seen = [], set()
+    while pid in table and pid not in seen and len(chain) < 4:
+        seen.add(pid)
+        chain.append(table[pid]["name"])
+        pid = table[pid]["ppid"]
+    return " < ".join(chain)
+
+
+def capture_hotspot(why: str, temp: Optional[float], used: Optional[int], window: float = 1.0) -> dict:
+    """Two process-table looks `window` seconds apart; the busiest by CPU and by memory."""
+    a = _procs()
+    t0 = time.time()
+    time.sleep(window)
+    b = _procs()
+    secs = max(0.1, time.time() - t0)
+    rows = []
+    for pid, cur in b.items():
+        prev = a.get(pid)
+        cpu = (cur["ticks"] - prev["ticks"]) / _CLK_TCK / secs * 100 if prev else 0.0
+        rows.append({"pid": pid, "name": cur["name"], "cpuPct": round(cpu), "rssMb": cur["rssMb"],
+                     "newSince": prev is None})
+    busiest = sorted(rows, key=lambda r: r["cpuPct"], reverse=True)[:5]
+    biggest = sorted(rows, key=lambda r: r["rssMb"], reverse=True)[:4]
+    for r in busiest + biggest:
+        r["cmd"] = _cmd(r["pid"])
+        r["chain"] = _parent_chain(b, r["pid"])
+    return {"t": _iso(), "why": why, "tempC": temp, "memUsedPct": used, "cpuPct": _cpu_busy_pct(),
+            "busiest": busiest, "biggest": biggest,
+            "newProcesses": [r["name"] for r in rows if r["newSince"]][:12]}
+
+
+async def run_hotspots() -> None:
+    """Watch temperature and memory every few seconds; on a jump above the
+    recent low, record which processes are busy (see ``sage_diagnostics``)."""
+    lows: Deque[tuple] = deque(maxlen=max(10, 240 // HOT_EVERY))
+    last = 0.0
+    while True:
+        await asyncio.sleep(HOT_EVERY)
+        try:
+            temp = await asyncio.to_thread(_temp_c)
+            used = (await asyncio.to_thread(_memory)).get("usedPct")
+            cpu = await asyncio.to_thread(_cpu_busy_pct)
+            if cpu is not None and cpu >= HOT_CPU_PCT and time.time() - last >= HOT_COOLDOWN:
+                last = time.time()
+                hotspots.append(await asyncio.to_thread(capture_hotspot, f"CPU {cpu}% busy", temp, used))
+            elif temp is not None and used is not None and len(lows) >= 5:
+                lo_t = min(x[0] for x in lows if x[0] is not None)
+                lo_m = min(x[1] for x in lows if x[1] is not None)
+                reasons = []
+                if temp - lo_t >= HOT_TEMP_RISE:
+                    reasons.append(f"temp {lo_t:g}->{temp:g}C")
+                if used - lo_m >= HOT_MEM_RISE:
+                    reasons.append(f"memory {lo_m}->{used}%")
+                if reasons and time.time() - last >= HOT_COOLDOWN:
+                    last = time.time()
+                    hotspots.append(await asyncio.to_thread(capture_hotspot, ", ".join(reasons), temp, used))
+            lows.append((temp, used))
+        except Exception as e:
+            logstore.error("diag", f"Hotspot watcher failed: {e!r}")
+            await asyncio.sleep(30)
+
+
 async def run() -> None:
     """Background worker: one sample every INTERVAL seconds, forever."""
     if not enabled():
         logstore.info("diag", "Diagnostics probe is off (SAGE_DIAG=0).")
         return
     logstore.info("diag", f"Diagnostics probe started: every {INTERVAL}s, keeping {KEEP_HOURS}h.")
+    if os.getenv("SAGE_DIAG_HOTSPOTS", "1").strip().lower() not in ("0", "false", "off", "no"):
+        asyncio.get_event_loop().create_task(run_hotspots())
     loop = asyncio.get_event_loop()
     count = 0
     # Prime the iowait delta and let the server settle before the first sample.
@@ -601,6 +726,7 @@ def summary(hours: float = 24) -> dict:
             "avgPct": round(sum(iowaits) / len(iowaits), 1) if iowaits else None,
         },
         "slowestRequests": slow_reqs,
+        "hotspots": [h for h in hotspots if h["t"] >= _iso(time.time() - hours * 3600)][-12:],
         "now": _snapshot(latest),
         "verdict": _verdict(episodes, public_fails, local_fails, uv_samples, lags),
     }
