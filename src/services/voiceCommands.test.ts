@@ -12,8 +12,9 @@ describe('wake word', () => {
     expect(afterWakeWord('sagely advice')).toBeNull();
     expect(afterWakeWord('Okay sage set a timer')).toBe('set a timer');
     expect(afterWakeWord('Hey, Sedge. set an alarm for 7')).toBe('set an alarm for 7');
-    expect(afterWakeWord('says set a timer for 5 minutes')).toBe('set a timer for 5 minutes');
-    expect(afterWakeWord('hey say cancel the alarm')).toBe('cancel the alarm');
+    expect(afterWakeWord('says set a timer for 5 minutes')).toBeNull();
+    expect(afterWakeWord('say hello to the stage')).toBeNull();
+    expect(afterWakeWord('stage lights off')).toBeNull();
     expect(afterWakeWord('I said sage')).toBeNull();
     expect(afterWakeWord('set a timer')).toBeNull();
   });

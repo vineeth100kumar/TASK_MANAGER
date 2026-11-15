@@ -23,9 +23,7 @@ export interface VoiceResult { ok: boolean; say: string; nothingRinging?: boolea
 // What speech recognition writes when someone says "Sage": the real word, its
 // sound-alikes, and the usual mishearings (accents included).
 const WAKE_WORDS = new Set([
-  'sage', "sage's", 'sages', 'sedge', 'saj', 'sayj', 'sej', 'sayge', 'saige', 'saeg', 'sagay',
-  'sayage', 'sheikh', 'sage.', 'say', 'says', "say's", 'stage', 'sagen', 'sagg', 'sag', 'sach',
-  'sa', 'sedj', 'saage', 'sayg', 'siege', 'sagë',
+  'sage', "sage's", 'sages', 'sedge', 'saj', 'sayj', 'sej', 'sayge', 'saige', 'saeg', 'sagay', 'sayage', 'saage', 'sayg',
 ]);
 // Said before "Sage": still counts as the wake word being first.
 const LEAD_INS = new Set(['hey', 'hi', 'hello', 'ok', 'okay', 'oh', 'um', 'uh', 'so', 'yo', 'hey,', 'ok,']);
@@ -38,8 +36,6 @@ export function afterWakeWord(text: string): string | null {
   for (let i = 0; i < Math.min(words.length, 3); i++) {
     const w = words[i].toLowerCase().replace(/^[^a-zë']+|[^a-zë']+$/g, '');
     if (WAKE_WORDS.has(w)) {
-      // "say" and "stage" are real words: only a wake word when nothing but lead-ins come before them.
-      if (/^(say|says|stage|sa|sag|siege)$/.test(w) && i > 1) return null;
       return words.slice(i + 1).join(' ').replace(/^[\s,.:!-]+/, '').trim();
     }
     if (!LEAD_INS.has(w)) return null;
