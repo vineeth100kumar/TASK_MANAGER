@@ -507,6 +507,10 @@ or as "sir" if there is none.
 Facts (JSON):
 """,
 }
+for _k in DAILY_PROMPTS:
+    DAILY_PROMPTS[_k] = DAILY_PROMPTS[_k].replace(
+        "Facts (JSON):",
+        'Every line must sound new: never reuse the wording, opening or joke of any line listed under "avoid".\n\nFacts (JSON):')
 
 
 WAKE_PROMPT = GREETING_PROMPT.replace(
@@ -515,6 +519,7 @@ WAKE_PROMPT = GREETING_PROMPT.replace(
 ).replace("at most 45 words", "at most 70 words").replace(
     "(name at most two items)", "(name at most three items, and the overdue count if any)")
 
+READY_MAX_AGE_S = 3 * 3600    # a line made ahead is rewritten after this: the time of day has moved on
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
@@ -592,6 +597,13 @@ def daily_line(kind: str, day: str, call_me: str = "") -> str:
         return ""
     pick = lines[int(hashlib.sha1(f"{kind}{day}".encode()).hexdigest(), 16) % len(lines)]
     return pick.replace("{name}", f", {call_me}" if call_me else "")
+
+
+def fresh_fallback(kind: str, call_me: str = "", recent: Optional[List[str]] = None, pick: Callable[[List[str]], str] = random.choice) -> str:
+    """A curated welcome/goodbye line that wasn't said lately. Pure apart from `pick`."""
+    lines = [l.replace("{name}", f", {call_me}" if call_me else "") for l in (DAILY_LINES.get(kind) or [])]
+    fresh = [l for l in lines if l not in (recent or [])] or lines
+    return pick(fresh) if fresh else ""
 
 
 def speech_cache_dir() -> Path:
@@ -889,6 +901,8 @@ class Speaker:
         self._last_welcome_at = 0.0
         self._last_goodbye_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
+        self._ready: Dict[str, tuple] = {}     # kind -> (text, wav, made at): the next welcome/goodbye, made ahead
+        self._recent: Dict[str, Deque[str]] = {k: deque(maxlen=8) for k in DAILY_LINES}   # lines said lately, never repeated
         self._daily_try = 0.0
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
         self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
@@ -1393,33 +1407,50 @@ class Speaker:
     def _day(self) -> str:
         return self.now().strftime("%Y-%m-%d")
 
-    async def _daily(self, kind: str, settings: dict) -> tuple:
-        """Today's (text, cache path) for "welcome" or "goodbye". Groq writes the
-        line once a day in the butler voice; it is kept in a small text file so it
-        stays the same all day. Without Groq, one of the curated lines is used."""
-        day = self._day()
+    async def _fresh(self, kind: str, settings: dict) -> str:
+        """A brand-new welcome or goodbye line, every time: Groq writes it in the
+        butler voice, told what was said lately so it never repeats; without Groq,
+        a curated line that wasn't used recently."""
         call_me = settings.get("callMe", "")
-        txt = speech_cache_dir() / f"{day}-{kind}.txt"
+        recent = list(self._recent[kind])
         text = ""
-        try:
-            text = txt.read_text().strip()
-        except OSError:
-            pass
+        if settings["witty"]:
+            now = self.now()
+            text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me, "avoid": recent}, DAILY_PROMPTS[kind])
+            if text in recent:
+                text = ""
+        text = text or fresh_fallback(kind, call_me, recent)
+        if text:
+            self._recent[kind].append(text)
+        return text
+
+    async def _prepare(self, kind: str) -> None:
+        """Write and voice the next line for `kind` ahead of time, so the next
+        arrival or departure is as quick as a cached line was."""
+        settings = get_settings()
+        text = await self._fresh(kind, settings)
         if not text:
-            if settings["witty"]:
-                now = self.now()
-                text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me}, DAILY_PROMPTS[kind])
-            text = text or daily_line(kind, day, call_me)
+            return
+        cache = speech_cache_dir() / f"ready-{kind}-{int(time.time())}.wav"
+        for old in speech_cache_dir().glob(f"ready-{kind}-*.wav"):
             try:
-                txt.parent.mkdir(parents=True, exist_ok=True)
-                txt.write_text(text)
-            except OSError as e:
-                log.info("Couldn't keep today's %s line: %s", kind, e)
-        return text, speech_cache_path(kind, day, text, settings)
+                old.unlink()
+            except OSError:
+                pass
+        await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
+        if cache_ok(cache):
+            self._ready[kind] = (text, cache, time.time())
 
     async def _say_daily(self, kind: str) -> None:
-        text, cache = await self._daily(kind, get_settings())
-        await self.say(text, kind, cache)
+        """Say a new welcome or goodbye: the one made ahead if it's still fresh
+        (and the settings haven't changed), else write one now. Then make the next."""
+        settings = get_settings()
+        ready = self._ready.pop(kind, None)
+        if ready and time.time() - ready[2] < READY_MAX_AGE_S and cache_ok(ready[1]):
+            await self.say(ready[0], kind, ready[1])
+        else:
+            await self.say(await self._fresh(kind, settings), kind)
+        self._daily_try = 0.0        # the run loop makes the next one at its next check
 
     def _note(self, event: str, action: str, why: str = "") -> None:
         """Remember (and log) what Herald decided, so a silent moment can be explained."""
@@ -1544,27 +1575,26 @@ class Speaker:
         self._note(event, "goodbye")
         asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
 
+    def _ready_all(self) -> bool:
+        return all(k in self._ready for k in DAILY_LINES)
+
     async def ensure_daily(self) -> None:
-        """Once a day (and again if a file went missing or the voice changed):
-        make today's welcome-back and goodbye lines, and clear older days."""
-        settings = get_settings()
-        day = self._day()
-        todo = [(k,) + tuple(await self._daily(k, settings)) for k in DAILY_LINES]
-        if all(cache_ok(c) for _, _, c in todo):
-            self._daily_day = day
-            return
-        if self.speaking or voice_problem() or not shutil.which("ffmpeg"):
-            return
-        for kind, text, cache in todo:
-            if not cache_ok(cache) and text:
-                await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
+        """Keep the next welcome-back and goodbye made ahead (they're new each time);
+        a made line goes stale after a few hours, as the time of day changes."""
+        for kind in DAILY_LINES:
+            ready = self._ready.get(kind)
+            if ready and time.time() - ready[2] < READY_MAX_AGE_S and cache_ok(ready[1]):
+                continue
+            if self.speaking or voice_problem() or not shutil.which("ffmpeg"):
+                return
+            self._ready.pop(kind, None)
+            await self._prepare(kind)
         for old in list(speech_cache_dir().glob("*.wav")) + list(speech_cache_dir().glob("*.txt")):
-            if not old.name.startswith(day):
+            if not old.name.startswith("ready-") and not old.name.startswith(self._day()):
                 try:
                     old.unlink()
                 except OSError:
                     pass
-        self._daily_day = day
 
     async def greet(self, kind: str = "greeting") -> str:
         """The full briefing. The same one is reused all day while your tasks are
@@ -1618,7 +1648,7 @@ class Speaker:
                 await self.wifi_guard()
                 if has_output(get_settings()):
                     await self.tick()
-                    if self._daily_day != self._day() and time.time() - self._daily_try >= 600:
+                    if time.time() - self._daily_try >= (60 if self._ready_all() else 600):
                         self._daily_try = time.time()
                         await self.ensure_daily()
             except Exception as e:
