@@ -6,10 +6,9 @@
 // from and saved to the Pi; the Pi's DESK_STATE events keep it live.
 
 import { useCallback, useEffect, useState } from 'react';
-import { AlarmClock, AlertTriangle, BellOff, BellRing, Clock, Cpu, Hourglass, Lightbulb, Moon, Server, AlarmClockOff } from 'lucide-react';
+import { AlarmClock, AlertTriangle, Clock, Cpu, Hourglass, Lightbulb, Moon, Server } from 'lucide-react';
 import { LUMO_EVENT, LumoAlarm, LumoState, LumoStatus, compareVersions, lumoApi, lumoAvailable, untilText } from '../../services/lumo';
 import { useDataChanges } from '../../hooks/useDataChanges';
-import { useToast } from '../../context/ToastContext';
 import { useLumoSettings } from '../lumo/parts';
 import { AlarmsTab } from '../lumo/AlarmsTab';
 import { TimersTab } from '../lumo/TimersTab';
@@ -35,7 +34,6 @@ const FIT_FIRMWARE = '2.15.0';
 const BRIGHTNESS_FIRMWARE = '2.23.0';
 
 export function LumoView() {
-  const { showToast } = useToast();
   const [tab, setTabState] = useState<Tab>(() => {
     try { return (localStorage.getItem(TAB_KEY) as Tab) || 'alarms'; } catch { return 'alarms'; }
   });
@@ -95,19 +93,7 @@ export function LumoView() {
   const soundsSupported = connected ? compareVersions(status?.firmware ?? null, SOUNDS_FIRMWARE) >= 0 : true;
   const fitSupported = connected ? compareVersions(status?.firmware ?? null, FIT_FIRMWARE) >= 0 : true;
   const brightnessSupported = connected ? compareVersions(status?.firmware ?? null, BRIGHTNESS_FIRMWARE) >= 0 : true;
-  const ringing = live?.ringing;
-  const timerDone = live?.timer.state === 'done';
   const next = (alarms || []).filter(a => a.enabled && a.nextRing).sort((a, b) => a.nextRing!.localeCompare(b.nextRing!))[0];
-
-  const ringAction = async (action: 'snooze' | 'stop') => {
-    try {
-      const s = await lumoApi.ringing(action);
-      setLive(s.state);
-      loadAlarms();
-    } catch (e: any) {
-      showToast(e.message, 'error');
-    }
-  };
 
   const tagline = error ? `Can't reach the Pi right now (${error}).`
     : !status ? 'Asking the Pi…'
@@ -146,28 +132,6 @@ export function LumoView() {
           </p>
         )}
       </div>
-
-      {ringing && (
-        <div className="rounded-3xl p-4 md:p-5 bg-red-500/10 ring-1 ring-red-500/30 flex items-center gap-4 flex-wrap">
-          <BellRing size={26} className="text-red-500 animate-bounce shrink-0" />
-          <div className="flex-1 min-w-0">
-            <div className="text-[16px] font-semibold text-gray-900 dark:text-white">{ringing.label} is ringing</div>
-            <div className="text-[13px] text-gray-500">Since {new Date(ringing.since).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' })}</div>
-          </div>
-          <div className="flex gap-2">
-            <button onClick={() => ringAction('snooze')} className="px-4 py-2.5 rounded-xl surface-item font-semibold text-[14px] text-gray-800 dark:text-gray-100 flex items-center gap-1.5"><AlarmClockOff size={16} /> Snooze</button>
-            <button onClick={() => ringAction('stop')} className="px-4 py-2.5 rounded-xl bg-red-600 text-white font-semibold text-[14px] flex items-center gap-1.5 shadow-sm shadow-red-600/30"><BellOff size={16} /> Stop</button>
-          </div>
-        </div>
-      )}
-      {timerDone && !ringing && (
-        <div className="rounded-3xl p-4 md:p-5 bg-amber-500/10 ring-1 ring-amber-500/30 flex items-center gap-4 flex-wrap">
-          <Hourglass size={24} className="text-amber-500 shrink-0" />
-          <div className="flex-1 text-[16px] font-semibold text-gray-900 dark:text-white">{live?.timer.label || 'Timer'} is done</div>
-          <button onClick={async () => { try { setLive((await lumoApi.timer('cancel')).state); } catch (e: any) { showToast(e.message, 'error'); } }}
-            className="px-4 py-2.5 rounded-xl bg-amber-500 text-white font-semibold text-[14px]">Stop</button>
-        </div>
-      )}
 
       {tab === 'alarms' && (
         <AlarmsTab alarms={alarms} settings={settings} save={save} reload={loadAlarms} connected={connected} tonesSupported={toolsSupported} soundsSupported={soundsSupported} />

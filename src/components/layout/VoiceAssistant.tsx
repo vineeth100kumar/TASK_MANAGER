@@ -8,7 +8,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Mic, Ear, Loader2 } from 'lucide-react';
 import { lumoAvailable, lumoApi } from '../../services/lumo';
-import { afterWakeWord, heraldConfirms, parseVoice, runVoice, transcribeClip } from '../../services/voiceCommands';
+import { afterWakeWord, askAssistant, heraldConfirms, heraldSays, parseVoice, runVoice, transcribeClip, VoiceCommand } from '../../services/voiceCommands';
 import { VoiceListener, micAvailable } from '../../services/voiceListener';
 
 const WAKE_KEY = 'sage:voice-wake';
@@ -43,17 +43,35 @@ export function VoiceAssistant() {
     } catch { /* speaking is a bonus */ }
   }, []);
 
-  const runCommand = useCallback(async (text: string, quiet: boolean) => {
-    const cmd = parseVoice(text);
-    if (!cmd) { if (!quiet) show(false, `I didn't get a command from "${text}". Try "set a timer for 10 minutes".`); return false; }
+  // Run an alarm or timer command the app does itself; Herald confirms it in Alfred/Jarvis words.
+  const runLocal = useCallback(async (cmd: VoiceCommand) => {
     const result = await runVoice(cmd, hour24.current);
-    if (!result.ok) { show(false, result.say); return true; }
-    // Herald says it on the soundbar in Alfred/Jarvis words; the browser speaks it only when there is no speaker.
+    if (!result.ok) { show(false, result.say); return result; }
     const herald = await heraldConfirms(result.say);
     show(true, herald ?? result.say, herald === null);
     mutedUntil.current = Date.now() + MUTE_AFTER_COMMAND_MS;
-    return true;
+    return result;
   }, [show]);
+
+  // The words to an action: the app's own alarm/timer rules first, then the Pi (tasks, music,
+  // the clock's screens and lights, volume, modes, the briefing, and Groq for odd phrasings).
+  const runCommand = useCallback(async (text: string, quiet: boolean) => {
+    const local = parseVoice(text);
+    if (local) {
+      const result = await runLocal(local);
+      if (!result.nothingRinging) return true;       // "stop" with nothing ringing: maybe the music
+    }
+    const reply = await askAssistant(text);
+    if (reply.command) { await runLocal(reply.command); return true; }
+    if (!reply.handled) { if (!quiet) show(false, reply.say || `I didn't get a command from "${text}".`); return false; }
+    if (reply.ok === false) { show(false, reply.say || 'That did not work.'); return true; }
+    const say = reply.say || 'Done, sir.';
+    if (reply.spoken) show(true, say, false);
+    else if (reply.answer) { const said = await heraldSays(say); show(true, say, !said); }
+    else { const herald = await heraldConfirms(say); show(true, herald ?? say, herald === null); }
+    mutedUntil.current = Date.now() + MUTE_AFTER_COMMAND_MS;
+    return true;
+  }, [runLocal, show]);
 
   const stop = useCallback(() => {
     mode.current = 'off';
@@ -90,7 +108,7 @@ export function VoiceAssistant() {
         return;
       }
       armedUntil.current = 0;
-      await runCommand(command, true);
+      await runCommand(command, !/\bsage\b/i.test(text));
       setPhase(back);
     } catch (e: any) {
       show(false, e?.message || 'Voice failed.');

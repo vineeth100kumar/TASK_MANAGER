@@ -175,3 +175,46 @@ async def press(button: str) -> bool:
         return False
     await desk.press(button)
     return True
+
+
+async def show_screen(screen: str) -> None:
+    """Show one of the clock's screens now (from a voice command)."""
+    if desk is None:
+        raise ValueError("The desk clock isn't running.")
+    if screen not in desk_settings.SCREENS:
+        raise ValueError(f"Unknown screen {screen!r}.")
+    await desk.controller.show_screen(screen)
+
+
+async def set_lights(cmd: dict) -> dict:
+    """Lights from a voice command: on or off, a mode, a brightness (0-100) or a
+    step brighter or dimmer. Returns what to say."""
+    if desk is None:
+        return {"say": "The clock isn't running, sir.", "ok": False}
+    if cmd.get("state") == "off":
+        desk.lights_off = True
+        desk.controller.lights = desk.lights()
+        await desk.controller.send_lights()
+        await desk.announce()
+        return {"say": "Lights off"}
+    update: dict = {}
+    if cmd.get("mode"):
+        update["mode"] = cmd["mode"]
+    now = int(desk.settings["lights"]["brightness"])
+    if cmd.get("brightness") is not None:
+        update["brightness"] = round(cmd["brightness"] * 255 / 100)
+    elif cmd.get("delta") is not None:
+        update["brightness"] = max(5, min(255, now + round(cmd["delta"] * 255 / 100)))
+    if update:
+        await save_settings({"lights": update})
+    if desk.lights_off:
+        desk.lights_off = False
+        desk.controller.lights = desk.lights()
+        await desk.controller.send_lights()
+        await desk.announce()
+    pct = round(int(desk.settings["lights"]["brightness"]) * 100 / 255)
+    if cmd.get("mode"):
+        return {"say": f"Lights set to {cmd['mode'].lower()}"}
+    if update:
+        return {"say": f"Lights at {pct} percent"}
+    return {"say": "Lights on"}

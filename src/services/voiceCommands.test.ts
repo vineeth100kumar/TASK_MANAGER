@@ -72,6 +72,14 @@ describe('commands', () => {
     expect(p('snooze')).toEqual({ kind: 'ring', action: 'snooze' });
     expect(p('stop the alarm')).toEqual({ kind: 'ring', action: 'stop' });
   });
+  it('only takes the short forms of stop and snooze', () => {
+    expect(p('stop the music')).toBeNull();
+    expect(p('stop the stopwatch')).toBeNull();
+    expect(p('snooze the gym task till tomorrow')).toBeNull();
+    expect(p('snooze for 10 minutes')).toEqual({ kind: 'ring', action: 'snooze' });
+    expect(p('dismiss the alarm')).toEqual({ kind: 'ring', action: 'stop' });
+    expect(p('turn off the alarm')).toEqual({ kind: 'ring', action: 'stop' });
+  });
   it('ignores what it does not know', () => {
     expect(p('what is the weather')).toBeNull();
     expect(p('set an alarm')).toBeNull();
