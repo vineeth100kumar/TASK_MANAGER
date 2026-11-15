@@ -1927,6 +1927,26 @@ async def voice_transcribe(request: Request):
     return {"success": True, "text": text}
 
 
+class VoiceCommandRequest(BaseModel):
+    text: str
+
+
+@app.post("/api/voice/command")
+async def voice_command_endpoint(req: VoiceCommandRequest):
+    """A spoken command the web app's own rules didn't take: tasks, music, the
+    clock's screens and lights, volume, Work/Chill, the briefing (voice_assistant.py)."""
+    import voice_assistant
+    now = datetime.datetime.now(notifier._tz(notifier.get_prefs()))
+    try:
+        res = await voice_assistant.handle(req.text[:300], now)
+    except claude_api.ApiError as e:
+        return {"success": True, "handled": True, "ok": False, "say": f"Sage couldn't do that, sir: {e}"}
+    if res.get("event") == "life-mode":
+        state = _life_mode_state()
+        await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
+    return res
+
+
 @app.post("/api/speaker/announce")
 async def speaker_announce(body: Dict[str, Any]):
     """Herald confirms a voice command that was just carried out. 400 when there is
@@ -1936,6 +1956,9 @@ async def speaker_announce(body: Dict[str, Any]):
     what = str(body.get("what") or "").strip()[:200]
     if not what:
         raise HTTPException(status_code=400, detail="What was done?")
+    if body.get("verbatim"):
+        await speaker.speaker.say(what, "command")
+        return {"success": True, "text": what}
     text = await speaker.speaker.announce_command(what)
     return {"success": True, "text": text}
 

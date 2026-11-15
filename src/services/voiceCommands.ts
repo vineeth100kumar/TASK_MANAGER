@@ -16,7 +16,7 @@ export type VoiceCommand =
   | { kind: 'timer'; action: 'pause' | 'resume' | 'cancel' }
   | { kind: 'timer_add'; seconds: number };
 
-export interface VoiceResult { ok: boolean; say: string }
+export interface VoiceResult { ok: boolean; say: string; nothingRinging?: boolean }
 
 // ---- wake word -------------------------------------------------------------
 
@@ -170,9 +170,11 @@ export function parseVoice(raw: string, now = new Date()): VoiceCommand | null {
   const t = clean(raw);
   const has = (re: RegExp) => re.test(t);
 
-  // The clock is ringing right now: stop / snooze.
-  if (has(/\bsnooze\b/)) return { kind: 'ring', action: 'snooze' };
-  if (has(/\b(stop|dismiss|silence|quiet|shut up)\b/) && !has(/\btimer\b/)) return { kind: 'ring', action: 'stop' };
+  // The clock is ringing right now: stop / snooze. Only the short forms, so "stop the
+  // music" or "snooze the gym task" go to the Pi's own understanding instead.
+  if (has(/^ (?:please )?snooze(?: (?:the|my|that|it))?(?: alarm| ringing)?(?: for \d+ minutes?)? $/)) return { kind: 'ring', action: 'snooze' };
+  if (has(/^ (?:please )?(?:stop|dismiss|silence|quiet|shut up|turn off|switch off)(?: (?:the|my|that|it))?(?: alarm| ringing| ring| noise| beeping| beep)? $/) ) return { kind: 'ring', action: 'stop' };
+  if (has(/\b(?:stop|dismiss|silence|snooze)\b.*\balarm\b|\balarm\b.*\b(?:stop|dismiss|silence|snooze)\b/) && !has(/\b(?:cancel|delete|remove|set|turn off all)\b/)) return { kind: 'ring', action: has(/snooze/) ? 'snooze' : 'stop' };
 
   if (has(/\btimers?\b/) || (has(/\b(start|set)\b/) && parseDuration(t) && !has(/\balarm|wake\b/))) {
     if (has(/\b(cancel|delete|remove|clear|stop|reset|end|kill)\b/)) return { kind: 'timer', action: 'cancel' };
@@ -240,7 +242,7 @@ export async function runVoice(cmd: VoiceCommand, hour24 = false): Promise<Voice
       }
       case 'ring': {
         const st = await lumoApi.status();
-        if (!st.state?.ringing) return { ok: false, say: 'Nothing is ringing.' };
+        if (!st.state?.ringing) return { ok: false, say: 'Nothing is ringing.', nothingRinging: true };
         await lumoApi.ringing(cmd.action);
         return { ok: true, say: cmd.action === 'snooze' ? 'Snoozed.' : 'Stopped.' };
       }
@@ -292,4 +294,37 @@ export async function transcribeClip(wav: Blob, seconds: number, wake: boolean):
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.detail || `The Pi answered ${res.status}`);
   return String(data.text || '').trim();
+}
+
+// What the Pi made of words the app's own rules didn't take (tasks, music, the
+// clock's screens and lights, volume, Work/Chill, the briefing; a paraphrase of an
+// alarm or timer comes back as `command` for the app to run).
+export interface AssistantReply {
+  handled: boolean;
+  ok?: boolean;
+  say?: string;
+  answer?: boolean;      // `say` is the answer itself: speak it as written
+  spoken?: boolean;      // Herald already said it (the briefing)
+  command?: VoiceCommand;
+}
+
+export async function askAssistant(text: string): Promise<AssistantReply> {
+  const res = await fetch(`${piBackendUrl()}/api/voice/command`, {
+    method: 'POST', headers: piHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ text }),
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `The Pi answered ${res.status}`);
+  return data as AssistantReply;
+}
+
+// Herald says an answer as written, as it is already worded for the ear.
+export async function heraldSays(text: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${piBackendUrl()}/api/speaker/announce`, {
+      method: 'POST', headers: piHeaders({ 'Content-Type': 'application/json' }), body: JSON.stringify({ what: text, verbatim: true }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }

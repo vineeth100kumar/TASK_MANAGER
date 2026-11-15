@@ -33,7 +33,8 @@ AUDIO_PER_DAY = 26000.0
 
 # Whisper biased toward the words this app listens for.
 PROMPT = ("Sage, set an alarm for 7:30 AM. Sage, set a timer for 10 minutes. "
-          "Sage, cancel the 6 PM alarm. Sage, snooze. Sage, stop.")
+          "Sage, cancel the 6 PM alarm. Sage, snooze. Sage, stop. Sage, start the stopwatch. "
+          "Sage, lights to 40 percent. Sage, next song. Sage, volume up. Sage, what's playing?")
 
 # What Whisper makes up from silence or noise.
 _HALLUCINATIONS = {
