@@ -274,3 +274,22 @@ export async function heraldConfirms(what: string): Promise<string | null> {
     return null;
   }
 }
+
+// One spoken clip to text with Groq Whisper, through the Pi (it holds the key and
+// counts Groq's limits). `wake` marks clips from always-listening, which get a
+// smaller share of the day's allowance than a tap.
+export async function transcribeClip(wav: Blob, seconds: number, wake: boolean): Promise<string> {
+  const res = await fetch(`${piBackendUrl()}/api/voice/transcribe`, {
+    method: 'POST',
+    headers: piHeaders({
+      'Content-Type': wav.type || 'audio/wav',
+      'X-Audio-Seconds': seconds.toFixed(2),
+      'X-Voice-Mode': wake ? 'wake' : 'tap',
+      'X-Voice-Lang': (navigator.language || 'en').slice(0, 2),
+    }),
+    body: wav,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.detail || `The Pi answered ${res.status}`);
+  return String(data.text || '').trim();
+}

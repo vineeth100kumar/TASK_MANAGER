@@ -1907,6 +1907,26 @@ async def speaker_say(body: Dict[str, Any]):
     return {"success": True, "text": text}
 
 
+@app.post("/api/voice/transcribe")
+async def voice_transcribe(request: Request):
+    """One spoken clip (the request body: wav, mp4, ogg or webm audio) to text, with
+    Groq Whisper. Headers: X-Audio-Seconds (its length), X-Voice-Mode ("wake" when it
+    came from always-listening), X-Voice-Lang."""
+    import voice_stt
+    audio = await request.body()
+    try:
+        seconds = float(request.headers.get("x-audio-seconds") or 0)
+    except ValueError:
+        seconds = 0.0
+    try:
+        text = await voice_stt.transcribe(
+            audio, request.headers.get("content-type", ""), min(max(seconds, 0.0), 60.0),
+            request.headers.get("x-voice-mode") == "wake", (request.headers.get("x-voice-lang") or "en")[:2].lower())
+    except voice_stt.VoiceError as e:
+        raise HTTPException(status_code=e.status, detail=str(e))
+    return {"success": True, "text": text}
+
+
 @app.post("/api/speaker/announce")
 async def speaker_announce(body: Dict[str, Any]):
     """Herald confirms a voice command that was just carried out. 400 when there is
