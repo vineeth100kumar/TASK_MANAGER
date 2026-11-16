@@ -134,6 +134,19 @@ def wind_down_line(closed: int, first_tomorrow: Optional[str], call_me: str = ""
     return " ".join(parts)
 
 
+_HEADS_UP = {
+    "rain": ["Rain about{name}. Do take an umbrella.", "It is raining out there{name}. An umbrella would be wise."],
+    "storm": ["A storm is about{name}. You might wait it out, or at least dress for it."],
+    "snow": ["Snow outside{name}. Do wrap up warm."],
+}
+
+
+def heads_up_line(icon: str, call_me: str = "", idx: int = 0) -> str:
+    """A word of warning as you head out, from the weather icon. "" when the weather is fine. Pure."""
+    lines = _HEADS_UP.get(icon or "")
+    return lines[idx % len(lines)].format(name=_name(call_me)) if lines else ""
+
+
 def summarize_held(held: List[dict]) -> Dict[str, int]:
     """How many of each kind were held (for the UI and logs). Pure."""
     out: Dict[str, int] = {}

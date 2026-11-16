@@ -31,6 +31,7 @@ import item_actions
 import life_mode
 import phone_link
 import recorder
+import herald_journal
 import speaker
 import spotify
 import room_music
@@ -1866,12 +1867,35 @@ def _on_arrival(away_s: float = 0.0) -> None:
     room_music.room.on_arrival(away_s)      # ...then soft music (waits for Herald to finish)
 
 
+def _journal(kind: str) -> None:
+    try:
+        j = herald_journal.load()
+        herald_journal.save((herald_journal.leave if kind == "leave" else herald_journal.arrive)(j, time.time()))
+    except Exception as e:
+        print(f"Presence journal failed: {e}")
+
+
+@app.get("/api/herald/presence")
+async def herald_presence(days: int = 7):
+    """When you were home: a bar per day, for the presence card."""
+    import notifier
+    tz = notifier._tz(notifier.get_prefs())
+    j = await asyncio.to_thread(herald_journal.load)
+    known, home = await asyncio.to_thread(_phone_presence)
+    if herald_journal.is_out(j) and known and home and time.time() - j["trips"][-1]["out"] > 600:      # pressed Leave but stayed: the phone never dropped
+        j = herald_journal.arrive(j, time.time())
+        await asyncio.to_thread(herald_journal.save, j)
+    return {"success": True, **herald_journal.report(j, tz, time.time(), max(1, min(days, 30)))}
+
+
 def _on_leave() -> None:
+    _journal("leave")
     speaker.speaker.on_leave()
     room_music.room.on_leave()
 
 
 life_mode.on_arrival = _on_arrival
+life_mode.on_return = lambda away_s: _journal("arrive")
 life_mode.on_leave = _on_leave
 def _on_phone_call(event: str, uid: str = "") -> None:
     room_music.room.on_call_event(event, uid)
