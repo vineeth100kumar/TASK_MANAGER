@@ -157,7 +157,8 @@ export function Header({
         <LeaveRoomButton />
 
         {/* Work or Chill: on every screen size, phones included. */}
-        <ModeSwitch />
+        {/* On desktop the open sidebar already carries this switch, so it shows here only when the sidebar is closed. */}
+        <div className={isSidebarOpen ? 'md:hidden' : ''}><ModeSwitch /></div>
 
         {/* Interactive Sync Diagnostics Badge */}
         <SyncBadge onClick={() => setIsDiagnosticsOpen && setIsDiagnosticsOpen(true)} />

@@ -17,7 +17,9 @@ export function ProjectGroups({ items, children }: Props) {
       {groups.map(g => (
         <div key={g.key} className="pt-2 first:pt-0">
           <h4 className="flex items-center gap-2 px-1 pb-1 text-[11.5px] font-semibold uppercase tracking-wide text-gray-400">
-            {g.color && <span className="w-2 h-2 rounded-full" style={{ background: g.color }} aria-hidden />}
+            {g.color && (g.color.startsWith('bg-')
+              ? <span className={`w-2 h-2 rounded-full ${g.color}`} aria-hidden />
+              : <span className="w-2 h-2 rounded-full" style={{ background: g.color }} aria-hidden />)}
             <span className="truncate">{g.name}</span>
             <span className="tabular-nums text-gray-300 dark:text-gray-600">{g.items.length}</span>
           </h4>

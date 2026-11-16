@@ -18,22 +18,22 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
         <table className="w-full text-left whitespace-nowrap min-w-[700px]">
           <thead>
             <tr className="bg-[#f5f5f7] dark:bg-black/20 text-[12px] font-semibold uppercase tracking-wider text-gray-500">
-              <th className="px-6 py-4">Key</th>
-              <th className="px-6 py-4 w-1/3">Title</th>
-              <th className="px-6 py-4">Status</th>
-              <th className="px-6 py-4">Priority</th>
-              <th className="px-6 py-4">Project / Space</th>
-              <th className="px-6 py-4">Due Date</th>
-              <th className="px-6 py-4">Estimate</th>
+              <th className="px-6 py-3.5">Key</th>
+              <th className="px-6 py-3.5 w-1/3">Title</th>
+              <th className="px-6 py-3.5">Status</th>
+              <th className="px-6 py-3.5">Priority</th>
+              <th className="px-6 py-3.5">Project / Space</th>
+              <th className="px-6 py-3.5">Due Date</th>
+              <th className="px-6 py-3.5">Estimate</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-white/5 text-[14px] font-medium">
+          <tbody className="divide-y divide-gray-100 dark:divide-white/5 text-[13.5px] font-medium">
             {tasks.map(task => {
               const isDone = task.status === 'done';
               const stage = stageOf(task, statusesFor(task.projectId, projects));
               return (
                 <tr key={task.id} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)} className="hover:bg-gray-50 dark:hover:bg-white/5 cursor-pointer outline-none focus:bg-blue-50 dark:focus:bg-white/10 group">
-                  <td className="px-6 py-4 text-gray-400 font-bold">
+                  <td className="px-6 py-3.5 text-gray-400 text-xs font-semibold tracking-wide">
                     <div className="flex items-center gap-2.5">
                       {onTransition && (
                         <button onClick={(e) => { e.stopPropagation(); onTransition(task, isDone ? 'todo' : 'done'); }}
@@ -45,24 +45,24 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                       <span>{task.key}</span>
                     </div>
                   </td>
-                  <td className={`px-6 py-4 truncate max-w-[300px] font-semibold ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</td>
-                  <td className="px-6 py-4">
-                    <span className="flex items-center gap-2">
+                  <td className={`px-6 py-3.5 truncate max-w-[300px] font-semibold ${isDone ? 'text-gray-400 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</td>
+                  <td className="px-6 py-3.5">
+                    <span className="flex items-center gap-1.5 text-xs font-semibold text-gray-700 dark:text-gray-300 whitespace-nowrap">
                       <stage.icon size={14} strokeWidth={2.2} className={stage.tint} aria-hidden />
                       {stage.label}
                     </span>
                   </td>
-                  <td className="px-6 py-4">
+                  <td className="px-6 py-3.5">
                     <div className="flex items-center gap-1.5">
                       <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />
                       <span className="capitalize font-semibold text-xs">{(PRIORITIES as any)[task.priority]?.label || task.priority}</span>
                     </div>
                   </td>
-                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">
+                  <td className="px-6 py-3.5 text-gray-500 text-xs font-semibold">
                     {task.project?.name || task.area?.name || 'General'}
                   </td>
-                  <td className={`px-6 py-4 text-xs font-semibold whitespace-nowrap ${task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`} title={task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'Overdue' : undefined}>{task.dueDate ? formatDisplayDate(task.dueDate) : <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
-                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.estimated || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
+                  <td className={`px-6 py-3.5 text-xs font-semibold whitespace-nowrap ${task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`} title={task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'Overdue' : undefined}>{task.dueDate ? formatDisplayDate(task.dueDate) : <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
+                  <td className="px-6 py-3.5 text-gray-500 text-xs font-semibold">{task.estimated || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
                 </tr>
               );
             })}

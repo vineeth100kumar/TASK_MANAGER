@@ -460,7 +460,7 @@ export function Sidebar({
                     className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                     {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
                     <div className="relative flex items-center gap-3">
-                      <item.icon size={17} data-nav={item.id} className={'nav-icon ' + (item.color || (isActive ? 'text-blue-600 dark:text-blue-400' : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300'))} />
+                      <item.icon size={17} data-nav={item.id} className={'nav-icon transition-colors ' + (isActive ? (item.color || 'text-blue-600 dark:text-blue-400') : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
                       <span className="text-[14px]">{item.name}</span>
                     </div>
                     {item.count !== undefined && item.count > 0 && (
@@ -568,7 +568,7 @@ export function Sidebar({
                 <div className="space-y-6">
                   <div className="space-y-1">
                     <div className="px-3 flex items-center justify-between mb-2">
-                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-orange-400">Life Areas</h4>
+                      <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">Life Areas</h4>
                       <button onClick={() => setIsAddAreaOpen(true)} className="text-orange-400 hover:text-orange-600 dark:hover:text-orange-300 rounded-md p-1 transition-colors" title="Add Area" aria-label="Add Area"><Plus size={16}/></button>
                     </div>
                     {areas.map((area) => {
@@ -595,7 +595,7 @@ export function Sidebar({
 
                   <div className="space-y-1">
                     <div className="px-3 flex items-center justify-between mb-2">
-                      <h4 className="text-[11px] font-semibold uppercase tracking-wider text-orange-400">Growth & Routine</h4>
+                      <h4 className="text-[11px] font-semibold uppercase tracking-[0.08em] text-gray-400">Growth & Routine</h4>
                     </div>
                     <button onClick={() => setActiveGrowthTab('goals')} className="w-full flex items-center gap-3 px-3 py-2 rounded-xl transition-colors group hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200">
                       <Target size={16} className="text-blue-500" />

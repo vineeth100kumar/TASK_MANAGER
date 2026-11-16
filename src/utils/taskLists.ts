@@ -123,7 +123,7 @@ export function groupByProject(items: WorkItem[]): ProjectGroup[] {
     const key = i.projectId ? `p:${i.projectId}` : i.areaId ? `a:${i.areaId}` : 'none';
     let g = groups.get(key);
     if (!g) {
-      g = { key, name: i.project?.name || i.area?.name || 'No project', color: (i.project as any)?.color, items: [] };
+      g = { key, name: i.project?.name || i.area?.name || 'No project', color: (i.project as any)?.color || (i.area as any)?.color, items: [] };
       groups.set(key, g);
     }
     g.items.push(i);

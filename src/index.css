@@ -333,6 +333,30 @@
 
   /* A single row or card: white with a soft layered shadow that deepens and
      lifts on hover. */
+  /* The quiet details line under a task title: parts joined by even dots.
+     Each part carries its dot in its own left padding, and the line is pulled
+     left and clipped by that much, so a dot never starts a line (first or wrapped). */
+  .meta-line { margin-left: -1em; clip-path: inset(0 0 0 1em); }
+  .meta-line > .meta-part { position: relative; padding-left: 1em; }
+  .meta-line > .meta-part::before {
+    content: "·";
+    position: absolute;
+    left: 0;
+    width: 1em;
+    text-align: center;
+    font-weight: 500;
+    color: rgb(156 163 175 / 0.8);
+  }
+  .meta-line > :not(.meta-part) { margin-left: 1em; }
+  .meta-status > i {
+    display: inline-block;
+    width: 5px;
+    height: 5px;
+    margin-right: 0.4em;
+    border-radius: 9999px;
+    vertical-align: 0.12em;
+  }
+
   .surface-item {
     background-color: white;
     border: 1px solid rgb(0 0 0 / 0.06);

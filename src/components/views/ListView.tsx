@@ -70,9 +70,10 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                 onSwipeLeft={swipeable ? () => snoozeToTomorrow(task) : undefined}>
               <div
                 onClick={() => onSelect(task.id)}
-                className={`group flex flex-col sm:flex-row sm:items-center justify-between p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer border ${pressed.has(task.id) ? 'is-completing' : ''} ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'surface-item is-interactive'}`}>
+                className={`group flex items-center gap-3 p-3.5 sm:px-5 sm:py-3.5 rounded-2xl cursor-pointer border ${pressed.has(task.id) ? 'is-completing' : ''} ${selectedId === task.id ? 'bg-blue-50/50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800' : 'surface-item is-interactive'}`}>
                 
-                <div className="flex items-center gap-3 w-full sm:w-auto">
+                  {/* The tick, then title and details; details drop under the title when the row is narrow. */}
+                  <span className="shrink-0 flex">
                   {task.entityType === 'task' ? (
                     <>
                       {task.status !== 'done' && (
@@ -87,22 +88,21 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                   ) : (
                     <Bell size={20} className="text-emerald-500" />
                   )}
-                  
-                  <div className="flex flex-col">
-                    <div className="flex items-center gap-2">
+                  </span>
+
+                <div className="flex-1 min-w-0 flex flex-wrap items-center justify-between gap-x-4 gap-y-1">
+                    <div className="flex items-baseline gap-2 min-w-0 flex-1 basis-64">
                       <span className="hidden sm:inline text-[11px] font-semibold tracking-wide text-gray-400 w-14 shrink-0">{task.key}</span>
-                      <span className={`row-title text-[15px] font-semibold tracking-[-0.01em] ${task.entityType !== 'milestone' && (task.status === 'done' || task.completed) ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
+                      <span className={`row-title min-w-0 text-[14.5px] font-semibold tracking-[-0.01em] ${task.entityType !== 'milestone' && (task.status === 'done' || task.completed) ? 'text-gray-400 dark:text-gray-500 line-through' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
                       {task.subtaskCount > 0 && (
                         <div className="hidden sm:flex items-center gap-1 text-[11px] font-semibold text-gray-500 bg-gray-100 dark:bg-white/10 px-2 py-0.5 rounded-md ml-2">
                           {task.completedSubtaskCount}/{task.subtaskCount}
                         </div>
                       )}
                     </div>
-                  </div>
-                </div>
 
                 {task.entityType === 'task' && (
-                  <div className="flex items-center gap-3 sm:gap-4 shrink-0 pl-8 sm:pl-0 mt-1.5 sm:mt-0">
+                  <div className="flex items-center flex-wrap gap-x-3 gap-y-1 min-w-0">
                     <span className="sm:hidden text-[11px] font-semibold tracking-wide text-gray-400">{task.key}</span>
                     {task.project?.name && (
                       <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/5 text-gray-500">
@@ -110,7 +110,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                       </span>
                     )}
                     {task.area?.name && (
-                      <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-orange-50 dark:bg-orange-950/30 text-orange-600 dark:text-orange-400">
+                      <span className="hidden sm:inline-block text-[11px] font-semibold px-2 py-0.5 rounded-md bg-gray-100 dark:bg-white/5 text-gray-500">
                         {task.area.name}
                       </span>
                     )}
@@ -122,32 +122,36 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                     {(task.labels || []).slice(0, 2).map((tag: string) => (
                       <span key={tag} className="hidden sm:inline-flex text-[11px] font-semibold px-2 py-0.5 rounded-full bg-gray-100 dark:bg-white/10 text-gray-500">#{tag}</span>
                     ))}
+                    {/* Date and priority flag travel together, so the flag never wraps alone. */}
+                    <span className="flex items-center gap-3 whitespace-nowrap">
                     {dateStr && (
-                      <span className={`text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
+                      <span className={`text-[12px] font-semibold flex items-center gap-1.5 ${task.status !== 'done' && task.dueDate && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`}>
                         <CalendarIcon size={14}/> {dateStr}
                       </span>
                     )}
                     <Flag size={16} className={(PRIORITIES as any)[task.priority]?.color || 'text-gray-400'} aria-label={`Priority: ${task.priority}`}/>
+                    </span>
                   </div>
                 )}
                 
                 {task.entityType === 'event' && (
-                  <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
+                  <div className="flex items-center gap-4 min-w-0">
                     <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.startAt ? formatWhen(task.startAt) : 'No time set'}</span>
                   </div>
                 )}
 
                 {task.entityType === 'milestone' && dateStr && (
-                  <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
+                  <div className="flex items-center gap-4 min-w-0">
                     <span className="text-[12px] sm:text-[13px] font-semibold flex items-center gap-1.5 text-gray-500"><Flag size={14}/> {dateStr}</span>
                   </div>
                 )}
 
                 {task.entityType === 'reminder' && (
-                  <div className="flex items-center gap-4 shrink-0 pl-8 sm:pl-0 mt-2 sm:mt-0">
+                  <div className="flex items-center gap-4 min-w-0">
                     <span className="text-[12px] sm:text-[13px] font-semibold text-gray-500 flex items-center gap-1.5"><CalendarIcon size={14}/> {task.remindAt ? formatWhen(task.remindAt) : 'No time set'}</span>
                   </div>
                 )}
+                </div>
               </div>
               </SwipeRow>
             );

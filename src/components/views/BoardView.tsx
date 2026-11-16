@@ -67,7 +67,7 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
                           title={task.status === 'done' ? 'Mark as To Do' : 'Mark as Done'}>
                           {task.status === 'done' && <Check size={10} strokeWidth={3} />}
                         </button>}
-                        <span className="text-[12px] font-semibold text-gray-400 uppercase">{task.key}</span>
+                        <span className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{task.key}</span>
                         {task.entityType !== 'task' && <span className="text-[10.5px] font-semibold uppercase tracking-wide text-gray-400 bg-black/[0.04] dark:bg-white/[0.06] px-1.5 py-0.5 rounded-md">{KIND_LABEL[task.entityType] || task.entityType}</span>}
                       </div>
                       {!milestone && <Flag size={14} className={(PRIORITIES as any)[task.priority]?.color} />}
@@ -81,7 +81,7 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
                       </div>
                     )}
 
-                    {hasFooter && <div className="flex justify-between items-center gap-3 mt-2.5 pt-2.5 border-t border-gray-100 dark:border-white/5">
+                    {hasFooter && <div className="flex justify-between items-center gap-3 mt-2">
                       <div className="flex gap-3 text-[12px] font-semibold text-gray-400">
                         {(task.subtaskCount ?? 0) > 0 && <span className="flex items-center gap-1" title={`${task.completedSubtaskCount} of ${task.subtaskCount} subtasks`}><CheckSquare size={13}/> {task.completedSubtaskCount}/{task.subtaskCount}</span>}
                         {(task.commentCount ?? 0) > 0 && <span className="flex items-center gap-1" title={`${task.commentCount} notes`}><MessageSquare size={13}/> {task.commentCount}</span>}
