@@ -2,7 +2,7 @@ import { PRIORITIES } from '../../services/constants';
 import { api } from '../../services/api';
 import { stageOf, statusesFor } from '../../services/projectTypes';
 import { Flag, Check } from 'lucide-react';
-import { formatDisplayDate } from '../../utils/dateUtils';
+import { formatDisplayDate, getTodayString } from '../../utils/dateUtils';
 
 interface TableViewProps {
   tasks: any[];
@@ -61,7 +61,7 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                   <td className="px-6 py-4 text-gray-500 text-xs font-semibold">
                     {task.project?.name || task.area?.name || 'General'}
                   </td>
-                  <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.dueDate ? formatDisplayDate(task.dueDate) : <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
+                  <td className={`px-6 py-4 text-xs font-semibold whitespace-nowrap ${task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'text-red-500' : 'text-gray-500'}`} title={task.dueDate && task.status !== 'done' && task.dueDate < getTodayString() ? 'Overdue' : undefined}>{task.dueDate ? formatDisplayDate(task.dueDate) : <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
                   <td className="px-6 py-4 text-gray-500 text-xs font-semibold">{task.estimated || <span className="text-gray-300 dark:text-gray-600">—</span>}</td>
                 </tr>
               );

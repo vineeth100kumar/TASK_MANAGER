@@ -64,7 +64,7 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
       <span className={`absolute left-1.5 top-3 bottom-3 w-1 rounded-full ${p.bar}`} aria-hidden />
       <CompleteButton checked={completing} saving={saving} onComplete={onComplete} />
       <div className="min-w-0 flex-1 cursor-pointer" onClick={onOpen}>
-        <p className="row-title font-semibold text-[13.5px] text-gray-900 dark:text-white truncate">{item.title || 'Untitled'}</p>
+        <p className="row-title font-semibold text-[13.5px] text-gray-900 dark:text-white max-md:line-clamp-2 md:truncate">{item.title || 'Untitled'}</p>
         <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 mt-0.5 text-[11px] font-medium text-gray-400">
           {p.label && <span className={`font-semibold ${p.text}`}>{p.label}</span>}
           {when && <span className={overdue ? 'text-red-500 font-semibold' : ''}>{p.label ? '· ' : ''}{when}</span>}

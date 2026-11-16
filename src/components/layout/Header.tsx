@@ -54,9 +54,9 @@ function SyncBadge({ onClick }: { onClick?: () => void }) {
 
   if (status.pendingCount > 0) {
     return (
-      <button onClick={onClick} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-semibold border border-amber-200/50 dark:border-amber-700/40 hover:opacity-90 transition-opacity" title="Unsynced changes queued for cloud upload">
+      <button onClick={onClick} className="flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400 text-xs font-semibold border border-amber-200/50 dark:border-amber-700/40 hover:opacity-90 transition-opacity" title="Unsynced changes queued for cloud upload" aria-label={`${status.pendingCount} unsynced changes`}>
         <RefreshCw size={12} className={status.state === 'syncing' ? 'animate-spin' : ''} />
-        <span>{status.pendingCount} unsynced</span>
+        <span>{status.pendingCount}<span className="hidden sm:inline"> unsynced</span></span>
       </button>
     );
   }
@@ -152,7 +152,7 @@ export function Header({
         </div>
       </div>
 
-      <div className="flex items-center gap-2 md:gap-3 justify-end">
+      <div className="flex items-center gap-1.5 sm:gap-2 md:gap-3 justify-end shrink-0">
         {/* Leaving the room: a quick goodbye to Herald, beside the mode switch. */}
         <LeaveRoomButton />
 

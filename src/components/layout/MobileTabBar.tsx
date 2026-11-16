@@ -37,7 +37,7 @@ export function MobileTabBar({ activeView, activeWorkspace, lifeContext, onNavig
     id === 'all' ? activeView === 'tasks' && activeWorkspace === 'all' : activeView === id;
 
   return (
-    <nav aria-label="Primary" className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-gray-200/70 dark:border-white/[0.08] bg-white/85 dark:bg-[#141416]/85 backdrop-blur-2xl shadow-[0_-8px_24px_-16px_rgb(16_24_40/0.12)] dark:shadow-none backdrop-saturate-150 pb-[env(safe-area-inset-bottom)]">
+    <nav aria-label="Primary" className="md:hidden fixed bottom-0 inset-x-0 z-30 border-t border-gray-200/70 dark:border-white/[0.08] bg-white/95 dark:bg-[#141416]/95 backdrop-blur-2xl shadow-[0_-8px_24px_-16px_rgb(16_24_40/0.12)] dark:shadow-none backdrop-saturate-150 pb-[env(safe-area-inset-bottom)]">
       <div className="grid grid-cols-5 h-16">
         {TABS.map(tab => {
           if (tab.id === 'create') {

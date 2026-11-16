@@ -209,9 +209,9 @@ export function CreateTaskModal({ onClose, onCreate, workspaceId, lifeContext: f
       <motion.div role="dialog" aria-modal="true" aria-label="New item" initial={{ opacity: 0, scale: 0.97, y: 12 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.97, y: 12 }} transition={{ type: 'spring', bounce: 0, duration: 0.3 }}
         className="bg-white dark:bg-[#1c1c1e] w-full max-w-2xl rounded-t-3xl sm:rounded-3xl pb-[env(safe-area-inset-bottom)] sm:pb-0 shadow-[0_24px_64px_-16px_rgb(16_24_40/0.35)] dark:shadow-[0_24px_64px_-12px_rgb(0_0_0/0.8),inset_0_1px_0_rgb(255_255_255/0.06)] overflow-hidden relative z-10 flex flex-col max-h-[90vh] ring-1 ring-black/5 dark:ring-white/10">
         
-        <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-6 shrink-0">
-          <div className="flex items-center gap-3">
-            <h2 className="text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white">New Item</h2>
+        <div className="h-14 border-b border-gray-100 dark:border-white/5 flex items-center justify-between px-4 sm:px-6 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <h2 className="max-sm:sr-only text-[15px] font-semibold tracking-tight text-gray-900 dark:text-white whitespace-nowrap">New Item</h2>
             <div className="flex p-0.5 rounded-lg bg-gray-100 dark:bg-white/5" role="group" aria-label="Chat or form">
               {(['chat', 'form'] as const).map(m => (
                 <button key={m} type="button" aria-pressed={mode === m} onClick={() => setMode(m)}

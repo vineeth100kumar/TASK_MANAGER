@@ -225,9 +225,9 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
         initial={{ x: '100%', boxShadow: '-20px 0 50px rgba(0,0,0,0)' }} animate={{ x: 0, boxShadow: '-20px 0 50px rgba(0,0,0,0.1)' }} exit={{ x: '100%' }} transition={{ type: "spring", damping: 30, stiffness: 300 }}
         className="fixed inset-y-0 right-0 z-50 w-full md:w-[560px] lg:w-[600px] xl:shadow-none bg-white dark:bg-[#1c1c1e] border-l border-gray-200 dark:border-white/10 flex flex-col shadow-2xl"
       >
-        <div className="h-16 flex items-center justify-between px-6 border-b border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
-          <div className="flex items-center gap-3">
-            <span className="text-[13px] font-bold tracking-widest uppercase text-gray-500">{task.key}</span>
+        <div className="h-16 flex items-center justify-between gap-2 px-4 sm:px-6 border-b border-gray-100 dark:border-white/5 bg-white/80 dark:bg-[#1c1c1e]/80 backdrop-blur-xl sticky top-0 z-10 shrink-0">
+          <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+            <span className="text-[13px] font-bold tracking-widest uppercase text-gray-500 whitespace-nowrap">{task.key}</span>
             <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[11px] font-semibold ${(WORK_ITEM_TYPES as any)[task.type]?.color || 'bg-gray-100 text-gray-700'}`}>
               {(() => {
                 const TypeIcon = (WORK_ITEM_TYPES as any)[task.type]?.icon || FileText;
@@ -236,7 +236,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
               <span>{(WORK_ITEM_TYPES as any)[task.type]?.label || task.type}</span>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-0.5 sm:gap-2 shrink-0">
             {task.status !== 'done' && <SnoozeMenu itemId={task.id} onSnoozed={() => loadData()} />}
             <button onClick={() => { downloadTaskImage(task, task.project); showToast('Task picture (.png) downloaded!'); }} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors" title="Download Task Picture (PNG)"><Camera size={17} /></button>
             <button onClick={handleToggleHidden} className="p-2 rounded-xl hover:bg-gray-100 dark:hover:bg-white/10 text-gray-500 hover:text-gray-900 dark:hover:text-white transition-colors"
@@ -251,11 +251,11 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
         </div>
 
         <div className="flex-1 overflow-y-auto custom-scrollbar">
-          <div className="px-6 md:px-8 pt-8 pb-6">
+          <div className="px-5 md:px-8 pt-6 pb-6">
              <textarea className="w-full bg-transparent text-2xl md:text-3xl font-bold resize-none outline-none border-none text-gray-900 dark:text-white leading-tight placeholder-gray-300 dark:placeholder-gray-700 hover:bg-gray-50 dark:hover:bg-white/5 focus:bg-gray-50 dark:focus:bg-white/5 rounded-2xl p-2 -ml-2 transition-colors"
-                value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onBlur={submitTitle} rows={2} placeholder="Item Title" />
+                value={editTitle} onChange={(e) => setEditTitle(e.target.value)} onBlur={submitTitle} rows={1} style={{ fieldSizing: 'content' } as React.CSSProperties} placeholder="Item Title" />
               
-              <div className="flex bg-gray-100/80 dark:bg-white/5 p-1 rounded-[14px] w-fit mt-4 border border-black/5 dark:border-white/5">
+              <div className="flex bg-gray-100/80 dark:bg-white/5 p-1 rounded-[14px] w-fit mt-3 border border-black/5 dark:border-white/5">
                 <button onClick={() => setActiveTab('details')} className={`px-5 py-2 rounded-[10px] text-[14px] font-semibold transition-all ${activeTab === 'details' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>Details</button>
                 <button onClick={() => setActiveTab('activity')} className={`px-5 py-2 rounded-[10px] text-[14px] font-semibold flex items-center gap-2 transition-all ${activeTab === 'activity' ? 'bg-white dark:bg-[#2c2c2e] shadow-sm text-gray-900 dark:text-white' : 'text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'}`}>
                   Activity Log <span className="bg-gray-200 dark:bg-white/10 px-2 py-0.5 rounded-full text-[11px]">{activities.length}</span>
@@ -321,7 +321,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       })()}
 
                       <PropertyRow icon={CalendarIcon} label="Dates">
-                        <div className="flex flex-wrap items-center gap-x-2 gap-y-1 justify-end">
+                        <div className="flex flex-wrap items-center gap-x-1 sm:gap-x-2 gap-y-1 justify-end">
                           <DatePicker align="end" aria-label="Start date" placeholder="Start" icon={false} className="prop-control"
                             value={toInputDateValue(task.startDate)} onChange={async v => { await onUpdateDetails(task, { startDate: v || null }); loadData(); }} />
                           <span className="text-gray-300 dark:text-gray-600" aria-hidden>→</span>
@@ -615,7 +615,7 @@ function TagAdder({ existing, popular, onAdd }: { existing: string[]; popular: s
 function PropertyRow({ icon: Icon, label, children, isLast = false }: { icon: any, label: string, children: React.ReactNode, isLast?: boolean }) {
   return (
     <div className={`flex items-start justify-between gap-3 p-4 px-4 sm:px-6 ${!isLast ? 'border-b border-black/5 dark:border-white/5' : ''}`}>
-      <div className="flex items-center gap-2.5 text-gray-500 w-32 sm:w-1/3 shrink-0 mt-1.5"><Icon size={17} strokeWidth={2} className="shrink-0" /><span className="text-[13.5px] font-medium whitespace-nowrap">{label}</span></div>
+      <div className="flex items-center gap-2.5 text-gray-500 w-auto sm:w-1/3 shrink-0 mt-1.5"><Icon size={17} strokeWidth={2} className="shrink-0" /><span className="text-[13.5px] font-medium whitespace-nowrap">{label}</span></div>
       <div className="flex-1 flex flex-col items-end text-right min-w-0">{children}</div>
     </div>
   );

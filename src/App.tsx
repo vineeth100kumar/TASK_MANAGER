@@ -590,7 +590,7 @@ function MainApp() {
                     <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
                         {presentationMode === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {presentationMode === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} hideHome={isProjectPage} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
                         {presentationMode === 'branches' && (
                           <ProjectBranchesView
                             items={workItems}

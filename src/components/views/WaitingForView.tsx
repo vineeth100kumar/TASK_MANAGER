@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getTodayString, parseLocalDate } from '../../utils/dateUtils';
+import { getTodayString, parseLocalDate, formatDisplayDate } from '../../utils/dateUtils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Hourglass, UserCheck, Calendar, Plus, X, Check } from 'lucide-react';
 import { api } from '../../services/api';
@@ -159,12 +159,23 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
                       {wf?.about || item.title}
                     </h4>
 
-                    {wf?.followUpDate && (
-                      <div className="flex items-center gap-1.5 mt-2 text-[11px] text-gray-500 dark:text-gray-400 font-semibold">
-                        <Calendar size={12} className="text-purple-500" />
-                        <span>Follow up by {wf.followUpDate}</span>
-                      </div>
+                    {wf?.about && item.title && item.title !== wf.about && (
+                      <p className="text-[12px] text-gray-500 dark:text-gray-400 mt-0.5 truncate">{item.title}</p>
                     )}
+
+                    {wf?.followUpDate && (() => {
+                      // A plain date, and red once the day to chase has passed.
+                      const today = getTodayString();
+                      const late = wf.followUpDate < today;
+                      const label = late ? `Follow-up was due ${formatDisplayDate(wf.followUpDate)}. Time to chase`
+                        : wf.followUpDate === today ? 'Follow up today' : `Follow up by ${formatDisplayDate(wf.followUpDate)}`;
+                      return (
+                        <div className={`flex items-center gap-1.5 mt-2 text-[11px] font-semibold ${late ? 'text-red-500' : wf.followUpDate === today ? 'text-amber-600 dark:text-amber-400' : 'text-gray-500 dark:text-gray-400'}`}>
+                          <Calendar size={12} className={late ? '' : 'text-purple-500'} />
+                          <span>{label}</span>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </div>
 

@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { Flag, Calendar as CalendarIcon, CheckCircle2, Circle, Clock, MapPin, Bell, ChevronRight, Target } from 'lucide-react';
 import { PRIORITIES } from '../../services/constants';
 import { parseDateString, getTodayString } from '../../utils/dateUtils';
@@ -37,6 +38,16 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
   const sortedDates = Array.from(dateMap.keys()).sort();
   // India holidays label the days that already have items (read-only, utils/holidays.ts).
   const holidays = holidayMap(useHolidayPref());
+
+  // Open at today (or the next day with something on it), not at the oldest
+  // finished work. Older days stay above, one scroll away.
+  const anchorDate = sortedDates.find(d => d >= todayStr) || null;
+  const anchorRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (anchorDate && anchorDate !== sortedDates[0]) anchorRef.current?.scrollIntoView({ block: 'start' });
+    // Only when the view opens: later edits must not move the page.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const formatDateHeader = (dStr: string) => {
     const d = parseDateString(dStr) || new Date();
@@ -89,7 +100,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
       <div className="space-y-6">
         <h3 className="text-xl font-bold flex items-center gap-2 px-2 text-gray-900 dark:text-white">
           <Clock size={20} className="text-blue-500" />
-          Chronological Schedule
+          Timeline
         </h3>
 
         <div className="relative pl-6 sm:pl-8 border-l-2 border-gray-200 dark:border-gray-800 space-y-8 ml-3 sm:ml-4">
@@ -98,7 +109,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
             const items = dateMap.get(dateStr) || [];
 
             return (
-              <div key={dateStr} className="relative group">
+              <div key={dateStr} ref={dateStr === anchorDate ? anchorRef : undefined} className="relative group scroll-mt-24">
                 {/* Date Node */}
                 <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#0a0a0b] flex items-center justify-center ${isToday ? 'bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
 

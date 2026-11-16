@@ -358,7 +358,7 @@ export function Sidebar({
                   );
                 })}
               </div>
-              <p className="px-1 text-[11.5px] text-gray-500 dark:text-gray-400 truncate" title={describeLifeMode(lifeMode)}>{describeLifeMode(lifeMode)} · <kbd className="kbd">M</kbd></p>
+              <p className="px-1 text-[11.5px] leading-snug text-gray-500 dark:text-gray-400 line-clamp-2" title={describeLifeMode(lifeMode)}>{describeLifeMode(lifeMode)} · <kbd className="kbd">M</kbd></p>
             </div>
             {/* One switch: Work or Chill above. In Work, personal tasks can ride along. */}
             {lifeMode.mode === 'chill' ? null : (
