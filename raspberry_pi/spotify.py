@@ -140,7 +140,7 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if not uri:
             raise ValueError("Paste a Spotify playlist or album link.")
         out["arrivalPlaylist"] = uri
-    for k, lo, hi in (("arrivalVolume", 5, 80), ("callVolume", 5, 80), ("arrivalMinutes", 1, 10), ("callHoldMinutes", 1, 120)):
+    for k, lo, hi in (("arrivalVolume", 0, 100), ("callVolume", 0, 100), ("arrivalMinutes", 1, 10), ("callHoldMinutes", 1, 120)):
         if k in update:
             try:
                 out[k] = max(lo, min(hi, int(update[k])))

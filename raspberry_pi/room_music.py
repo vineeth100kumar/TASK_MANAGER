@@ -200,7 +200,7 @@ class RoomMusic:
         if m.playing():
             return self._note("no arrival music", "something is already playing")
         before = self._volume() or 50
-        target = int(s.get("arrivalVolume") or 40)
+        target = int(s.get("arrivalVolume", 40))
         total = max(MIN_TOTAL_S, float(s.get("arrivalMinutes") or 2) * 60)
         uri = str(s.get("arrivalPlaylist") or "")
         took_over = False
@@ -303,7 +303,7 @@ class RoomMusic:
         if not (m and m.playing()):
             return self._note("call", "nothing playing to turn down")
         current = self._volume()
-        level = int(s.get("callVolume") or 30)
+        level = int(s.get("callVolume", 30))
         target = duck_target(current, level)
         self.on_call = True
         self.call_level = level

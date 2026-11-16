@@ -98,6 +98,7 @@ DEFAULTS: Dict[str, Any] = {
     "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
     "recap": True,             # Herald: after a trip, who messaged you while you were out and which reminders slipped by
     "headsUp": True,           # Herald: a word about rain, storm or snow as you head out
+    "callHoldMinutes": 5,      # Herald: an answered call holds lines this long (the phone never says it ended)
     "callEtiquette": True,     # Herald: hold its own lines during a call, then say them as one line
     "windDown": "21:45",       # Herald: an evening line (closed today, first tomorrow) at this time; "" = off
     "lastWindDown": "",        # the day the evening line was last said; not user-set
@@ -208,6 +209,8 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
         if value and not HHMM.match(value):
             raise ValueError("Wind-down needs a time like 21:45, or empty for off.")
         out["windDown"] = value
+    if "callHoldMinutes" in update:
+        out["callHoldMinutes"] = int(max(1, min(60, int(update["callHoldMinutes"]))))
     if "briefAfterHours" in update:
         out["briefAfterHours"] = round(max(0.25, min(24.0, float(update["briefAfterHours"]))), 2)
     if "leaveAfterMinutes" in update:
@@ -409,7 +412,8 @@ IGNORED_APPS = {
     "in.redbus.android", "com.olacabs.customer",
     "com.nykaa.app", "com.healthkart.app",
 }
-NOTICE_GAP_S = 60       # the same sender is announced at most once a minute
+NOTICE_GAP_S = 20       # the same sender is announced at most once per 20 s (a reaction counts apart from a message)
+_REACTION_RE = re.compile(r"^(reacted|liked|loved|laughed at|emphasized|disliked|questioned)\b", re.I)
 BATTERY_LOW = 20
 BATTERY_RESET = 30
 
@@ -443,6 +447,11 @@ _NOTICE_LINES = {
         "Pardon the interruption{name}. You have a message from {who}.",
         "A message from {who}{name}. Whenever you're ready.",
         "If I may{name}, {who} has sent you a message.",
+    ],
+    "reaction": [
+        "A small reaction from {who}{name}, to one of your messages.",
+        "{who} has reacted to your message{name}. Nothing urgent.",
+        "If I may{name}, {who} reacted to something you sent.",
     ],
     "battery": [
         "Pardon me{name}, your phone is running low on battery. Perhaps a charger is in order.",
@@ -556,7 +565,7 @@ BRIEF_MIN_GAP_S = 300         # the briefing is rebuilt at most this often, howe
 WEATHER_EVERY_S = 600         # how often the weather is looked at
 WEATHER_STEP_C = 1.0          # the weather counts as changed from this many degrees, or a new sky
 HOLD_KINDS = ("notice", "reminder", "event")   # lines that wait while a call is on
-CALL_HOLD_S = 15 * 60                           # an answered call holds lines at most this long (the phone never says it ended)
+CALL_HOLD_S = 5 * 60                            # default; the "callHoldMinutes" setting wins. An answered call holds lines at most this long (the phone never says it ended)
 RECAP_WAIT_S = 25                               # after you're back, how long the phone gets to hand over what you missed
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
@@ -1617,16 +1626,19 @@ class Speaker:
         sender = (entry.get("title") or "").strip()[:60]
         if kind in ("whatsapp", "message") and sender and _PHONE_NUMBER_RE.match(sender):
             return self._note(f"{kind} from {sender}", "silent", "unknown number, skipping")
-        event = f"{kind} from {sender or 'someone'}"
+        announce_kind = kind
+        if kind in ("whatsapp", "message") and _REACTION_RE.match((entry.get("message") or "").strip()):
+            announce_kind = "reaction"
+        event = f"{announce_kind} from {sender or 'someone'}"
         if not self._may_announce(event, settings):
             return
-        key = f"{kind}:{sender.lower()}"
+        key = f"{announce_kind}:{sender.lower()}"
         now = time.time()
         if now - self._notice_at.get(key, 0) < NOTICE_GAP_S:
             return self._note(event, "silent", "same sender under a minute ago")
         self._notice_at[key] = now
         self._note(event, "announced")
-        asyncio.run_coroutine_threadsafe(self._notice(kind, {"what": kind, "from": sender}, settings), self.loop)
+        asyncio.run_coroutine_threadsafe(self._notice(announce_kind, {"what": announce_kind, "from": sender}, settings), self.loop)
 
     def on_phone_battery(self, level: int) -> None:
         """phone_link calls this every few minutes with the phone's battery %."""
@@ -1803,6 +1815,8 @@ class Speaker:
         meta = job.get("meta") or {}
         kind = meta.get("kind") or job["kind"]
         self._note(job["kind"], "held", "you're on a call")
+        if kind == "reaction":
+            kind = "message"
         if kind in ("whatsapp", "message", "email", "reminder"):
             self._held.append({"kind": kind, "who": meta.get("who", ""), "title": meta.get("title", "")})
             del self._held[:-20]
@@ -1814,7 +1828,7 @@ class Speaker:
         def apply() -> None:
             if event == "ringing":
                 self._call_uids.add(uid)
-                self._call_until = time.time() + CALL_HOLD_S
+                self._call_until = time.time() + int(get_settings().get("callHoldMinutes", 5)) * 60
             elif event == "ringing_stopped":
                 self._call_uids.discard(uid)      # answered or not: the hold runs on until it times out or you press Call's over
             elif event == "missed":

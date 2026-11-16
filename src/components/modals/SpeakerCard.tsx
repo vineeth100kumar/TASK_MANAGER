@@ -159,7 +159,15 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.recap !== false} onChange={on => save({ recap: on })} label="Herald: recap when I'm back"
             hint="After a trip of 15 minutes or more: who messaged or rang while you were out (names only, saved contacts only) and which timed reminders slipped by." />
           <Switch on={set.callEtiquette !== false} onChange={on => save({ callEtiquette: on })} label="Herald: stay quiet during calls"
-            hint="Message and reminder lines wait while your phone is ringing or on a call, then come back as one line. Press Call's over (Spotify card) when you hang up, or it carries on after 15 minutes." />
+            hint="Message and reminder lines wait while your phone is ringing or on a call, then come back as one line. Press Call's over (Spotify card) when you hang up, or it carries on after the time below." />
+          {set.callEtiquette !== false && (
+            <label className="flex items-center justify-between gap-3 text-sm">
+              <span>Hold lines after a call starts for<span className="block text-xs text-gray-400">Your phone never says a call ended, so Herald waits this long, then says what it held.</span></span>
+              <select className="rounded-lg border border-black/10 dark:border-white/10 bg-transparent px-2 py-1 text-sm" value={String(set.callHoldMinutes ?? 5)} onChange={e => save({ callHoldMinutes: Number(e.target.value) })}>
+                {[2, 5, 10, 15, 30].map(m => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+          )}
           <label className="flex items-center justify-between gap-3 text-sm">
             <span>Evening wind-down<span className="block text-xs text-gray-400">At this time, while you're home: what you closed today and what's first tomorrow.</span></span>
             <span className="flex items-center gap-2">
