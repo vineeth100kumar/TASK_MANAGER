@@ -126,10 +126,6 @@ def cutout_problem(refresh: bool = False) -> Optional[str]:
     return _problem
 
 
-def cutout_available() -> bool:
-    return cutout_problem() is None
-
-
 def make_mask(photo) -> "Image.Image":
     """The person in `photo` as a greyscale mask (white = person), made in a
     child process. Raises RuntimeError with the reason when that fails. The

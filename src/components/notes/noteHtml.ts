@@ -67,9 +67,3 @@ function hasTransparency(ctx: CanvasRenderingContext2D, w: number, h: number): b
   for (let i = 3; i < data.length; i += 4 * 16) if (data[i] < 250) return true;
   return false;
 }
-
-/** The note's text for previews and search, without tags. */
-export function htmlToText(html: string): string {
-  const doc = new DOMParser().parseFromString(`<body>${html}</body>`, 'text/html');
-  return (doc.body.innerText ?? doc.body.textContent ?? '').trim();
-}

@@ -149,10 +149,3 @@ def memory_remark(late: int, streak: int, call_me: str = "") -> str:
     if streak >= 3:
         return f"{_number(streak).capitalize()} days running with something closed{name}. Rather good."
     return ""
-
-
-def last_trip_seconds(j: dict) -> Optional[float]:
-    for t in reversed(j.get("trips", [])):
-        if t.get("in"):
-            return float(t["in"]) - float(t["out"])
-    return None

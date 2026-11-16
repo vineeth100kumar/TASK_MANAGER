@@ -824,11 +824,6 @@ def has_output(settings: dict) -> bool:
     return bool(settings.get("address")) or uses_usb(settings)
 
 
-def usb_device(settings: dict) -> str:
-    card = usb_card(settings.get("usbCard", ""))
-    return f"plughw:CARD={card['id']},DEV=0" if card else ""
-
-
 MIXER_PREFER = ("Master", "PCM", "Speaker", "Headphone", "Headset", "Line Out")
 
 

@@ -11,7 +11,7 @@ import time
 import uuid
 from pathlib import Path
 import httpx
-from fastapi import FastAPI, File, HTTPException, BackgroundTasks, Request, UploadFile, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel

@@ -25,6 +25,3 @@ export function stripLeadIn(title: string): string {
   if (!t) return title;
   return t === title.trim() ? title : t[0].toUpperCase() + t.slice(1);
 }
-
-/** Whether a stored title still starts with lead-in words. */
-export const hasLeadIn = (title: string) => !!title && stripLeadIn(title) !== title;

@@ -25,14 +25,6 @@ export const STATUSES = {
   blocked: { id: 'blocked', label: 'Waiting', color: 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-400', dot: 'bg-red-500' },
 };
 
-// A personal list has no workflow to enforce: an item can move to any status.
-export const ALLOWED_TRANSITIONS = {
-  todo: ['in_progress', 'blocked', 'done'],
-  in_progress: ['todo', 'blocked', 'done'],
-  done: ['todo', 'in_progress', 'blocked'],
-  blocked: ['todo', 'in_progress', 'done']
-};
-
 export const PRIORITIES = {
   low: { id: 'low', label: 'Low', color: 'text-gray-500' },
   medium: { id: 'medium', label: 'Medium', color: 'text-blue-500' },
