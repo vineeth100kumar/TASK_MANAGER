@@ -166,7 +166,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
         {unsorted.length > 0 && (
           <button
             onClick={() => setIsTriaging(true)}
-            className="px-4 py-2.5 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 text-white dark:text-black font-semibold text-[12.5px] rounded-xl shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5 flex items-center gap-2 active:scale-[0.97] transition-all"
+            className="px-4 py-2.5 bg-white/80 hover:bg-white dark:bg-white/[0.08] dark:hover:bg-white/[0.12] text-gray-800 dark:text-gray-100 font-semibold text-[12.5px] rounded-xl shadow-sm shadow-black/5 ring-1 ring-inset ring-black/[0.08] dark:ring-white/10 flex items-center gap-2 active:scale-[0.97] transition-all"
           >
             <Play size={13} className="fill-current" /> Sort {unsorted.length} new
           </button>

@@ -149,11 +149,11 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
                   <h4 className="row-title inline font-semibold text-[15px] tracking-[-0.01em] text-gray-900 dark:text-white group-hover:text-amber-600 dark:group-hover:text-amber-400 transition-colors leading-snug">
                     {item.title}
                   </h4>
-                  <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-1 text-[12px] text-gray-400 whitespace-nowrap">
+                  <div className="meta-line flex flex-wrap items-center gap-y-0.5 mt-1 text-[12px] text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                    <span className="meta-part uppercase font-semibold text-[11px] tracking-wide text-gray-400">{item.key}</span>
+                    {item.dueDate && <span className={`meta-part font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-gray-600 dark:text-gray-300'}`}>{withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
+                    {item.project && <span className="meta-part">{item.project.name}</span>}
                     <ContextTag item={item} combined={!lifeContext} />
-                    <span className="uppercase font-semibold text-[11px] tracking-wide text-gray-400">{item.key}</span>
-                    {item.dueDate && <span className={`font-semibold ${formatDateRange(null, item.dueDate)?.startsWith('Overdue') ? 'text-red-500' : 'text-blue-500'}`}>· {withTime(formatDateRange(null, item.dueDate), item.dueTime)}</span>}
-                    {item.project && <span>· {item.project.name}</span>}
                   </div>
                   {normalizeDoses(item.doseTimes).length > 1 && (
                     <DoseChips className="mt-1.5" times={normalizeDoses(item.doseTimes)} ticked={item.dosesDone} label={item.title}

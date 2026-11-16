@@ -25,7 +25,7 @@ export function WeekStrip({ days }: { days: WeekDay[] }) {
           </div>
         ))}
       </div>
-      <span className="text-[12.5px] font-medium text-gray-500 dark:text-gray-400">{caption}</span>
+      <span className="max-sm:hidden text-[12.5px] font-medium text-gray-500 dark:text-gray-400">{caption}</span>
     </div>
   );
 }

@@ -138,14 +138,14 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
     <div className="max-w-4xl mx-auto space-y-4 md:space-y-6 pb-20 font-sans stagger">
 
       {/* Greeting and today's progress */}
-      <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} p-5 md:p-8 rounded-3xl`}>
+      <div className={`hero ${lifeContext === 'personal' ? 'hero-personal' : ''} px-5 py-4 md:p-8 rounded-3xl`}>
         <div className="flex items-center justify-between gap-5">
           <div className="flex-1 min-w-0">
-            <div className="eyebrow text-gray-500 dark:text-gray-400 mb-2 md:mb-3">
+            <div className="eyebrow text-gray-500 dark:text-gray-400 mb-1.5 md:mb-3">
               {lifeContext === 'personal' ? <Sun size={14} className="text-orange-500"/> : <Sparkles size={14} className="text-blue-500"/>}
               <span>{time.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}</span>
             </div>
-            <h1 className="text-display text-[30px] md:text-[44px] lg:text-[52px] font-semibold leading-[1.05] pb-1">
+            <h1 className="text-display text-[26px] md:text-[44px] lg:text-[52px] font-semibold leading-[1.05] pb-1">
               {greeting}
             </h1>
             <p className="text-[14.5px] md:text-[15px] text-gray-500 dark:text-gray-400 mt-1 md:mt-1.5">{daySummary}</p>
@@ -156,12 +156,12 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
               if (!todays.length && !next) return null;
               const days = next ? Math.round((new Date(`${next.date}T00:00`).getTime() - new Date(`${todayIso}T00:00`).getTime()) / 86_400_000) : 0;
               return (
-                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[13px] text-rose-600 dark:text-rose-300" data-testid="holiday-line">
+                <p className="mt-2 flex flex-wrap items-center gap-x-1.5 text-[12.5px] md:text-[13px] text-gray-500 dark:text-gray-400" data-testid="holiday-line">
                   <span aria-hidden className="w-1.5 h-1.5 rounded-full bg-rose-500" />
                   {todays.length ? (
-                    <><span className="font-semibold">{todays.map(h => h.name).join(' · ')}</span><span className="text-rose-500/80 dark:text-rose-300/70">today, {holidayLabel(todays[0]).toLowerCase()}{todays[0].moonSighting ? ' (subject to moon sighting)' : ''}</span></>
+                    <><span className="font-semibold text-gray-800 dark:text-gray-200">{todays.map(h => h.name).join(' · ')}</span><span>today, {holidayLabel(todays[0]).toLowerCase()}{todays[0].moonSighting ? ' (subject to moon sighting)' : ''}</span></>
                   ) : next && (
-                    <><span className="text-rose-500/80 dark:text-rose-300/70">Next holiday:</span><span className="font-semibold">{next.name}</span><span className="text-rose-500/80 dark:text-rose-300/70">{days === 1 ? 'tomorrow' : `${new Date(`${next.date}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, in ${days} days`}{next.type === 'restricted' ? ' (restricted)' : ''}</span></>
+                    <><span className="max-sm:hidden">Next holiday:</span><span className="font-semibold text-gray-800 dark:text-gray-200">{next.name}</span><span>{days === 1 ? 'tomorrow' : `${new Date(`${next.date}T00:00`).toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}, in ${days} days`}{next.type === 'restricted' ? ' (restricted)' : ''}</span></>
                   )}
                 </p>
               );
@@ -173,7 +173,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
                 Do the weekly review
               </button>
             )}
-            {data.week?.length > 0 && total > 0 && <div className="mt-4"><WeekStrip days={data.week} /></div>}
+            {data.week?.length > 0 && total > 0 && <div className="mt-3 md:mt-4"><WeekStrip days={data.week} /></div>}
           </div>
 
           {total > 0 && (

@@ -12,7 +12,7 @@ import { SnoozeMenu } from './SnoozeMenu';
 
 const PRIORITY_STYLE: Record<string, { bar: string; label: string; text: string }> = {
   urgent: { bar: 'bg-red-500', label: 'Urgent', text: 'text-red-600 dark:text-red-400' },
-  high: { bar: 'bg-orange-500', label: 'High', text: 'text-orange-600 dark:text-orange-400' },
+  high: { bar: 'bg-orange-500', label: 'High', text: 'text-gray-600 dark:text-gray-300' },
   medium: { bar: 'bg-blue-400/70', label: '', text: '' },
   low: { bar: 'bg-gray-300 dark:bg-gray-600', label: 'Low', text: 'text-gray-400' }
 };
@@ -65,16 +65,17 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
       <CompleteButton checked={completing} saving={saving} onComplete={onComplete} />
       <div className="min-w-0 flex-1 cursor-pointer" onClick={onOpen}>
         <p className="row-title font-semibold text-[13.5px] text-gray-900 dark:text-white max-md:line-clamp-2 md:truncate">{item.title || 'Untitled'}</p>
-        <div className="flex items-center flex-wrap gap-x-1.5 gap-y-0.5 mt-0.5 text-[11px] font-medium text-gray-400">
-          {p.label && <span className={`font-semibold ${p.text}`}>{p.label}</span>}
-          {when && <span className={overdue ? 'text-red-500 font-semibold' : ''}>{p.label ? '· ' : ''}{when}</span>}
-          {home && <span>{p.label || when ? '· ' : ''}{home}</span>}
-          {mins && <span>· {mins}</span>}
-          {KIND[item.entityType] && <span>· {KIND[item.entityType]}</span>}
-          {item.status === 'in_progress' && <span className="text-blue-500 font-semibold">· In progress</span>}
-          {item.waitingFor?.who ? <span className="text-purple-500 font-semibold">· Waiting on {item.waitingFor.who}</span>
-            : item.status === 'blocked' && <span className="text-purple-500 font-semibold">· Blocked</span>}
-          {snoozed && item.snoozedUntil && <span className="text-amber-600 dark:text-amber-400 font-semibold">· {snoozeLabel(item.snoozedUntil)}</span>}
+        <div className="meta-line flex items-center flex-wrap gap-y-0.5 mt-0.5 text-[11.5px] font-medium text-gray-500 dark:text-gray-400">
+          {/* One quiet line: colour is kept for urgent and late; a status is a small dot and a word. */}
+          {p.label && <span className={`meta-part font-semibold ${p.text}`}>{p.label}</span>}
+          {when && <span className={`meta-part ${overdue ? 'text-red-500 font-semibold' : ''}`}>{when}</span>}
+          {home && <span className="meta-part">{home}</span>}
+          {mins && <span className="meta-part">{mins}</span>}
+          {KIND[item.entityType] && <span className="meta-part">{KIND[item.entityType]}</span>}
+          {item.status === 'in_progress' && <span className="meta-part meta-status text-gray-600 dark:text-gray-300"><i className="bg-blue-500" aria-hidden />In progress</span>}
+          {item.waitingFor?.who ? <span className="meta-part meta-status text-gray-600 dark:text-gray-300"><i className="bg-purple-500" aria-hidden />Waiting on {item.waitingFor.who}</span>
+            : item.status === 'blocked' && <span className="meta-part meta-status text-gray-600 dark:text-gray-300"><i className="bg-purple-500" aria-hidden />Blocked</span>}
+          {snoozed && item.snoozedUntil && <span className="meta-part meta-status text-gray-600 dark:text-gray-300"><i className="bg-amber-500" aria-hidden />{snoozeLabel(item.snoozedUntil)}</span>}
           <ContextTag item={item} combined={combined} />
         </div>
         {doses.length > 1 && (
@@ -92,8 +93,8 @@ export function TaskRow({ item, today, combined, completing, saving, onComplete,
       >
         <Star size={16} className={item.isFocus ? 'fill-current' : ''} />
       </button>
-      {/* Always shown: a hover-only clock was invisible on phones and easy to miss on desktop. */}
-      <SnoozeMenu itemId={item.id} onSnoozed={onSnoozed} className="shrink-0" />
+      {/* Always there (a hover-only clock was invisible on phones), but faint on desktop until the row is pointed at. */}
+      <SnoozeMenu itemId={item.id} onSnoozed={onSnoozed} className="shrink-0 transition-opacity md:opacity-40 md:group-hover:opacity-100 focus-within:opacity-100 has-[[aria-expanded=true]]:opacity-100" />
     </div>
   );
 }
