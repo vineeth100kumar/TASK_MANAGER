@@ -8,6 +8,7 @@ import { Speaker, Loader2, Volume2, Link2, Unplug, Moon, AudioWaveform } from 'l
 import { useSpeaker, type SpeakerSettings, type SurroundMode, type LatencyMode } from '../../services/speaker';
 import type { BluetoothDevice } from '../../services/bluetooth';
 import { useToast } from '../../context/ToastContext';
+import { PresenceCard } from './PresenceCard';
 
 const card = 'p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-4';
 const smallButton = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap';
@@ -152,6 +153,9 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             hint="Instagram, Telegram, iMessage, Messenger and others. Only who, never what." />
           <Switch on={set.announceBattery !== false} onChange={on => save({ announceBattery: on })} label="Herald: tell me when my phone battery is low"
             hint="Once at 20% or below, again after it has charged past 30%." />
+          <PresenceCard />
+          <Switch on={set.headsUp !== false} onChange={on => save({ headsUp: on })} label="Herald: weather heads-up as I leave"
+            hint="A word about rain, a storm or snow right after the goodbye. Traffic isn't included." />
           <Switch on={set.recap !== false} onChange={on => save({ recap: on })} label="Herald: recap when I'm back"
             hint="After a trip of 15 minutes or more: who messaged or rang while you were out (names only, saved contacts only) and which timed reminders slipped by." />
           <Switch on={set.callEtiquette !== false} onChange={on => save({ callEtiquette: on })} label="Herald: stay quiet during calls"

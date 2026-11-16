@@ -95,3 +95,60 @@ class SpeakerRuleTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class JournalTests(unittest.TestCase):
+    def setUp(self):
+        import datetime as dt
+        import herald_journal as hj
+        self.dt, self.hj = dt, hj
+        self.tz = dt.timezone.utc
+        self.base = dt.datetime(2026, 11, 16, 0, 0, tzinfo=self.tz).timestamp()
+
+    def at(self, hour, minute=0, day=0):
+        return self.base + day * 86400 + hour * 3600 + minute * 60
+
+    def test_trip_and_report(self):
+        j = self.hj.leave({}, self.at(9))
+        j = self.hj.leave(j, self.at(9, 1))                  # the Leave button, then Bluetooth: one trip
+        self.assertEqual(len(j["trips"]), 1)
+        j = self.hj.arrive(j, self.at(12))
+        r = self.hj.day_report(j, self.dt.date(2026, 11, 16), self.tz, self.at(18))
+        self.assertEqual(r["out"], [[540, 720]])
+        self.assertEqual(r["awayMin"], 180)
+        self.assertEqual(r["homeMin"], 360)   # known 09:00 to 18:00 (540 min), less the 180 min trip
+        self.assertFalse(self.hj.day_report(j, self.dt.date(2026, 11, 15), self.tz, self.at(18))["known"])
+
+    def test_blip_is_dropped(self):
+        j = self.hj.leave({}, self.at(9))
+        j = self.hj.arrive(j, self.at(9, 1))
+        self.assertEqual(j["trips"], [])
+
+    def test_open_trip_reaches_now(self):
+        j = self.hj.leave({}, self.at(20))
+        self.assertTrue(self.hj.is_out(j))
+        r = self.hj.day_report(j, self.dt.date(2026, 11, 16), self.tz, self.at(22))
+        self.assertEqual(r["out"], [[1200, 1320]])
+
+    def test_late_returns_and_remarks(self):
+        j = {}
+        for d in range(3):
+            j = self.hj.leave(j, self.at(20, day=d))
+            j = self.hj.arrive(j, self.at(23, 30, day=d))
+        self.assertEqual(self.hj.late_returns(j, self.tz, self.at(23, 45, day=2)), 3)
+        self.assertEqual(self.hj.memory_remark(3, 0, "sir"), "That is the third late return this week, sir.")
+        self.assertEqual(self.hj.memory_remark(1, 3), "Three days running with something closed. Rather good.")
+        self.assertEqual(self.hj.memory_remark(1, 2), "")
+
+    def test_streak(self):
+        today = self.dt.date(2026, 11, 16)
+        self.assertEqual(self.hj.closed_streak({"2026-11-16", "2026-11-15", "2026-11-14", "2026-11-12"}, today), 3)
+        self.assertEqual(self.hj.closed_streak({"2026-11-15", "2026-11-14"}, today), 2)    # today still open
+        self.assertEqual(self.hj.closed_streak(set(), today), 0)
+
+
+class HeadsUpTests(unittest.TestCase):
+    def test_lines(self):
+        self.assertEqual(h.heads_up_line("rain", "sir"), "Rain about, sir. Do take an umbrella.")
+        self.assertEqual(h.heads_up_line("sun"), "")
+        self.assertIn("Snow", h.heads_up_line("snow"))

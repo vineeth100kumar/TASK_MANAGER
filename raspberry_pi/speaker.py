@@ -58,6 +58,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 import herald_extras
+import herald_journal
 
 log = logging.getLogger("speaker")
 
@@ -96,6 +97,7 @@ DEFAULTS: Dict[str, Any] = {
     "announceMessages": True,  # Herald: "a message from X" for Instagram, Telegram, iMessage, etc.
     "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
     "recap": True,             # Herald: after a trip, who messaged you while you were out and which reminders slipped by
+    "headsUp": True,           # Herald: a word about rain, storm or snow as you head out
     "callEtiquette": True,     # Herald: hold its own lines during a call, then say them as one line
     "windDown": "21:45",       # Herald: an evening line (closed today, first tomorrow) at this time; "" = off
     "lastWindDown": "",        # the day the evening line was last said; not user-set
@@ -168,7 +170,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "recap", "callEtiquette", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "recap", "callEtiquette", "headsUp", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if not PHONE_SPEAKER_ALLOWED:
@@ -357,6 +359,8 @@ def template_greeting(f: dict) -> str:
         parts.append(f"And {_number(f['overdueCount'])} overdue, when you're ready.")
     if f.get("habitsLeft"):
         parts.append(f"Don't forget {f['habitsLeft'][0]}.")
+    if f.get("memory"):
+        parts.append(f["memory"])
     if f.get("chill"):
         parts.append("Work is put away for the evening." if f["partOfDay"] in ("evening", "night") else "Work is put away for now.")
     return " ".join(parts)
@@ -379,6 +383,9 @@ Address them by the name given (as a butler would, e.g. "Master Vineeth" or \
 Facts (JSON):
 """
 
+
+GREETING_PROMPT = GREETING_PROMPT.replace(
+    "Facts (JSON):", 'If "memory" is given, you may work it in once, lightly, in your own words.\n\nFacts (JSON):')
 
 WHATSAPP_APPS = {"net.whatsapp.WhatsApp", "net.whatsapp.WhatsAppSMB"}
 EMAIL_APPS = {"com.apple.mobilemail", "com.google.Gmail", "com.microsoft.Office.Outlook",
@@ -534,7 +541,7 @@ for _k in DAILY_PROMPTS:
         "Facts (JSON):",
         'Every line must sound new: never reuse the wording, opening or joke of any line listed under "avoid". '
         'Never state a clock time, a date or any number: the line is spoken a minute or two after it is written, '
-        'so keep it timeless. A plain greeting for the part of day given (good morning, good afternoon, good evening) '
+        'so keep it timeless. If "memory" is given you may allude to it once, lightly, in words, never digits. A plain greeting for the part of day given (good morning, good afternoon, good evening) '
         'is welcome; never say "now", "just now", "tonight at" or an hour.\n\nFacts (JSON):')
 
 
@@ -991,6 +998,7 @@ class Speaker:
         self._call_until = 0.0                  # an answered call holds lines at most this long
         self._held: List[dict] = []             # lines held during the call: {kind, who, title}
         self._wind_idx = 0
+        self._heads_up_at = 0.0
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -1477,7 +1485,9 @@ class Speaker:
             habits_left = [str(h.get("name") or h.get("title") or "") for h in notifier.habits() if notifier.habit_due(h, now)]
         except Exception:
             pass
-        return greeting_facts(now, due, overdue, chill, None, [h for h in habits_left if h], settings["callMe"])
+        facts = greeting_facts(now, due, overdue, chill, None, [h for h in habits_left if h], settings["callMe"])
+        facts["memory"] = self._memory(settings["callMe"])
+        return facts
 
     async def _ai_line(self, facts: dict, prompt: str = GREETING_PROMPT) -> str:
         try:
@@ -1515,7 +1525,9 @@ class Speaker:
         text = ""
         if settings["witty"]:
             now = self.now()
-            text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me, "avoid": recent}, DAILY_PROMPTS[kind])
+            memory = await asyncio.to_thread(self._memory, call_me)
+            text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me, "avoid": recent,
+                                        "memory": memory}, DAILY_PROMPTS[kind])
             if text in recent:
                 text = ""
         text = text or fresh_fallback(kind, call_me, recent)
@@ -1680,6 +1692,8 @@ class Speaker:
         self._last_goodbye_at = now
         self._note(event, "goodbye")
         asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
+        if settings.get("headsUp", True):
+            asyncio.run_coroutine_threadsafe(self._heads_up(), self.loop)
 
     def _ready_ok(self, kind: str) -> bool:
         """The line made ahead is still usable: its file is there, the voice settings
@@ -1885,6 +1899,34 @@ class Speaker:
 
     # --- Wind-down ---
 
+    def _memory(self, call_me: str) -> str:
+        """A short remark on a pattern (late returns this week, a run of days closing tasks), or "". Needs the journal and the done list."""
+        try:
+            import notifier
+            tz = notifier._tz(notifier.get_prefs())
+            now = datetime.datetime.now(tz)
+            late = herald_journal.late_returns(herald_journal.load(), tz, now.timestamp())
+            since = (now - datetime.timedelta(days=14)).date().isoformat()
+            days = {str(i.get("completedAt") or "")[:10] for i in notifier.completed_since(since)}
+            return herald_journal.memory_remark(late, herald_journal.closed_streak(days, now.date()), call_me)
+        except Exception as e:
+            log.info("Herald memory failed: %s", e)
+            return ""
+
+    async def _heads_up(self) -> None:
+        """As you leave: rain, a storm or snow outside, in one short line after the goodbye."""
+        if time.time() - self._heads_up_at < 1200:
+            return
+        weather = await self._current_weather()
+        settings = get_settings()
+        line = herald_extras.heads_up_line((weather or {}).get("icon", ""), settings.get("callMe", ""), self._wind_idx)
+        self._wind_idx += 1
+        if not line:
+            return self._note("heads-up", "silent", "the weather is fine")
+        self._heads_up_at = time.time()
+        self._note("heads-up", "announced", (weather or {}).get("icon", ""))
+        await self.say(line, "headsup")
+
     def _wind_facts(self) -> dict:
         import notifier
         prefs = notifier.get_prefs()
@@ -1896,7 +1938,7 @@ class Speaker:
         items = [i for i in notifier.open_items() if not i.get("isHidden") and "alarm" not in (i.get("labels") or [])]
         due, _ = notifier.plan_for_today(items, tomorrow, tz)
         titles = [str(i.get("title") or "").strip() for i in due if str(i.get("title") or "").strip()]
-        return {"closed": len(closed), "first": titles[0] if titles else None}
+        return {"closed": len(closed), "first": titles[0] if titles else None, "memory": self._memory(get_settings().get("callMe", ""))}
 
     async def maybe_wind_down(self) -> None:
         """Once an evening, at windDown, while you're home: what you closed today and what's first tomorrow."""
@@ -1914,7 +1956,7 @@ class Speaker:
             return
         await asyncio.to_thread(_store_setting, "lastWindDown", today)
         facts = await asyncio.to_thread(self._wind_facts)
-        line = herald_extras.wind_down_line(facts["closed"], facts["first"], settings.get("callMe", ""), self._wind_idx)
+        line = herald_extras.wind_down_line(facts["closed"], facts["first"], settings.get("callMe", ""), self._wind_idx, facts.get("memory", ""))
         self._wind_idx += 1
         self._note("wind-down", "announced")
         await self.say(line, "winddown")
