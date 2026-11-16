@@ -265,7 +265,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
 
           <div className="px-6 md:px-8 pb-20">
             {activeTab === 'details' ? (
-              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="space-y-8">
+              <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="stagger space-y-8">
                 
                 <div className="bg-[#f5f5f7] dark:bg-white/5 rounded-3xl border border-black/5 dark:border-white/5 overflow-hidden">
                   

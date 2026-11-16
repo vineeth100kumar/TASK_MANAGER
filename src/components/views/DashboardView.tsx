@@ -232,7 +232,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
             {doneToday > 0 ? (
               <Celebrate><div className="w-11 h-11 rounded-full bg-emerald-50 dark:bg-emerald-950/40 text-emerald-500 flex items-center justify-center"><Check size={20} strokeWidth={3} /></div></Celebrate>
             ) : (
-              <div className="w-11 h-11 rounded-full bg-gray-100 dark:bg-white/5 text-gray-400 flex items-center justify-center"><CalendarCheck size={20} /></div>
+              <div className="float-soft w-11 h-11 rounded-full bg-gray-100 dark:bg-white/5 text-gray-400 flex items-center justify-center"><CalendarCheck size={20} /></div>
             )}
             <p className="text-[14px] font-semibold text-gray-900 dark:text-white">{doneToday > 0 ? 'Today is clear' : 'Nothing due today'}</p>
             {onNavigateView && (

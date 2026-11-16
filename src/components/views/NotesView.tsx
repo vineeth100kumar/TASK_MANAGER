@@ -211,7 +211,7 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
         </div>
 
         {/* Note List */}
-        <div className="flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
+        <div key={kind} className="stagger flex-1 overflow-y-auto custom-scrollbar p-2 space-y-1">
           {filteredNotes.map(note => {
             const isSelected = note.id === selectedNoteId;
             return (

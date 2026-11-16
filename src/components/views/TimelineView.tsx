@@ -103,7 +103,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
           Timeline
         </h3>
 
-        <div className="relative pl-6 sm:pl-8 border-l-2 border-gray-200 dark:border-gray-800 space-y-8 ml-3 sm:ml-4">
+        <div className="stagger relative pl-6 sm:pl-8 border-l-2 border-gray-200 dark:border-gray-800 space-y-8 ml-3 sm:ml-4">
           {sortedDates.map(dateStr => {
             const { dayName, fullDate, isToday, isPast } = formatDateHeader(dateStr);
             const items = dateMap.get(dateStr) || [];
@@ -111,7 +111,7 @@ export function TimelineView({ tasks, onSelect }: TimelineViewProps) {
             return (
               <div key={dateStr} ref={dateStr === anchorDate ? anchorRef : undefined} className="relative group scroll-mt-24">
                 {/* Date Node */}
-                <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#0a0a0b] flex items-center justify-center ${isToday ? 'bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
+                <div className={`absolute -left-[31px] sm:-left-[39px] top-0 w-6 h-6 rounded-full border-4 border-white dark:border-[#0a0a0b] flex items-center justify-center ${isToday ? 'today-pulse bg-blue-600 ring-4 ring-blue-500/20' : isPast ? 'bg-gray-300 dark:bg-gray-700' : 'bg-gray-400 dark:bg-gray-600'}`} />
 
                 <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 mb-3">
                   <span className={`text-[15px] font-bold ${isToday ? 'text-blue-600 dark:text-blue-400' : 'text-gray-900 dark:text-white'}`}>

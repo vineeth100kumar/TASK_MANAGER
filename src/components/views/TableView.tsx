@@ -27,7 +27,7 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
               <th className="px-6 py-3.5">Estimate</th>
             </tr>
           </thead>
-          <tbody className="divide-y divide-gray-100 dark:divide-white/5 text-[13.5px] font-medium">
+          <tbody className="rows-in divide-y divide-gray-100 dark:divide-white/5 text-[13.5px] font-medium">
             {tasks.map(task => {
               const isDone = task.status === 'done';
               const stage = stageOf(task, statusesFor(task.projectId, projects));

@@ -90,7 +90,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
           {/* The slot limit, shown rather than told. */}
           <div className="flex items-center gap-1.5 mt-3" aria-label={`${focusItems.length} of ${FOCUS_SLOTS} focus slots used`}>
             {Array.from({ length: FOCUS_SLOTS }, (_, i) => (
-              <span key={i} className={`h-1.5 w-6 rounded-full transition-colors duration-300 ${i < focusItems.length ? 'bg-amber-500' : 'bg-black/[0.08] dark:bg-white/[0.1]'}`} />
+              <span key={i} style={{ ['--i' as any]: i }} className={`grow-in h-1.5 w-6 rounded-full transition-colors duration-300 ${i < focusItems.length ? 'bg-amber-500' : 'bg-black/[0.08] dark:bg-white/[0.1]'}`} />
             ))}
           </div>
         </div>
@@ -100,7 +100,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-4 py-2.5 bg-gradient-to-b from-amber-400 to-amber-500 hover:to-amber-600 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-amber-600/25 ring-1 ring-inset ring-white/20 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
+          className="sheen px-4 py-2.5 bg-gradient-to-b from-amber-400 to-amber-500 hover:to-amber-600 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-amber-600/25 ring-1 ring-inset ring-white/20 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
           <Plus size={14} /> Add item <kbd className="hidden md:inline-flex kbd !bg-white/20 !text-white !border-white/20">N</kbd>
         </button>
@@ -121,7 +121,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
         </div>
       ) : focusItems.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
-          <div className="w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-500 mx-auto flex items-center justify-center">
+          <div className="float-soft w-12 h-12 rounded-full bg-amber-50 dark:bg-amber-950/30 text-amber-500 mx-auto flex items-center justify-center">
             <Sparkles size={24} />
           </div>
           <h3 className="text-[17px] font-semibold tracking-tight text-gray-900 dark:text-white">No items in Focus</h3>

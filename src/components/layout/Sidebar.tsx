@@ -404,7 +404,7 @@ export function Sidebar({
               const showMore = moreOpen || moreActive;
               const moreCount = all.filter(i => !DOORS.includes(i.id)).reduce((n, i: any) => n + (i.count || 0), 0);
               const list = [...all.filter(i => DOORS.includes(i.id)), ...(showMore ? all.filter(i => !DOORS.includes(i.id)) : [])];
-              return <>{list.map((item: any) => {
+              return <>{list.map((item: any, idx: number) => {
                 const isActive = 
                   item.id === 'notes' ? activeView === 'notes' : 
                   item.id === 'canvas' ? activeView === 'canvas' : 
@@ -456,8 +456,8 @@ export function Sidebar({
                     if(window.innerWidth < 768) setIsSidebarOpen(false); 
                   }}
                     onPointerEnter={() => prefetchView(item.id)} onFocus={() => prefetchView(item.id)}
-                    aria-current={isActive ? 'page' : undefined}
-                    className={`relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
+                    aria-current={isActive ? 'page' : undefined} style={{ ['--i' as any]: idx - DOORS.length }}
+                    className={`${DOORS.includes(item.id) ? '' : 'nav-reveal'} relative w-full flex items-center justify-between px-3 py-2 rounded-xl transition-colors group font-medium ${isActive ? 'text-gray-900 dark:text-white' : 'hover:bg-black/[0.04] dark:hover:bg-white/5 text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200'}`}>
                     {isActive && <motion.span layoutId="nav-pill" transition={{ type: 'spring', stiffness: 500, damping: 40 }} className="absolute inset-0 rounded-xl bg-white dark:bg-white/10 shadow-sm ring-1 ring-black/5 dark:ring-white/[0.04]" />}
                     <div className="relative flex items-center gap-3">
                       <item.icon size={17} data-nav={item.id} className={'nav-icon transition-colors ' + (isActive ? (item.color || 'text-blue-600 dark:text-blue-400') : 'text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-300')} />
