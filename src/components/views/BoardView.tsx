@@ -21,6 +21,8 @@ interface BoardViewProps {
 
 export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_STATUSES, hideHome }: BoardViewProps) {
   const [draggedTask, setDraggedTask] = useState<any>(null);
+  const [overColumn, setOverColumn] = useState<string | null>(null);  // the column a dragged card is over
+  const endDrag = () => { setDraggedTask(null); setOverColumn(null); };
 
   const handleDragStart = (e: React.DragEvent, task: any) => {
     setDraggedTask(task);
@@ -29,26 +31,26 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
   const handleDragOver = (e: React.DragEvent) => e.preventDefault();
   const handleDrop = async (e: React.DragEvent, toStatus: string) => {
     e.preventDefault();
-    if (!draggedTask || stageOf(draggedTask, statuses).id === toStatus) return;
+    if (!draggedTask || stageOf(draggedTask, statuses).id === toStatus) { endDrag(); return; }
     
     onTransition(draggedTask, toStatus);
-    setDraggedTask(null);
+    endDrag();
   };
 
   return (
-    <div className="flex gap-4 overflow-x-auto pb-12 min-h-[75vh] items-start snap-x">
+    <div className="stagger flex gap-4 overflow-x-auto pb-12 min-h-[75vh] items-start snap-x">
       {statuses.map(status => {
         const columnTasks = tasks.filter(t => stageOf(t, statuses).id === status.id);
         const isValidDrop = !!draggedTask;
 
         return (
-          <div key={status.id} className={`flex flex-col ${statuses.length > 4 ? 'w-[272px] shrink-0' : 'w-[300px] shrink-0 lg:w-auto lg:flex-1 lg:min-w-[240px] lg:max-w-[380px] lg:shrink'} snap-start`} onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, status.id)}>
+          <div key={status.id} className={`flex flex-col ${statuses.length > 4 ? 'w-[272px] shrink-0' : 'w-[300px] shrink-0 lg:w-auto lg:flex-1 lg:min-w-[240px] lg:max-w-[380px] lg:shrink'} snap-start`} onDragOver={(e) => { handleDragOver(e); if (draggedTask && overColumn !== status.id) setOverColumn(status.id); }} onDrop={(e) => handleDrop(e, status.id)}>
             <div className="flex items-center gap-2 mb-2 px-2 sticky top-0 py-2 z-10">
               <div className={`p-1.5 rounded-lg bg-black/[0.04] dark:bg-white/[0.06] ${status.tint}`}><status.icon size={14} strokeWidth={2.2} aria-hidden /></div>
               <h3 className="font-semibold text-[14px] tracking-[-0.01em]">{status.label}</h3>
               <span className="text-[11px] font-semibold tabular-nums bg-black/[0.05] dark:bg-white/[0.07] px-2 py-0.5 rounded-full text-gray-500">{columnTasks.length}</span>
             </div>
-            <div className={`flex flex-col gap-2.5 surface p-2.5 rounded-3xl min-h-[150px] border transition-colors ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
+            <div className={`stagger drop-ready ${overColumn === status.id ? 'is-over' : ''} flex flex-col gap-2.5 surface p-2.5 rounded-3xl min-h-[150px] border ${draggedTask && !isValidDrop ? 'opacity-50 border-transparent' : draggedTask && isValidDrop ? 'border-blue-300 dark:border-blue-500/50 bg-blue-50/50 dark:bg-blue-900/10' : 'border-black/5 dark:border-white/5'}`}>
               {columnTasks.map(task => {
                 const dateText = withTime(formatDateRange(task.startDate, task.dueDate, task.status === 'done'), task.dueTime);
                 // A milestone is logged once the work is done: it sits in the
@@ -57,8 +59,8 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
                 const home = hideHome ? '' : (task.project?.name || task.area?.name || '');
                 const hasFooter = !!home || (task.subtaskCount ?? 0) > 0 || (task.commentCount ?? 0) > 0;
                 return (
-                  <div key={task.id} draggable={!milestone} onDragStart={(e) => handleDragStart(e, task)} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
-                    className={`surface-item is-interactive p-3.5 rounded-2xl ${milestone ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} group outline-none focus:ring-2 focus:ring-blue-500/50`}>
+                  <div key={task.id} draggable={!milestone} onDragStart={(e) => handleDragStart(e, task)} onDragEnd={endDrag} onClick={() => onSelect(task.id)} role="button" tabIndex={0} onKeyDown={(e) => e.key === 'Enter' && onSelect(task.id)}
+                    className={`surface-item is-interactive p-3.5 rounded-2xl ${draggedTask?.id === task.id ? 'is-dragging' : ''} ${milestone ? 'cursor-pointer' : 'cursor-grab active:cursor-grabbing'} group outline-none focus:ring-2 focus:ring-blue-500/50`}>
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
                         {milestone ? <Flag size={14} className="text-emerald-500" aria-label="Milestone reached" /> : <button 

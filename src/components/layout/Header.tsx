@@ -208,7 +208,7 @@ export function Header({
           </>
         )}
 
-        <button onClick={() => setIsCreateModalOpen(true)} title="New item (N)" aria-label="New item" className="hidden md:flex shrink-0 items-center gap-1.5 h-9 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 dark:hover:from-white dark:hover:to-gray-100 text-white dark:text-black px-3 md:px-3.5 rounded-xl text-[13.5px] font-semibold transition-all active:scale-[0.97] shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5">
+        <button onClick={() => setIsCreateModalOpen(true)} title="New item (N)" aria-label="New item" className="sheen hidden md:flex shrink-0 items-center gap-1.5 h-9 bg-gradient-to-b from-gray-800 to-gray-950 hover:from-gray-700 hover:to-gray-900 dark:from-white dark:to-gray-200 dark:hover:from-white dark:hover:to-gray-100 text-white dark:text-black px-3 md:px-3.5 rounded-xl text-[13.5px] font-semibold transition-all active:scale-[0.97] shadow-sm shadow-black/20 ring-1 ring-inset ring-white/10 dark:ring-black/5">
           <Plus size={16} /> <span className="hidden lg:inline">New Item</span>
         </button>
       </div>

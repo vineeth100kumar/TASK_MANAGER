@@ -111,7 +111,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
 
         <button 
           onClick={() => setIsAddOpen(true)}
-          className="px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
+          className="sheen px-5 py-2.5 bg-purple-600 hover:bg-purple-700 text-white font-semibold text-xs rounded-xl shadow-md flex items-center gap-2 active:scale-95 transition-transform"
         >
           <Plus size={14} /> New Follow-Up
         </button>
@@ -120,7 +120,7 @@ export function WaitingForView({ lifeContext, onSelectTask }: WaitingForViewProp
       {/* Waiting Items List */}
       {!loaded ? null : items.length === 0 ? (
         <div className="text-center py-20 surface rounded-3xl border border-black/5 dark:border-white/5 space-y-3 stagger">
-          <div className="w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
+          <div className="float-soft w-12 h-12 rounded-full bg-purple-50 dark:bg-purple-950/30 text-purple-500 mx-auto flex items-center justify-center">
             <UserCheck size={24} />
           </div>
           <h3 className="text-base font-bold text-gray-900 dark:text-white">Nobody owes you a reply</h3>

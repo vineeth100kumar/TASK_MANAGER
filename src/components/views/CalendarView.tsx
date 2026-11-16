@@ -92,7 +92,7 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
         </div>
 
         <div className="md:flex-1 md:overflow-y-auto custom-scrollbar">
-          <div className="grid grid-cols-7 md:auto-rows-fr md:h-full md:min-h-[500px]">
+          <div key={cells[7]?.dateStr} className="cal-wave grid grid-cols-7 md:auto-rows-fr md:h-full md:min-h-[500px]">
             {cells.map((cell, i) => {
               const items = dates.get(cell.dateStr) || [];
               const hols = holidays.get(cell.dateStr) || [];
@@ -100,11 +100,11 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
               const isToday = cell.dateStr === today;
               const isSel = cell.dateStr === selectedDay;
               return (
-                <div key={cell.dateStr} onClick={() => setSelectedDay(cell.dateStr)}
+                <div key={cell.dateStr} onClick={() => setSelectedDay(cell.dateStr)} style={{ ['--i' as any]: (i % 7) + Math.floor(i / 7) }}
                   className={`relative min-h-[3.25rem] md:min-h-[104px] p-1 md:p-2 border-b border-r border-gray-100 dark:border-white/5 ${(i + 1) % 7 === 0 ? 'border-r-0' : ''} ${i >= cells.length - 7 ? 'border-b-0' : ''}
                     ${offDay ? 'bg-rose-50/50 dark:bg-rose-500/[0.04]' : cell.weekend ? 'bg-gray-50/60 dark:bg-white/[0.015]' : ''} ${isSel ? 'max-md:bg-blue-50/70 dark:max-md:bg-blue-500/10' : ''}`}>
                   <div className={`text-[12px] font-semibold mb-1 w-6 h-6 mx-auto md:mx-0 flex items-center justify-center rounded-full tabular-nums
-                    ${isToday ? 'bg-blue-600 text-white shadow-sm shadow-blue-600/30' : cell.isCurrentMonth ? 'text-gray-700 dark:text-gray-300' : 'text-gray-300 dark:text-gray-600'}`}>
+                    ${isToday ? 'today-pulse bg-blue-600 text-white shadow-sm shadow-blue-600/30' : cell.isCurrentMonth ? 'text-gray-700 dark:text-gray-300' : 'text-gray-300 dark:text-gray-600'}`}>
                     {cell.day}
                   </div>
                   {/* Phones get dots and an agenda below; wider screens list the items. */}

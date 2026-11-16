@@ -176,7 +176,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
             const event = new KeyboardEvent('keydown', { key: 'n' });
             window.dispatchEvent(event);
           }}
-          className="px-4 py-2.5 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
+          className="sheen px-4 py-2.5 bg-gradient-to-b from-blue-500 to-blue-600 hover:from-blue-500 hover:to-blue-700 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-blue-600/25 ring-1 ring-inset ring-white/15 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
           <Plus size={14} /> Add item <kbd className="ml-0.5 px-1.5 rounded-md bg-white/20 text-[10.5px] font-semibold leading-[18px]">N</kbd>
         </button>
@@ -227,7 +227,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
               </div>
             </Celebrate>
           ) : (
-            <div className="w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
+            <div className="float-soft w-12 h-12 rounded-full bg-emerald-50 dark:bg-emerald-950/30 text-emerald-500 mx-auto flex items-center justify-center">
               <CheckCircle2 size={24} />
             </div>
           )}

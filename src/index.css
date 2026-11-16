@@ -443,6 +443,65 @@
   .stagger > *:nth-child(7) { animation-delay: 240ms; }
   .stagger > *:nth-child(n+8) { animation-delay: 280ms; }
 
+  /* Table rows fade in one after another (a transform on a <tr> is unreliable). */
+  .rows-in > tr { animation: fade-in 420ms ease-out backwards; }
+  .rows-in > tr:nth-child(2) { animation-delay: 30ms; }
+  .rows-in > tr:nth-child(3) { animation-delay: 60ms; }
+  .rows-in > tr:nth-child(4) { animation-delay: 90ms; }
+  .rows-in > tr:nth-child(5) { animation-delay: 120ms; }
+  .rows-in > tr:nth-child(6) { animation-delay: 150ms; }
+  .rows-in > tr:nth-child(7) { animation-delay: 180ms; }
+  .rows-in > tr:nth-child(n+8) { animation-delay: 210ms; }
+
+  /* A month of day cells settles in as a soft diagonal wave (--i = column + row). */
+  .cal-wave > * { animation: cal-in 420ms calc(var(--i, 0) * 22ms) var(--ease-out-expo) backwards; }
+  @keyframes cal-in { from { opacity: 0; transform: scale(0.97); } }
+
+  /* Today's date breathes out one soft ring when the calendar opens. */
+  .today-pulse { position: relative; }
+  .today-pulse::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    box-shadow: 0 0 0 0 rgb(37 99 235 / 0.45);
+    animation: today-ring 1400ms 300ms var(--ease-out-expo) 2;
+    pointer-events: none;
+  }
+  @keyframes today-ring { to { box-shadow: 0 0 0 10px rgb(37 99 235 / 0); } }
+
+  /* Progress dashes and bars grow from the left, one after another. */
+  .grow-in { transform-origin: left center; animation: grow-in 520ms calc(var(--i, 0) * 70ms + 120ms) var(--ease-spring) backwards; }
+  @keyframes grow-in { from { opacity: 0; transform: scaleX(0); } }
+
+  /* The icon on an empty page floats gently, so the page is not dead still. */
+  .float-soft { animation: float-soft 5s ease-in-out infinite; }
+  @keyframes float-soft { 50% { transform: translateY(-4px); } }
+
+  /* A light sweeps across a primary button when it is pointed at. */
+  .sheen { position: relative; overflow: hidden; isolation: isolate; }
+  .sheen::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    background: linear-gradient(105deg, transparent 35%, rgb(255 255 255 / 0.28) 50%, transparent 65%);
+    transform: translateX(-120%);
+    pointer-events: none;
+  }
+  .sheen:hover::after { transform: translateX(120%); transition: transform 700ms var(--ease-out-expo); }
+
+  /* Switch knobs land with a small spring. */
+  [role="switch"] + span::after { transition-duration: 300ms; transition-timing-function: var(--ease-spring); }
+
+  /* Sidebar links revealed by "More" rise in one after another. */
+  .nav-reveal { animation: rise 380ms calc(var(--i, 0) * 28ms) var(--ease-out-expo) backwards; }
+
+  /* A card being dragged tilts a touch; the column it can land in lifts. */
+  .is-dragging { opacity: 0.55; transform: rotate(1.5deg) scale(0.98); }
+  .drop-ready { transition: transform 240ms var(--ease-out-expo), background-color 200ms, border-color 200ms; }
+  .drop-ready.is-over { transform: scale(1.012); }
+
   /* A new page slides up into place (App.tsx keys it by view). */
   .view-enter { animation: view-in 240ms var(--ease-out-expo) backwards; }
 
