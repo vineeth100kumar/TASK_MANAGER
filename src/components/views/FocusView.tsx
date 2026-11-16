@@ -102,7 +102,7 @@ export function FocusView({ lifeContext, onSelectTask }: FocusViewProps) {
           }}
           className="px-4 py-2.5 bg-gradient-to-b from-amber-400 to-amber-500 hover:to-amber-600 text-white font-semibold text-[12.5px] rounded-xl shadow-sm shadow-amber-600/25 ring-1 ring-inset ring-white/20 hidden md:flex items-center gap-2 active:scale-[0.97] transition-all"
         >
-          <Plus size={14} /> Add Item (N)
+          <Plus size={14} /> Add item <kbd className="hidden md:inline-flex kbd !bg-white/20 !text-white !border-white/20">N</kbd>
         </button>
       </div>
 

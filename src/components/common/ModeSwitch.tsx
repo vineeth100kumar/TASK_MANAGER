@@ -31,11 +31,12 @@ export function ModeSwitch() {
         const active = state.mode === mode;
         const Icon = mode === 'work' ? Briefcase : Coffee;
         return (
-          <button key={mode} role="radio" aria-checked={active} onClick={() => pick(mode)}
+          <button key={mode} role="radio" aria-checked={active} aria-label={mode === 'work' ? 'Work' : 'Chill'} onClick={() => pick(mode)}
             className={`relative flex items-center gap-1.5 h-8 px-2.5 rounded-[10px] text-[12.5px] font-semibold transition-colors ${active ? (mode === 'chill' ? 'text-orange-600 dark:text-orange-400' : 'text-gray-900 dark:text-white') : 'text-gray-500 hover:text-gray-800 dark:hover:text-gray-200'}`}>
             {active && <motion.span layoutId="mode-thumb" transition={{ type: 'spring', stiffness: 500, damping: 38 }} className="absolute inset-0 rounded-[10px] bg-white dark:bg-[#2c2c2e] shadow-sm ring-1 ring-black/5 dark:ring-white/5" />}
             <Icon size={14} className="relative" />
-            <span className="relative">{mode === 'work' ? 'Work' : 'Chill'}</span>
+            {/* Phones show the icon alone, so the page title keeps its room. */}
+            <span className="relative hidden sm:inline">{mode === 'work' ? 'Work' : 'Chill'}</span>
             {active && fromPresence && <Home size={10} className="relative -ml-0.5 opacity-60" aria-label="set by home or away" />}
           </button>
         );

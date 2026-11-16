@@ -57,16 +57,16 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { pro
 
   return (
     <div className="mb-4 md:mb-5 flex flex-col md:flex-row md:items-center gap-2.5 md:gap-4">
-      <div className="flex items-center gap-2.5 shrink-0">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5 md:shrink-0">
         <ProjectTypeMenu project={project} projects={data.projects} onChange={changeType} />
-        <span className="text-[12.5px] text-gray-500 tabular-nums">{open} open · {done} done</span>
+        <span className="text-[12.5px] text-gray-500 tabular-nums whitespace-nowrap">{open} open · {done} done</span>
         <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('sage:edit-project', { detail: project.id }))}
-          className="flex items-center gap-1 h-7 px-2 rounded-full text-[12px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
+          className="flex items-center gap-1 h-7 px-2 rounded-full text-[12px] font-semibold whitespace-nowrap text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5 transition-colors"
           title="Edit name, key, colour and type">
           <Pencil size={12} /> Edit
         </button>
         <button type="button" onClick={toggleComplete}
-          className={`flex items-center gap-1 h-7 px-2 rounded-full text-[12px] font-semibold transition-colors ${project.completedAt ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300 hover:opacity-80' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5'}`}
+          className={`flex items-center gap-1 h-7 px-2 rounded-full text-[12px] font-semibold whitespace-nowrap transition-colors ${project.completedAt ? 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300 hover:opacity-80' : 'text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-white/5'}`}
           title={project.completedAt ? 'Reopen this project' : 'Mark this project complete'}>
           {project.completedAt ? <><RotateCcw size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Mark complete</>}
         </button>

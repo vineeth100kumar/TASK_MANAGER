@@ -40,6 +40,7 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
     try { return (localStorage.getItem(TAB_KEY) as Tab) || 'signals'; } catch { return 'signals'; }
   });
   const [ideaId, setIdeaId] = useState<string | null>(null);
+  const [showDown, setShowDown] = useState(false);
   const [vaultOpenId, setVaultOpenId] = useState<string | null>(null);
   const [seedTheme, setSeedTheme] = useState('');
   const [industryId, setIndustryId] = useState<string | null>(null);
@@ -208,9 +209,19 @@ export function RadarView({ onOpenProject, onOpenNote }: RadarViewProps) {
         </div>
         {tab === 'signals' && summary && <Ticker quotes={summary.ticker} />}
         {tab === 'signals' && down.length > 0 && (
-          <p className="text-[12px] font-medium text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-            <AlertTriangle size={13} /> Down: {down.map(s => s.error ? `${s.name} (${s.error.split(';')[0].split(': ').pop()})` : s.name).join(', ')}
-          </p>
+          // A long list of names buried the page, so more than three fold behind a count.
+          <div className="text-[12px] font-medium text-amber-700 dark:text-amber-400">
+            <p className="flex items-center gap-1.5">
+              <AlertTriangle size={13} className="shrink-0" />
+              {down.length <= 3
+                ? <>Down: {down.map(s => s.error ? `${s.name} (${s.error.split(';')[0].split(': ').pop()})` : s.name).join(', ')}</>
+                : <>{down.length} sources can't be reached right now.
+                    <button type="button" onClick={() => setShowDown(v => !v)} aria-expanded={showDown} className="underline underline-offset-2 font-semibold hover:opacity-80">{showDown ? 'Hide' : 'Show which'}</button></>}
+            </p>
+            {down.length > 3 && showDown && (
+              <p className="mt-1.5 pl-5 leading-relaxed">{down.map(s => s.error ? `${s.name} (${s.error.split(';')[0].split(': ').pop()})` : s.name).join(', ')}</p>
+            )}
+          </div>
         )}
       </div>
 
