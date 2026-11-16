@@ -60,6 +60,14 @@ class GreetingTests(unittest.TestCase):
                          "Pardon the interruption. A reminder: Pay rent.")
 
 
+class ReactionTests(unittest.TestCase):
+    def test_reaction_line_and_regex(self):
+        self.assertTrue(speaker._REACTION_RE.match("Reacted \u2764 to \u201cok\u201d"))
+        self.assertFalse(speaker._REACTION_RE.match("Fuck yeah"))
+        self.assertIn("Supreet", speaker.notice_line("reaction", "Supreet Yadav"))
+        self.assertEqual(speaker.clean_settings({"callHoldMinutes": 999})["callHoldMinutes"], 60)
+
+
 class SettingsTests(unittest.TestCase):
     def test_clean(self):
         s = speaker.clean_settings({"address": "aa:bb:cc:dd:ee:ff", "volume": 500, "speed": 3})

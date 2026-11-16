@@ -96,10 +96,10 @@ class PureTests(unittest.TestCase):
         d = spotify.clean_settings({})
         self.assertFalse(d["arrivalMusic"])
         self.assertEqual((d["arrivalVolume"], d["callVolume"]), (40, 30))
-        s = spotify.clean_settings({"arrivalMusic": True, "arrivalVolume": 500,
+        s = spotify.clean_settings({"arrivalMusic": True, "arrivalVolume": 500, "callVolume": 0,
                                     "arrivalPlaylist": "https://open.spotify.com/playlist/37i9dQZF1DWZeKCadgRdKQ?si=x"})
         self.assertTrue(s["arrivalMusic"])
-        self.assertEqual(s["arrivalVolume"], 80)
+        self.assertEqual((s["arrivalVolume"], s["callVolume"]), (100, 0))
         self.assertEqual(s["arrivalPlaylist"], "spotify:playlist:37i9dQZF1DWZeKCadgRdKQ")
         with self.assertRaises(ValueError):
             spotify.clean_settings({"arrivalPlaylist": "lofi please"})

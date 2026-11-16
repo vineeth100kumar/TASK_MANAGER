@@ -27,9 +27,12 @@ export function SpotifyCard() {
   const { showToast } = useToast();
   const [busy, setBusy] = useState(false);
   const [key, setKey] = useState('');
+  const [volDraft, setVolDraft] = useState<number | null>(null);
   const s = sp.state;
   if (!s) return null;
   const set = s.settings;
+  const vol = volDraft ?? set.arrivalVolume;
+  const setVol = (v: number) => setVolDraft(v);
   const player = s.player;
   const track = player?.track;
 
@@ -161,9 +164,10 @@ export function SpotifyCard() {
                 onBlur={e => e.target.value.trim() && e.target.value.trim() !== set.arrivalPlaylist && save({ arrivalPlaylist: e.target.value.trim() })} />
               <div className="flex flex-wrap items-center gap-4 text-xs text-gray-500">
                 <label className="flex items-center gap-2">Volume
-                  <select className={field} value={set.arrivalVolume} disabled={busy} onChange={e => save({ arrivalVolume: Number(e.target.value) })}>
-                    {[25, 30, 35, 40, 45, 50].map(v => <option key={v} value={v}>{v}%</option>)}
-                  </select>
+                  <input type="range" min={0} max={100} step={1} disabled={busy} value={vol} onChange={e => setVol(Number(e.target.value))}
+                    onMouseUp={() => vol !== set.arrivalVolume && save({ arrivalVolume: vol })} onTouchEnd={() => vol !== set.arrivalVolume && save({ arrivalVolume: vol })}
+                    onKeyUp={() => vol !== set.arrivalVolume && save({ arrivalVolume: vol })} />
+                  <span className="w-9 tabular-nums">{vol}%</span>
                 </label>
                 <label className="flex items-center gap-2">For
                   <select className={field} value={set.arrivalMinutes} disabled={busy} onChange={e => save({ arrivalMinutes: Number(e.target.value) })}>
