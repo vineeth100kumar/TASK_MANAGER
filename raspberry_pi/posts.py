@@ -379,15 +379,6 @@ async def _announce(post: dict) -> None:
 
 # --- Is the slide maker ready? ---
 
-def chromium_path() -> str:
-    """The browser to draw with: AUTOCONTENT_CHROMIUM, else the one Playwright
-    installed, else the system's (apt chromium). Empty means Playwright's own."""
-    explicit = os.environ.get("AUTOCONTENT_CHROMIUM", "").strip()
-    if explicit:
-        return explicit if Path(explicit).exists() else ""
-    return ""
-
-
 def _playwright_browser_present() -> bool:
     root = Path(os.environ.get("PLAYWRIGHT_BROWSERS_PATH") or Path.home() / ".cache" / "ms-playwright")
     return root.is_dir() and any(root.glob("chromium*"))

@@ -145,11 +145,3 @@ def heads_up_line(icon: str, call_me: str = "", idx: int = 0) -> str:
     """A word of warning as you head out, from the weather icon. "" when the weather is fine. Pure."""
     lines = _HEADS_UP.get(icon or "")
     return lines[idx % len(lines)].format(name=_name(call_me)) if lines else ""
-
-
-def summarize_held(held: List[dict]) -> Dict[str, int]:
-    """How many of each kind were held (for the UI and logs). Pure."""
-    out: Dict[str, int] = {}
-    for h in held:
-        out[h.get("kind", "line")] = out.get(h.get("kind", "line"), 0) + 1
-    return out
