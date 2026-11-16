@@ -47,6 +47,8 @@ BATTERY_EVERY_S = 300
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
+# Seconds a phone may stay connected without a BLE link before the Pi drops it so it reconnects fresh.
+STUCK_DROP_AFTER = int(os.getenv("SAGE_PHONE_STUCK_DROP", "25"))
 
 BLUEZ = "org.bluez"
 ANCS_SERVICE = "7905f431-b5ce-4e99-a40f-4b1e122d00d0"
@@ -251,6 +253,7 @@ class PhoneLink:
         # The link's state as the Pi sees it, for the log and /api/phone.
         self._ble_last_try = 0.0
         self._ble_tries = 0
+        self._classic_only = False
         self._ble_stuck_since = 0.0  # when ServicesResolved first stayed false
         self._advertising = False
         self._adv_exported = False
@@ -441,11 +444,12 @@ class PhoneLink:
             if not self._ble_stuck_since:
                 self._ble_stuck_since = now
             stuck_for = now - self._ble_stuck_since
-            if stuck_for >= 120:
+            if stuck_for >= STUCK_DROP_AFTER or self._classic_only:
                 self.say("state", f"{phone_name} ({address}) has been connected without BLE for "
                                   f"{int(stuck_for)} s; disconnecting to force a fresh link.")
                 self._ble_stuck_since = 0.0
                 self._ble_tries = 0
+                self._classic_only = False
                 self._chars.clear()
                 self._unwatch()
                 try:
@@ -539,6 +543,15 @@ class PhoneLink:
                                  f"BlueZ accepted; waiting for ServicesResolved.")
         except Exception as e:
             error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
+            if "profile-unavailable" in error.lower() or "profile_unavailable" in error.lower():
+                # The Pi offers the phone no classic profile (it is notifications-only,
+                # no speaker), so a Connect from here can only try classic and always
+                # fails. The phone is holding a classic link with no BLE; drop it, and
+                # the phone, hearing the Pi's ANCS advertisement, reconnects over BLE.
+                self._classic_only = True
+                self.say("open-ble", f"{name} holds a classic-only link the Pi can't use (BlueZ: profile unavailable); "
+                                     f"dropping it so the phone reconnects over BLE.")
+                return
             if "already in progress" in error.lower():
                 # BlueZ is already connecting it: not a refusal, look again soon.
                 self._ble_tries = max(0, self._ble_tries - 1)
