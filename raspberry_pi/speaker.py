@@ -57,6 +57,8 @@ from collections import deque
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
+import herald_extras
+
 log = logging.getLogger("speaker")
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
@@ -93,6 +95,10 @@ DEFAULTS: Dict[str, Any] = {
     "announceEmail": True,     # Herald: "an email from X" (never the subject or body)
     "announceMessages": True,  # Herald: "a message from X" for Instagram, Telegram, iMessage, etc.
     "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
+    "recap": True,             # Herald: after a trip, who messaged you while you were out and which reminders slipped by
+    "callEtiquette": True,     # Herald: hold its own lines during a call, then say them as one line
+    "windDown": "21:45",       # Herald: an evening line (closed today, first tomorrow) at this time; "" = off
+    "lastWindDown": "",        # the day the evening line was last said; not user-set
     "callMe": "",           # how the greeting addresses you ("" = no name, "sir" works)
     "voice": "bm_george",
     "speed": 1.0,
@@ -162,7 +168,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "recap", "callEtiquette", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if not PHONE_SPEAKER_ALLOWED:
@@ -195,6 +201,11 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
             if not HHMM.match(value):
                 raise ValueError("Quiet hours need times like 22:30.")
             out[key] = value
+    if "windDown" in update:
+        value = str(update.get("windDown") or "")
+        if value and not HHMM.match(value):
+            raise ValueError("Wind-down needs a time like 21:45, or empty for off.")
+        out["windDown"] = value
     if "briefAfterHours" in update:
         out["briefAfterHours"] = round(max(0.25, min(24.0, float(update["briefAfterHours"]))), 2)
     if "leaveAfterMinutes" in update:
@@ -222,6 +233,17 @@ def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
 def _store_greet_time(at: float) -> None:
     settings = get_settings()
     settings["lastGreetAt"] = int(at)
+    conn = _connect()
+    try:
+        conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (SETTINGS_KEY, json.dumps(settings)))
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def _store_setting(key: str, value: Any) -> None:
+    settings = get_settings()
+    settings[key] = value
     conn = _connect()
     try:
         conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (SETTINGS_KEY, json.dumps(settings)))
@@ -526,6 +548,9 @@ READY_MAX_AGE_S = 3 * 3600    # (no longer used: a made line is kept until somet
 BRIEF_MIN_GAP_S = 300         # the briefing is rebuilt at most this often, however often your tasks change
 WEATHER_EVERY_S = 600         # how often the weather is looked at
 WEATHER_STEP_C = 1.0          # the weather counts as changed from this many degrees, or a new sky
+HOLD_KINDS = ("notice", "reminder", "event")   # lines that wait while a call is on
+CALL_HOLD_S = 15 * 60                           # an answered call holds lines at most this long (the phone never says it ended)
+RECAP_WAIT_S = 25                               # after you're back, how long the phone gets to hand over what you missed
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
@@ -580,6 +605,13 @@ DAILY_LINES: Dict[str, List[str]] = {
         "Mind how you go{name}. I'll have everything ready for your return.",
     ],
 }
+
+
+def herald_extras_later(hhmm: str, minutes: int = 90) -> str:
+    """The clock time `minutes` after hhmm, capped at 23:59, so an evening line is only said in its window. Pure."""
+    h, m = int(hhmm[:2]), int(hhmm[3:])
+    total = min(h * 60 + m + minutes, 23 * 60 + 59)
+    return f"{total // 60:02d}:{total % 60:02d}"
 
 
 def brief_due(away_s: float, last_at: float, now: float, hours: float) -> bool:
@@ -949,6 +981,16 @@ class Speaker:
         self._events_at: Dict[str, float] = {}   # when each event line was last queued
         self._soundbar_was: Optional[bool] = None   # None until the first check (no line on Sage's own restart)
         self._last_spoke_at = 0.0
+        # Recap after a trip (herald_extras.recap_line)
+        self._recap_until = 0.0                 # pre-existing phone notifications are collected until then
+        self._recap: List[dict] = []            # {kind, who} heard while you were out
+        self._recap_from = 0.0                  # when you left (epoch s)
+        self._recap_idx = 0
+        # Call etiquette: Herald's own lines wait while a call is on
+        self._call_uids: set = set()
+        self._call_until = 0.0                  # an answered call holds lines at most this long
+        self._held: List[dict] = []             # lines held during the call: {kind, who, title}
+        self._wind_idx = 0
         self.now: Callable[[], datetime.datetime] = datetime.datetime.now
 
     # --- State for the web app ---
@@ -1201,15 +1243,15 @@ class Speaker:
 
     # --- Speaking ---
 
-    def say_soon(self, text: str, kind: str = "line", cache: Optional[Path] = None) -> None:
+    def say_soon(self, text: str, kind: str = "line", cache: Optional[Path] = None, meta: Optional[dict] = None) -> None:
         """Queue a line from any thread."""
         if self.loop is None or self.queue is None:
             return
-        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time(), "cache": cache})
+        self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time(), "cache": cache, "meta": meta})
 
-    async def say(self, text: str, kind: str = "line", cache: Optional[Path] = None) -> None:
+    async def say(self, text: str, kind: str = "line", cache: Optional[Path] = None, meta: Optional[dict] = None) -> None:
         if self.queue is not None:
-            await self.queue.put({"text": text, "kind": kind, "at": time.time(), "cache": cache})
+            await self.queue.put({"text": text, "kind": kind, "at": time.time(), "cache": cache, "meta": meta})
 
     def event(self, kind: str) -> bool:
         """A short line for something that just happened (any thread). Lines
@@ -1236,6 +1278,9 @@ class Speaker:
             job = await self.queue.get()
             if job["kind"] == "event" and (time.time() - job.get("at", 0) > EVENT_STALE_S or not self.queue.empty()):
                 continue    # late, or something more important is waiting
+            if job["kind"] in HOLD_KINDS and self.holding():
+                self._hold(job)
+                continue
             try:
                 await self._speak(job["text"], job["kind"], job.get("cache"))
             except Exception as e:
@@ -1527,6 +1572,9 @@ class Speaker:
         if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
             return self._note(event, "silent", "quiet hours")
         now = time.time()
+        if settings.get("recap", True) and away_s >= herald_extras.RECAP_MIN_AWAY_S:
+            self._recap, self._recap_until = [], now + RECAP_WAIT_S - 2
+            asyncio.run_coroutine_threadsafe(self._deliver_recap(now - away_s), self.loop)
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
             self._note(event, "briefing")
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
@@ -1550,6 +1598,8 @@ class Speaker:
 
     def on_phone_notification(self, entry: dict) -> None:
         """phone_link calls this for each new notification from the phone."""
+        if entry.get("preExisting"):
+            return self._collect_recap(entry)
         kind = notice_kind(entry.get("appId", ""))
         if not kind or kind == "ignored":
             return
@@ -1594,7 +1644,8 @@ class Speaker:
             text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT)
             await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
         else:
-            await self.say(notice_line(kind, facts.get("from", ""), call_me), "notice")
+            await self.say(notice_line(kind, facts.get("from", ""), call_me), "notice",
+                           meta={"kind": kind, "who": facts.get("from", "")})
 
     async def announce_command(self, what: str) -> str:
         """Confirm a spoken command that has been carried out ("alarm set for 6:30
@@ -1731,6 +1782,143 @@ class Speaker:
         await self.say(line, kind, cache)
         return line
 
+    # --- Call etiquette ---
+
+    def holding(self) -> bool:
+        """True while a call is on and Herald keeps its own lines back."""
+        if not get_settings().get("callEtiquette", True):
+            return False
+        return bool(self._call_uids) or time.time() < self._call_until
+
+    def _hold(self, job: dict) -> None:
+        meta = job.get("meta") or {}
+        kind = meta.get("kind") or job["kind"]
+        self._note(job["kind"], "held", "you're on a call")
+        if kind in ("whatsapp", "message", "email", "reminder"):
+            self._held.append({"kind": kind, "who": meta.get("who", ""), "title": meta.get("title", "")})
+            del self._held[:-20]
+
+    def on_call_event(self, event: str, uid: str = "") -> None:
+        """phone_link calls this (any thread): ringing / ringing_stopped / missed."""
+        if not self.loop:
+            return
+        def apply() -> None:
+            if event == "ringing":
+                self._call_uids.add(uid)
+                self._call_until = time.time() + CALL_HOLD_S
+            elif event == "ringing_stopped":
+                self._call_uids.discard(uid)      # answered or not: the hold runs on until it times out or you press Call's over
+            elif event == "missed":
+                self._call_uids.discard(uid)
+                asyncio.ensure_future(self.call_over("missed"))
+        self.loop.call_soon_threadsafe(apply)
+
+    async def call_over(self, why: str = "asked") -> None:
+        """The call is done (the Call's over button, a missed call, or the hold timing out): say what waited, as one line."""
+        was = bool(self._call_uids) or self._call_until > 0
+        self._call_uids, self._call_until = set(), 0.0
+        held, self._held = self._held, []
+        if not was:
+            return
+        settings = get_settings()
+        line = herald_extras.replay_line(held, settings.get("callMe", ""), self._wind_idx)
+        self._wind_idx += 1
+        self._note("call over", "replay" if line else "nothing held", why)
+        if line and settings.get("callEtiquette", True):
+            await self.say(line, "replay")
+
+    # --- Return recap ---
+
+    def _collect_recap(self, entry: dict) -> None:
+        """A notification the phone already had when it reconnected: kept for the recap, never announced."""
+        if time.time() > self._recap_until:
+            return
+        settings = get_settings()
+        kind = notice_kind(entry.get("appId", ""))
+        who = (entry.get("title") or "").strip()[:60]
+        if entry.get("category") == "missed call":
+            kind = "call"
+        elif not kind or kind == "ignored":
+            return
+        elif not settings.get({"whatsapp": "announceWhatsApp", "email": "announceEmail"}.get(kind, "announceMessages"), True):
+            return
+        if not herald_extras.is_named(who):
+            return                  # only people you have saved: no numbers, no blanks
+        if (kind, who) not in [(r["kind"], r["who"]) for r in self._recap]:
+            self._recap.append({"kind": kind, "who": who})
+
+    def wants_existing(self) -> bool:
+        """phone_link asks: should it read the phone's older notifications right now (just after you got back)?"""
+        return time.time() < self._recap_until
+
+    def _missed_reminders(self, left_at: float) -> List[str]:
+        import notifier
+        tz = notifier._tz(notifier.get_prefs())
+        now = datetime.datetime.now(tz)
+        left = datetime.datetime.fromtimestamp(left_at, tz)
+        if left.date() != now.date():
+            return []
+        items = [i for i in notifier.open_items() if not i.get("isHidden")]
+        return herald_extras.missed_reminders(items, left.strftime("%H:%M"), now.strftime("%H:%M"), now.date().isoformat())
+
+    async def _deliver_recap(self, left_at: float) -> None:
+        await asyncio.sleep(RECAP_WAIT_S)
+        settings = get_settings()
+        heard, self._recap = self._recap, []
+        try:
+            reminders = await asyncio.to_thread(self._missed_reminders, left_at)
+        except Exception as e:
+            log.info("Recap reminders failed: %s", e)
+            reminders = []
+        line = herald_extras.recap_line(
+            [r["who"] for r in heard if r["kind"] in ("whatsapp", "message")],
+            [r["who"] for r in heard if r["kind"] == "email"],
+            [r["who"] for r in heard if r["kind"] == "call"],
+            reminders, settings.get("callMe", ""), self._recap_idx)
+        self._recap_idx += 1
+        if not line:
+            return self._note("recap", "silent", "nothing to report")
+        if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+            return self._note("recap", "silent", "quiet hours")
+        self._note("recap", "announced")
+        await self.say(line, "recap")
+
+    # --- Wind-down ---
+
+    def _wind_facts(self) -> dict:
+        import notifier
+        prefs = notifier.get_prefs()
+        tz = notifier._tz(prefs)
+        now = datetime.datetime.now(tz)
+        today = now.date().isoformat()
+        closed = [i for i in notifier.completed_since(today) if str(i.get("completedAt") or "")[:10] == today]
+        tomorrow = (now + datetime.timedelta(days=1)).replace(hour=12, minute=0)
+        items = [i for i in notifier.open_items() if not i.get("isHidden") and "alarm" not in (i.get("labels") or [])]
+        due, _ = notifier.plan_for_today(items, tomorrow, tz)
+        titles = [str(i.get("title") or "").strip() for i in due if str(i.get("title") or "").strip()]
+        return {"closed": len(closed), "first": titles[0] if titles else None}
+
+    async def maybe_wind_down(self) -> None:
+        """Once an evening, at windDown, while you're home: what you closed today and what's first tomorrow."""
+        settings = get_settings()
+        at = settings.get("windDown") or ""
+        now = self.now()
+        today = now.strftime("%Y-%m-%d")
+        if not at or settings.get("lastWindDown") == today or not has_output(settings):
+            return
+        if not (at <= now.strftime("%H:%M") < herald_extras_later(at)):
+            return
+        if not (self.phone and self.phone.available and self.phone.home):
+            return
+        if self.speaking or self.holding() or in_quiet(now, settings["quietStart"], settings["quietEnd"]):
+            return
+        await asyncio.to_thread(_store_setting, "lastWindDown", today)
+        facts = await asyncio.to_thread(self._wind_facts)
+        line = herald_extras.wind_down_line(facts["closed"], facts["first"], settings.get("callMe", ""), self._wind_idx)
+        self._wind_idx += 1
+        self._note("wind-down", "announced")
+        await self.say(line, "winddown")
+
     def on_wake(self) -> None:
         """An alarm marked "Wake me up" was stopped (called on the loop): speak
         the morning briefing, if there is a speaker and you're home."""
@@ -1749,7 +1937,7 @@ class Speaker:
         home = bool(self.phone and self.phone.available and self.phone.home)
         wanted = bool((item.get("customFields") or {}).get("readAloud"))
         if has_output(settings) and settings["reminders"] and home and wanted:
-            self.say_soon(reminder_line(message), "reminder")
+            self.say_soon(reminder_line(message), "reminder", meta={"kind": "reminder", "title": str(message.get("title") or "").strip()})
 
     # --- Running ---
 
@@ -1765,6 +1953,9 @@ class Speaker:
                 await self.wifi_guard()
                 if has_output(get_settings()):
                     await self.tick()
+                    if self._call_until and time.time() >= self._call_until:
+                        await self.call_over("time")
+                    await self.maybe_wind_down()
                     if time.time() - self._daily_try >= 120:
                         self._daily_try = time.time()
                         await self.ensure_daily()

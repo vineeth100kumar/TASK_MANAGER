@@ -120,7 +120,7 @@ class WakeAndReadAloudTests(unittest.TestCase):
     def test_reminders_are_silent_unless_read_aloud(self):
         sp = speaker.Speaker()
         spoken = []
-        sp.say_soon = lambda text, kind="line": spoken.append(text)
+        sp.say_soon = lambda text, kind="line", **kw: spoken.append(text)
         sp.phone = type("P", (), {"available": True, "home": True})()
         orig = speaker.has_output
         speaker.has_output = lambda s: True

@@ -39,6 +39,7 @@ away_after: Callable[[], float] = lambda: AWAY_AFTER
 # Bundle ids whose notifications are passed on. Empty means every app.
 # Set by db_server: Herald announces some phone notifications and a low battery.
 on_phone_notification = None   # fn(entry dict)
+fetch_existing = lambda: False   # fn() -> True while the phone's older notifications are wanted (Herald's recap, just after you get back)
 on_phone_call = None           # fn(event: ringing|ringing_stopped|missed, uid) (room_music.py)
 on_phone_battery = None        # fn(level 0..100)
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"  # the iPhone shares it with bonded accessories
@@ -309,6 +310,7 @@ class PhoneLink:
             # Which of the phone's actions it offers (see perform_action).
             "actions": {"positive": bool(item.get("positive")), "negative": bool(item.get("negative"))},
             "at": int(time.time() * 1000),
+            "preExisting": bool(item.get("preExisting")),
         }
         self.notifications = deque((n for n in self.notifications if n["id"] != entry["id"]), maxlen=KEEP)
         self.notifications.append(entry)
@@ -745,7 +747,7 @@ class PhoneLink:
                     log.info("Call hook failed: %s", e)
             if note["event"] == "removed":
                 await self.remove_notification(str(note["uid"]), from_phone=True)
-            elif not note["preExisting"] and ANCS_CONTROL_POINT in self._chars:
+            elif (not note["preExisting"] or fetch_existing()) and ANCS_CONTROL_POINT in self._chars:
                 self._pending[note["uid"]] = note
                 request = bytes([0]) + struct.pack("<I", note["uid"]) + ATTR_REQUEST
                 await self._chars[ANCS_CONTROL_POINT].call_write_value(request, {})
