@@ -152,6 +152,18 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
             hint="Instagram, Telegram, iMessage, Messenger and others. Only who, never what." />
           <Switch on={set.announceBattery !== false} onChange={on => save({ announceBattery: on })} label="Herald: tell me when my phone battery is low"
             hint="Once at 20% or below, again after it has charged past 30%." />
+          <Switch on={set.recap !== false} onChange={on => save({ recap: on })} label="Herald: recap when I'm back"
+            hint="After a trip of 15 minutes or more: who messaged or rang while you were out (names only, saved contacts only) and which timed reminders slipped by." />
+          <Switch on={set.callEtiquette !== false} onChange={on => save({ callEtiquette: on })} label="Herald: stay quiet during calls"
+            hint="Message and reminder lines wait while your phone is ringing or on a call, then come back as one line. Press Call's over (Spotify card) when you hang up, or it carries on after 15 minutes." />
+          <label className="flex items-center justify-between gap-3 text-sm">
+            <span>Evening wind-down<span className="block text-xs text-gray-400">At this time, while you're home: what you closed today and what's first tomorrow.</span></span>
+            <span className="flex items-center gap-2">
+              <input type="time" className="rounded-lg border border-black/10 dark:border-white/10 bg-transparent px-2 py-1 text-sm" disabled={!set.windDown}
+                value={set.windDown || '21:45'} onChange={e => e.target.value && save({ windDown: e.target.value })} />
+              <button className={smallButton} onClick={() => save({ windDown: set.windDown ? '' : '21:45' })}>{set.windDown ? 'Turn off' : 'Turn on'}</button>
+            </span>
+          </label>
           <Switch on={set.witty} onChange={on => save({ witty: on })} label="Butler-style wording"
             hint="Groq writes a fresh line each time, in the voice of an old-school English butler. Without a Groq key, a plain greeting is used." />
           <Switch on={set.chimes !== false} onChange={on => save({ chimes: on })} label="Little responses"

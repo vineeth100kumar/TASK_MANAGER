@@ -1873,7 +1873,13 @@ def _on_leave() -> None:
 
 life_mode.on_arrival = _on_arrival
 life_mode.on_leave = _on_leave
-phone_link.on_phone_call = room_music.room.on_call_event
+def _on_phone_call(event: str, uid: str = "") -> None:
+    room_music.room.on_call_event(event, uid)
+    speaker.speaker.on_call_event(event, uid)
+
+
+phone_link.on_phone_call = _on_phone_call
+phone_link.fetch_existing = speaker.speaker.wants_existing
 phone_link.on_phone_notification = speaker.speaker.on_phone_notification
 phone_link.on_phone_battery = speaker.speaker.on_phone_battery
 # Phone drops off Bluetooth = you've left, unless the 5 minute delay is switched on.
@@ -2034,6 +2040,7 @@ async def spotify_shuffle(body: Dict[str, Any]):
 @app.post("/api/spotify/call-over")
 async def spotify_call_over():
     await room_music.room.call_over("asked")
+    await speaker.speaker.call_over("asked")
     await spotify.connect.publish(force=True)
     return await spotify_state()
 
