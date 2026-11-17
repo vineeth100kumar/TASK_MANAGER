@@ -44,6 +44,15 @@ on_phone_call = None           # fn(event: ringing|ringing_stopped|missed, uid) 
 on_phone_battery = None        # fn(level 0..100)
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"  # the iPhone shares it with bonded accessories
 BATTERY_EVERY_S = 300
+# How long after the phone last proved its BLE link is really alive (real
+# ANCS/AMS data arrived, a subscription finished, or a battery read succeeded)
+# it still counts as present, even while BlueZ keeps claiming it is connected.
+# A phone that has left leaves a "connected" Device1 behind in BlueZ: a
+# half-open, zombie link where no notify session starts and no data ever comes.
+# Trusting BlueZ's Connected flag alone showed "phone connected / Home" forever.
+# Must stay above BATTERY_EVERY_S so a present but silent phone, kept fresh only
+# by the 5-minute battery heartbeat, is never dropped between reads.
+PRESENCE_LIVENESS = int(os.getenv("SAGE_PHONE_LIVENESS", "360"))
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -268,6 +277,11 @@ class PhoneLink:
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.battery: Optional[int] = None
         self._battery_at = 0.0
+        # When the phone last proved its BLE link is really alive (real
+        # ANCS/AMS data, a finished subscription, or a battery read). Presence
+        # trusts this over BlueZ's Connected flag, which stays true on a dead
+        # link after the phone has left (see PRESENCE_LIVENESS).
+        self._alive_at = 0.0
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -427,7 +441,13 @@ class PhoneLink:
                 if ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids:
                     phone_path, phone_name, dev = path, d.get("Alias").value if d.get("Alias") else "", d
                     break
-        await self.set_presence(phone_path is not None, phone_name)
+        # BlueZ says the phone is connected, but that flag stays true on a dead
+        # zombie link after the phone has left (no notify session starts, no
+        # data arrives). Count it as present only while the link has recently
+        # proven alive; a zombie then decays to "away" instead of green forever.
+        linked = phone_path is not None
+        alive = bool(self._alive_at and time.time() - self._alive_at < PRESENCE_LIVENESS)
+        await self.set_presence(linked and alive, phone_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
             self.say("state", "no paired phone is connected to the Pi; waiting")
@@ -488,6 +508,7 @@ class PhoneLink:
                 try:
                     value = await (await self._char(path)).get_interface("org.bluez.GattCharacteristic1").call_read_value({})
                     self.battery = int(bytes(value)[0])
+                    self._alive_at = time.time()  # a read that works proves the link is live
                 except Exception as e:
                     self.say("battery", f"could not read the phone's battery: {e}")
                     return
@@ -632,6 +653,7 @@ class PhoneLink:
                     self._chars.clear()
                     return
         self._subscribed_at = time.time()
+        self._alive_at = self._subscribed_at  # a finished subscription proves the link is live
         self._ams_not_listening = False
         self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
         self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
@@ -745,6 +767,8 @@ class PhoneLink:
         return handler
 
     async def _on_value(self, uuid: str, data: bytes) -> None:
+        # Real bytes from the phone: the clearest proof the BLE link is alive.
+        self._alive_at = time.time()
         if uuid == ANCS_NOTIFICATION_SOURCE:
             self.say("ancs-raw", f"ANCS Notification Source sent {len(data)} bytes")
             note = parse_notification_source(data)
