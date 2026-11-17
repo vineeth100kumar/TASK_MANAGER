@@ -44,6 +44,35 @@ on_phone_call = None           # fn(event: ringing|ringing_stopped|missed, uid) 
 on_phone_battery = None        # fn(level 0..100)
 BATTERY_LEVEL = "00002a19-0000-1000-8000-00805f9b34fb"  # the iPhone shares it with bonded accessories
 BATTERY_EVERY_S = 300
+# How long after the phone last proved its BLE link is really alive (real
+# ANCS/AMS data arrived, a subscription finished, or a battery read succeeded)
+# it still counts as present, even while BlueZ keeps claiming it is connected.
+# A phone that has left leaves a "connected" Device1 behind in BlueZ: a
+# half-open, zombie link where no notify session starts and no data ever comes.
+# Trusting BlueZ's Connected flag alone showed "phone connected / Home" forever.
+# Must stay above BATTERY_EVERY_S so a present but silent phone, kept fresh only
+# by the 5-minute battery heartbeat, is never dropped between reads.
+PRESENCE_LIVENESS = int(os.getenv("SAGE_PHONE_LIVENESS", "360"))
+# Self-healing a wedged BLE link. BlueZ can report the phone connected with its
+# services resolved while the link is actually dead: notify sessions won't start
+# and nothing arrives. Healing it (disconnect so the phone reconnects with a
+# fresh GATT link) is gated on *positive evidence* the link is broken, never on
+# silence alone, so a quiet but present phone is never dropped by mistake:
+#   - a probe read of the battery that fails, or
+#   - the ANCS/AMS subscription failing several ticks running.
+# DEAD_AFTER: the link must also have shown no life at all for this long first.
+DEAD_AFTER = int(os.getenv("SAGE_PHONE_DEAD_AFTER", "150"))
+# When the link looks suspect (no data for this long) the Pi actively reads the
+# battery to test it, rather than waiting for the next heartbeat: a real drop is
+# caught in seconds and a quiet-but-present phone is confirmed alive.
+PROBE_AFTER = int(os.getenv("SAGE_PHONE_PROBE_AFTER", "60"))
+PROBE_EVERY = int(os.getenv("SAGE_PHONE_PROBE_EVERY", "30"))
+# Failed probe reads / failed subscriptions that count as "the link is broken".
+PROBE_FAILS = int(os.getenv("SAGE_PHONE_PROBE_FAILS", "1"))
+SUBSCRIBE_FAILS = int(os.getenv("SAGE_PHONE_SUBSCRIBE_FAILS", "3"))
+# Shortest gap between two forced reconnects, so a phone that keeps coming back
+# wedged is retried at a steady pace, not in a tight loop.
+FORCE_MIN_GAP = int(os.getenv("SAGE_PHONE_FORCE_GAP", "90"))
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -268,6 +297,16 @@ class PhoneLink:
                                      "subscribed": [], "nowPlaying": "not asked", "lastError": None}
         self.battery: Optional[int] = None
         self._battery_at = 0.0
+        # When the phone last proved its BLE link is really alive (real
+        # ANCS/AMS data, a finished subscription, or a battery read). Presence
+        # trusts this over BlueZ's Connected flag, which stays true on a dead
+        # link after the phone has left (see PRESENCE_LIVENESS).
+        self._alive_at = 0.0
+        self._ble_dead_since = 0.0   # when the BLE link first looked dead (no life)
+        self._probe_at = 0.0         # last active liveness probe
+        self._probe_fails = 0        # consecutive failed liveness probes
+        self._subscribe_fails = 0    # consecutive failed subscriptions (broken link)
+        self._force_at = 0.0         # last forced reconnect, to pace retries
         self.control: Optional[Any] = None  # BluetoothControl, once BlueZ is reachable
 
     # --- State shared with the web app ---
@@ -427,7 +466,13 @@ class PhoneLink:
                 if ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids:
                     phone_path, phone_name, dev = path, d.get("Alias").value if d.get("Alias") else "", d
                     break
-        await self.set_presence(phone_path is not None, phone_name)
+        # BlueZ says the phone is connected, but that flag stays true on a dead
+        # zombie link after the phone has left (no notify session starts, no
+        # data arrives). Count it as present only while the link has recently
+        # proven alive; a zombie then decays to "away" instead of green forever.
+        linked = phone_path is not None
+        alive = bool(self._alive_at and time.time() - self._alive_at < PRESENCE_LIVENESS)
+        await self.set_presence(linked and alive, phone_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
             self.say("state", "no paired phone is connected to the Pi; waiting")
@@ -445,18 +490,9 @@ class PhoneLink:
                 self._ble_stuck_since = now
             stuck_for = now - self._ble_stuck_since
             if stuck_for >= STUCK_DROP_AFTER or self._classic_only:
-                self.say("state", f"{phone_name} ({address}) has been connected without BLE for "
-                                  f"{int(stuck_for)} s; disconnecting to force a fresh link.")
-                self._ble_stuck_since = 0.0
-                self._ble_tries = 0
-                self._classic_only = False
-                self._chars.clear()
-                self._unwatch()
-                try:
-                    dev_obj = (await self._char(phone_path)).get_interface("org.bluez.Device1")
-                    await asyncio.wait_for(dev_obj.call_disconnect(), timeout=10)
-                except Exception as e:
-                    self.say("disconnect", f"disconnect failed: {e}")
+                await self._force_fresh_link(phone_path,
+                    f"{phone_name} ({address}) has been connected without BLE for "
+                    f"{int(stuck_for)} s; disconnecting to force a fresh link.")
                 return
             self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
                               f"(ServicesResolved=no), so notifications and now playing can't be read. "
@@ -476,27 +512,92 @@ class PhoneLink:
         if self._chars:
             await self._check_title()
         await self._check_battery(objects, phone_path)
+        await self._heal_if_dead(objects, phone_path, phone_name, address)
 
-    async def _check_battery(self, objects: dict, device_path: str) -> None:
-        """Read the phone's battery level every few minutes (Battery Service)."""
-        if time.time() - self._battery_at < BATTERY_EVERY_S:
-            return
+    async def _check_battery(self, objects: dict, device_path: str, probe: bool = False) -> Optional[bool]:
+        """Read the phone's battery level (Battery Service). Every few minutes as
+        a heartbeat; with probe=True, read now to test a link that looks dead.
+        Returns True on a good read, False when the read failed (the link is not
+        answering), None when it wasn't time or the phone exposes no battery."""
+        if not probe and time.time() - self._battery_at < BATTERY_EVERY_S:
+            return None
         self._battery_at = time.time()
         for path, ifaces in objects.items():
             char = ifaces.get("org.bluez.GattCharacteristic1")
             if char and path.startswith(device_path + "/") and char["UUID"].value.lower() == BATTERY_LEVEL:
                 try:
-                    value = await (await self._char(path)).get_interface("org.bluez.GattCharacteristic1").call_read_value({})
+                    value = await asyncio.wait_for(
+                        (await self._char(path)).get_interface("org.bluez.GattCharacteristic1").call_read_value({}),
+                        timeout=10)
                     self.battery = int(bytes(value)[0])
+                    self._alive_at = time.time()  # a read that works proves the link is live
                 except Exception as e:
                     self.say("battery", f"could not read the phone's battery: {e}")
-                    return
+                    return False
                 if on_phone_battery:
                     try:
                         on_phone_battery(self.battery)
                     except Exception as e:
                         log.info("Herald battery hook failed: %s", e)
+                return True
+        return None
+
+    async def _heal_if_dead(self, objects: dict, device_path: str, name: str, address: str) -> None:
+        """Keep the BLE link honest, so Herald and notifications can rely on it.
+
+        BlueZ can hold the phone "connected" with its services resolved while
+        the link is dead: no notify session starts and nothing arrives. When the
+        link looks suspect, actively read the battery to test it. A quiet but
+        present phone answers and is cleared; a dead link fails, and once there
+        is positive evidence it is broken (a failed probe read, or the
+        subscription failing several ticks running) and it has shown no life for
+        DEAD_AFTER, the phone is disconnected so it reconnects with a fresh GATT
+        link. Paced by FORCE_MIN_GAP so a phone that keeps coming back wedged is
+        retried steadily, not in a tight loop."""
+        now = time.time()
+        if self._alive_at and now - self._alive_at < PROBE_AFTER:
+            self._ble_dead_since = 0.0
+            self._probe_fails = 0
+            return
+        if not self._ble_dead_since:
+            self._ble_dead_since = now
+        if now - self._probe_at >= PROBE_EVERY:
+            self._probe_at = now
+            ok = await self._check_battery(objects, device_path, probe=True)
+            if ok is True:
+                self._ble_dead_since = 0.0
+                self._probe_fails = 0
                 return
+            if ok is False:
+                self._probe_fails += 1
+        broken = self._probe_fails >= PROBE_FAILS or self._subscribe_fails >= SUBSCRIBE_FAILS
+        if broken and now - self._ble_dead_since >= DEAD_AFTER and now - self._force_at >= FORCE_MIN_GAP:
+            await self._force_fresh_link(device_path,
+                f"{name} ({address}) shows a BLE link but it is not answering "
+                f"(no data for {int(now - self._ble_dead_since)} s; "
+                f"{self._probe_fails} failed probe read(s), {self._subscribe_fails} failed subscribe(s)); "
+                f"reconnecting to heal it.")
+
+    async def _force_fresh_link(self, device_path: str, why: str) -> None:
+        """Disconnect the phone so it reconnects with a clean GATT link. Used
+        when the link is wedged: classic-only with no BLE, or a BLE link BlueZ
+        calls up that is actually dead. The phone, still bonded and hearing the
+        Pi's ANCS advertisement, reconnects on its own within a few seconds."""
+        self.say("state", why)
+        self._ble_stuck_since = 0.0
+        self._ble_dead_since = 0.0
+        self._ble_tries = 0
+        self._probe_fails = 0
+        self._subscribe_fails = 0
+        self._classic_only = False
+        self._force_at = time.time()
+        self._chars.clear()
+        self._unwatch()
+        try:
+            dev_obj = (await self._char(device_path)).get_interface("org.bluez.Device1")
+            await asyncio.wait_for(dev_obj.call_disconnect(), timeout=10)
+        except Exception as e:
+            self.say("disconnect", f"disconnect failed: {e}")
 
     def _stale_reason(self, objects: dict, device_path: str) -> str:
         """Why the songs subscription is no longer live, or "" when it is.
@@ -630,8 +731,11 @@ class PhoneLink:
                     # forget the subscription and ask again on the next tick
                     # (the watchers stay, so nothing is added twice).
                     self._chars.clear()
+                    self._subscribe_fails += 1  # evidence the link may be dead (_heal_if_dead)
                     return
         self._subscribed_at = time.time()
+        self._alive_at = self._subscribed_at  # a finished subscription proves the link is live
+        self._subscribe_fails = 0
         self._ams_not_listening = False
         self._set_link(subscribed=sorted(CHAR_NAMES.get(u, u) for u in self._chars), nowPlaying="asked")
         self.say("state", f"subscribed to {self.link['phone']} ({self.link['address']}): "
@@ -745,6 +849,8 @@ class PhoneLink:
         return handler
 
     async def _on_value(self, uuid: str, data: bytes) -> None:
+        # Real bytes from the phone: the clearest proof the BLE link is alive.
+        self._alive_at = time.time()
         if uuid == ANCS_NOTIFICATION_SOURCE:
             self.say("ancs-raw", f"ANCS Notification Source sent {len(data)} bytes")
             note = parse_notification_source(data)
