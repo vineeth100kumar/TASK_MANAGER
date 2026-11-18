@@ -47,6 +47,16 @@ export function HiddenView({ onSelectTask }: HiddenViewProps) {
     }
   };
 
+  const reopen = async (item: WorkItem) => {
+    try {
+      await api.workItems.updateDetails(item.id, { status: 'todo', completedAt: null } as any);
+      showToast('Marked incomplete');
+      load();
+    } catch (err: any) {
+      showToast('Could not mark it incomplete: ' + err.message, 'error');
+    }
+  };
+
   const unhide = async (item: WorkItem) => {
     try {
       await api.workItems.setHidden(item.id, false);
@@ -68,7 +78,7 @@ export function HiddenView({ onSelectTask }: HiddenViewProps) {
       className="p-3.5 md:p-4 rounded-2xl surface-item is-interactive flex items-center gap-3 group">
       {item.status !== 'done'
         ? <CompleteButton checked={isCompleting(item.id)} saving={isSaving(item.id)} onComplete={(e) => { e.stopPropagation(); complete(item); }} />
-        : <CompleteButton checked onComplete={() => {}} />}
+        : <CompleteButton checked onComplete={() => {}} onUndo={() => reopen(item)} />}
       <button className="min-w-0 flex-1 text-left" onClick={() => onSelectTask(item.id)}>
         <span className={`block font-semibold text-sm leading-snug truncate ${item.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{item.title}</span>
         {(item.dueDate || item.project) && (
