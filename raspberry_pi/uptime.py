@@ -28,6 +28,10 @@ import logstore
 import notifier
 import system_health
 
+# Called by db_server after the back-up email settles, with the outage dict:
+# wires Herald's "back online" line. Not called when there was no outage.
+on_back_online: Optional[Any] = None
+
 STATE_FILE = notifier.DATA_DIR / "sage_uptime.json"
 BEAT_EVERY_SECONDS = 60
 SETTLE_SECONDS = 90
@@ -277,6 +281,11 @@ async def run() -> None:
         if outage and time.monotonic() >= next_try:
             try:
                 await asyncio.to_thread(send_pending)
+                if on_back_online:
+                    try:
+                        on_back_online(outage)
+                    except Exception as e:
+                        logstore.warn("uptime", f"Back-online announce failed: {e}")
                 outage = None
             except Exception as e:
                 logstore.warn("uptime", f"Back-up email failed, will retry: {e}")

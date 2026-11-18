@@ -519,6 +519,43 @@ class HeraldNoticeTest(unittest.TestCase):
             for c in run.call_args_list:
                 c.args[0].close()
 
+    def test_back_online_picks_strongest_reason(self):
+        outage = {"reasons": [{"kind": "restart"}, {"kind": "update"}, {"kind": "reboot"}]}
+        self.assertEqual(speaker._back_online_kind(outage), "update")
+        self.assertEqual(speaker._back_online_kind({"reasons": [{"kind": "crash"}]}), "crash")
+        self.assertEqual(speaker._back_online_kind({"reasons": [{"kind": "power"}, {"kind": "update"}]}), "power")
+        self.assertEqual(speaker._back_online_kind({}), "restart")
+
+    def test_back_online_only_when_home(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=False)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_back_online({"reasons": [{"kind": "update"}]})
+            self.assertFalse(run.called)
+            self.assertEqual(s._herald[-1]["action"], "silent")
+            s.phone = mock.Mock(home=True)
+            s.on_back_online({"reasons": [{"kind": "update"}]})
+            self.assertEqual(run.call_count, 1)
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_back_online_blocks_welcome_right_after(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True, available=True)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_back_online({"reasons": [{"kind": "restart"}]})
+            s.on_arrival(60)   # phone link settles seconds later
+            self.assertEqual(run.call_count, 1)
+            self.assertEqual(s._herald[-1]["action"], "silent")
+            for c in run.call_args_list:
+                c.args[0].close()
+
     def test_spam_filter_skips_phone_numbers(self):
         s = speaker.Speaker()
         s.loop = mock.Mock()
