@@ -76,8 +76,20 @@ FORCE_MIN_GAP = int(os.getenv("SAGE_PHONE_FORCE_GAP", "90"))
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
-# Seconds a phone may stay connected without a BLE link before the Pi drops it so it reconnects fresh.
-STUCK_DROP_AFTER = int(os.getenv("SAGE_PHONE_STUCK_DROP", "25"))
+# Seconds a phone may stay connected without a BLE link before the Pi drops it
+# so it reconnects fresh. The old 25 s was a flap: iPhone opened a classic ACL,
+# the Pi dropped it before iOS got round to opening BLE, and iOS reconnected on
+# classic again. The Pi now tries ConnectProfile(ANCS) first and only drops as a
+# last resort, after a long quiet.
+STUCK_DROP_AFTER = int(os.getenv("SAGE_PHONE_STUCK_DROP", "900"))
+# How often (seconds) the Pi actively asks for the ANCS profile when the phone
+# is on a classic-only link, so iOS opens the BLE GATT session itself.
+PROFILE_RETRY = int(os.getenv("SAGE_PHONE_PROFILE_RETRY", "60"))
+# Classic-paired-connected still counts as "home" for this many seconds after
+# the link was last seen, even if the BLE side never came up. Presence does
+# not need notifications or now-playing to work: a bonded iPhone being in
+# range IS the signal we care about.
+CLASSIC_PRESENCE = int(os.getenv("SAGE_PHONE_CLASSIC_PRESENCE", "60"))
 
 BLUEZ = "org.bluez"
 ANCS_SERVICE = "7905f431-b5ce-4e99-a40f-4b1e122d00d0"
@@ -284,6 +296,8 @@ class PhoneLink:
         self._ble_tries = 0
         self._classic_only = False
         self._ble_stuck_since = 0.0  # when ServicesResolved first stayed false
+        self._profile_last_try = 0.0  # when the Pi last asked for the ANCS profile
+        self._classic_seen_at = 0.0   # the phone was paired+Connected (even w/o BLE)
         self._advertising = False
         self._adv_exported = False
         self._adv_last_try = 0.0
@@ -469,9 +483,15 @@ class PhoneLink:
         # BlueZ says the phone is connected, but that flag stays true on a dead
         # zombie link after the phone has left (no notify session starts, no
         # data arrives). Count it as present only while the link has recently
-        # proven alive; a zombie then decays to "away" instead of green forever.
+        # proven alive OR a classic-paired link has been seen in the last
+        # minute. A bonded iPhone being in range is the signal that matters
+        # for "home"; notifications and now-playing are nice-to-have on BLE.
+        now_t = time.time()
         linked = phone_path is not None
-        alive = bool(self._alive_at and time.time() - self._alive_at < PRESENCE_LIVENESS)
+        if linked:
+            self._classic_seen_at = now_t
+        alive = bool(self._alive_at and now_t - self._alive_at < PRESENCE_LIVENESS) \
+            or bool(self._classic_seen_at and now_t - self._classic_seen_at < CLASSIC_PRESENCE)
         await self.set_presence(linked and alive, phone_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
@@ -489,16 +509,22 @@ class PhoneLink:
             if not self._ble_stuck_since:
                 self._ble_stuck_since = now
             stuck_for = now - self._ble_stuck_since
-            if stuck_for >= STUCK_DROP_AFTER or self._classic_only:
+            # Industrial-grade: don't fight the iPhone. If it is holding a
+            # classic-only link, ask BlueZ for the ANCS profile (which pushes
+            # the phone to open its BLE GATT), paced so we never thrash. Only
+            # drop as a very last resort after STUCK_DROP_AFTER (15 min) and
+            # never more often than FORCE_MIN_GAP.
+            self._chars.clear()
+            if now - self._profile_last_try >= PROFILE_RETRY:
+                self._profile_last_try = now
+                await self._connect_profile(phone_path, phone_name, address)
+            if stuck_for >= STUCK_DROP_AFTER and now - self._force_at >= FORCE_MIN_GAP:
                 await self._force_fresh_link(phone_path,
                     f"{phone_name} ({address}) has been connected without BLE for "
-                    f"{int(stuck_for)} s; disconnecting to force a fresh link.")
+                    f"{int(stuck_for)} s; disconnecting as a last resort.")
                 return
-            self.say("state", f"{phone_name} ({address}) is connected, but its BLE link to the Pi is not "
-                              f"(ServicesResolved=no), so notifications and now playing can't be read. "
-                              f"Opening the BLE link from the Pi.")
-            self._chars.clear()
-            await self._open_ble(phone_path, phone_name, address)
+            self.say("state", f"{phone_name} ({address}) is connected on classic; waiting for the iPhone "
+                              f"to open its BLE link (asking for the ANCS profile every {PROFILE_RETRY} s).")
             return
         self._ble_tries = 0
         self._ble_stuck_since = 0.0
@@ -620,6 +646,25 @@ class PhoneLink:
                 return "BlueZ says it is no longer notifying; the BLE link likely dropped and came back"
         return "the phone's media service is gone from BlueZ; the BLE link likely dropped and came back"
 
+    async def _connect_profile(self, path: str, name: str, address: str) -> None:
+        """Ask BlueZ to connect the ANCS GATT profile on a device already up on
+        classic. This is the non-destructive way to coax the iPhone into
+        opening its BLE GATT session: no disconnect, no flap. If BlueZ doesn't
+        have the call (older versions) or the phone refuses, we just wait for
+        iOS to open BLE on its own schedule. A classic-only ACL is fine; we
+        now show the phone as present from the classic link alone."""
+        try:
+            dev = (await self._char(path)).get_interface("org.bluez.Device1")
+            await asyncio.wait_for(dev.call_connect_profile(ANCS_SERVICE), timeout=10)
+            self.say("profile", f"asked BlueZ for the ANCS profile on {name} ({address}); "
+                                f"iOS should open BLE shortly.")
+        except Exception as e:
+            error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
+            # Any error is fine: the Pi keeps advertising ANCS, iOS reconnects
+            # over BLE in its own time. Log quietly so repeated tries don't
+            # fill the running record.
+            self.say("profile", f"ConnectProfile(ANCS) on {name} not accepted ({error}); waiting for the iPhone.")
+
     async def _open_ble(self, path: str, name: str, address: str) -> None:
         """Ask BlueZ to connect to the phone over BLE. A phone that is already
         connected for classic audio doesn't open its BLE link on its own after
@@ -646,12 +691,11 @@ class PhoneLink:
             error = f"{getattr(e, 'type', None) or type(e).__name__}: {e}"
             if "profile-unavailable" in error.lower() or "profile_unavailable" in error.lower():
                 # The Pi offers the phone no classic profile (it is notifications-only,
-                # no speaker), so a Connect from here can only try classic and always
-                # fails. The phone is holding a classic link with no BLE; drop it, and
-                # the phone, hearing the Pi's ANCS advertisement, reconnects over BLE.
-                self._classic_only = True
-                self.say("open-ble", f"{name} holds a classic-only link the Pi can't use (BlueZ: profile unavailable); "
-                                     f"dropping it so the phone reconnects over BLE.")
+                # no speaker), so a bare Connect fails. The caller (_tick) will
+                # fall through to ConnectProfile(ANCS) next tick, which coaxes
+                # iOS into opening its BLE GATT without a disconnect/flap.
+                self.say("open-ble", f"{name} has no classic profile the Pi offers; waiting on "
+                                     f"ConnectProfile(ANCS) instead of dropping the link.")
                 return
             if "already in progress" in error.lower():
                 # BlueZ is already connecting it: not a refusal, look again soon.

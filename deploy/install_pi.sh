@@ -183,6 +183,19 @@ part_services() {
     systemctl disable --now "ollama.service" 2>/dev/null || true
     echo "Disabled the ollama service (AI now uses Groq). Run 'ollama rm <model>' to reclaim its disk."
   fi
+  # Present the Pi to the iPhone as a wearable accessory (Class of Device
+  # 0x000704 = Wrist Watch), never as an audio device. iOS reads the Class of
+  # Device and refuses to route audio to a watch, so the phone will never try
+  # to use the Pi as a speaker even if a stray SDP record slipped through.
+  # Dropped-in on bluetooth.service so it is re-applied after every reboot;
+  # hciconfig is still in bluez and idempotent.
+  if command -v hciconfig >/dev/null 2>&1; then
+    mkdir -p /etc/systemd/system/bluetooth.service.d
+    printf '[Service]\nExecStartPost=/bin/sh -c "sleep 2 && /usr/bin/hciconfig hci0 class 0x000704 || true"\n' \
+      > /etc/systemd/system/bluetooth.service.d/sage-accessory.conf
+    systemctl daemon-reload
+    systemctl restart bluetooth 2>/dev/null || true
+  fi
   systemctl daemon-reload
   for unit in "${UNITS[@]}"; do
     systemctl enable --quiet "$unit.service"
@@ -209,17 +222,18 @@ part_audio() {
 
   apt-get install -y -qq bluez-alsa-utils libasound2-plugin-bluez alsa-utils ffmpeg >/dev/null 2>&1 \
     || { echo "bluez-alsa didn't install, so the soundbar speaker is off. Try: sudo apt-get install bluez-alsa-utils libasound2-plugin-bluez"; return 0; }
-  # The Pi only plays TO a soundbar (a2dp-source). Offering a speaker (a2dp-sink)
-  # to the phone made the phone treat the Pi as an audio device and disturbed the
-  # notification companion, so it is off unless you run with SAGE_PHONE_SPEAKER=1.
-  PHONE_SINK=""; [ "${SAGE_PHONE_SPEAKER:-0}" = "1" ] && PHONE_SINK=" -p a2dp-sink"
+  # The Pi only plays TO a soundbar (a2dp-source). A2DP sink (phone-as-source)
+  # is OFF: offering it made the iPhone treat the Pi as an audio device and
+  # broke the BLE notification/now-playing link. The SAGE_PHONE_SPEAKER switch
+  # is removed on purpose; the AuthorizeService agent also refuses incoming
+  # audio profiles as a second line of defence.
   DAEMON="$(command -v bluealsad || command -v bluealsa || true)"
   UNIT="$(systemctl list-unit-files --no-legend 'bluealsa*.service' | awk '{print $1}' | grep -v aplay | head -1)"
   if [ -n "$DAEMON" ] && [ -n "$UNIT" ]; then
     mkdir -p "/etc/systemd/system/$UNIT.d"
     # Real-time priority: bluez-alsa encodes the soundbar's audio, and a late
     # packet is a stutter you hear.
-    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source${PHONE_SINK}\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
+    printf '[Service]\nExecStart=\nExecStart=%s -S -p a2dp-source\nNice=-15\nCPUSchedulingPolicy=fifo\nCPUSchedulingPriority=40\nIOSchedulingClass=realtime\n' "$DAEMON" > "/etc/systemd/system/$UNIT.d/sage.conf"
     # Sage plays the phone's audio itself (speaker.py), only when a soundbar is there.
     systemctl disable --now bluealsa-aplay.service 2>/dev/null || true
     systemctl daemon-reload
