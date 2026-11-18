@@ -79,7 +79,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                       {task.status !== 'done' && (
                         <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
                       )}
-                      {task.status === 'done' && <CompleteButton checked onComplete={() => {}} onUndo={() => onTransition(task, 'todo')} />}
+                      {task.status === 'done' && <CompleteButton checked onComplete={() => {}} onUndo={() => onTransition(task, 'incomplete')} />}
                     </>
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />

@@ -49,7 +49,7 @@ export function HiddenView({ onSelectTask }: HiddenViewProps) {
 
   const reopen = async (item: WorkItem) => {
     try {
-      await api.workItems.updateDetails(item.id, { status: 'todo', completedAt: null } as any);
+      await api.workItems.transitionStatus(item.id, 'todo', undefined, 'incomplete');
       showToast('Marked incomplete');
       load();
     } catch (err: any) {

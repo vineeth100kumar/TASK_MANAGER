@@ -64,9 +64,9 @@ export function BoardView({ tasks, onSelect, onTransition, statuses = DEFAULT_ST
                     <div className="flex justify-between items-start mb-2">
                       <div className="flex items-center gap-2">
                         {milestone ? <Flag size={14} className="text-emerald-500" aria-label="Milestone reached" /> : <button 
-                          onClick={(e) => { e.stopPropagation(); onTransition(task, task.status === 'done' ? 'todo' : 'done'); }}
+                          onClick={(e) => { e.stopPropagation(); onTransition(task, task.status === 'done' ? 'incomplete' : 'done'); }}
                           className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${task.status === 'done' ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 hover:border-blue-500'}`}
-                          title={task.status === 'done' ? 'Mark as To Do' : 'Mark as Done'}>
+                          title={task.status === 'done' ? 'Mark as Incomplete' : 'Mark as Done'}>
                           {task.status === 'done' && <Check size={10} strokeWidth={3} />}
                         </button>}
                         <span className="text-[11px] font-semibold tracking-wide text-gray-400 uppercase">{task.key}</span>

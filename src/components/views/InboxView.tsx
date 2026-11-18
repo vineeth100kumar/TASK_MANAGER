@@ -123,8 +123,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
   const handleReopen = async (item: WorkItem) => {
     try {
-      await api.workItems.updateDetails(item.id, { status: 'todo', completedAt: null } as any);
-      showToast('Reopened');
+      await api.workItems.transitionStatus(item.id, 'todo', undefined, 'incomplete');
+      showToast('Marked incomplete');
       loadInbox();
     } catch (err: any) {
       showToast('Could not reopen: ' + err.message, 'error');
@@ -211,7 +211,7 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
                   <p className="text-[11px] text-gray-400">{item.project?.name || item.area?.name || 'No project'}{item.completedAt ? ` · done ${timeAgo(item.completedAt)}` : ''}</p>
                 </div>
                 <button onClick={() => handleReopen(item)} className="px-2.5 py-1.5 rounded-lg text-[12px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1">
-                  <RotateCcw size={12} /> Reopen
+                  <RotateCcw size={12} /> Incomplete
                 </button>
               </div>
             ))}
