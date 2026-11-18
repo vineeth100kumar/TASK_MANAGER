@@ -141,6 +141,25 @@ class WakeAndReadAloudTests(unittest.TestCase):
         self.assertIn("Pills", spoken[0])
 
 
+
+class HonestHeraldTests(unittest.TestCase):
+    def test_standing_verdict_follows_the_facts(self):
+        self.assertEqual(speaker.standing_facts(0, 2, 4, 0)["verdict"], "good")
+        self.assertEqual(speaker.standing_facts(0, 2, 1, 0)["verdict"], "fine")
+        self.assertEqual(speaker.standing_facts(2, 2, 5, 0)["verdict"], "slipping")
+        self.assertEqual(speaker.standing_facts(5, 2, 0, 1)["verdict"], "behind")
+
+    def test_names_must_survive(self):
+        self.assertTrue(speaker.names_ok("Sansa sent you a message.", ["Sansa Stark"]))
+        self.assertFalse(speaker.names_ok("Someone sent you a message.", ["Sansa Stark"]))
+        self.assertTrue(speaker.names_ok("anything", []))
+
+    def test_prompts_are_honest_not_gushing(self):
+        for prompt in (speaker.DAILY_PROMPTS["welcome"], speaker.DAILY_PROMPTS["goodbye"], speaker.WIND_PROMPT, speaker.NOTICE_PROMPT):
+            self.assertIn("honest", prompt)
+            self.assertIn("do not flatter", prompt.replace("You do not flatter", "do not flatter"))
+        self.assertIn("never guess", speaker.NOTICE_PROMPT)
+
 if __name__ == "__main__":
     unittest.main()
 

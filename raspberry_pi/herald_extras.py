@@ -8,8 +8,9 @@ Pure helpers, no I/O, so speaker.py stays readable and these are easy to test:
 - Call etiquette: lines held during a call come back as one line afterwards.
 - Wind-down: one evening line, what you closed today and what comes first tomorrow.
 
-All wording is hand-written (Alfred/Jarvis), never written by an AI, and only
-ever says who, never what.
+These are the safe fallback wording only: speaker.py has Groq write each line
+fresh (an honest Alfred/Jarvis voice) and falls back to these if Groq fails.
+Either way Herald only ever says who, never what.
 """
 
 import re
