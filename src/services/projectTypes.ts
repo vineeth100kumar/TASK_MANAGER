@@ -1,6 +1,6 @@
 import {
   Code2, Briefcase, Clapperboard, Folder, Tag, Circle, CirclePlay, Hourglass, CircleCheck, Archive, Hammer,
-  FlaskConical, OctagonPause, Rocket, ShoppingCart, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
+  FlaskConical, OctagonPause, RotateCcw, Rocket, ShoppingCart, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
 } from 'lucide-react';
 import type { Project, TaskStatus, WorkItem } from './types';
 import { STATUSES } from './constants';
@@ -52,12 +52,17 @@ const TONES: Record<string, { dot: string; tint: string }> = {
 const s = (id: string, label: string, base: TaskStatus, tone: keyof typeof TONES, icon: LucideIcon): StatusStage =>
   ({ id, label, base, icon, ...TONES[tone] });
 
-/** To do, Doing, Waiting, Done: what every project had before types. */
+/** Every project type ends with Incomplete: a task taken back from Done. It stands on
+ * 'todo', so Today, Focus and the Pi treat it as open work again. Compulsory everywhere. */
+const INCOMPLETE = s('incomplete', 'Incomplete', 'todo', 'amber', RotateCcw);
+
+/** To do, Doing, Waiting, Done (then Incomplete): what every project had before types. */
 export const DEFAULT_STATUSES: StatusStage[] = [
   s('todo', STATUSES.todo.label, 'todo', 'gray', Circle),
   s('in_progress', STATUSES.in_progress.label, 'in_progress', 'blue', CirclePlay),
   s('blocked', STATUSES.blocked.label, 'blocked', 'red', Hourglass),
   s('done', STATUSES.done.label, 'done', 'emerald', CircleCheck),
+  INCOMPLETE,
 ];
 
 export const PROJECT_TYPES: ProjectTypeInfo[] = [
@@ -67,16 +72,16 @@ export const PROJECT_TYPES: ProjectTypeInfo[] = [
     statuses: [s('backlog', 'Backlog', 'todo', 'gray', Archive), s('procurement', 'Procurement', 'in_progress', 'amber', ShoppingCart),
       { ...s('building', 'Building', 'in_progress', 'sky', Hammer), fallback: true },
       s('testing', 'Testing', 'in_progress', 'violet', FlaskConical), s('blocked', 'Blocked', 'blocked', 'red', OctagonPause),
-      s('shipped', 'Shipped', 'done', 'emerald', Rocket)] },
+      s('shipped', 'Shipped', 'done', 'emerald', Rocket), INCOMPLETE] },
   { id: 'nontech', label: 'Non-tech', hint: 'Errands, admin', icon: Briefcase,
     chip: 'text-amber-700 bg-amber-500/10 dark:text-amber-300 dark:bg-amber-400/15', view: 'list',
     statuses: [s('todo', 'To do', 'todo', 'gray', Circle), s('in_progress', 'Doing', 'in_progress', 'amber', CirclePlay),
-      s('blocked', 'Waiting', 'blocked', 'red', Hourglass), s('done', 'Done', 'done', 'emerald', CircleCheck)] },
+      s('blocked', 'Waiting', 'blocked', 'red', Hourglass), s('done', 'Done', 'done', 'emerald', CircleCheck), INCOMPLETE] },
   { id: 'content', label: 'Content', hint: 'Videos, posts', icon: Clapperboard,
     chip: 'text-rose-700 bg-rose-500/10 dark:text-rose-300 dark:bg-rose-400/15', view: 'board',
     statuses: [s('idea', 'Idea', 'todo', 'amber', Lightbulb), s('scripting', 'Scripting', 'in_progress', 'blue', PenLine),
       s('recording', 'Recording', 'in_progress', 'sky', Video), s('editing', 'Editing', 'in_progress', 'violet', Scissors),
-      s('blocked', 'On hold', 'blocked', 'red', CirclePause), s('published', 'Published', 'done', 'emerald', Send)] },
+      s('blocked', 'On hold', 'blocked', 'red', CirclePause), s('published', 'Published', 'done', 'emerald', Send), INCOMPLETE] },
   { id: 'other', label: 'Other', hint: 'Anything else', icon: Folder,
     chip: 'text-gray-600 bg-gray-500/10 dark:text-gray-300 dark:bg-white/10', view: 'board',
     statuses: DEFAULT_STATUSES },

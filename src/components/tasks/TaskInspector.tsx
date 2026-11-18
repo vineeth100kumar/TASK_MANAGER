@@ -238,7 +238,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
           </div>
           <div className="flex items-center gap-0.5 sm:gap-2 shrink-0">
             {task.status === 'done' && (
-              <button onClick={() => handleStatusChange('todo')} className="px-2.5 py-1.5 rounded-xl text-[12px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center gap-1" title="Mark as not done again">
+              <button onClick={() => handleStatusChange('incomplete')} className="px-2.5 py-1.5 rounded-xl text-[12px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center gap-1" title="Mark as not done again">
                 <RotateCcw size={13} /> Mark incomplete
               </button>
             )}

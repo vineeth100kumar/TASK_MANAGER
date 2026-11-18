@@ -105,6 +105,17 @@ describe('older and odd records', () => {
     expect(stageOf(it, statusesFor(SAGE_ID, projects)).id).toBe('shipped');
   });
 
+  it('every project type, and a task with no project, has the Incomplete status', () => {
+    for (const id of [SAGE_ID, 'p-content', 'p-old', null]) {
+      const list = statusesFor(id as any, projects);
+      const inc = list.find(x => x.id === 'incomplete');
+      expect(inc?.base).toBe('todo');
+      expect(list[list.length - 1].id).toBe('incomplete');
+    }
+    const it = norm({ id: 'e', projectId: SAGE_ID, status: 'todo', stage: 'incomplete' });
+    expect(stageOf(it, statusesFor(SAGE_ID, projects)).id).toBe('incomplete');
+  });
+
   it('a project with the old "standard" type uses the usual four', () => {
     const it = norm({ id: 'd', projectId: 'p-old', status: 'in_review' });
     expect(stageOf(it, statusesFor('p-old', projects)).id).toBe('in_progress');

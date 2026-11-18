@@ -27,9 +27,10 @@ STATUS_WORDS = {
 # Each project type's own statuses and the base they stand on (projectTypes.ts).
 TYPE_STAGES = {
     "technical": {"backlog": "todo", "procurement": "in_progress", "building": "in_progress",
-                  "testing": "in_progress", "blocked": "blocked", "shipped": "done"},
+                  "testing": "in_progress", "blocked": "blocked", "shipped": "done",
+                  "incomplete": "todo"},
     "content": {"idea": "todo", "scripting": "in_progress", "recording": "in_progress",
-                "editing": "in_progress", "blocked": "blocked", "published": "done"},
+                "editing": "in_progress", "blocked": "blocked", "published": "done", "incomplete": "todo"},
 }
 
 
