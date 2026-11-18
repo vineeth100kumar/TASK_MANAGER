@@ -646,6 +646,28 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab 
               </div>
             </form>
 
+            {/* Live event registry (event_registry.py on the Pi): opens the standalone /events page. */}
+            {piBackendUrl() && (
+              <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-gray-700 dark:text-gray-300">
+                  <ExternalLink size={16} />
+                  <span>Live events</span>
+                </div>
+                <p className="text-xs text-gray-600 dark:text-gray-400">
+                  Watch every action, reaction, Herald line, backup, sync, notifier push, BLE event and worker tick
+                  as they happen. Opens in a new tab.
+                </p>
+                <a
+                  href={`${piBackendUrl()}/events`}
+                  target="_blank"
+                  rel="noreferrer noopener"
+                  className="inline-flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-semibold text-xs rounded-xl shadow-sm"
+                >
+                  <ExternalLink size={14} /> Open live events page
+                </a>
+              </div>
+            )}
+
             {/* Sage server logs (logstore.py on the Pi) */}
             {piBackendUrl() && logCfg !== null && (
               <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-3">

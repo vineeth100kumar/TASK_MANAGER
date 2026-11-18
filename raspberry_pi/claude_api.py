@@ -225,6 +225,15 @@ def logs(since: str = "", level: str = "", source: str = "", q: str = "", limit:
     return _logs(since=since, level=level, source=source, q=q, limit=limit)
 
 
+def registry(since: str = "", level: str = "", source: str = "",
+             kind: str = "", q: str = "", limit: int = 200) -> dict:
+    """The live event registry: structured timestamped events for every action,
+    reaction, Herald line, backup, sync, notifier, BLE event, worker tick. Read
+    via ``event_registry.read``."""
+    import event_registry as _er
+    return _er.read(since=since, level=level, source=source, kind=kind, q=q, limit=limit)
+
+
 def diagnostics(hours: float = 24, samples: int = 0) -> dict:
     """Blackout diagnostics: the 'blackouts in the last N hours' summary, and
     optionally the raw recent samples when ``samples`` is given."""
@@ -1522,7 +1531,9 @@ sage_reel_review approve it, reject it (archive) or restore it, and sage_post_li
 archived true show the archive.
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
-why something failed. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
+why something failed. sage_registry is the live event stream — structured, timestamped events for every action,
+reaction, Herald line, backup, sync, notifier push, BLE event and worker tick (newest first); prefer it when you
+want to see what Sage is doing right now, by kind (e.g. "herald", "backup", "sync.batch") or source. When Sage was unreachable or slow to open ("took too long to respond"), sage_diagnostics
 explains it: a probe on the Pi tracks whether the server answered on localhost and on the public Funnel URL, event-
 loop lag, under-voltage and the system, and sorts outages into network/Funnel vs server vs power. Changes appear in
 the open web app straight away. Prefer updating over deleting, and say what you changed."""
@@ -1722,6 +1733,19 @@ def _tools() -> List[dict]:
              "source": {"type": "string", "description": "Only entries whose source contains this, e.g. request, backup, sync, auth, notifier, slow (requests that took 800 ms or more, each with its request id)"},
              "q": {"type": "string", "description": "Only entries whose message contains this text"},
              "limit": {"type": "integer", "description": "At most this many (default 100, max 1000)"}}}},
+        {"name": "sage_registry", "description": "Sage's live event registry: a structured, "
+         "timestamped record of every action, reaction, check, Herald line, backup, sync, "
+         "notifier push, BLE event, worker tick and HTTP request, newest first. Each event "
+         "has ts, source, level, kind (e.g. 'startup', 'request', 'herald.say', 'backup.done'), "
+         "actor, summary and optional data. Use this to see exactly what Sage is doing right now; "
+         "sage_logs stays as the plain running log.",
+         "inputSchema": {"type": "object", "properties": {
+             "since": {"type": "string", "description": "Only events at or after this ISO-8601 time"},
+             "level": {"type": "string", "enum": ["debug", "info", "warn", "error"], "description": "Only this level or louder"},
+             "source": {"type": "string", "description": "Module slug, e.g. server, speaker, backup, sync, notifier, phone"},
+             "kind": {"type": "string", "description": "Event slug, e.g. startup, request, herald, backup, sync.batch, log.error"},
+             "q": {"type": "string", "description": "Only events whose summary or actor contains this text"},
+             "limit": {"type": "integer", "description": "At most this many (default 200, max 2000)"}}}},
         {"name": "sage_diagnostics", "description": "Explain Sage blackouts (the public URL showing "
          "\"took too long to respond\"). A running probe on the Pi records, every ~30s, whether the server "
          "answers on localhost and on the public Funnel URL, plus event-loop lag, requests in flight and the "
@@ -1801,6 +1825,9 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "sage_logs":
         return logs(args.get("since", ""), args.get("level", ""), args.get("source", ""),
                     args.get("q", ""), args.get("limit", 100))
+    if name == "sage_registry":
+        return registry(args.get("since", ""), args.get("level", ""), args.get("source", ""),
+                        args.get("kind", ""), args.get("q", ""), args.get("limit", 200))
     if name == "sage_diagnostics":
         return diagnostics(args.get("hours", 24), args.get("samples", 0))
     raise ApiError(404, f"Unknown tool {name}")
