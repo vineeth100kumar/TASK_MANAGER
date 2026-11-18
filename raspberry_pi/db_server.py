@@ -157,6 +157,10 @@ async def require_api_key(request, call_next):
         and request.method != "OPTIONS"
         and not logged_in(request)
     ):
+        # The /events page sets a short-lived cookie so its EventSource stream
+        # (which can't carry custom headers) and its fetch() calls pass auth.
+        if path.startswith("/api/registry") and key_matches(request.cookies.get("sage_events_key", "")):
+            return await call_next(request)
         if not key_matches(request_key(request)) and not claude_may(request):
             return JSONResponse({"success": False, "error": "Missing or wrong Sage API key"}, status_code=401)
     return await call_next(request)
@@ -1730,7 +1734,16 @@ def events_page(request: Request):
     # Behind the same gate as the rest of the app.
     if access_gate.enabled and not logged_in(request):
         return RedirectResponse(f"/login?next=/events", status_code=303)
-    return HTMLResponse(_EVENTS_PAGE_HTML)
+    resp = HTMLResponse(_EVENTS_PAGE_HTML)
+    # The page's fetch and EventSource can't carry the x-sage-key header
+    # (EventSource has no custom-header API), so we hand them a short-lived
+    # cookie the registry routes accept. Scoped to /api/registry only.
+    if API_SECRET:
+        resp.set_cookie(
+            "sage_events_key", API_SECRET,
+            max_age=86400, httponly=True, samesite="lax", path="/api/registry",
+        )
+    return resp
 
 
 @app.post("/api/canvas/think")
