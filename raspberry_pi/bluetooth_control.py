@@ -31,6 +31,27 @@ CONFIRM_SECONDS = 60
 ADDRESS = re.compile(r"^([0-9A-F]{2}:){5}[0-9A-F]{2}$")
 ACTIONS = {"pair", "connect", "disconnect", "forget", "trust", "untrust"}
 
+# Classic Bluetooth service UUIDs the Pi refuses from any peer, always. The Pi
+# is a BLE accessory (ANCS/AMS) + an *outgoing* A2DP source to a soundbar; it
+# must never let an incoming peer (an iPhone, especially) route audio or data
+# through it. BlueZ's AuthorizeService fires for incoming profile use; we
+# reject every audio and PAN role here so iOS never treats the Pi as a speaker,
+# handset or tether. ANCS/AMS go over GATT and don't pass through this gate.
+BLOCKED_PROFILES = {u.lower() for u in (
+    "0000110a-0000-1000-8000-00805f9b34fb",  # Audio Source  (A2DP src)
+    "0000110b-0000-1000-8000-00805f9b34fb",  # Audio Sink    (A2DP snk) <- iPhone-as-source wants this
+    "0000110c-0000-1000-8000-00805f9b34fb",  # AVRCP Target
+    "0000110d-0000-1000-8000-00805f9b34fb",  # Advanced Audio
+    "0000110e-0000-1000-8000-00805f9b34fb",  # AVRCP Controller
+    "00001108-0000-1000-8000-00805f9b34fb",  # Headset
+    "00001112-0000-1000-8000-00805f9b34fb",  # Headset AG
+    "0000111e-0000-1000-8000-00805f9b34fb",  # Handsfree
+    "0000111f-0000-1000-8000-00805f9b34fb",  # Handsfree AG
+    "00001115-0000-1000-8000-00805f9b34fb",  # PAN NAP
+    "00001116-0000-1000-8000-00805f9b34fb",  # PAN PANU
+    "00001117-0000-1000-8000-00805f9b34fb",  # PAN GN
+)}
+
 ICON_KIND = {
     "phone": "phone", "computer": "computer", "input-keyboard": "input", "input-mouse": "input",
     "input-gaming": "input", "input-tablet": "input", "audio-card": "audio", "audio-headset": "audio",
@@ -367,6 +388,13 @@ class BluetoothControl:
 
             @method()
             async def AuthorizeService(self, device: "o", uuid: "s"):  # noqa: F821,N802
+                # Never let the phone use the Pi as a speaker, handset or
+                # tether. Audio and PAN profiles are refused unconditionally,
+                # even for a trusted device, so the iPhone treats the Pi as a
+                # pure BLE accessory.
+                if uuid.lower() in BLOCKED_PROFILES:
+                    log.info("Bluetooth: refused profile %s on %s (audio/PAN roles are off).", uuid, device)
+                    raise reject("Audio and PAN roles are off on this Pi")
                 ifaces = (await control.objects()).get(device, {})
                 if not prop(ifaces, DEVICE_IFACE, "Trusted", False) and not control.window_open():
                     raise reject("Service not allowed")
