@@ -586,6 +586,27 @@ HOLD_KINDS = ("notice", "reminder", "event")   # lines that wait while a call is
 CALL_HOLD_S = 5 * 60                            # default; the "callHoldMinutes" setting wins. An answered call holds lines at most this long (the phone never says it ended)
 RECAP_WAIT_S = 25                               # after you're back, how long the phone gets to hand over what you missed
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
+
+# One short line spoken when Sage comes back after being down. Reasons come
+# from uptime.py (update, restart, reboot, power cut, crash).
+BACK_ONLINE_LINES = {
+    "update": "Back online, with the latest changes.",
+    "restart": "Back online.",
+    "reboot": "Back online after a reboot.",
+    "power": "Back online after a power blip.",
+    "crash": "Back online after a hiccup.",
+}
+
+
+def _back_online_kind(outage: dict) -> str:
+    """The most telling reason among an outage's restarts. Mirrors
+    uptime._main_reason so the spoken line matches the back-up email."""
+    reasons = (outage or {}).get("reasons") or []
+    kinds = [r.get("kind") for r in reasons]
+    for kind in ("power", "crash", "update", "reboot", "restart"):
+        if kind in kinds:
+            return kind
+    return "restart"
 GREET_EVERY_HOURS = float(os.getenv("SAGE_GREET_EVERY_HOURS", "6"))
 
 
@@ -1620,6 +1641,32 @@ class Speaker:
             asyncio.run_coroutine_threadsafe(self._say_daily("welcome"), self.loop)
         else:
             self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
+
+    def on_back_online(self, outage: dict) -> None:
+        """Called once after Sage comes back from an update, restart, reboot,
+        power cut or crash. Announces only if you're home, so a return while
+        you're out stays silent. Suppresses the welcome-back that would
+        otherwise fire a moment later when the phone link re-settles."""
+        kind = _back_online_kind(outage)
+        event = f"back online ({kind})"
+        settings = get_settings()
+        if not self.loop:
+            return self._note(event, "silent", "Sage's speaker isn't running yet")
+        if not settings["greet"]:
+            return self._note(event, "silent", "'Welcome me home' is off")
+        if not getattr(self.phone, "home", False):
+            return self._note(event, "silent", "you're not home")
+        if not has_output(settings):
+            return self._note(event, "silent", "no sound card or soundbar to play on")
+        if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
+            return self._note(event, "silent", "quiet hours")
+        now = time.time()
+        if now - self._last_welcome_at < HERALD_GAP_S:
+            return self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
+        self._last_welcome_at = now
+        line = BACK_ONLINE_LINES.get(kind, BACK_ONLINE_LINES["restart"])
+        self._note(event, "back online")
+        asyncio.run_coroutine_threadsafe(self.say(line, "welcome"), self.loop)
 
     def _may_announce(self, event: str, settings: dict) -> bool:
         if not self.loop:

@@ -2158,6 +2158,7 @@ def _on_leave() -> None:
 life_mode.on_arrival = _on_arrival
 life_mode.on_return = lambda away_s: _journal("arrive")
 life_mode.on_leave = _on_leave
+uptime.on_back_online = speaker.speaker.on_back_online
 def _on_phone_call(event: str, uid: str = "") -> None:
     room_music.room.on_call_event(event, uid)
     speaker.speaker.on_call_event(event, uid)
