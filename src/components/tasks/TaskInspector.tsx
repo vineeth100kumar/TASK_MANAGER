@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { motion } from 'framer-motion';
-import { Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch, Eye, EyeOff, Volume2, RotateCcw } from 'lucide-react';
+import { XCircle, Loader2, Trash2, X, Circle, CheckCircle, Flag, Calendar as CalendarIcon, FileText, Play, Activity, ShieldAlert, Bell, Plus, Folder, Copy, Camera, Tag, GitBranch, Eye, EyeOff, Volume2, RotateCcw } from 'lucide-react';
 import { api } from '../../services/api';
 import { PRIORITIES, WORK_ITEM_TYPES, LABELS } from '../../services/constants';
 import { Project, Area } from '../../services/types';
@@ -238,8 +238,13 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
           </div>
           <div className="flex items-center gap-0.5 sm:gap-2 shrink-0">
             {task.status === 'done' && (
-              <button onClick={() => handleStatusChange('incomplete')} className="px-2.5 py-1.5 rounded-xl text-[12px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center gap-1" title="Mark as not done again">
-                <RotateCcw size={13} /> Mark incomplete
+              <button onClick={() => handleStatusChange('todo')} className="px-2.5 py-1.5 rounded-xl text-[12px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center gap-1" title="Open it again as To do">
+                <RotateCcw size={13} /> Reopen
+              </button>
+            )}
+            {task.status !== 'done' && task.entityType === 'task' && (
+              <button onClick={() => handleStatusChange('incomplete')} className="px-2.5 py-1.5 rounded-xl text-[12px] font-semibold text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/10 flex items-center gap-1" title="Could not be done: close it without finishing">
+                <XCircle size={13} /> Incomplete
               </button>
             )}
             {task.status !== 'done' && <SnoozeMenu itemId={task.id} onSnoozed={() => loadData()} />}

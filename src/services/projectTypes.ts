@@ -1,6 +1,6 @@
 import {
   Code2, Briefcase, Clapperboard, Folder, Tag, Circle, CirclePlay, Hourglass, CircleCheck, Archive, Hammer,
-  FlaskConical, OctagonPause, RotateCcw, Rocket, ShoppingCart, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
+  FlaskConical, OctagonPause, XCircle, Rocket, ShoppingCart, Lightbulb, PenLine, Video, Scissors, CirclePause, Send, type LucideIcon,
 } from 'lucide-react';
 import type { Project, TaskStatus, WorkItem } from './types';
 import { STATUSES } from './constants';
@@ -52,9 +52,11 @@ const TONES: Record<string, { dot: string; tint: string }> = {
 const s = (id: string, label: string, base: TaskStatus, tone: keyof typeof TONES, icon: LucideIcon): StatusStage =>
   ({ id, label, base, icon, ...TONES[tone] });
 
-/** Every project type ends with Incomplete: a task taken back from Done. It stands on
- * 'todo', so Today, Focus and the Pi treat it as open work again. Compulsory everywhere. */
-const INCOMPLETE = s('incomplete', 'Incomplete', 'todo', 'amber', RotateCcw);
+/** Every project type ends with Incomplete: a task that could not be done. It is closed
+ * like Done (stands on 'done', so Today, Inbox, reminders and the Pi skip it) but has no
+ * completedAt, so it never counts as finished. Compulsory everywhere. */
+export const INCOMPLETE_STAGE = 'incomplete';
+const INCOMPLETE = s(INCOMPLETE_STAGE, 'Incomplete', 'done', 'red', XCircle);
 
 /** To do, Doing, Waiting, Done (then Incomplete): what every project had before types. */
 export const DEFAULT_STATUSES: StatusStage[] = [

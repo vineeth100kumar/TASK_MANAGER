@@ -28,9 +28,9 @@ STATUS_WORDS = {
 TYPE_STAGES = {
     "technical": {"backlog": "todo", "procurement": "in_progress", "building": "in_progress",
                   "testing": "in_progress", "blocked": "blocked", "shipped": "done",
-                  "incomplete": "todo"},
+                  "incomplete": "done"},
     "content": {"idea": "todo", "scripting": "in_progress", "recording": "in_progress",
-                "editing": "in_progress", "blocked": "blocked", "published": "done", "incomplete": "todo"},
+                "editing": "in_progress", "blocked": "blocked", "published": "done", "incomplete": "done"},
 }
 
 
