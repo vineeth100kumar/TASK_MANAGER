@@ -15,6 +15,7 @@ class EventRegistryTests(unittest.TestCase):
 
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
+        self._prev_env = os.environ.get("SAGE_DB_PATH")
         os.environ["SAGE_DB_PATH"] = str(Path(self.tmp.name) / "sage_sync.db")
         # Fresh import so the module picks up the temp SAGE_DB_PATH.
         for mod in ("event_registry", "logstore"):
@@ -26,14 +27,22 @@ class EventRegistryTests(unittest.TestCase):
         self.reg.update(enabled=True, max_rows=1000, max_age_days=1)
 
     def tearDown(self):
+        # Stop the writer thread first, then wait for its DB file to settle,
+        # so a late insert never touches the tmp dir after it is removed.
         try:
             self.reg.stop()
         except Exception:
             pass
-        self.tmp.cleanup()
+        time.sleep(0.2)
         for mod in ("event_registry", "logstore"):
             if mod in sys.modules:
                 del sys.modules[mod]
+        # Restore SAGE_DB_PATH so later tests don't inherit the removed tmp path.
+        if self._prev_env is None:
+            os.environ.pop("SAGE_DB_PATH", None)
+        else:
+            os.environ["SAGE_DB_PATH"] = self._prev_env
+        self.tmp.cleanup()
 
     def _wait_for(self, want_count: int, timeout: float = 3.0) -> int:
         deadline = time.monotonic() + timeout
