@@ -390,7 +390,9 @@ def template_greeting(f: dict) -> str:
 GREETING_PROMPT = """You are the voice of Sage, speaking as a devoted, old-school \
 English butler in the manner of Alfred Pennyworth: unflappable, warm underneath, \
 impeccably polite, with a dry, gently teasing wit and a quiet concern for the \
-person's wellbeing (rest, food, not overworking). Write the one greeting spoken \
+person's wellbeing (rest, food, not overworking). He is honest before he is nice: \
+good news is stated plainly, bad news (overdue tasks, missed habits) just as plainly, with no \
+flattery and no gushing. Write the one greeting spoken \
 aloud on the soundbar as the person walks in the door.
 
 Rules: at most 45 words. Plain spoken English only: no emojis, lists, quotes, \
@@ -488,17 +490,64 @@ def notice_line(kind: str, sender: str, call_me: str = "") -> str:
     return lines[idx].format(who=who, name=name)
 
 
-NOTICE_PROMPT = """You are the voice of Sage, the AI that runs the person's home, speaking as \
-Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, warm, \
-dry and gently witty. Write ONE short line (at most 20 words) spoken aloud to tell the person \
-about what is in the facts: a new WhatsApp message or email (say who it is from, by the exact \
-name given; you do not know and must never guess what it says), or that their phone's battery \
-is low (give the percentage). Plain spoken English only: no emojis, quotes, lists or stage \
-directions. Address them by the name given, or "sir" if none.
+HONEST_PERSONA = """You are the voice of Sage, the AI that runs the person's home, in the manner of \
+Alfred Pennyworth and Tony Stark's Jarvis: a loyal, unflappable butler-AI who is honest before he is nice. \
+You report how things really stand. When things are good you say so, briefly and plainly. When they are \
+not (tasks overdue, habits missed, nothing done) you say that just as plainly: dry, matter-of-fact, \
+never cruel, never scolding. You do not flatter and you do not praise by default: a genuinely good \
+state earns one understated word of approval, an ordinary state earns none, a bad state earns the \
+honest observation. No cheerleading, no exclamation marks, no gushing words (amazing, wonderful, \
+fantastic, delighted). Dry wit is rare and never forced. Never repeat a stock phrase: say it fresh. """
+
+_SPOKEN_RULES = """Plain spoken English only: no emojis, lists, quotes, markdown or stage directions. \
+Address them by the name given (e.g. "Master Vineeth"), or "sir" if none. Never mention Batman, \
+Gotham or any film."""
+
+NOTICE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 18 words) spoken aloud to tell the \
+person about the event in the facts. "what" says which: whatsapp (a WhatsApp message), message \
+(a chat message), email, reaction (someone reacted to their message), or phone battery low (give the \
+percentage, and say so plainly if it is very low). For a person, say who it is from by the exact name \
+given in "from" and nothing else about it: you do not know and must never guess or imply what it \
+says, how important it is, or whether it is good news. Vary how you say it each time. """ + _SPOKEN_RULES + """
 
 Facts (JSON):
 """
 
+BACK_ONLINE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 14 words) spoken aloud to say that \
+Sage is back online. "reason" says why it was down: update (restarted with the latest changes), \
+restart, reboot, power (a power cut or blip) or crash (it fell over). Be honest about the reason: \
+if it crashed or lost power, say so plainly without drama; do not dress a crash up as an update. \
+Do not mention clock times or durations. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
+RECAP_PROMPT = HONEST_PERSONA + """Write a short spoken line (at most 40 words) telling the person what \
+they missed. The facts list who messaged, emailed or tried to ring them (use each name exactly as \
+given, include every one, say nothing about what any message said, you do not know) and which \
+timed reminders slipped past (read each title as given). "setting" says whether they were out ("while \
+you were out") or on a call. Matter-of-fact; if a reminder slipped, say so without sugar. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
+WIND_PROMPT = HONEST_PERSONA + """Write the short evening line (at most 40 words) spoken aloud as the \
+day winds down. "closed" is how many tasks they finished today, "overdue" how many are overdue, \
+"first" is what comes first tomorrow (say it as given, or say tomorrow is clear if null), \
+"memory" is an optional pattern worth one light remark. Judge the day honestly from the numbers: \
+several things closed with nothing overdue is a good day and you may say so in a few words; nothing \
+closed, or things overdue, is a poor one and you say that plainly, once, without a lecture. \
+You may say counts in words. End by wishing them rest only if it fits naturally. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
+HEADSUP_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 16 words) spoken as the person heads \
+out, warning them about the weather in "sky" (rain, storm or snow) and what to take or do about it. \
+""" + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
 
 COMMAND_PROMPT = """You are the voice of Sage, the AI that runs the person's home, speaking as \
 Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, warm, \
@@ -534,42 +583,30 @@ def command_line_ok(line: str, what: str) -> bool:
     return all(n in line for n in re.findall(r"\d+", what or ""))
 
 
-_DAILY_PERSONA = """You are the voice of Sage, the AI that runs the person's home, speaking as \
-Alfred Pennyworth crossed with Tony Stark's Jarvis: a devoted, unflappable butler-AI, \
-warm underneath, dry and gently teasing, never stuffy. """
+_STANDING_RULES = """"standing" says how things really stand: verdict is good (plenty closed, nothing \
+overdue), fine (nothing overdue), slipping (a task or two overdue) or behind (several overdue), with \
+the counts overdue, dueToday, closedToday and habitsLeft. Let the verdict set the tone. good: one \
+understated word of approval at most. fine: plain, no praise. slipping: say, dryly, that something \
+is overdue. behind: say plainly that the list is getting ahead of them, no scolding. You may give a \
+count in words (never digits), or say "a few". Do not list task titles. Every line must sound new: \
+never reuse the wording, opening or joke of any line listed under "avoid". Never state a clock time \
+or a date: the line is spoken a minute or two after it is written, so keep it timeless. If "memory" is \
+given you may allude to it once, lightly, in words. A plain greeting for the part of day given is fine; \
+never say "now", "just now" or an hour. 12 to 28 words, one or two sentences. """
 
 DAILY_PROMPTS = {
-    "welcome": _DAILY_PERSONA + """Write the short line spoken aloud when the person comes back home. \
-It is nice, sweet and a little fun: a warm welcome with one light, affectionate quip.
-
-Rules: 12 to 25 words, one or two sentences. Plain spoken English only: no emojis, \
-lists, quotes, markdown or stage directions. Do not mention tasks, the weather or any \
-numbers. Never mention Batman, Gotham or any film. Use the part of day and weekday \
-if it helps, and address them by the name given (e.g. "Master Vineeth" or "sir"), \
-or as "sir" if there is none.
+    "welcome": HONEST_PERSONA + """Write the short line spoken aloud when the person comes back home: \
+a plain welcome, then, if the standing warrants it, the honest word about it. """ + _STANDING_RULES + _SPOKEN_RULES + """
 
 Facts (JSON):
 """,
-    "goodbye": _DAILY_PERSONA + """Write the short line spoken aloud as the person heads out of the house. \
-It is nice, sweet and a little fun: a fond send-off with one light, affectionate quip \
-about minding the house.
-
-Rules: 12 to 25 words, one or two sentences. Plain spoken English only: no emojis, \
-lists, quotes, markdown or stage directions. Do not mention tasks, the weather or any \
-numbers. Never mention Batman, Gotham or any film. Use the part of day and weekday \
-if it helps, and address them by the name given (e.g. "Master Vineeth" or "sir"), \
-or as "sir" if there is none.
+    "goodbye": HONEST_PERSONA + """Write the short line spoken aloud as the person heads out of the house: \
+a plain send-off, then, if the standing warrants it, the honest word about it (a pending list can wait \
+for their return; say so if it is bad). """ + _STANDING_RULES + _SPOKEN_RULES + """
 
 Facts (JSON):
 """,
 }
-for _k in DAILY_PROMPTS:
-    DAILY_PROMPTS[_k] = DAILY_PROMPTS[_k].replace(
-        "Facts (JSON):",
-        'Every line must sound new: never reuse the wording, opening or joke of any line listed under "avoid". '
-        'Never state a clock time, a date or any number: the line is spoken a minute or two after it is written, '
-        'so keep it timeless. If "memory" is given you may allude to it once, lightly, in words, never digits. A plain greeting for the part of day given (good morning, good afternoon, good evening) '
-        'is welcome; never say "now", "just now", "tonight at" or an hour.\n\nFacts (JSON):')
 
 
 WAKE_PROMPT = GREETING_PROMPT.replace(
@@ -718,6 +755,26 @@ def fresh_fallback(kind: str, call_me: str = "", recent: Optional[List[str]] = N
     lines = [l.replace("{name}", f", {call_me}" if call_me else "") for l in (DAILY_LINES.get(kind) or [])]
     fresh = [l for l in lines if l not in (recent or [])] or lines
     return pick(fresh) if fresh else ""
+
+
+def standing_facts(overdue: int, due_today: int, closed_today: int, habits_left: int) -> dict:
+    """How things honestly stand, so Herald can say good when good and bad when bad. Pure."""
+    if overdue >= 3:
+        verdict = "behind"
+    elif overdue >= 1:
+        verdict = "slipping"
+    elif closed_today >= 3:
+        verdict = "good"
+    else:
+        verdict = "fine"
+    return {"verdict": verdict, "overdue": overdue, "dueToday": due_today,
+            "closedToday": closed_today, "habitsLeft": habits_left}
+
+
+def names_ok(line: str, names: List[str]) -> bool:
+    """A written line must say every name it was given (first word, any case). Pure."""
+    low = (line or "").lower()
+    return all((n.split() or [""])[0].lower() in low for n in names if n)
 
 
 def chime_for(kind: str) -> str:
@@ -1534,7 +1591,7 @@ class Speaker:
         facts["memory"] = self._memory(settings["callMe"])
         return facts
 
-    async def _ai_line(self, facts: dict, prompt: str = GREETING_PROMPT) -> str:
+    async def _ai_line(self, facts: dict, prompt: str = GREETING_PROMPT, timeout: float = 8) -> str:
         try:
             import canvas_thinker
             import httpx
@@ -1542,7 +1599,7 @@ class Speaker:
             if not key:
                 return ""
             model = canvas_thinker._setting("GROQ_LLM_MODEL") or canvas_thinker.GROQ_DEFAULT_MODEL
-            async with httpx.AsyncClient(timeout=8) as client:
+            async with httpx.AsyncClient(timeout=timeout) as client:
                 for m in dict.fromkeys([model, canvas_thinker.GROQ_FALLBACK_MODEL]):
                     res = await client.post(canvas_thinker.GROQ_URL, headers={"Authorization": f"Bearer {key}"}, json={
                         "model": m, "temperature": 0.8, "max_tokens": 500,
@@ -1561,6 +1618,18 @@ class Speaker:
     def _day(self) -> str:
         return self.now().strftime("%Y-%m-%d")
 
+    def _standing(self) -> dict:
+        """How your list really stands right now (overdue, due, closed today, habits left)."""
+        try:
+            settings = get_settings()
+            facts = self._facts(settings)
+            closed = self._wind_facts().get("closed", 0)
+            return standing_facts(int(facts.get("overdueCount", 0)), int(facts.get("dueCount", 0)),
+                                  int(closed), len(facts.get("habitsLeft") or []))
+        except Exception as e:
+            log.info("Herald standing failed: %s", e)
+            return {}
+
     async def _fresh(self, kind: str, settings: dict) -> str:
         """A brand-new welcome or goodbye line, every time: Groq writes it in the
         butler voice, told what was said lately so it never repeats; without Groq,
@@ -1571,8 +1640,9 @@ class Speaker:
         if settings["witty"]:
             now = self.now()
             memory = await asyncio.to_thread(self._memory, call_me)
+            standing = await asyncio.to_thread(self._standing)
             text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me, "avoid": recent,
-                                        "memory": memory}, DAILY_PROMPTS[kind])
+                                        "memory": memory, "standing": standing}, DAILY_PROMPTS[kind])
             if text in recent:
                 text = ""
         text = text or fresh_fallback(kind, call_me, recent)
@@ -1585,6 +1655,7 @@ class Speaker:
         arrival or departure is as quick as a cached line was."""
         settings = get_settings()
         made_part = part_of_day(self.now().hour)
+        mood = await asyncio.to_thread(self._standing)
         text = await self._fresh(kind, settings)
         if not text:
             return
@@ -1596,7 +1667,7 @@ class Speaker:
                 pass
         await self._render(text, settings, chime="down" if kind == "goodbye" else "up", cache=cache)
         if cache_ok(cache):
-            self._ready[kind] = (text, cache, time.time(), made_part, settings_fp(settings))
+            self._ready[kind] = (text, cache, time.time(), made_part, settings_fp(settings), mood)
 
     async def _say_daily(self, kind: str) -> None:
         """Say a new welcome or goodbye: the one made ahead if it's still fresh
@@ -1664,9 +1735,14 @@ class Speaker:
         if now - self._last_welcome_at < HERALD_GAP_S:
             return self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
         self._last_welcome_at = now
-        line = BACK_ONLINE_LINES.get(kind, BACK_ONLINE_LINES["restart"])
         self._note(event, "back online")
-        asyncio.run_coroutine_threadsafe(self.say(line, "welcome"), self.loop)
+
+        async def announce() -> None:
+            line = ""
+            if settings.get("witty", True):
+                line = await self._ai_line({"reason": kind, "name": settings.get("callMe", "")}, BACK_ONLINE_PROMPT, timeout=5)
+            await self.say(line or BACK_ONLINE_LINES.get(kind, BACK_ONLINE_LINES["restart"]), "welcome")
+        asyncio.run_coroutine_threadsafe(announce(), self.loop)
 
     def _may_announce(self, event: str, settings: dict) -> bool:
         if not self.loop:
@@ -1724,14 +1800,30 @@ class Speaker:
         self._note(event, "announced")
         asyncio.run_coroutine_threadsafe(self._notice("battery", {"what": "phone battery low", "percent": level}, settings), self.loop)
 
+    async def _ai_or(self, fallback: str, facts: dict, prompt: str, settings: dict, check: bool = True) -> str:
+        """Groq writes the line from `facts`; the template `fallback` stands in if Groq is
+        off, fails, or (with `check`) leaves out a name it was given."""
+        if not settings.get("witty", True):
+            return fallback
+        text = await self._ai_line(facts, prompt, timeout=6)
+        if text and check:
+            names = [n for k in ("messages", "emails", "missedCalls") for n in facts.get(k, [])]
+            if not names_ok(text, names):
+                text = ""
+        return text or fallback
+
     async def _notice(self, kind: str, facts: dict, settings: dict) -> None:
         call_me = settings.get("callMe", "")
-        if kind == "battery" and settings["witty"]:
-            text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT)
-            await self.say(text or notice_line(kind, facts.get("from", ""), call_me), "notice")
-        else:
-            await self.say(notice_line(kind, facts.get("from", ""), call_me), "notice",
-                           meta={"kind": kind, "who": facts.get("from", "")})
+        who = facts.get("from", "")
+        text = ""
+        if settings["witty"]:
+            text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT, timeout=5)
+            if text and kind != "battery" and not names_ok(text, [who] if who else []):
+                text = ""
+            if text and kind == "battery" and str(facts.get("percent", "")) not in text:
+                text = ""
+        await self.say(text or notice_line(kind, who, call_me), "notice",
+                       meta={"kind": kind, "who": who} if kind != "battery" else None)
 
     async def announce_command(self, what: str) -> str:
         """Confirm a spoken command that has been carried out ("alarm set for 6:30
@@ -1788,8 +1880,10 @@ class Speaker:
     async def ensure_daily(self) -> None:
         """Keep the welcome-back, goodbye and briefing made ahead and stored. Each is
         remade only when something it depends on changes, never because time passed."""
+        mood = await asyncio.to_thread(self._standing)
         for kind in DAILY_LINES:
-            if self._ready_ok(kind):
+            ready = self._ready.get(kind)
+            if self._ready_ok(kind) and not (ready and len(ready) > 5 and ready[5] != mood):
                 continue
             if self.speaking or voice_problem() or not shutil.which("ffmpeg"):
                 return
@@ -1913,6 +2007,11 @@ class Speaker:
         settings = get_settings()
         line = herald_extras.replay_line(held, settings.get("callMe", ""), self._wind_idx)
         self._wind_idx += 1
+        if line:
+            line = await self._ai_or(line, {"setting": "on a call", "messages": [h["who"] for h in held if h.get("kind") in ("whatsapp", "message") and herald_extras.is_named(h.get("who", ""))],
+                                            "emails": [h["who"] for h in held if h.get("kind") == "email" and herald_extras.is_named(h.get("who", ""))],
+                                            "remindersCameUp": [h.get("title", "") for h in held if h.get("kind") == "reminder"], "name": settings.get("callMe", "")},
+                                     RECAP_PROMPT, settings)
         self._note("call over", "replay" if line else "nothing held", why)
         if line and settings.get("callEtiquette", True):
             await self.say(line, "replay")
@@ -1966,6 +2065,13 @@ class Speaker:
             [r["who"] for r in heard if r["kind"] == "call"],
             reminders, settings.get("callMe", ""), self._recap_idx)
         self._recap_idx += 1
+        if line:
+            line = await self._ai_or(line, {"setting": "while you were out",
+                                            "messages": [r["who"] for r in heard if r["kind"] in ("whatsapp", "message")],
+                                            "emails": [r["who"] for r in heard if r["kind"] == "email"],
+                                            "missedCalls": [r["who"] for r in heard if r["kind"] == "call"],
+                                            "remindersSlippedBy": reminders, "name": settings.get("callMe", "")},
+                                     RECAP_PROMPT, settings)
         if not line:
             return self._note("recap", "silent", "nothing to report")
         if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
@@ -1997,6 +2103,8 @@ class Speaker:
         settings = get_settings()
         line = herald_extras.heads_up_line((weather or {}).get("icon", ""), settings.get("callMe", ""), self._wind_idx)
         self._wind_idx += 1
+        if line:
+            line = await self._ai_or(line, {"sky": (weather or {}).get("icon", ""), "name": settings.get("callMe", "")}, HEADSUP_PROMPT, settings, check=False)
         if not line:
             return self._note("heads-up", "silent", "the weather is fine")
         self._heads_up_at = time.time()
@@ -2034,6 +2142,10 @@ class Speaker:
         facts = await asyncio.to_thread(self._wind_facts)
         line = herald_extras.wind_down_line(facts["closed"], facts["first"], settings.get("callMe", ""), self._wind_idx, facts.get("memory", ""))
         self._wind_idx += 1
+        standing = await asyncio.to_thread(self._standing)
+        line = await self._ai_or(line, {"closed": facts["closed"], "overdue": standing.get("overdue", 0), "first": facts["first"],
+                                        "memory": facts.get("memory", ""), "name": settings.get("callMe", "")},
+                                 WIND_PROMPT, settings, check=False)
         self._note("wind-down", "announced")
         await self.say(line, "winddown")
 

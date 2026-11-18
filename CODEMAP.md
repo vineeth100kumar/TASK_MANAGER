@@ -283,7 +283,7 @@ needs adding there and in `db.ts`.
 | Today or Inbox contents | `src/utils/taskLists.ts`, `views/DashboardView.tsx`, `InboxView.tsx` |
 | Quick-add wording | `src/utils/quickAddParser.ts` and `raspberry_pi/quick_add.py` (tests in both) |
 | A notification's timing or text | `raspberry_pi/notifier.py` |
-| What Herald says | `raspberry_pi/speaker.py`, `herald_extras.py`, `herald_journal.py` |
+| What Herald says (Groq writes every line in an honest Alfred/Jarvis voice; templates are only the fallback) | `raspberry_pi/speaker.py`, `herald_extras.py`, `herald_journal.py` |
 | A new API route | `db_server.py` or a module's `router`, then a client in `src/services/` |
 | A Settings tab | `src/components/modals/SettingsModal.tsx` |
 | A new view | `App.tsx`, `views/lazyViews.tsx`, `layout/Sidebar.tsx`, `MobileTabBar.tsx` |
