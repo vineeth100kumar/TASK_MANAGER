@@ -13,7 +13,7 @@ from pathlib import Path
 import httpx
 from fastapi import FastAPI, File, HTTPException, Request, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 from typing import List, Dict, Any, Optional
 from urllib.parse import parse_qs, quote
@@ -24,6 +24,7 @@ import db_writer
 import claude_api
 import placement
 import logstore
+import event_registry
 import desk
 import drop
 import industry
@@ -733,6 +734,12 @@ async def startup_event():
     logging.getLogger().addHandler(handler)
     logging.getLogger("uvicorn.error").addHandler(handler)
     logstore.info("server", "Sage server started")
+    event_registry.event(
+        "startup",
+        "Sage server started",
+        source="server",
+        data={"pid": os.getpid(), "dataDir": str(Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent)},
+    )
     # The one thread that does database writes (see db_writer.py).
     db_writer.connect(DB_PATH)
     if access_gate.enabled:
@@ -762,6 +769,8 @@ async def startup_event():
 
 @app.on_event("shutdown")
 def shutdown_event():
+    event_registry.event("shutdown", "Sage server stopping", source="server")
+    event_registry.stop()
     db_writer.stop()
     # Marks this stop as on purpose, for the "Sage is back up" email.
     try:
@@ -894,6 +903,16 @@ async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -
     op_results = []
     applied_ops = []
     new_server_rev = None
+    try:
+        event_registry.event(
+            "sync.batch",
+            f"sync batch of {len(req.operations)} op(s) from {client_id or 'client'}",
+            source="sync",
+            actor=client_id or None,
+            data={"count": len(req.operations)},
+        )
+    except Exception:
+        pass
 
     def apply_batch(conn):
         # Runs on the database writer thread (db_writer.py), which commits when
@@ -1483,6 +1502,235 @@ def clear_logs():
     logstore.clear()
     logstore.info("server", "Log cleared")
     return {"success": True, **logstore.settings()}
+
+
+# --- Event registry (event_registry.py) -----------------------------------
+# The new structured event stream: every action, reaction, check, Herald line,
+# backup, sync, notifier push, BLE event, worker tick, request. The live
+# ``/events`` page watches the stream; the ``sage_registry`` connector reads
+# the store.
+
+
+class RegistrySettingsRequest(BaseModel):
+    enabled: Optional[bool] = None
+    maxRows: Optional[int] = None
+    maxAgeDays: Optional[int] = None
+
+
+@app.get("/api/registry")
+def registry_read(since: str = "", level: str = "", source: str = "",
+                  kind: str = "", q: str = "", limit: int = 200):
+    return {"success": True, **event_registry.read(
+        since=since, level=level, source=source, kind=kind, q=q, limit=limit,
+    )}
+
+
+@app.get("/api/registry/settings")
+def registry_get_settings():
+    return {"success": True, **event_registry.settings()}
+
+
+@app.post("/api/registry/settings")
+def registry_set_settings(req: RegistrySettingsRequest):
+    cfg = event_registry.update(
+        enabled=req.enabled, max_rows=req.maxRows, max_age_days=req.maxAgeDays,
+    )
+    event_registry.event(
+        "settings.registry",
+        f"Registry settings changed: enabled={cfg['enabled']}, cap={cfg['maxRows']} rows, keep={cfg['maxAgeDays']}d",
+        source="server",
+    )
+    return {"success": True, **cfg}
+
+
+@app.post("/api/registry/clear")
+def registry_clear():
+    event_registry.event("registry.clear", "Event registry cleared", source="server")
+    event_registry.clear()
+    return {"success": True, **event_registry.settings()}
+
+
+@app.get("/api/registry/stream")
+async def registry_stream():
+    """Server-sent events for the live ``/events`` page.
+
+    Each event is one JSON object; the page appends it to the top of the list.
+    A heartbeat comment every 15 s keeps proxies and browsers from hanging up.
+    """
+    q = event_registry.subscribe()
+
+    async def gen():
+        try:
+            yield b": connected\n\n"
+            last_beat = time.monotonic()
+            while True:
+                try:
+                    row = await asyncio.wait_for(asyncio.to_thread(q.get, True, 5.0), timeout=15)
+                    payload = json.dumps(row, ensure_ascii=False, default=str)
+                    yield f"data: {payload}\n\n".encode("utf-8")
+                except asyncio.TimeoutError:
+                    pass
+                except Exception:
+                    break
+                now = time.monotonic()
+                if now - last_beat >= 15:
+                    yield b": beat\n\n"
+                    last_beat = now
+        finally:
+            event_registry.unsubscribe(q)
+
+    return StreamingResponse(gen(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache",
+        "X-Accel-Buffering": "no",
+        "Connection": "keep-alive",
+    })
+
+
+_EVENTS_PAGE_HTML = """<!doctype html>
+<html lang=\"en\">
+<head>
+<meta charset=\"utf-8\" />
+<meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
+<title>Sage events</title>
+<style>
+  :root { color-scheme: light dark; --bg:#fff; --fg:#111; --muted:#6b7280; --card:#f8fafc; --line:#e5e7eb; --info:#2563eb; --warn:#ca8a04; --error:#dc2626; --debug:#6b7280; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0b0f17; --fg:#e5e7eb; --muted:#9ca3af; --card:#111827; --line:#1f2937; }
+  }
+  * { box-sizing: border-box; }
+  html,body { margin:0; height:100%; background:var(--bg); color:var(--fg); font-family:-apple-system,BlinkMacSystemFont,'SF Pro Text','Segoe UI',Roboto,Inter,sans-serif; }
+  header { position:sticky; top:0; z-index:10; background:var(--bg); border-bottom:1px solid var(--line); padding:12px 16px; }
+  header h1 { margin:0 0 6px; font-size:16px; letter-spacing:.02em; }
+  header .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; font-size:12px; }
+  input,select,button { font:inherit; color:inherit; background:var(--card); border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  button { cursor:pointer; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--muted); display:inline-block; }
+  .dot.live { background:#22c55e; box-shadow:0 0 0 4px rgba(34,197,94,.15); animation: pulse 1.6s infinite; }
+  @keyframes pulse { 50% { box-shadow:0 0 0 7px rgba(34,197,94,0); } }
+  main { padding:12px 16px 40px; max-width:1100px; margin:0 auto; }
+  .event { display:grid; grid-template-columns: 170px 90px 140px 1fr; gap:10px; padding:8px 10px; border-bottom:1px solid var(--line); font-size:13px; align-items:start; }
+  .event:hover { background:var(--card); }
+  .t { color:var(--muted); font-variant-numeric: tabular-nums; font-size:12px; }
+  .l { font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.05em; }
+  .l.info { color:var(--info); } .l.warn { color:var(--warn); } .l.error { color:var(--error); } .l.debug { color:var(--debug); }
+  .k { color:var(--muted); font-size:12px; }
+  .s { line-height:1.4; word-break:break-word; }
+  .actor { color:var(--muted); font-size:11px; margin-left:6px; }
+  details.data { margin-top:4px; font-size:11px; }
+  details.data pre { background:var(--card); padding:6px 8px; border-radius:6px; margin:4px 0 0; white-space:pre-wrap; word-break:break-all; }
+  .empty { color:var(--muted); padding:30px; text-align:center; }
+  footer { padding:16px; text-align:center; color:var(--muted); font-size:11px; }
+  @media (max-width:640px) {
+    .event { grid-template-columns: 90px 1fr; }
+    .event .l, .event .k { grid-column: 2 / -1; font-size:10px; }
+    .t { font-size:11px; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sage events <span class=\"dot\" id=\"live\" title=\"live\"></span></h1>
+  <div class=\"row\">
+    <label><span class=\"k\">Level</span>
+      <select id=\"level\">
+        <option value=\"\">all</option><option value=\"debug\">debug+</option>
+        <option value=\"info\" selected>info+</option><option value=\"warn\">warn+</option><option value=\"error\">error</option>
+      </select>
+    </label>
+    <label><span class=\"k\">Source</span> <input id=\"source\" placeholder=\"server, speaker…\" size=\"12\"></label>
+    <label><span class=\"k\">Kind</span> <input id=\"kind\" placeholder=\"herald, backup…\" size=\"12\"></label>
+    <label><span class=\"k\">Search</span> <input id=\"q\" placeholder=\"any text…\" size=\"20\"></label>
+    <button id=\"pause\">Pause</button>
+    <button id=\"clear\" title=\"Clear the on-screen list\">Clear view</button>
+    <span class=\"k\" id=\"count\"></span>
+    <span class=\"k\" style=\"margin-left:auto\"><a href=\"/\" style=\"color:inherit\">&larr; back to Sage</a></span>
+  </div>
+</header>
+<main>
+  <div id=\"list\"></div>
+  <div class=\"empty\" id=\"empty\">Loading…</div>
+</main>
+<footer>Live stream from <code>/api/registry/stream</code> · history from <code>/api/registry</code></footer>
+<script>
+(function(){
+  const list = document.getElementById('list');
+  const empty = document.getElementById('empty');
+  const count = document.getElementById('count');
+  const live = document.getElementById('live');
+  const levelEl = document.getElementById('level');
+  const sourceEl = document.getElementById('source');
+  const kindEl = document.getElementById('kind');
+  const qEl = document.getElementById('q');
+  const pauseBtn = document.getElementById('pause');
+  const clearBtn = document.getElementById('clear');
+  const LEVELS = ['debug','info','warn','error'];
+  let paused = false; let shown = 0; const MAX_ROWS = 2000;
+  function escapeHtml(s){ return (s||'').replace(/[&<>\"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','\"':'&quot;'}[c])); }
+  function matches(row){
+    const lv = levelEl.value; if (lv && LEVELS.indexOf(row.level) < LEVELS.indexOf(lv)) return false;
+    const src = sourceEl.value.trim().toLowerCase(); if (src && (row.source||'').toLowerCase().indexOf(src)<0) return false;
+    const kd = kindEl.value.trim().toLowerCase(); if (kd && (row.kind||'').toLowerCase().indexOf(kd)<0) return false;
+    const q = qEl.value.trim().toLowerCase();
+    if (q){ const hay = ((row.summary||'')+' '+(row.actor||'')).toLowerCase(); if (hay.indexOf(q)<0) return false; }
+    return true;
+  }
+  function format(row){
+    const t = (row.ts||'').replace('T',' ').replace('Z','').slice(0,23);
+    const actor = row.actor ? `<span class=\"actor\">· ${escapeHtml(row.actor)}</span>` : '';
+    let data = '';
+    if (row.data){ try { const txt = typeof row.data==='string' ? row.data : JSON.stringify(row.data, null, 2); data = `<details class=\"data\"><summary class=\"k\">data</summary><pre>${escapeHtml(txt)}</pre></details>`; } catch(e){} }
+    return `<div class=\"event\"><div class=\"t\">${escapeHtml(t)}</div><div class=\"l ${escapeHtml(row.level)}\">${escapeHtml(row.level)}</div><div class=\"k\">${escapeHtml(row.source)}/${escapeHtml(row.kind)}</div><div class=\"s\">${escapeHtml(row.summary)}${actor}${data}</div></div>`;
+  }
+  function add(row, prepend){
+    if (!matches(row)) return;
+    const node = document.createElement('div'); node.innerHTML = format(row); const el = node.firstElementChild;
+    if (prepend) list.insertBefore(el, list.firstChild); else list.appendChild(el);
+    shown++;
+    while (list.childNodes.length > MAX_ROWS) list.removeChild(list.lastChild);
+    count.textContent = shown + ' events';
+    empty.style.display = 'none';
+  }
+  function reloadHistory(){
+    const p = new URLSearchParams({ limit: '400' });
+    if (levelEl.value) p.set('level', levelEl.value);
+    if (sourceEl.value) p.set('source', sourceEl.value);
+    if (kindEl.value) p.set('kind', kindEl.value);
+    if (qEl.value) p.set('q', qEl.value);
+    list.innerHTML = ''; shown = 0; empty.style.display = 'block'; empty.textContent = 'Loading…';
+    fetch('/api/registry?'+p.toString(), { credentials: 'same-origin' })
+      .then(r => r.json())
+      .then(j => {
+        (j.entries||[]).slice().reverse().forEach(r => add(r, true));
+        if (shown === 0){ empty.textContent = 'No events match these filters.'; empty.style.display='block'; }
+      })
+      .catch(() => { empty.textContent = 'Could not load history.'; empty.style.display='block'; });
+  }
+  let es = null;
+  function openStream(){
+    try { es && es.close(); } catch(e){}
+    es = new EventSource('/api/registry/stream', { withCredentials: true });
+    es.onopen = () => live.classList.add('live');
+    es.onerror = () => { live.classList.remove('live'); setTimeout(openStream, 3000); };
+    es.onmessage = e => { if (paused) return; try { add(JSON.parse(e.data), true); } catch(err){} };
+  }
+  [levelEl, sourceEl, kindEl, qEl].forEach(el => el.addEventListener('input', () => { clearTimeout(window._t); window._t = setTimeout(reloadHistory, 250); }));
+  pauseBtn.addEventListener('click', () => { paused = !paused; pauseBtn.textContent = paused ? 'Resume' : 'Pause'; });
+  clearBtn.addEventListener('click', () => { list.innerHTML = ''; shown = 0; empty.textContent = 'Cleared. New events will appear here.'; empty.style.display = 'block'; count.textContent = ''; });
+  reloadHistory();
+  openStream();
+})();
+</script>
+</body>
+</html>
+"""
+
+
+@app.get("/events", include_in_schema=False)
+def events_page(request: Request):
+    # Behind the same gate as the rest of the app.
+    if access_gate.enabled and not logged_in(request):
+        return RedirectResponse(f"/login?next=/events", status_code=303)
+    return HTMLResponse(_EVENTS_PAGE_HTML)
 
 
 @app.post("/api/canvas/think")

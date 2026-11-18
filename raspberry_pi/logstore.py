@@ -105,6 +105,13 @@ def update(enabled: Optional[bool] = None, max_bytes=None) -> dict:
 
 def log(level: str, source: str, msg: str) -> None:
     """Record one line. Never raises: logging must not break a request."""
+    # Mirror to the structured registry so the /events page and the sage_registry
+    # connector tool see every line too. See event_registry.py.
+    try:
+        import event_registry  # local import: avoid cycles at module load
+        event_registry.simple(level, source, msg)
+    except Exception:
+        pass
     try:
         with _lock:
             cfg = _load()

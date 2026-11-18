@@ -18,6 +18,10 @@ import sqlite3
 from pathlib import Path
 from typing import List, Optional
 import system_health
+try:
+    import event_registry
+except ImportError:  # module order safety
+    event_registry = None
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
 BACKUP_DIR = Path(os.getenv("SAGE_BACKUP_DIR", str(Path(DB_PATH).resolve().parent / "backups")))
@@ -103,6 +107,12 @@ async def scheduler(local_now) -> None:
             if due(local_now(), last):
                 path = await asyncio.to_thread(make_backup)
                 print(f"Database backup written: {path.name}")
+                if event_registry is not None:
+                    event_registry.event("backup.done", f"Database backup written: {path.name}",
+                                         source="backup", data={"path": str(path)})
         except Exception as e:
             print(f"Database backup failed: {e}")
+            if event_registry is not None:
+                event_registry.event("backup.fail", f"Database backup failed: {e}",
+                                     source="backup", level="error")
         await asyncio.sleep(CHECK_EVERY_SECONDS)

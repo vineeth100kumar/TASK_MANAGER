@@ -59,6 +59,24 @@ from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 import herald_extras
 import herald_journal
+try:
+    import event_registry
+except ImportError:
+    event_registry = None
+
+
+def _registry_herald(kind: str, text: str, queued: bool = False) -> None:
+    if event_registry is None:
+        return
+    try:
+        event_registry.event(
+            f"herald.{kind}" if kind else "herald.say",
+            text[:200],
+            source="speaker",
+            actor=("queued" if queued else "spoken"),
+        )
+    except Exception:
+        pass
 
 log = logging.getLogger("speaker")
 
@@ -1260,10 +1278,12 @@ class Speaker:
         if self.loop is None or self.queue is None:
             return
         self.loop.call_soon_threadsafe(self.queue.put_nowait, {"text": text, "kind": kind, "at": time.time(), "cache": cache, "meta": meta})
+        _registry_herald(kind, text, queued=True)
 
     async def say(self, text: str, kind: str = "line", cache: Optional[Path] = None, meta: Optional[dict] = None) -> None:
         if self.queue is not None:
             await self.queue.put({"text": text, "kind": kind, "at": time.time(), "cache": cache, "meta": meta})
+            _registry_herald(kind, text, queued=True)
 
     def event(self, kind: str) -> bool:
         """A short line for something that just happened (any thread). Lines
