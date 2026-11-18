@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { withTime, formatClock } from '../../utils/reminders';
-import { CheckCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
+import { Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { PRIORITIES } from '../../services/constants';
 import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/projectTypes';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
@@ -79,7 +79,7 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                       {task.status !== 'done' && (
                         <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
                       )}
-                      {task.status === 'done' && <CheckCircle size={20} strokeWidth={2.5} className="text-emerald-500" />}
+                      {task.status === 'done' && <CompleteButton checked onComplete={() => {}} onUndo={() => onTransition(task, 'todo')} />}
                     </>
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />
