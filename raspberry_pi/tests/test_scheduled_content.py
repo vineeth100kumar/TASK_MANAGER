@@ -1,6 +1,9 @@
 """Tests for content_schedule.py: planned posts and reels are drawn ahead of their slot.
 
-    cd raspberry_pi && python -m unittest tests.test_content_schedule
+The file name sorts after test_safety on purpose: whichever test file imports db_server first
+sets the data folder the later ones share, and test_safety counts items in it.
+
+    cd raspberry_pi && python -m unittest tests.test_scheduled_content
 """
 
 import datetime
@@ -20,8 +23,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from fastapi.testclient import TestClient  # noqa: E402
 
-import content_schedule  # noqa: E402
 import db_server  # noqa: E402
+import content_schedule  # noqa: E402
 import posts  # noqa: E402
 import reels  # noqa: E402
 
