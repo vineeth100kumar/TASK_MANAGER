@@ -136,7 +136,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
               : <span className="flex items-center gap-1 text-violet-500"><LoaderCircle size={11} className="animate-spin" /> {p.status === 'waiting' ? 'needs voice' : 'drawing'}</span>)}
           </div>
           <h4 className="text-[14px] font-semibold leading-snug line-clamp-2">{p.title}</h4>
-          {p.scheduledFor && col === 'scheduled' && <p className="mt-1.5 text-[11.5px] font-semibold text-sky-600 dark:text-sky-400">{whenText(p.scheduledFor)}</p>}
+          {p.scheduledFor && col === 'scheduled' && <p className="mt-1.5 text-[11.5px] font-semibold text-sky-600 dark:text-sky-400">Post {whenText(p.scheduledFor)}{p.status !== 'planned' && ' · reminder set'}</p>}
         </button>
         {col === 'ready' && (
           <button type="button" onClick={() => moveTo(p, 'scheduled')} className="mt-2 flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
@@ -145,9 +145,9 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
         )}
         {col === 'scheduled' && p.status === 'planned' && (
           <div className="mt-2 space-y-1.5">
-            <p className="text-[11.5px] text-gray-500">Script saved. Draws about {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}.</p>
+            <p className="text-[11.5px] text-gray-500">Script saved. Draws {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}, reminder at post time.</p>
             <div className="flex flex-wrap gap-1.5">
-              <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
+              <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change date</button>
               <button type="button" onClick={() => drawNow(p)} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300">{p.kind === 'post' ? 'Draw now' : 'Make now'}</button>
               <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
             </div>
@@ -155,7 +155,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
         )}
         {col === 'scheduled' && p.status !== 'planned' && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
+            <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change date</button>
             <button type="button" onClick={() => moveTo(p, 'posted')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Mark posted</button>
             <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
           </div>
