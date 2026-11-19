@@ -11,10 +11,8 @@ import { api } from '../../services/api';
 import type { Project, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
-
-type Kind = 'post' | 'reel';
-type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; archived: boolean; projectId: string | null; createdAt: string };
-type ColumnId = 'idea' | 'script' | 'drafting' | 'ready' | 'scheduled' | 'posted';
+import { ContentCalendar } from './ContentCalendar';
+import { ColumnId, Piece, columnOf, toLocalInput, toPiece, whenText } from '../../services/contentPieces';
 
 const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: string; drop: boolean }[] = [
   { id: 'idea', label: 'Idea', icon: Lightbulb, tint: 'text-amber-500', drop: false },
@@ -25,34 +23,6 @@ const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: stri
   { id: 'posted', label: 'Posted', icon: Send, tint: 'text-gray-500', drop: true },
 ];
 
-const DRAFTING = new Set(['waiting', 'queued', 'running', 'failed']);
-
-function columnOf(p: Piece): ColumnId {
-  if (DRAFTING.has(p.status)) return 'drafting';
-  if (p.posted) return 'posted';
-  return p.scheduledFor ? 'scheduled' : 'ready';
-}
-
-const toPiece = (kind: Kind, x: Post | Reel): Piece => ({
-  kind, id: x.id, title: x.title, status: x.status, scheduledFor: x.scheduledFor || null,
-  posted: x.posted, archived: Boolean(x.archived), projectId: x.projectId, createdAt: x.createdAt,
-});
-
-/** "Mon 24 Nov, 9:00 AM" from an ISO time, in the viewer's time zone. */
-export function whenText(iso: string): string {
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleString(undefined, { weekday: 'short', day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
-}
-
-/** The value a datetime-local input wants (local time, no zone) for an ISO time. */
-function toLocalInput(iso: string | null): string {
-  const d = iso ? new Date(iso) : new Date(Date.now() + 24 * 3600_000);
-  if (!iso) d.setHours(9, 0, 0, 0);
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
 export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string; onSelectTask: (id: string) => void }) {
   const { showToast } = useToast();
   const [pieces, setPieces] = useState<Piece[] | null>(null);
@@ -60,6 +30,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
   const [error, setError] = useState('');
   const [dragged, setDragged] = useState<Piece | null>(null);
   const [over, setOver] = useState<ColumnId | null>(null);
+  const [mode, setMode] = useState<'board' | 'week'>('board');
   const [picking, setPicking] = useState<{ piece: Piece; value: string } | null>(null);
 
   const project = (api.sync.getState().projects.filter(Boolean) as Project[]).find(p => p.id === projectId);
@@ -183,10 +154,16 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button type="button" onClick={() => openPosts({ projectId, newPost: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[13px] font-semibold"><Plus size={14} /> New post</button>
         <button type="button" onClick={() => openReels({ projectId, newReel: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[13px] font-semibold"><Plus size={14} /> New reel</button>
-        <p className="text-[12.5px] text-gray-500">Drag a finished post or reel to Scheduled to pick its day and time.</p>
+        <div className="flex rounded-xl bg-black/[0.05] dark:bg-white/10 p-0.5 ml-auto" role="group" aria-label="Pipeline view">
+          {(['board', 'week'] as const).map(m => (
+            <button key={m} type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
+              className={`h-8 px-3 rounded-[10px] text-[12.5px] font-semibold capitalize ${mode === m ? 'bg-white dark:bg-[#2c2c2e] shadow-sm' : 'text-gray-500'}`}>{m}</button>
+          ))}
+        </div>
       </div>
+      {mode === 'week' && <ContentCalendar projectId={projectId} />}
       {error && <p className="text-[13px] text-red-600 mb-3">{error}</p>}
-      <div className="flex gap-4 overflow-x-auto pb-12 min-h-[60vh] items-start snap-x">
+      {mode === 'board' && <div className="flex gap-4 overflow-x-auto pb-12 min-h-[60vh] items-start snap-x">
         {COLUMNS.map(col => {
           const list = col.id === 'idea' ? ideas : col.id === 'script' ? scripts : byColumn[col.id];
           const count = list.length;
@@ -208,7 +185,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
             </div>
           );
         })}
-      </div>
+      </div>}
 
       {picking && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setPicking(null)}>

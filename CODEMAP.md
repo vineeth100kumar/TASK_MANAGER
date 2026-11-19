@@ -133,7 +133,7 @@ Radar, Data and Migration, Server and Reset).
 | Herald (voice on the soundbar) | `modals/SpeakerCard` | `speaker.py`, `herald_extras.py`, `herald_journal.py`, `speak_worker.py`, `/api/speaker/*`, `/api/herald/presence` |
 | Spotify and arrival music | `modals/SpotifyCard` | `spotify.py` (Soloist, PipeWire bridge), `room_music.py`, `audio_probe.py`, `/api/spotify/*` |
 | Drop share links | `views/DropView`, `services/drop.ts`, Notes share menu | `drop.py` |
-| Content pipeline (ideas, scripts, posts, reels, schedule) | `views/ProjectPipeline.tsx` (Pipeline button in `ProjectTypeBar`, mode `pipeline` in `App.tsx`) | `posts.py` / `reels.py` `scheduledFor` + `POST .../schedule` |
+| Content pipeline (ideas, scripts, posts, reels, schedule) | `views/ProjectPipeline.tsx` (Pipeline button in `ProjectTypeBar`, mode `pipeline` in `App.tsx`); week plan `views/ContentCalendar.tsx` (Board/Week toggle in the Pipeline, and `views/ContentWeekView.tsx` = sidebar "Content week" for every project); shared helpers `services/contentPieces.ts` | `posts.py` / `reels.py` `scheduledFor` + `POST .../schedule` |
 | Posts (carousels) | `views/PostsView`, `components/posts/`, `modals/PostPictureKeys` | `posts.py`, `posts_copies.py`, `lowprio.py`, `content_engine/` |
 | Reels (videos) | `views/ReelsView`, `components/reels/` | `reels.py`, `content_engine/src/autocontent/reel/`, `deploy/install_reels.sh` |
 | Recordings (parked) | `views/RecordingsView`, `services/recordings.ts` | `recorder.py` (routes need `SAGE_MIC=1`) |

@@ -41,6 +41,7 @@ import { SageLoader } from './components/common/SageLoader';
 import { BootBoundary } from './components/common/BootBoundary';
 import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { ContentWeekView } from './components/views/ContentWeekView';
 import { ProjectPipeline } from './components/views/ProjectPipeline';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
@@ -540,6 +541,8 @@ function MainApp() {
               <PostsView projectId={postsProject} focus={postsFocus} />
             ) : activeView === 'reels' ? (
               <ReelsView projectId={reelsProject} focus={reelsFocus} />
+            ) : activeView === 'contentweek' ? (
+              <ContentWeekView />
             ) : activeView === 'recordings' ? (
               <RecordingsView />
             ) : activeView === 'hidden' ? (
