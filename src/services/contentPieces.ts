@@ -62,3 +62,22 @@ export function drawAtText(iso: string): string {
   const d = new Date(new Date(iso).getTime() - LEAD_MINUTES * 60_000);
   return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
 }
+
+export interface ContentCounts { drafting: number; ready: number; scheduled: number; posted: number; weekScheduled: number }
+
+/** How a project's posts and reels stand: per column, and how many are due to go live in the week of `now` (Monday to Sunday). */
+export function countPieces(pieces: Piece[], now: Date = new Date()): ContentCounts {
+  const out: ContentCounts = { drafting: 0, ready: 0, scheduled: 0, posted: 0, weekScheduled: 0 };
+  const from = weekStart(now).getTime();
+  const to = from + 7 * 24 * 3600_000;
+  for (const p of pieces) {
+    if (p.archived) continue;
+    const col = columnOf(p);
+    if (col === 'drafting' || col === 'ready' || col === 'scheduled' || col === 'posted') out[col] += 1;
+    if (col === 'scheduled' && p.scheduledFor) {
+      const t = new Date(p.scheduledFor).getTime();
+      if (t >= from && t < to) out.weekScheduled += 1;
+    }
+  }
+  return out;
+}

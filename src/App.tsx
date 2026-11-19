@@ -41,6 +41,7 @@ import { SageLoader } from './components/common/SageLoader';
 import { BootBoundary } from './components/common/BootBoundary';
 import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { ContentSummary } from './components/views/ContentSummary';
 import { ContentWeekView } from './components/views/ContentWeekView';
 import { ProjectPipeline } from './components/views/ProjectPipeline';
 import { ProjectFront } from './components/common/ProjectFront';
@@ -568,6 +569,9 @@ function MainApp() {
                 {isProjectPage && (
                   <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })}
                     pipelineOn={pipelineOn} onPipeline={() => setPresentationMode(pipelineOn ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : 'pipeline')} />
+                )}
+                {isProjectPage && !pipelineOn && api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent && (
+                  <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
                 )}
                 {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : (<>
                 {/* Global Quick Filter Bar */}
