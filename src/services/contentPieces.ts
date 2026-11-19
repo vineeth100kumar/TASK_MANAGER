@@ -4,8 +4,8 @@ import type { Post } from './posts';
 import type { Reel } from './reels';
 
 export type Kind = 'post' | 'reel';
-export type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; archived: boolean; projectId: string | null; createdAt: string };
-export type ColumnId = 'idea' | 'script' | 'drafting' | 'ready' | 'scheduled' | 'posted';
+export type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; wontPost: boolean; archived: boolean; projectId: string | null; createdAt: string };
+export type ColumnId = 'idea' | 'script' | 'drafting' | 'ready' | 'scheduled' | 'posted' | 'dropped';
 
 /** The Pi starts drawing a planned piece this long before its slot (content_schedule.py, LEAD_MINUTES). */
 export const LEAD_MINUTES = 60;
@@ -13,6 +13,7 @@ export const LEAD_MINUTES = 60;
 const DRAFTING = new Set(['waiting', 'queued', 'running', 'failed']);
 
 export function columnOf(p: Piece): ColumnId {
+  if (p.wontPost) return 'dropped';
   if (DRAFTING.has(p.status)) return 'drafting';
   if (p.posted) return 'posted';
   return p.scheduledFor ? 'scheduled' : 'ready';
@@ -20,7 +21,7 @@ export function columnOf(p: Piece): ColumnId {
 
 export const toPiece = (kind: Kind, x: Post | Reel): Piece => ({
   kind, id: x.id, title: x.title, status: x.status, scheduledFor: x.scheduledFor || null,
-  posted: x.posted, archived: Boolean(x.archived), projectId: x.projectId, createdAt: x.createdAt,
+  posted: x.posted, wontPost: Boolean(x.wontPost), archived: Boolean(x.archived), projectId: x.projectId, createdAt: x.createdAt,
 });
 
 /** "Mon 24 Nov, 9:00 AM" from an ISO time, in the viewer's time zone. */

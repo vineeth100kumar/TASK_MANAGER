@@ -3,7 +3,7 @@
 // Drag a finished post or reel between Ready, Scheduled and Posted; dropping on
 // Scheduled asks for a date and time.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { CalendarClock, CheckCircle2, Clapperboard, GalleryHorizontal, Lightbulb, LoaderCircle, PenLine, Plus, Send, TriangleAlert, X } from 'lucide-react';
+import { Ban, CalendarClock, CheckCircle2, Clapperboard, GalleryHorizontal, Lightbulb, LoaderCircle, PenLine, Plus, Send, TriangleAlert, X } from 'lucide-react';
 import { Post, postsApi, postsAvailable, POST_EVENT, openPosts } from '../../services/posts';
 import { Reel, reelsApi, reelsAvailable, REEL_EVENT, openReels } from '../../services/reels';
 import { stageOf, projectTypeInfo } from '../../services/projectTypes';
@@ -21,6 +21,7 @@ const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: stri
   { id: 'ready', label: 'Ready', icon: CheckCircle2, tint: 'text-emerald-500', drop: true },
   { id: 'scheduled', label: 'Scheduled', icon: CalendarClock, tint: 'text-sky-500', drop: true },
   { id: 'posted', label: 'Posted', icon: Send, tint: 'text-gray-500', drop: true },
+  { id: 'dropped', label: "Won't post", icon: Ban, tint: 'text-gray-400', drop: true },
 ];
 
 export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string; onSelectTask: (id: string) => void }) {
@@ -65,7 +66,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
   useDataChanges(readTasks);
 
   const byColumn = useMemo(() => {
-    const out: Record<ColumnId, Piece[]> = { idea: [], script: [], drafting: [], ready: [], scheduled: [], posted: [] };
+    const out: Record<ColumnId, Piece[]> = { idea: [], script: [], drafting: [], ready: [], scheduled: [], posted: [], dropped: [] };
     for (const p of pieces || []) out[columnOf(p)].push(p);
     out.scheduled.sort((a, b) => (a.scheduledFor || '').localeCompare(b.scheduledFor || ''));
     return out;
@@ -82,9 +83,19 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
   const setPosted = (piece: Piece, posted: boolean) =>
     piece.kind === 'post' ? postsApi.setPosted(piece.id, posted) : reelsApi.setPosted(piece.id, posted);
 
+  const skip = (piece: Piece, undo: boolean) =>
+    piece.kind === 'post' ? postsApi.skip(piece.id, undo) : reelsApi.skip(piece.id, undo);
+
   const moveTo = async (piece: Piece, to: ColumnId) => {
     const from = columnOf(piece);
     if (from === to || !COLUMNS.find(c => c.id === to)?.drop || from === 'drafting') return;
+    if (to === 'dropped') { await call(piece, () => skip(piece, false), "Dropped. No reminders; the files are kept."); return; }
+    if (from === 'dropped') {
+      // Bring it back first, then do what was asked.
+      try { await skip(piece, true); } catch (e: any) { showToast(e.message || 'Could not bring it back', 'error'); return; }
+      if (to === 'ready') { showToast('Back to Ready'); await load(); return; }
+      piece = { ...piece, wontPost: false, scheduledFor: null };
+    }
     if (piece.status === 'planned' && to !== 'scheduled') { showToast('Not drawn yet. Draw it now, or change its time.', 'info'); return; }
     if (to === 'scheduled') { setPicking({ piece, value: toLocalInput(piece.scheduledFor) }); return; }
     if (to === 'posted') { await call(piece, () => setPosted(piece, true), 'Marked as posted'); return; }
@@ -125,30 +136,38 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
               : <span className="flex items-center gap-1 text-violet-500"><LoaderCircle size={11} className="animate-spin" /> {p.status === 'waiting' ? 'needs voice' : 'drawing'}</span>)}
           </div>
           <h4 className="text-[14px] font-semibold leading-snug line-clamp-2">{p.title}</h4>
-          {p.scheduledFor && col === 'scheduled' && <p className="mt-1.5 text-[11.5px] font-semibold text-sky-600 dark:text-sky-400">{whenText(p.scheduledFor)}</p>}
+          {p.scheduledFor && col === 'scheduled' && <p className="mt-1.5 text-[11.5px] font-semibold text-sky-600 dark:text-sky-400">Post {whenText(p.scheduledFor)}{p.status !== 'planned' && ' · reminder set'}</p>}
         </button>
         {col === 'ready' && (
           <button type="button" onClick={() => moveTo(p, 'scheduled')} className="mt-2 flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
-            <CalendarClock size={12} /> Schedule
+            <CalendarClock size={12} /> Remind me to post
           </button>
         )}
         {col === 'scheduled' && p.status === 'planned' && (
           <div className="mt-2 space-y-1.5">
-            <p className="text-[11.5px] text-gray-500">Script saved. Draws about {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}.</p>
+            <p className="text-[11.5px] text-gray-500">Script saved. Draws {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}, reminder at post time.</p>
             <div className="flex flex-wrap gap-1.5">
-              <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
+              <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change date</button>
               <button type="button" onClick={() => drawNow(p)} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300">{p.kind === 'post' ? 'Draw now' : 'Make now'}</button>
+              <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
             </div>
           </div>
         )}
         {col === 'scheduled' && p.status !== 'planned' && (
           <div className="mt-2 flex flex-wrap gap-1.5">
-            <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
+            <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change date</button>
             <button type="button" onClick={() => moveTo(p, 'posted')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Mark posted</button>
+            <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
           </div>
         )}
         {col === 'ready' && (
-          <button type="button" onClick={() => moveTo(p, 'posted')} className="mt-2 ml-1.5 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Mark posted</button>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => moveTo(p, 'posted')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Mark posted</button>
+            <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
+          </div>
+        )}
+        {col === 'dropped' && (
+          <button type="button" onClick={() => moveTo(p, 'ready')} className="mt-2 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Bring back</button>
         )}
       </div>
     );
@@ -208,6 +227,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
               </div>
               <button type="button" onClick={() => setPicking(null)} aria-label="Close" className="p-1 text-gray-400 hover:text-gray-700"><X size={18} /></button>
             </div>
+            {picking.piece.status !== 'planned' && <p className="text-[12.5px] text-gray-500">You get a reminder at this time (push, email and Herald) and once more next morning if it is not marked posted.</p>}
             <input type="datetime-local" value={picking.value} onChange={e => setPicking({ ...picking, value: e.target.value })}
               className="w-full h-11 px-3 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[14px]" />
             <div className="flex gap-2">

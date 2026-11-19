@@ -133,7 +133,7 @@ Radar, Data and Migration, Server and Reset).
 | Herald (voice on the soundbar) | `modals/SpeakerCard` | `speaker.py`, `herald_extras.py`, `herald_journal.py`, `speak_worker.py`, `/api/speaker/*`, `/api/herald/presence` |
 | Spotify and arrival music | `modals/SpotifyCard` | `spotify.py` (Soloist, PipeWire bridge), `room_music.py`, `audio_probe.py`, `/api/spotify/*` |
 | Drop share links | `views/DropView`, `services/drop.ts`, Notes share menu | `drop.py` |
-| Content pipeline (ideas, scripts, posts, reels, schedule) | `views/ProjectPipeline.tsx` (Pipeline button in `ProjectTypeBar`, mode `pipeline` in `App.tsx`); week plan `views/ContentCalendar.tsx` (Board/Week toggle in the Pipeline, and `views/ContentWeekView.tsx` = sidebar "Content week" for every project); shared helpers `services/contentPieces.ts`; status line + empty-week nudge `views/ContentSummary.tsx` | `posts.py` / `reels.py` `scheduledFor` + `POST .../schedule` |
+| Content pipeline (ideas, scripts, posts, reels, schedule) | `views/ProjectPipeline.tsx` (Pipeline button in `ProjectTypeBar`, mode `pipeline` in `App.tsx`); week plan `views/ContentCalendar.tsx` (Board/Week toggle in the Pipeline, and `views/ContentWeekView.tsx` = sidebar "Content week" for every project); shared helpers `services/contentPieces.ts`; status line + empty-week nudge `views/ContentSummary.tsx`; add/move a post or reel to a project `common/ProjectLink.tsx` -> `posts.relink_project`; Won't post column + buttons in the Pipeline | `posts.py` / `reels.py` `scheduledFor` + `POST .../schedule`, `POST .../project`, `POST .../skip` (Won't post, `wontPost`) |
 | Posts (carousels) | `views/PostsView`, `components/posts/`, `modals/PostPictureKeys` | `posts.py`, `posts_copies.py`, `lowprio.py`, `content_engine/` |
 | Reels (videos) | `views/ReelsView`, `components/reels/` | `reels.py`, `content_engine/src/autocontent/reel/`, `deploy/install_reels.sh` |
 | Recordings (parked) | `views/RecordingsView`, `services/recordings.ts` | `recorder.py` (routes need `SAGE_MIC=1`) |
@@ -157,7 +157,7 @@ Radar, Data and Migration, Server and Reset).
 | `chat_capture.py`, `canvas_thinker.py`, `voice_command.py`, `voice_assistant.py`, `voice_stt.py` | AI for Chat, Canvas, Siri and voice |
 | `radar.py`, `radar_research.py`, `markets.py`, `prices.py`, `sparks.py`, `industry.py` | Radar (most have their own `router`) |
 | `drop.py`, `posts.py`, `posts_copies.py`, `reels.py`, `recorder.py` | Drop, Posts, Reels, Recordings routers |
-| `content_schedule.py` | Background loop (every minute): a post/reel saved with a date (status `planned`) is drawn 1 hour before its slot, or earlier when the Pi is idle and the slot is within 24 h; Herald says when it is ready (`speaker.on_content_ready`). Env `SAGE_CONTENT_LEAD_MINUTES`, `SAGE_CONTENT_EARLY_HOURS` |
+| `content_schedule.py` | Background loop (every minute): a post/reel saved with a date (status `planned`) is drawn 1 hour before its slot, or earlier when the Pi is idle and the slot is within 24 h; Herald says when it is ready (`speaker.on_content_ready`). Also `remind_due`: a Ready item with a date gets push + email + Herald (`speaker.on_post_due`) at the post time and once next morning (09:00) if not posted (`remindStage`); dates over 3 days old stay silent. Env `SAGE_CONTENT_LEAD_MINUTES`, `SAGE_CONTENT_EARLY_HOURS` |
 | `life_mode.py`, `phone_link.py`, `bluetooth_control.py`, `public_link.py` | Modes, iPhone BLE, Bluetooth, public URL |
 | `speaker.py`, `speak_worker.py`, `herald_extras.py`, `herald_journal.py`, `room_music.py`, `spotify.py`, `audio_probe.py` | Herald, music, audio diagnostics |
 | `system_health.py`, `logstore.py`, `diagnostics.py`, `uptime.py`, `lowprio.py` | Health report, capped log, blackout probe, "back up" emails, nice/ionice for heavy jobs |
@@ -223,8 +223,8 @@ reads; `config/` holds brand and AI tuning; `styles/` and `assets/` are artwork.
 | Depth, gallery | `GET/PUT/DELETE /api/desk/depth`, `POST .../depth/photo`, `.../depth/cutout`; `GET/POST /api/desk/gallery/photos`, `POST .../photos/upload`, `DELETE .../photos/{name}`, `POST .../gallery/preview` |
 | Radar | `GET /api/radar/summary`, `/signals`, `/brief`, `/markets`, `GET/PUT /settings`, `POST /refresh`; research `POST/GET /api/radar/research[/{job_id}]`; Lab `/sparks`, `/sparks/make`, `/sparks/{id}/keep|research|dismiss`; industry `/api/radar/industry[/{id}[/ai|/note]]` |
 | Drop | `GET/POST /api/drops`, `POST .../clip`, `.../{slug}/images`, `/permanent`, `/enabled`, `/extend`, `DELETE .../{slug}` |
-| Posts | `/api/posts` (list, create, `status`, `pictures`, `check`, `format`), `/api/posts/{id}` (get, `rerender`, `posted`, `schedule`, `review`, `restore`, `send`, delete, `slides/{n}`, `preview/{n}`, `zip`, `qr.svg`) |
-| Reels | `/api/reels` (list, create, `format`, `status`, `check`), `/api/reels/{id}` (get, `voice`, `remake`, `posted`, `schedule`, `review`, `restore`, `send`, delete, `qr.svg`) |
+| Posts | `/api/posts` (list, create, `status`, `pictures`, `check`, `format`), `/api/posts/{id}` (get, `rerender`, `posted`, `schedule`, `project`, `review`, `restore`, `send`, delete, `slides/{n}`, `preview/{n}`, `zip`, `qr.svg`) |
+| Reels | `/api/reels` (list, create, `format`, `status`, `check`), `/api/reels/{id}` (get, `voice`, `remake`, `posted`, `schedule`, `project`, `review`, `restore`, `send`, delete, `qr.svg`) |
 | Recordings | `/api/recordings/*`: parked, only live with `SAGE_MIC=1` |
 | Claude | `GET /api/claude/overview`, `/health`, `/history`, `/diagnostics`, `/maps`, `/maps/{ref}`, `POST /quick-add`, `/maps/{ref}/thoughts`, `/notes/push`, Drop, Posts and Reels helpers, CRUD `/api/claude/{table}[/{id}]`; MCP `/mcp/{token}` |
 | Other | `GET /api/public-url`; `/` serves the built web app |

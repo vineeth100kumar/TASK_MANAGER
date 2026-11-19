@@ -18,6 +18,7 @@ import {
   MakerStatus, POST_EVENT, Post, ReviewAction, canShareFiles, copyText, fetchBlob, fileName, mediaUrl, postLink, postsApi, qrPath, zipUrl,
 } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
+import { ProjectLink } from '../common/ProjectLink';
 
 interface Props {
   postId: string;
@@ -206,6 +207,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             {post.seconds ? ` · made in ${Math.round(post.seconds)}s` : ''}
             {post.posted ? ' · Posted' : ''}
           </p>
+          {!post.archived && <div className="mt-2"><ProjectLink projectId={post.projectId} onChange={async id => { setPost(await postsApi.setProject(post.id, id)); }} /></div>}
         </div>
         {post.archived ? (
           <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">

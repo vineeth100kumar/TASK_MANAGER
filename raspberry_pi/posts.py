@@ -523,6 +523,8 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "projectId": project_id or None,
         "taskId": None,
         "scheduledFor": planned_for,   # ISO time (UTC) the post goes live; set from the project Pipeline
+        "remindStage": 0,       # post-time reminders sent so far: 0 none, 1 at the time, 2 next morning (content_schedule.py)
+        "wontPost": False,      # dropped: no reminders, shown as Dropped, files kept
         "status": "planned" if planned_for else "queued",
         "error": "",
         "log": [],
@@ -880,6 +882,46 @@ async def _move_task(post: dict, stage: str, status: str) -> None:
         logstore.warn("posts", f"Couldn't move the task for post {post['id']}: {e}")
 
 
+def _task_stage(item: dict) -> tuple:
+    """(stage, status) the item's task should show for where the item stands."""
+    if item.get("wontPost"):
+        return "incomplete", "done"
+    if item.get("posted"):
+        return "published", "done"
+    if item.get("status") == "done":
+        return "editing", "in_progress"
+    return "scripting", "in_progress"
+
+
+async def relink_project(item: dict, project_id: str, kind: str, save) -> dict:
+    """Put a post or reel in a project, or move it to another one, at any time. Its task comes
+    along (or is made), so the project's Pipeline, Week and counts pick it up. kind is "Post" or "Reel"."""
+    if not project_id or not _find_record or not _create_record or not _update_record:
+        raise ValueError("Pick a project.")
+    project = _find_record("projects", project_id)
+    if not project:
+        raise ValueError("That project doesn't exist.")
+    item["projectId"] = project_id
+    fields = _stage_fields(item, *_task_stage(item))
+    task = None
+    if item.get("taskId"):
+        try:
+            task = await _update_record("workItems", item["taskId"], {"projectId": project_id, "areaId": None, "isInbox": False, **fields})
+        except Exception:
+            task = None   # the old task was deleted: make a new one below
+    if task is None:
+        id_key = "postId" if kind == "Post" else "reelId"
+        task = await _create_record("workItems", {
+            "title": f"{kind}: {item['title']}", "projectId": project_id, "entityType": "task",
+            "labels": [kind.lower()], id_key: item["id"],
+            "description": f"Made with Auto Content. Open the {kind.lower()} from Sage > {kind}s.",
+            **fields,
+        })
+        item["taskId"] = task.get("id")
+    await save(item)
+    return item
+
+
 # Set by db_server (speaker.py): Herald says a scheduled post or reel is ready.
 on_content_ready: Optional[Callable[[dict], Awaitable[None]]] = None
 
@@ -897,6 +939,19 @@ def ready_facts(item: dict, kind: str) -> dict:
     except (TypeError, ValueError):
         pass
     return facts
+
+
+# Set by db_server (speaker.py): Herald says it is time to post something that is ready.
+on_post_due: Optional[Callable[[dict], Awaitable[None]]] = None
+
+
+async def _say_due(item: dict, kind: str, stage: int) -> None:
+    if on_post_due is None:
+        return
+    try:
+        await on_post_due({**ready_facts(item, kind), "stillWaiting": stage > 1})
+    except Exception as e:
+        logstore.warn("posts", f"Herald couldn't announce the post time for {kind} {item.get('id')}: {e}")
 
 
 async def _say_ready(item: dict, kind: str) -> None:
@@ -1173,11 +1228,60 @@ async def posts_posted(post_id: str, undo: bool = False):
         return _bad("Only a finished post can be marked as posted.", 409)
     post["posted"] = not undo
     post["postedAt"] = None if undo else _utc()
+    if not undo:
+        post["wontPost"] = False
     await save_async(post)
     if undo:
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+    return {"success": True, "post": with_media(post)}
+
+
+async def set_wont_post(item: dict, wont: bool, save) -> dict:
+    """"Won't post": changed your mind. No more reminders, the date is cleared, the files are kept, and the
+    task closes as Incomplete. wont=False brings it back to Ready."""
+    item["wontPost"] = bool(wont)
+    if wont:
+        item["scheduledFor"] = None
+        item["posted"], item["postedAt"] = False, None
+    item["remindStage"] = 0
+    await save(item)
+    stage, status = _task_stage(item)
+    if item.get("taskId") and _update_record:
+        try:
+            await _update_record("workItems", item["taskId"], _stage_fields(item, stage, status))
+        except Exception as e:
+            logstore.warn("posts", f"Couldn't move the task for {item.get('id')}: {e}")
+    return item
+
+
+class SkipBody(BaseModel):
+    undo: bool = False
+
+
+@router.post("/api/posts/{post_id}/skip")
+async def posts_skip(post_id: str, body: SkipBody):
+    post = get(post_id)
+    if not post:
+        return _missing()
+    await set_wont_post(post, not body.undo, save_async)
+    return {"success": True, "post": with_media(post)}
+
+
+class ProjectBody(BaseModel):
+    projectId: str = ""
+
+
+@router.post("/api/posts/{post_id}/project")
+async def posts_project(post_id: str, body: ProjectBody):
+    post = get(post_id)
+    if not post:
+        return _missing()
+    try:
+        await relink_project(post, body.projectId, "Post", save_async)
+    except ValueError as e:
+        return _bad(str(e))
     return {"success": True, "post": with_media(post)}
 
 
@@ -1207,6 +1311,7 @@ async def posts_schedule(post_id: str, body: ScheduleBody):
         post["scheduledFor"] = parse_schedule(body.at)
     except ValueError as e:
         return _bad(str(e))
+    post["remindStage"] = 0   # a new time starts the reminders again
     await save_async(post)
     if post["status"] == "planned" and not post["scheduledFor"]:
         release(post)   # a planned post with no date is simply drawn now

@@ -386,6 +386,8 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "", s
         "projectId": project_id or None,
         "taskId": None,
         "scheduledFor": planned_for,   # ISO time (UTC) the reel goes live; set from the project Pipeline
+        "remindStage": 0,       # post-time reminders sent so far: 0 none, 1 at the time, 2 next morning (content_schedule.py)
+        "wontPost": False,      # dropped: no reminders, shown as Dropped, files kept
         "status": "waiting" if report["needsRecording"] else ("planned" if plan else "queued"),
         "review": "pending",   # pending | approved | rejected
         "archived": False,     # a rejected reel is archived: the script is kept, the video removed
@@ -1013,11 +1015,42 @@ async def reels_posted(reel_id: str, undo: bool = False):
         return _bad("Only a finished reel can be marked as posted.", 409)
     reel["posted"] = not undo
     reel["postedAt"] = None if undo else _utc()
+    if not undo:
+        reel["wontPost"] = False
     await save_async(reel)
     if undo:
         await _move_task(reel, "editing", "in_progress")
     else:
         await _move_task(reel, "published", "done")
+    return {"success": True, "reel": with_media(reel)}
+
+
+class SkipBody(BaseModel):
+    undo: bool = False
+
+
+@router.post("/api/reels/{reel_id}/skip")
+async def reels_skip(reel_id: str, body: SkipBody):
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    await posts.set_wont_post(reel, not body.undo, save_async)
+    return {"success": True, "reel": with_media(reel)}
+
+
+class ProjectBody(BaseModel):
+    projectId: str = ""
+
+
+@router.post("/api/reels/{reel_id}/project")
+async def reels_project(reel_id: str, body: ProjectBody):
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    try:
+        await posts.relink_project(reel, body.projectId, "Reel", save_async)
+    except ValueError as e:
+        return _bad(str(e))
     return {"success": True, "reel": with_media(reel)}
 
 
@@ -1034,6 +1067,7 @@ async def reels_schedule(reel_id: str, body: ScheduleBody):
         reel["scheduledFor"] = posts.parse_schedule(body.at)
     except ValueError as e:
         return _bad(str(e))
+    reel["remindStage"] = 0   # a new time starts the reminders again
     await save_async(reel)
     if reel["status"] == "planned" and not reel["scheduledFor"]:
         release(reel)   # a planned reel with no date is simply made now

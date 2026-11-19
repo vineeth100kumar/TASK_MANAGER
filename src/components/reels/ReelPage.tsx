@@ -15,6 +15,7 @@ import {
 } from '../../services/reels';
 import { copyText, fetchBlob } from '../../services/posts';
 import { useToast } from '../../context/ToastContext';
+import { ProjectLink } from '../common/ProjectLink';
 
 interface Props {
   reelId: string;
@@ -178,6 +179,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
             {reel.madeIn ? ` · made in ${Math.round(reel.madeIn)}s` : ''}
             {reel.posted ? ' · Posted' : ''}
           </p>
+          {!reel.archived && <div className="mt-2"><ProjectLink projectId={reel.projectId} onChange={async id => { setReel(await reelsApi.setProject(reel.id, id)); }} /></div>}
         </div>
         {reel.archived ? (
           <span className="shrink-0 inline-flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-gray-200 text-gray-600 dark:bg-white/10 dark:text-gray-300">

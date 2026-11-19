@@ -27,6 +27,8 @@ export interface Post {
   taskId: string | null;
   /** ISO time (UTC) it is meant to go live; null when not scheduled. */
   scheduledFor?: string | null;
+  /** Dropped: changed your mind, no reminders; the files are kept. */
+  wontPost?: boolean;
   status: PostStatus;
   error: string;
   log?: PostLogLine[];
@@ -113,6 +115,10 @@ export const postsApi = {
     call<{ post: Post }>(`/api/posts/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.post),
   review: (id: string, action: ReviewAction) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.post),
+  skip: (id: string, undo = false) =>
+    call<{ post: Post }>(`/api/posts/${enc(id)}/skip`, { method: 'POST', body: JSON.stringify({ undo }) }).then(d => d.post),
+  setProject: (id: string, projectId: string) =>
+    call<{ post: Post }>(`/api/posts/${enc(id)}/project`, { method: 'POST', body: JSON.stringify({ projectId }) }).then(d => d.post),
   schedule: (id: string, at: string | null) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/schedule`, { method: 'POST', body: JSON.stringify({ at }) }).then(d => d.post),
   restore: (id: string) => call<{ post: Post }>(`/api/posts/${enc(id)}/restore`, { method: 'POST' }).then(d => d.post),
