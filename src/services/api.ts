@@ -562,10 +562,11 @@ export const api = {
           followUpDate: existing.dueDate || '',
           sinceDate: now.split('T')[0]
         } : existing.waitingFor,
-        completedAt: toStatus === 'done' ? now : null,
+        // Incomplete is closed but not finished: no completedAt, so stats and streaks skip it.
+        completedAt: toStatus === 'done' && stage !== 'incomplete' ? now : null,
         // Finishing an item with doses ticks them all; reopening starts them over.
         ...(normalizeDoses(existing.doseTimes).length
-          ? { dosesDone: toStatus === 'done' ? normalizeDoses(existing.doseTimes) : (existing.status === 'done' ? [] : existing.dosesDone || []) }
+          ? { dosesDone: toStatus === 'done' && stage !== 'incomplete' ? normalizeDoses(existing.doseTimes) : (existing.status === 'done' ? [] : existing.dosesDone || []) }
           : {}),
         version: nextVersion,
         updatedAt: now,

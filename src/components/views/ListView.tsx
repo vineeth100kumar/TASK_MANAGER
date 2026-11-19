@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { withTime, formatClock } from '../../utils/reminders';
-import { Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
+import { XCircle, Calendar as CalendarIcon, Flag, Bell, CalendarDays } from 'lucide-react';
 import { PRIORITIES } from '../../services/constants';
 import { DEFAULT_STATUSES, stageOf, type StatusStage } from '../../services/projectTypes';
 import { formatDateRange, getTodayString } from '../../utils/dateUtils';
@@ -79,7 +79,8 @@ export function ListView({ tasks, onSelect, selectedId, onTransition, statuses =
                       {task.status !== 'done' && (
                         <CompleteButton checked={pressed.has(task.id)} saving={spinning.has(task.id)} onComplete={() => completeSoon(task)} />
                       )}
-                      {task.status === 'done' && <CompleteButton checked onComplete={() => {}} onUndo={() => onTransition(task, 'incomplete')} />}
+                      {task.status === 'done' && task.stage === 'incomplete' && <button onClick={(e) => { e.stopPropagation(); onTransition(task, 'todo'); }} title="Could not be done. Press to reopen" aria-label="Incomplete, reopen" className="w-[22px] h-[22px] rounded-full flex items-center justify-center text-red-500 hover:bg-red-500/10"><XCircle size={20} /></button>}
+                      {task.status === 'done' && task.stage !== 'incomplete' && <CompleteButton checked onComplete={() => {}} onUndo={() => onTransition(task, 'todo')} />}
                     </>
                   ) : task.entityType === 'event' ? (
                     <CalendarDays size={20} className="text-purple-500" />

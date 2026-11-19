@@ -36,9 +36,9 @@ export function TableView({ tasks, onSelect, onTransition }: TableViewProps) {
                   <td className="px-6 py-3.5 text-gray-400 text-xs font-semibold tracking-wide">
                     <div className="flex items-center gap-2.5">
                       {onTransition && (
-                        <button onClick={(e) => { e.stopPropagation(); onTransition(task, isDone ? 'incomplete' : 'done'); }}
+                        <button onClick={(e) => { e.stopPropagation(); onTransition(task, isDone ? 'todo' : 'done'); }}
                           className={`w-4 h-4 rounded-full border flex items-center justify-center transition-colors ${isDone ? 'bg-emerald-500 border-emerald-500 text-white' : 'border-gray-300 dark:border-gray-600 hover:border-blue-500'}`}
-                          title={isDone ? 'Mark as Incomplete' : 'Mark as Done'}>
+                          title={isDone ? 'Mark as To Do' : 'Mark as Done'}>
                           {isDone && <Check size={10} strokeWidth={3} />}
                         </button>
                       )}

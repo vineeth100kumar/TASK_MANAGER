@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Inbox, CheckCircle2, Plus, Sparkles, ChevronRight, Check, X, Play, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react';
+import { XCircle, Inbox, CheckCircle2, Plus, Sparkles, ChevronRight, Check, X, Play, ShieldCheck, AlertTriangle, RotateCcw } from 'lucide-react';
 import { useCompletion } from '../../hooks/useCompletion';
 import { TaskRow } from '../common/TaskRow';
 import { ProjectGroups } from '../common/ProjectGroups';
@@ -123,8 +123,8 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
 
   const handleReopen = async (item: WorkItem) => {
     try {
-      await api.workItems.transitionStatus(item.id, 'todo', undefined, 'incomplete');
-      showToast('Marked incomplete');
+      await api.workItems.transitionStatus(item.id, 'todo', undefined, null);
+      showToast('Reopened');
       loadInbox();
     } catch (err: any) {
       showToast('Could not reopen: ' + err.message, 'error');
@@ -205,13 +205,13 @@ export function InboxView({ lifeContext, onSelectTask }: InboxViewProps) {
           <div className="space-y-2">
             {done.slice(0, 100).map(item => (
               <div key={item.id} className="px-4 py-3 rounded-2xl surface-item flex items-center gap-3">
-                <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />
+                {item.stage === 'incomplete' ? <XCircle size={18} className="text-red-500 shrink-0" aria-label="Could not be done" /> : <CheckCircle2 size={18} className="text-emerald-500 shrink-0" />}
                 <div className="min-w-0 flex-1 cursor-pointer" onClick={() => onSelectTask(item.id)}>
                   <p className="text-[13.5px] font-medium text-gray-500 line-through truncate">{item.title || 'Untitled'}</p>
-                  <p className="text-[11px] text-gray-400">{item.project?.name || item.area?.name || 'No project'}{item.completedAt ? ` · done ${timeAgo(item.completedAt)}` : ''}</p>
+                  <p className="text-[11px] text-gray-400">{item.project?.name || item.area?.name || 'No project'}{item.stage === 'incomplete' ? ' · incomplete, could not be done' : item.completedAt ? ` · done ${timeAgo(item.completedAt)}` : ''}</p>
                 </div>
                 <button onClick={() => handleReopen(item)} className="px-2.5 py-1.5 rounded-lg text-[12px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-black/5 dark:hover:bg-white/5 flex items-center gap-1">
-                  <RotateCcw size={12} /> Incomplete
+                  <RotateCcw size={12} /> Reopen
                 </button>
               </div>
             ))}

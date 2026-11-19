@@ -109,10 +109,10 @@ describe('older and odd records', () => {
     for (const id of [SAGE_ID, 'p-content', 'p-old', null]) {
       const list = statusesFor(id as any, projects);
       const inc = list.find(x => x.id === 'incomplete');
-      expect(inc?.base).toBe('todo');
+      expect(inc?.base).toBe('done');
       expect(list[list.length - 1].id).toBe('incomplete');
     }
-    const it = norm({ id: 'e', projectId: SAGE_ID, status: 'todo', stage: 'incomplete' });
+    const it = norm({ id: 'e', projectId: SAGE_ID, status: 'done', stage: 'incomplete' });
     expect(stageOf(it, statusesFor(SAGE_ID, projects)).id).toBe('incomplete');
   });
 
