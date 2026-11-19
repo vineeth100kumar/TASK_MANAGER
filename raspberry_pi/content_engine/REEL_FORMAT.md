@@ -286,6 +286,36 @@ timing and your wording stays on the captions as written in `say:`. Read the `sa
 if you change words the captions still show the script's words, and timing may drift a little.
 With your own recording every slide needs a `say:` line.
 
+## Writing for the Phonon voice (optional)
+
+Skip this section if you use Kokoro or your own recording; nothing above changes. Phonon 31M is chosen with
+`voice: phonon:Zoey` (or in the voice picker). It is read differently from Kokoro, so write its `say:` lines
+like this:
+
+- **Let Phonon read numbers and symbols itself.** Write `65%`, `₹5 lakh`, `$3.5 million`, `9:30`, `2026`
+  as normal text. Phonon turns them into words. Do not respell them, and the Kokoro respellings
+  (`U P I`, `sass`, `pie`) are not applied.
+- **Abbreviations:** use the form people say. For letters, keep `N X P` / `A I` spaced as before (captions
+  still show NXP / AI). For a word-like acronym write it as a word (`NASA`). If one is read wrongly, add
+  `pronounce: UPI = you pee eye` in the header: it is applied to Phonon too.
+- **One idea per sentence, 6 to 14 words, ends with `.` `?` or `!`.** Phonon speaks each sentence as its own
+  piece and sets the pause after it itself. A slide's `say:` is sent to it as a whole, so do not
+  chop one sentence into fragments with full stops (`So. It works.`): that is where odd gaps come from.
+- **Pauses:** punctuation is NOT turned into extra silence for Phonon. Only an explicit `[pause]`,
+  `[pause 0.6]`, `[breath]` or `[beat]` adds quiet, so use them sparingly, right before a reveal.
+  `pauses:` (tight/relaxed) has no effect on Phonon's own sentence pauses.
+- **No ellipsis tricks or stacked punctuation** (`...`, `?!`, `--`): there is no punctuation-as-direction
+  with Phonon. A dash becomes a comma. Use a new sentence for a turn.
+- **Pace:** `speed:` works (above 1 faster, below 1 slower) and `tone:` sets a slide's pace the same way.
+  If a whole reel sounds slow, set `speed: 1.1`; if rushed, `0.95`. Phonon's own default is its
+  natural pace, so start at 1.0.
+- **Voices:** US women Zoey, Juniper, Everly, Harper, Hadley, Delia; US men Easton, Micah, Trevor,
+  Russell, Preston, Miles; UK women Maeve, Freya, Pippa, Elodie-Rose, Imogen, Lottie, Bryony;
+  UK men Alfie, Hugh, Edwin, Spencer, Toby, Teddy. No blends. A slide can use another with `voice:`.
+- **Check by ear, once:** make a short reel first. This guide follows Phonon's published notes (it
+  reads long text sentence by sentence, normalises numbers itself, and has no pause markup); how
+  each punctuation mark sounds is not documented, so adjust after listening.
+
 ## What the checks say
 
 Nothing is ever drawn over the captions: after every slide is laid out, the renderer measures it

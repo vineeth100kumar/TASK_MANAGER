@@ -185,6 +185,36 @@ def pieces(text: str) -> List[Tuple[str, float]]:
     return merged
 
 
+def phonon_speakable(text: str, pronounce: Optional[dict] = None) -> str:
+    """Narration for Phonon: it normalises numbers, money, percent and abbreviations itself (lang en),
+    so only quotes and dashes are tidied and the script's own `pronounce:` respellings applied.
+    Kokoro's respellings (U P I, sass, pie) and symbol-to-word rewrites are NOT used."""
+    t = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
+    t = re.sub(r"\s*[–—]\s*", ", ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return apply_pronounce_only(t, pronounce)
+
+
+def apply_pronounce_only(text: str, extra: Optional[dict] = None) -> str:
+    for word in sorted(extra or {}, key=len, reverse=True):
+        flags = 0 if any(c.isupper() for c in word) else re.I
+        text = re.sub(rf"(?<![\w]){re.escape(word)}(?![\w])", extra[word], text, flags=flags)
+    return text
+
+
+def phonon_pieces(text: str) -> List[Tuple[str, float]]:
+    """A slide's narration for Phonon as (text, quiet after): whole in one piece, so Phonon's own
+    sentence handling sets the rhythm. Only an explicit [pause]/[breath]/[beat] mark splits it and adds quiet."""
+    from .script import PAUSE_MARK
+    out: List[Tuple[str, float]] = []
+    pos = 0
+    for m in PAUSE_MARK.finditer(text):
+        out.append((text[pos:m.start()].strip(), float(m.group(2)) if m.group(2) else MARK_PAUSE[m.group(1).lower()]))
+        pos = m.end()
+    out.append((text[pos:].strip(), 0.0))
+    return [(t, g) for t, g in out if t]
+
+
 # --- writing and reading wave files without extra packages ---
 
 def write_wav(path: Path, samples, rate: int = SAMPLE_RATE) -> None:
@@ -341,10 +371,12 @@ def _render_tts(scenes, voice, speed, work, say, engine, pauses, polish, loudnes
         v = sc.voice or voice
         pace = speed * (sc.speed or 1.0)
         chunks = []
-        segs = pieces(sc.say_raw or sc.say)
+        ph = is_phonon(v) and engine is None
+        segs = phonon_pieces(sc.say_raw or sc.say) if ph else pieces(sc.say_raw or sc.say)
         for k, (text, gap) in enumerate(segs):
             if text:
-                chunks.append(np.asarray(speak(speakable(text, pronounce), v, pace), dtype="float32"))
+                spoken = phonon_speakable(text, pronounce) if ph else speakable(text, pronounce)
+                chunks.append(np.asarray(speak(spoken, v, pace), dtype="float32"))
             if k < len(segs) - 1 and gap:
                 chunks.append(silence(gap * pauses))
         audio = np.concatenate(chunks) if chunks else silence(0.2)
