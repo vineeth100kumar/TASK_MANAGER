@@ -355,7 +355,8 @@ def _first_error(report: dict) -> str:
     return f"The script has {report['errors']} error(s); fix them first. {first['message'] if first else ''}{where}".strip()
 
 
-def start(script: str, title: str = "", style: str = "", project_id: str = "") -> dict:
+def start(script: str, title: str = "", style: str = "", project_id: str = "", scheduled_for: str = "") -> dict:
+    """Make a reel now, or (with scheduled_for, and no voice recording to wait for) keep it "planned" until content_schedule draws it ahead of that time."""
     script = _clean_script(script)
     if not script.strip():
         raise ValueError("Paste a script first.")
@@ -366,7 +367,9 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
     report = check(script)
     if not report["ok"]:
         raise ValueError(_first_error(report))
-    if queue_length() >= MAX_QUEUE:
+    planned_for = posts.parse_schedule(scheduled_for) if scheduled_for else None
+    plan = bool(planned_for) and not report["needsRecording"]
+    if not plan and queue_length() >= MAX_QUEUE:
         raise Busy(f"{MAX_QUEUE} reels are already waiting. Try again in a few minutes.")
     reel = {
         "id": uuid.uuid4().hex[:12],
@@ -379,8 +382,8 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
         "voiceFile": "",
         "projectId": project_id or None,
         "taskId": None,
-        "scheduledFor": None,   # ISO time (UTC) the reel goes live; set from the project Pipeline
-        "status": "waiting" if report["needsRecording"] else "queued",
+        "scheduledFor": planned_for,   # ISO time (UTC) the reel goes live; set from the project Pipeline
+        "status": "waiting" if report["needsRecording"] else ("planned" if plan else "queued"),
         "review": "pending",   # pending | approved | rejected
         "archived": False,     # a rejected reel is archived: the script is kept, the video removed
         "archivedAt": None,
@@ -404,13 +407,34 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
         "emailError": "",
     }
     # The built-in voice can't speak here: say so now, rather than after a minute of drawing.
-    voice_problem = _voice_problem() if reel["status"] == "queued" else ""
+    voice_problem = _voice_problem() if reel["status"] in ("queued", "planned") else ""
     if voice_problem:
         reel.update(status="failed", error=voice_problem, finishedAt=_utc())
     save(reel)
     if reel["status"] == "queued":
         _spawn(_run(reel))
     return reel
+
+
+def planned() -> List[dict]:
+    """Reels saved with a date, waiting for their turn to be made."""
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT payload FROM reels WHERE status = 'planned'").fetchall()
+    finally:
+        conn.close()
+    return [json.loads(r["payload"]) for r in rows]
+
+
+def release(reel: dict) -> bool:
+    """Start making a planned reel. Must run on the event loop. False when it is not planned or the queue is full."""
+    if reel.get("status") != "planned" or queue_length() >= MAX_QUEUE:
+        return False
+    reel["status"] = "queued"
+    _note(reel, "Making ahead of its time")
+    save(reel)
+    _spawn(_run(reel))
+    return True
 
 
 def restart(reel: dict, script: str = "", style: str = "") -> dict:
@@ -740,6 +764,7 @@ async def _move_task(reel: dict, stage: str, status: str) -> None:
 async def _after_done(reel: dict) -> None:
     await _move_task(reel, "editing", "in_progress")
     await _email(reel)
+    await posts._say_ready(reel, "reel")
 
 
 # --- Email ---
@@ -879,6 +904,7 @@ class NewReel(BaseModel):
     title: str = ""
     style: str = ""
     projectId: str = ""
+    scheduledFor: str = ""   # ISO time: keep the script and make it ahead of this time
 
 
 class Again(BaseModel):
@@ -930,7 +956,7 @@ async def reels_create(body: NewReel):
     if not state["ready"]:
         return _bad("The reel maker isn't ready on this Pi. " + " ".join(state["problems"]), 503)
     try:
-        reel = start(body.script, body.title, body.style, body.projectId)
+        reel = start(body.script, body.title, body.style, body.projectId, body.scheduledFor)
     except ValueError as e:
         return _bad(str(e))
     except Busy as e:
@@ -1006,6 +1032,8 @@ async def reels_schedule(reel_id: str, body: ScheduleBody):
     except ValueError as e:
         return _bad(str(e))
     await save_async(reel)
+    if reel["status"] == "planned" and not reel["scheduledFor"]:
+        release(reel)   # a planned reel with no date is simply made now
     return {"success": True, "reel": with_media(reel)}
 
 

@@ -11,7 +11,7 @@ import { piBackendUrl, piHeaders } from './piBackend';
 
 export const REEL_EVENT = 'sage:reel';
 
-export type ReelStatus = 'waiting' | 'queued' | 'running' | 'done' | 'failed';
+export type ReelStatus = 'planned' | 'waiting' | 'queued' | 'running' | 'done' | 'failed';
 
 export interface ReelLogLine { at: string; text: string }
 export interface ReelStep { n: number; type: string; start: number; end: number; reveals: number[] }
@@ -127,7 +127,7 @@ export const reelsApi = {
   list: (projectId = '', archived = false) =>
     call<{ status: ReelMakerStatus; reels: Reel[] }>(`/api/reels?${projectId ? `projectId=${enc(projectId)}&` : ''}archived=${archived ? 'true' : 'false'}`),
   check: (script: string) => call<{ check: ReelCheck }>('/api/reels/check', { method: 'POST', body: JSON.stringify({ script }) }).then(d => d.check),
-  create: (body: { script: string; title?: string; style?: string; projectId?: string }) =>
+  create: (body: { script: string; title?: string; style?: string; projectId?: string; scheduledFor?: string }) =>
     call<{ reel: Reel }>('/api/reels', { method: 'POST', body: JSON.stringify(body) }).then(d => d.reel),
   get: (id: string) => call<{ reel: Reel; status: ReelMakerStatus }>(`/api/reels/${enc(id)}`),
   remake: (id: string, body: { script?: string; style?: string }) =>

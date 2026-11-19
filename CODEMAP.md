@@ -157,6 +157,7 @@ Radar, Data and Migration, Server and Reset).
 | `chat_capture.py`, `canvas_thinker.py`, `voice_command.py`, `voice_assistant.py`, `voice_stt.py` | AI for Chat, Canvas, Siri and voice |
 | `radar.py`, `radar_research.py`, `markets.py`, `prices.py`, `sparks.py`, `industry.py` | Radar (most have their own `router`) |
 | `drop.py`, `posts.py`, `posts_copies.py`, `reels.py`, `recorder.py` | Drop, Posts, Reels, Recordings routers |
+| `content_schedule.py` | Background loop (every minute): a post/reel saved with a date (status `planned`) is drawn 1 hour before its slot, or earlier when the Pi is idle and the slot is within 24 h; Herald says when it is ready (`speaker.on_content_ready`). Env `SAGE_CONTENT_LEAD_MINUTES`, `SAGE_CONTENT_EARLY_HOURS` |
 | `life_mode.py`, `phone_link.py`, `bluetooth_control.py`, `public_link.py` | Modes, iPhone BLE, Bluetooth, public URL |
 | `speaker.py`, `speak_worker.py`, `herald_extras.py`, `herald_journal.py`, `room_music.py`, `spotify.py`, `audio_probe.py` | Herald, music, audio diagnostics |
 | `system_health.py`, `logstore.py`, `diagnostics.py`, `uptime.py`, `lowprio.py` | Health report, capped log, blackout probe, "back up" emails, nice/ionice for heavy jobs |

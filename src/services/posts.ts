@@ -11,7 +11,7 @@ import { piBackendUrl, piHeaders } from './piBackend';
 
 export const POST_EVENT = 'sage:post';
 
-export type PostStatus = 'queued' | 'running' | 'done' | 'failed';
+export type PostStatus = 'planned' | 'queued' | 'running' | 'done' | 'failed';
 
 export interface PostLogLine { at: string; text: string }
 
@@ -104,7 +104,7 @@ export const postsApi = {
     call<{ status: MakerStatus; posts: Post[] }>(`/api/posts?${projectId ? `projectId=${enc(projectId)}&` : ''}archived=${archived ? 'true' : 'false'}`),
   status: () => call<{ status: MakerStatus }>('/api/posts/status').then(d => d.status),
   check: (script: string) => call<{ check: ScriptCheck }>('/api/posts/check', { method: 'POST', body: JSON.stringify({ script }) }).then(d => d.check),
-  create: (body: { script: string; title?: string; style?: string; format?: string; projectId?: string }) =>
+  create: (body: { script: string; title?: string; style?: string; format?: string; projectId?: string; scheduledFor?: string }) =>
     call<{ post: Post }>('/api/posts', { method: 'POST', body: JSON.stringify(body) }).then(d => d.post),
   get: (id: string) => call<{ post: Post; status: MakerStatus }>(`/api/posts/${enc(id)}`),
   rerender: (id: string, body: { script?: string; style?: string; format?: string }) =>

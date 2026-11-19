@@ -513,6 +513,15 @@ says, how important it is, or whether it is good news. Vary how you say it each 
 Facts (JSON):
 """
 
+CONTENT_READY_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 22 words) spoken aloud to say that a scheduled \
+post or reel has finished drawing and is ready to look at. Facts: "kind" (post or reel), "title", \
+"project" (may be empty), "when" (when it is due to go live, such as Monday at 9 AM; may be empty), and \
+"late" (true if that time has already passed: then say so plainly). Say it is ready. Mention the title \
+at most once, do not praise the work, and do not read anything but the title and the time. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
 BACK_ONLINE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 14 words) spoken aloud to say that \
 Sage is back online. "reason" says why it was down: update (restarted with the latest changes), \
 restart, reboot, power (a power cut or blip) or crash (it fell over). Be honest about the reason: \
@@ -2158,6 +2167,20 @@ class Speaker:
             async def brief() -> None:
                 await self.say(await self.greeting(wake=True), "wake")
             asyncio.ensure_future(brief())
+
+    async def on_content_ready(self, facts: dict) -> None:
+        """A scheduled post or reel finished drawing (called on the loop). Spoken only while
+        you're home and the speaker is on; the email and the Pipeline still tell you otherwise."""
+        settings = get_settings()
+        home = bool(self.phone and self.phone.available and self.phone.home)
+        if not (self.loop and has_output(settings) and home):
+            return
+        what = facts.get("kind", "post")
+        text = await self._ai_line({**facts, "name": settings.get("callMe", "")}, CONTENT_READY_PROMPT, timeout=6)
+        if not text:
+            when = f" for {facts['when']}" if facts.get("when") else ""
+            text = f"Your {what}{when} is ready" + (", though its time has already passed." if facts.get("late") else ".")
+        await self.say(text, "content", meta={"kind": "content", "title": str(facts.get("title") or "")})
 
     def on_reminder(self, item: dict, message: dict) -> None:
         """notifier calls this (from its worker thread) as a reminder goes out.

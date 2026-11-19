@@ -12,7 +12,7 @@ import type { Project, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
 import { ContentCalendar } from './ContentCalendar';
-import { ColumnId, Piece, columnOf, toLocalInput, toPiece, whenText } from '../../services/contentPieces';
+import { ColumnId, Piece, columnOf, drawAtText, toLocalInput, toPiece, whenText } from '../../services/contentPieces';
 
 const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: string; drop: boolean }[] = [
   { id: 'idea', label: 'Idea', icon: Lightbulb, tint: 'text-amber-500', drop: false },
@@ -85,6 +85,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
   const moveTo = async (piece: Piece, to: ColumnId) => {
     const from = columnOf(piece);
     if (from === to || !COLUMNS.find(c => c.id === to)?.drop || from === 'drafting') return;
+    if (piece.status === 'planned' && to !== 'scheduled') { showToast('Not drawn yet. Draw it now, or change its time.', 'info'); return; }
     if (to === 'scheduled') { setPicking({ piece, value: toLocalInput(piece.scheduledFor) }); return; }
     if (to === 'posted') { await call(piece, () => setPosted(piece, true), 'Marked as posted'); return; }
     // Ready: take it off the schedule and un-post it if it was posted.
@@ -106,6 +107,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
     }, `Scheduled for ${whenText(when.toISOString())}`);
   };
 
+  const drawNow = (p: Piece) => call(p, () => (p.kind === 'post' ? postsApi.rerender(p.id, {}) : reelsApi.remake(p.id, {})), 'Started');
   const open = (p: Piece) => (p.kind === 'post' ? openPosts({ postId: p.id }) : openReels({ reelId: p.id }));
 
   const renderCard = (p: Piece) => {
@@ -130,7 +132,16 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
             <CalendarClock size={12} /> Schedule
           </button>
         )}
-        {col === 'scheduled' && (
+        {col === 'scheduled' && p.status === 'planned' && (
+          <div className="mt-2 space-y-1.5">
+            <p className="text-[11.5px] text-gray-500">Script saved. Draws about {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}.</p>
+            <div className="flex flex-wrap gap-1.5">
+              <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
+              <button type="button" onClick={() => drawNow(p)} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-500/15 dark:text-purple-300">{p.kind === 'post' ? 'Draw now' : 'Make now'}</button>
+            </div>
+          </div>
+        )}
+        {col === 'scheduled' && p.status !== 'planned' && (
           <div className="mt-2 flex flex-wrap gap-1.5">
             <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Change time</button>
             <button type="button" onClick={() => moveTo(p, 'posted')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300">Mark posted</button>
@@ -201,7 +212,7 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
               className="w-full h-11 px-3 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[14px]" />
             <div className="flex gap-2">
               <button type="button" onClick={confirmPick} className="flex-1 h-10 rounded-xl bg-sky-600 text-white text-[14px] font-semibold">Schedule</button>
-              {picking.piece.scheduledFor && (
+              {picking.piece.scheduledFor && picking.piece.status !== 'planned' && (
                 <button type="button" onClick={() => { const p = picking.piece; setPicking(null); moveTo(p, 'ready'); }} className="h-10 px-4 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[14px] font-semibold">Unschedule</button>
               )}
             </div>

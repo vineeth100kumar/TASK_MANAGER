@@ -24,6 +24,7 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
   const [style, setStyle] = useState(edit?.style || '');
   const [format, setFormat] = useState(edit?.format || '');
   // Opened outside a project with exactly one content project: use it (pick "No project" to leave it out).
+  const [postAt, setPostAt] = useState('');   // optional: when it should go live; the Pi then draws it ahead of time
   const [project, setProject] = useState(() => {
     if (projectId || edit) return projectId;
     const only = (api.sync.getState().projects.filter(Boolean) as Project[]).filter(p => p.type === 'content' && p.autoContent);
@@ -76,7 +77,7 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
         const post = await postsApi.rerender(edit.id, { script, style: effectiveStyle, format: effectiveFormat });
         onMade(post.id);
       } else {
-        const post = await postsApi.create({ script, style: effectiveStyle, format: effectiveFormat, projectId: project });
+        const post = await postsApi.create({ script, style: effectiveStyle, format: effectiveFormat, projectId: project, ...(postAt ? { scheduledFor: new Date(postAt).toISOString() } : {}) });
         onMade(post.id);
       }
     } catch (e: any) {
@@ -180,6 +181,13 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
           </div>
           {!edit && (
             <div>
+              <label className="field-label mb-1.5" htmlFor="post-at">Post at (optional)</label>
+              <input id="post-at" type="datetime-local" value={postAt} onChange={e => setPostAt(e.target.value)} className="field w-full" />
+              {postAt && <p className="mt-1 text-[11.5px] text-gray-500">The Pi saves the script and draws it about an hour before. Herald tells you when it is ready.</p>}
+            </div>
+          )}
+          {!edit && (
+            <div>
               <label className="field-label mb-1.5">Project</label>
               <Select value={project} onChange={setProject} className="field w-full" aria-label="Project">
                 <option value="">No project</option>
@@ -197,7 +205,7 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
         <div className="max-w-3xl mx-auto flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
           <button type="button" disabled={blocked} onClick={make}
             className="flex-1 md:flex-none md:min-w-[200px] flex items-center justify-center gap-2 h-12 md:h-11 px-6 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] disabled:opacity-40 shadow-sm shadow-purple-600/20 active:scale-[0.98] transition">
-            {busy ? <LoaderCircle size={18} className="animate-spin" /> : <Wand2 size={18} />} {edit ? 'Make again' : 'Make slides'}
+            {busy ? <LoaderCircle size={18} className="animate-spin" /> : <Wand2 size={18} />} {edit ? 'Make again' : postAt ? 'Save, draw it later' : 'Make slides'}
           </button>
           <p className="text-[12.5px] text-gray-500 flex items-start gap-1.5">
             <Mail size={14} className="shrink-0 mt-0.5" />

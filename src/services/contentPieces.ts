@@ -7,6 +7,9 @@ export type Kind = 'post' | 'reel';
 export type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; archived: boolean; projectId: string | null; createdAt: string };
 export type ColumnId = 'idea' | 'script' | 'drafting' | 'ready' | 'scheduled' | 'posted';
 
+/** The Pi starts drawing a planned piece this long before its slot (content_schedule.py, LEAD_MINUTES). */
+export const LEAD_MINUTES = 60;
+
 const DRAFTING = new Set(['waiting', 'queued', 'running', 'failed']);
 
 export function columnOf(p: Piece): ColumnId {
@@ -53,3 +56,9 @@ export function moveToDay(day: Date, from: string | null): string {
   return out.toISOString();
 }
 
+
+/** When the Pi will start drawing a planned piece: an hour before its slot. */
+export function drawAtText(iso: string): string {
+  const d = new Date(new Date(iso).getTime() - LEAD_MINUTES * 60_000);
+  return isNaN(d.getTime()) ? '' : d.toLocaleString(undefined, { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+}

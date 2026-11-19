@@ -2,13 +2,14 @@
 // The list, the New post screen and one post's page, with the project filter
 // when it is opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CalendarClock, CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { MakerStatus, POST_EVENT, Post, mediaUrl, postsApi, postsAvailable } from '../../services/posts';
 import { NewPostScreen } from '../posts/NewPostScreen';
 import { PostPage } from '../posts/PostPage';
 import { timeAgo } from '../../services/radar';
+import { drawAtText } from '../../services/contentPieces';
 
 type Screen = { name: 'list' } | { name: 'new' } | { name: 'post'; id: string } | { name: 'edit'; post: Post };
 
@@ -118,13 +119,13 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
                   className={`w-10 ${p.format === 'square' ? 'h-10' : 'h-[50px]'} rounded-lg object-cover shrink-0 bg-black/[0.06] dark:bg-white/10`} />
               ) : (
               <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${p.status === 'done' ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/20 dark:text-emerald-300' : p.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'}`}>
-                {p.status === 'done' ? <CheckCircle2 size={18} /> : p.status === 'failed' ? <TriangleAlert size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
+                {p.status === 'done' ? <CheckCircle2 size={18} /> : p.status === 'failed' ? <TriangleAlert size={18} /> : p.status === 'planned' ? <CalendarClock size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
               </span>
               )}
               <span className="min-w-0 flex-1">
                 <span className="block text-[14.5px] font-semibold text-gray-900 dark:text-white truncate">{p.title}</span>
                 <span className="block text-[12px] text-gray-500 truncate">
-                  {p.archived ? 'Archived · script kept' : p.status === 'done' ? `${p.slideCount} slides${p.review === 'approved' ? ' · Approved' : ''}` : p.status === 'failed' ? 'Failed' : `Drawing ${p.progress.done}/${p.progress.total}`}
+                  {p.archived ? 'Archived · script kept' : p.status === 'done' ? `${p.slideCount} slides${p.review === 'approved' ? ' · Approved' : ''}` : p.status === 'failed' ? 'Failed' : p.status === 'planned' ? `Draws about ${p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}` : `Drawing ${p.progress.done}/${p.progress.total}`}
                   {p.posted ? ' · Posted' : ''}{projectName(p.projectId) && !projectId ? ` · ${projectName(p.projectId)}` : ''} · {timeAgo(p.createdAt)}
                 </span>
               </span>
