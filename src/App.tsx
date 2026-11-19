@@ -41,6 +41,9 @@ import { SageLoader } from './components/common/SageLoader';
 import { BootBoundary } from './components/common/BootBoundary';
 import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
+import { ContentSummary } from './components/views/ContentSummary';
+import { ContentWeekView } from './components/views/ContentWeekView';
+import { ProjectPipeline } from './components/views/ProjectPipeline';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
@@ -479,6 +482,7 @@ function MainApp() {
   };
   const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
   // A project's board and list group by its type's statuses; elsewhere, the usual four.
+  const pipelineOn = isProjectPage && presentationMode === 'pipeline' && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
   const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
 
   return (
@@ -538,6 +542,8 @@ function MainApp() {
               <PostsView projectId={postsProject} focus={postsFocus} />
             ) : activeView === 'reels' ? (
               <ReelsView projectId={reelsProject} focus={reelsFocus} />
+            ) : activeView === 'contentweek' ? (
+              <ContentWeekView />
             ) : activeView === 'recordings' ? (
               <RecordingsView />
             ) : activeView === 'hidden' ? (
@@ -559,10 +565,15 @@ function MainApp() {
               />
             ) : (
               <div>
-                {isProjectPage && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
+                {isProjectPage && !pipelineOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
                 {isProjectPage && (
-                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
+                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })}
+                    pipelineOn={pipelineOn} onPipeline={() => setPresentationMode(pipelineOn ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : 'pipeline')} />
                 )}
+                {isProjectPage && !pipelineOn && api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent && (
+                  <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
+                )}
+                {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
@@ -608,6 +619,7 @@ function MainApp() {
                     </motion.div>
                   </AnimatePresence>
                 )}
+                </>)}
               </div>
             )}
             </Suspense>

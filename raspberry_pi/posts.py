@@ -494,7 +494,8 @@ def _clean_script(script: str) -> str:
     return (script or "").replace("\r\n", "\n").replace("\r", "\n").lstrip("﻿")
 
 
-def start(script: str, title: str = "", style: str = "", fmt: str = "", project_id: str = "") -> dict:
+def start(script: str, title: str = "", style: str = "", fmt: str = "", project_id: str = "", scheduled_for: str = "") -> dict:
+    """Save a script and draw it now, or (with scheduled_for) keep it "planned" until content_schedule draws it ahead of that time."""
     script = _clean_script(script)
     if not script.strip():
         raise ValueError("Paste a script first.")
@@ -509,7 +510,8 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         first = next((i for i in report["issues"] if i["severity"] == "ERROR"), None)
         where = f" (line {first['line']})" if first and first.get("line") else ""
         raise ValueError(f"The script has {report['errors']} error(s); fix them first. {first['message'] if first else ''}{where}".strip())
-    if queue_length() >= MAX_QUEUE:
+    planned_for = parse_schedule(scheduled_for) if scheduled_for else None
+    if not planned_for and queue_length() >= MAX_QUEUE:
         raise Busy(f"{MAX_QUEUE} posts are already waiting. Try again in a minute.")
     post = {
         "id": uuid.uuid4().hex[:12],
@@ -520,7 +522,8 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "format": fmt or report["format"] or "portrait",
         "projectId": project_id or None,
         "taskId": None,
-        "status": "queued",
+        "scheduledFor": planned_for,   # ISO time (UTC) the post goes live; set from the project Pipeline
+        "status": "planned" if planned_for else "queued",
         "error": "",
         "log": [],
         "progress": {"done": 0, "total": len(report["slides"])},
@@ -541,8 +544,30 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "emailError": "",
     }
     save(post)
-    _spawn(_run(post))
+    if not planned_for:
+        _spawn(_run(post))
     return post
+
+
+def planned() -> List[dict]:
+    """Posts saved with a date, waiting for their turn to be drawn."""
+    conn = _db()
+    try:
+        rows = conn.execute("SELECT payload FROM posts WHERE status = 'planned'").fetchall()
+    finally:
+        conn.close()
+    return [json.loads(r["payload"]) for r in rows]
+
+
+def release(post: dict) -> bool:
+    """Start drawing a planned post. Must run on the event loop. False when it is not planned or the queue is full."""
+    if post.get("status") != "planned" or queue_length() >= MAX_QUEUE:
+        return False
+    post["status"] = "queued"
+    _note(post, "Drawing ahead of its time")
+    save(post)
+    _spawn(_run(post))
+    return True
 
 
 def restart(post: dict, script: str = "", style: str = "", fmt: str = "") -> dict:
@@ -855,9 +880,38 @@ async def _move_task(post: dict, stage: str, status: str) -> None:
         logstore.warn("posts", f"Couldn't move the task for post {post['id']}: {e}")
 
 
+# Set by db_server (speaker.py): Herald says a scheduled post or reel is ready.
+on_content_ready: Optional[Callable[[dict], Awaitable[None]]] = None
+
+
+def ready_facts(item: dict, kind: str) -> dict:
+    """What Herald is told about a finished post or reel that has a date."""
+    tz = notifier._tz(notifier.get_prefs())
+    facts = {"kind": kind, "title": item.get("title", ""), "when": "", "late": False,
+             "project": (_project(item) or {}).get("name", "")}
+    try:
+        due = datetime.datetime.fromisoformat(str(item.get("scheduledFor")).replace("Z", "+00:00")).astimezone(tz)
+        clock = due.strftime("%I:%M %p").lstrip("0").replace(":00", "")
+        facts["when"] = f"{due.strftime('%A')} at {clock}"
+        facts["late"] = due < datetime.datetime.now(tz)
+    except (TypeError, ValueError):
+        pass
+    return facts
+
+
+async def _say_ready(item: dict, kind: str) -> None:
+    if not item.get("scheduledFor") or on_content_ready is None:
+        return
+    try:
+        await on_content_ready(ready_facts(item, kind))
+    except Exception as e:
+        logstore.warn("posts", f"Herald couldn't announce {kind} {item.get('id')}: {e}")
+
+
 async def _after_done(post: dict) -> None:
     await _move_task(post, "editing", "in_progress")
     await _email(post)
+    await _say_ready(post, "post")
 
 
 # --- Email ---
@@ -1007,6 +1061,7 @@ class NewPost(BaseModel):
     style: str = ""
     format: str = ""
     projectId: str = ""
+    scheduledFor: str = ""   # ISO time: keep the script and draw it ahead of this time
 
 
 class Again(BaseModel):
@@ -1072,7 +1127,7 @@ async def posts_create(body: NewPost):
     if not status()["ready"]:
         return _bad("The slide maker isn't ready on this Pi. " + " ".join(status()["problems"]), 503)
     try:
-        post = start(body.script, body.title, body.style, body.format, body.projectId)
+        post = start(body.script, body.title, body.style, body.format, body.projectId, body.scheduledFor)
     except ValueError as e:
         return _bad(str(e))
     except Busy as e:
@@ -1123,6 +1178,38 @@ async def posts_posted(post_id: str, undo: bool = False):
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+    return {"success": True, "post": with_media(post)}
+
+
+class ScheduleBody(BaseModel):
+    at: Optional[str] = None   # ISO datetime, or empty to unschedule
+
+
+def parse_schedule(at: Optional[str]) -> Optional[str]:
+    """An ISO datetime as UTC text, or None to clear. Raises ValueError for junk."""
+    if not at:
+        return None
+    try:
+        when = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("That date and time isn't valid.")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@router.post("/api/posts/{post_id}/schedule")
+async def posts_schedule(post_id: str, body: ScheduleBody):
+    post = get(post_id)
+    if not post:
+        return _missing()
+    try:
+        post["scheduledFor"] = parse_schedule(body.at)
+    except ValueError as e:
+        return _bad(str(e))
+    await save_async(post)
+    if post["status"] == "planned" and not post["scheduledFor"]:
+        release(post)   # a planned post with no date is simply drawn now
     return {"success": True, "post": with_media(post)}
 
 

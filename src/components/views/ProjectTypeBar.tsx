@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Clapperboard, GalleryHorizontal, Pencil, Plus, RotateCcw } from 'lucide-react';
+import { CheckCircle2, Clapperboard, Workflow, GalleryHorizontal, Pencil, Plus, RotateCcw } from 'lucide-react';
 import { openPosts } from '../../services/posts';
 import { openReels } from '../../services/reels';
 import { api } from '../../services/api';
@@ -12,7 +12,7 @@ import { ProjectTypeMenu } from '../common/ProjectTypePicker';
 
 // The strip at the top of a project's page: its type (tap to change) and one
 // chip per status that type uses, with a count; a chip shows only that status.
-export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void }) {
+export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, pipelineOn, onPipeline }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void; pipelineOn?: boolean; onPipeline?: () => void }) {
   const { showToast } = useToast();
   const read = () => {
     // The same items the page below starts from (before its filters), so
@@ -72,6 +72,13 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { pro
         </button>
         {project.autoContent && (
           <>
+            {onPipeline && (
+              <button type="button" onClick={onPipeline} aria-pressed={pipelineOn}
+                className={`flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold transition-opacity ${pipelineOn ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 hover:opacity-80'}`}
+                title="Ideas, scripts, posts and reels through to posted">
+                <Workflow size={12} /> Pipeline
+              </button>
+            )}
             <button type="button" onClick={() => openPosts({ projectId: project.id })}
               className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-300 hover:opacity-80 transition-opacity"
               title="Posts made with Auto Content">

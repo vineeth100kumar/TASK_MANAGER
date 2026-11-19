@@ -7,8 +7,9 @@
 // <video> element streams, seeks and caches it by itself.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Check, CheckCircle2, Copy, Download, FileAudio, LoaderCircle, Mail, Mic, Pencil, RefreshCw, Send, Share2, Smartphone, Square, ThumbsUp, Trash2,
+  AlertTriangle, Archive, ArchiveRestore, ArrowLeft, CalendarClock, Check, CheckCircle2, Copy, Download, FileAudio, LoaderCircle, Mail, Mic, Pencil, RefreshCw, Send, Share2, Smartphone, Square, ThumbsUp, Trash2, Wand2,
 } from 'lucide-react';
+import { drawAtText, whenText } from '../../services/contentPieces';
 import {
   REEL_EVENT, Reel, ReelMakerStatus, ReviewAction, canShareVideo, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
 } from '../../services/reels';
@@ -211,6 +212,22 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
 
       {reel.status === 'waiting' && (
         <RecordStep reel={reel} status={status} onUploaded={r => setReel(r)} onEdit={() => onEdit(reel)} />
+      )}
+
+      {reel.status === 'planned' && (
+        <div className="surface rounded-3xl border border-sky-300/50 dark:border-sky-500/30 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <CalendarClock size={18} className="text-sky-500" />
+            <h3 className="font-semibold text-[15px] text-gray-900 dark:text-white">Script saved, making it later</h3>
+          </div>
+          <p className="text-[13px] text-gray-600 dark:text-gray-300">
+            {reel.scheduledFor ? `Due ${whenText(reel.scheduledFor)}. The Pi makes it about ${drawAtText(reel.scheduledFor)} and Herald tells you when it is ready.` : 'No date set.'}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={again} disabled={busy === 'again'} className="h-9 px-4 rounded-xl bg-purple-600 text-white text-[13px] font-semibold flex items-center gap-1.5"><Wand2 size={14} /> Make now</button>
+            <button onClick={() => onEdit(reel)} className="h-9 px-4 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold">Edit script</button>
+          </div>
+        </div>
       )}
 
       {running && (
