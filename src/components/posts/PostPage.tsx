@@ -11,8 +11,9 @@
 // Download / ZIP are ordinary links, so nothing waits on JavaScript fetches.
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  AlertTriangle, Archive, ArchiveRestore, ArrowLeft, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, ImageDown, RefreshCw, Send, Share2, Smartphone, ThumbsUp, Trash2,
+  AlertTriangle, Archive, ArchiveRestore, ArrowLeft, CalendarClock, Check, CheckCircle2, Copy, Download, LoaderCircle, Mail, Pencil, ImageDown, RefreshCw, Send, Share2, Smartphone, ThumbsUp, Trash2, Wand2,
 } from 'lucide-react';
+import { drawAtText, whenText } from '../../services/contentPieces';
 import {
   MakerStatus, POST_EVENT, Post, ReviewAction, canShareFiles, copyText, fetchBlob, fileName, mediaUrl, postLink, postsApi, qrPath, zipUrl,
 } from '../../services/posts';
@@ -233,6 +234,22 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
             </button>
             <button onClick={() => onEdit(post)} className="h-9 px-4 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold">Edit script</button>
             <button onClick={remove} className="h-9 px-3 rounded-xl text-red-600 text-[13px] font-semibold">Delete</button>
+          </div>
+        </div>
+      )}
+
+      {post.status === 'planned' && (
+        <div className="surface rounded-3xl border border-sky-300/50 dark:border-sky-500/30 p-5 space-y-3">
+          <div className="flex items-center gap-2">
+            <CalendarClock size={18} className="text-sky-500" />
+            <h3 className="font-semibold text-[15px] text-gray-900 dark:text-white">Script saved, drawing later</h3>
+          </div>
+          <p className="text-[13px] text-gray-600 dark:text-gray-300">
+            {post.scheduledFor ? `Due ${whenText(post.scheduledFor)}. The Pi draws it about ${drawAtText(post.scheduledFor)} and Herald tells you when it is ready.` : 'No date set.'}
+          </p>
+          <div className="flex gap-2">
+            <button onClick={again} disabled={busy === 'again'} className="h-9 px-4 rounded-xl bg-purple-600 text-white text-[13px] font-semibold flex items-center gap-1.5"><Wand2 size={14} /> Draw now</button>
+            <button onClick={() => onEdit(post)} className="h-9 px-4 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold">Edit script</button>
           </div>
         </div>
       )}

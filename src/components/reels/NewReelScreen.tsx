@@ -25,7 +25,13 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
   const [style, setStyle] = useState(edit?.style || '');
   // "script" = keep what the script says; "mine" = own recording; any voice id overrides it
   const [voice, setVoice] = useState('script');
-  const [project, setProject] = useState(projectId);
+  // Opened outside a project with exactly one content project: use it (pick "No project" to leave it out).
+  const [postAt, setPostAt] = useState('');   // optional: when it should go live; the Pi then makes it ahead of time
+  const [project, setProject] = useState(() => {
+    if (projectId || edit) return projectId;
+    const only = (api.sync.getState().projects.filter(Boolean) as Project[]).filter(p => p.type === 'content' && p.autoContent);
+    return only.length === 1 ? only[0].id : '';
+  });
   const [check, setCheck] = useState<ReelCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -75,7 +81,7 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
     try {
       const reel = edit
         ? await reelsApi.remake(edit.id, { script: scriptForPi, style: effectiveStyle })
-        : await reelsApi.create({ script: scriptForPi, style: effectiveStyle, projectId: project });
+        : await reelsApi.create({ script: scriptForPi, style: effectiveStyle, projectId: project, ...(postAt ? { scheduledFor: new Date(postAt).toISOString() } : {}) });
       onMade(reel);
     } catch (e: any) {
       showToast(e.message || "Couldn't start the reel", 'error');
@@ -197,6 +203,13 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
           </div>
           {!edit && (
             <div className="sm:col-span-2">
+              <label className="field-label mb-1.5" htmlFor="post-at">Post at (optional)</label>
+              <input id="post-at" type="datetime-local" value={postAt} onChange={e => setPostAt(e.target.value)} className="field w-full" />
+              {postAt && <p className="mt-1 text-[11.5px] text-gray-500">{ownVoice ? 'Record your voice next; the Pi makes it right after.' : 'The Pi saves the script and makes it about an hour before. Herald tells you when it is ready.'}</p>}
+            </div>
+          )}
+          {!edit && (
+            <div className="sm:col-span-2">
               <label className="field-label mb-1.5">Project</label>
               <Select value={project} onChange={setProject} className="field w-full" aria-label="Project">
                 <option value="">No project</option>
@@ -214,7 +227,7 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
         <div className="max-w-3xl mx-auto flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
           <button type="button" disabled={blocked} onClick={make}
             className="flex-1 md:flex-none md:min-w-[200px] flex items-center justify-center gap-2 h-12 md:h-11 px-6 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] disabled:opacity-40 shadow-sm shadow-purple-600/20 active:scale-[0.98] transition">
-            {busy ? <LoaderCircle size={18} className="animate-spin" /> : <Wand2 size={18} />} {edit ? 'Make again' : ownVoice ? 'Next: record your voice' : 'Make reel'}
+            {busy ? <LoaderCircle size={18} className="animate-spin" /> : <Wand2 size={18} />} {edit ? 'Make again' : ownVoice ? 'Next: record your voice' : postAt ? 'Save, make it later' : 'Make reel'}
           </button>
           <p className="text-[12.5px] text-gray-500 flex items-start gap-1.5">
             <Mail size={14} className="shrink-0 mt-0.5" />

@@ -2,7 +2,7 @@
 // The list, the New reel screen and one reel's page, with the project filter when it is
 // opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, CheckCircle2, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CalendarClock, CheckCircle2, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
 import ClapperIcon from '../icons/ClapperIcon';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
@@ -10,6 +10,7 @@ import { REEL_EVENT, Reel, ReelMakerStatus, formatSeconds, posterUrl, reelsApi, 
 import { NewReelScreen } from '../reels/NewReelScreen';
 import { ReelPage } from '../reels/ReelPage';
 import { timeAgo } from '../../services/radar';
+import { drawAtText } from '../../services/contentPieces';
 
 type Screen = { name: 'list' } | { name: 'new' } | { name: 'reel'; id: string } | { name: 'edit'; reel: Reel };
 
@@ -74,6 +75,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
     if (r.status === 'done') return `${formatSeconds(r.seconds)} · ${r.scenes} slides${r.review === 'approved' ? ' · Approved' : ''}`;
     if (r.status === 'failed') return 'Failed';
     if (r.status === 'waiting') return 'Needs your voice-over';
+    if (r.status === 'planned') return `Makes about ${r.scheduledFor ? drawAtText(r.scheduledFor) : 'later'}`;
     if (r.status === 'queued') return r.queuePosition && r.queuePosition > 1 ? `In the queue · ${r.queuePosition} in line` : 'Waiting for its turn';
     return `Making ${Math.round(r.progress.percent)}%`;
   };
@@ -127,7 +129,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
                   className="w-10 h-[71px] rounded-lg object-cover shrink-0 bg-black/[0.06] dark:bg-white/10" />
               ) : (
                 <span className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${r.status === 'failed' ? 'bg-red-100 text-red-700 dark:bg-red-500/20 dark:text-red-300' : r.status === 'waiting' ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/20 dark:text-amber-300' : 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300'}`}>
-                  {r.status === 'failed' ? <TriangleAlert size={18} /> : r.status === 'waiting' ? <Mic size={18} /> : r.status === 'done' ? <CheckCircle2 size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
+                  {r.status === 'failed' ? <TriangleAlert size={18} /> : r.status === 'waiting' ? <Mic size={18} /> : r.status === 'planned' ? <CalendarClock size={18} /> : r.status === 'done' ? <CheckCircle2 size={18} /> : <LoaderCircle size={18} className="animate-spin" />}
                 </span>
               )}
               <span className="min-w-0 flex-1">

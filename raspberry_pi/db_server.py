@@ -753,6 +753,7 @@ async def startup_event():
         logstore.warn("server", "API_SECRET is not set; the server is open to anyone who can reach it.")
     _background(google_sheets_backup_worker())
     _background(notifier.scheduler())
+    _background(content_schedule.run())
     _background(uptime.run())
     _background(diagnostics.run())
     _background(backup.scheduler(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs()))))
@@ -1780,6 +1781,7 @@ def public_url():
 # --- Notifications (see notifier.py) ---
 import notifier
 import uptime
+import content_schedule
 import posts
 import reels
 notifier.init_tables()
@@ -2175,6 +2177,7 @@ phone_link.away_after = lambda: phone_link.QUICK_AWAY_AFTER if speaker.get_setti
 # Only when that music goes over Bluetooth: with the USB sound card the radio is free.
 phone_link.audio_busy = lambda: (not speaker.uses_usb(speaker.get_settings())) and (spotify.connect.playing() or speaker.speaker.passing())
 notifier.speak_reminder = speaker.speaker.on_reminder
+posts.on_content_ready = speaker.speaker.on_content_ready
 from desk import desk as desk_wake  # noqa: E402
 desk_wake.on_wake = speaker.speaker.on_wake
 
