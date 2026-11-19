@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AlertTriangle, BookOpen, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
-import { EXAMPLE_REEL, ReelCheck, downloadReelFormat, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
+import { EXAMPLE_REEL, ReelCheck, downloadReelFormat, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, PHONON_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
 import type { Reel } from '../../services/reels';
@@ -198,6 +198,8 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
             <Select value={voice} onChange={setVoice} className="field w-full" aria-label="Voice">
               <option value="script">From the script</option>
               {VOICE_PICKS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
+              {(status?.voices || []).some(v => v.startsWith('phonon:')) &&
+                PHONON_PICKS.map(v => <option key={v.id} value={v.id}>{v.label}</option>)}
               <option value="mine">Your own recording</option>
             </Select>
           </div>
