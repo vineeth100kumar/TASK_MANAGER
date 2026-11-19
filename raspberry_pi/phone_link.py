@@ -52,6 +52,7 @@ BATTERY_EVERY_S = 300
 # Trusting BlueZ's Connected flag alone showed "phone connected / Home" forever.
 # Must stay above BATTERY_EVERY_S so a present but silent phone, kept fresh only
 # by the 5-minute battery heartbeat, is never dropped between reads.
+DATA_LIVE = int(os.getenv("SAGE_PHONE_DATA_LIVE", "45"))
 PRESENCE_LIVENESS = int(os.getenv("SAGE_PHONE_LIVENESS", "360"))
 # Self-healing a wedged BLE link. BlueZ can report the phone connected with its
 # services resolved while the link is actually dead: notify sessions won't start
@@ -492,7 +493,12 @@ class PhoneLink:
             self._classic_seen_at = now_t
         alive = bool(self._alive_at and now_t - self._alive_at < PRESENCE_LIVENESS) \
             or bool(self._classic_seen_at and now_t - self._classic_seen_at < CLASSIC_PRESENCE)
-        await self.set_presence(linked and alive, phone_name)
+        # Data flowing from the phone (now playing, notifications, battery) is
+        # proof it is here even when the Device1 match above misses it (e.g.
+        # ANCS not in the cached UUIDs yet). Short window so leaving is still
+        # noticed quickly.
+        data_live = bool(self._alive_at and now_t - self._alive_at < DATA_LIVE)
+        await self.set_presence((linked and alive) or data_live, phone_name or self.device_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
             self.say("state", "no paired phone is connected to the Pi; waiting")
