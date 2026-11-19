@@ -290,8 +290,8 @@ def _synthesize_phonon(text: str, voice: str, speed: float):
     import numpy as np
     tts = _phonon_engine()
     delta = max(-0.6, min(0.6, round(1.0 / max(0.5, min(2.0, speed)) - 1.0, 2)))   # + slower, - faster
-    samples = np.asarray(tts.synth(text, voice=phonon_name(voice), conditions={"duration_delta": delta}),
-                         dtype="float32")
+    tts.set_conditions({"duration_delta": delta})   # speed is a model condition, set without reloading
+    samples = np.asarray(tts.synth(text, voice=phonon_name(voice)), dtype="float32")
     rate = int(getattr(tts, "sample_rate", SAMPLE_RATE))
     if rate != SAMPLE_RATE:
         n = int(len(samples) * SAMPLE_RATE / rate)
