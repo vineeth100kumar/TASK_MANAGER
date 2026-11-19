@@ -136,6 +136,8 @@ export const reelsApi = {
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.reel),
   review: (id: string, action: ReviewAction) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.reel),
+  setProject: (id: string, projectId: string) =>
+    call<{ reel: Reel }>(`/api/reels/${enc(id)}/project`, { method: 'POST', body: JSON.stringify({ projectId }) }).then(d => d.reel),
   schedule: (id: string, at: string | null) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/schedule`, { method: 'POST', body: JSON.stringify({ at }) }).then(d => d.reel),
   restore: (id: string) => call<{ reel: Reel }>(`/api/reels/${enc(id)}/restore`, { method: 'POST' }).then(d => d.reel),

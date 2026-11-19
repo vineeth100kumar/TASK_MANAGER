@@ -1021,6 +1021,22 @@ async def reels_posted(reel_id: str, undo: bool = False):
     return {"success": True, "reel": with_media(reel)}
 
 
+class ProjectBody(BaseModel):
+    projectId: str = ""
+
+
+@router.post("/api/reels/{reel_id}/project")
+async def reels_project(reel_id: str, body: ProjectBody):
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    try:
+        await posts.relink_project(reel, body.projectId, "Reel", save_async)
+    except ValueError as e:
+        return _bad(str(e))
+    return {"success": True, "reel": with_media(reel)}
+
+
 class ScheduleBody(BaseModel):
     at: Optional[str] = None   # ISO datetime, or empty to unschedule
 

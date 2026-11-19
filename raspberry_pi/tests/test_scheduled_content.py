@@ -56,6 +56,28 @@ def at(hours: float) -> str:
     return (NOW + datetime.timedelta(hours=hours)).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
+class FakeBox:
+    """Stands in for the project and task records claude_api would hold."""
+
+    def __init__(self):
+        self.projects = {"p1": {"id": "p1", "type": "content", "name": "Mind Deeds"}, "p2": {"id": "p2", "type": "content", "name": "Other"}}
+        self.items = {}
+
+    def find(self, table, record_id):
+        return (self.projects if table == "projects" else self.items).get(record_id)
+
+    async def create(self, table, fields):
+        record = {**fields, "id": f"t{len(self.items) + 1}"}
+        self.items[record["id"]] = record
+        return record
+
+    async def update(self, table, record_id, fields):
+        if record_id not in self.items:
+            raise KeyError(record_id)
+        self.items[record_id].update(fields)
+        return self.items[record_id]
+
+
 class ShouldRelease(unittest.TestCase):
     def test_inside_the_lead_always_starts(self):
         due = NOW + datetime.timedelta(minutes=59)
@@ -136,6 +158,29 @@ class PlannedPosts(unittest.IsolatedAsyncioTestCase):
         posts.connect(db_server.DB_PATH, None, None, None, None)
         self.assertEqual(posts.get(post["id"])["status"], "planned")
         posts.delete(post["id"])
+
+    async def test_a_loose_post_can_join_and_change_projects(self):
+        box = FakeBox()
+        posts.connect(db_server.DB_PATH, None, box.create, box.update, box.find)
+        with mock.patch.object(posts, "_spawn"):
+            post = posts.start(SMALL)   # made with no project
+        post.update(status="done", slides=[], slideCount=2)
+        posts.save(post)
+        self.assertEqual(client.post(f"/api/posts/{post['id']}/project", json={"projectId": "nope"}).status_code, 400)
+        moved = client.post(f"/api/posts/{post['id']}/project", json={"projectId": "p1"}).json()["post"]
+        self.assertEqual(moved["projectId"], "p1")
+        task = box.items[moved["taskId"]]
+        self.assertEqual((task["projectId"], task["status"], task["stage"]), ("p1", "in_progress", "editing"))
+        # changing project moves the same task, it does not make another
+        again = client.post(f"/api/posts/{post['id']}/project", json={"projectId": "p2"}).json()["post"]
+        self.assertEqual(again["taskId"], moved["taskId"])
+        self.assertEqual(len(box.items), 1)
+        self.assertEqual(box.items[again["taskId"]]["projectId"], "p2")
+        # a posted one lands as Published
+        posted = client.post(f"/api/posts/{post['id']}/posted").json()["post"]
+        self.assertTrue(posted["posted"])
+        posts.delete(post["id"])
+        posts.connect(db_server.DB_PATH, None, None, None, None)
 
     async def test_ready_facts_name_the_slot(self):
         facts = posts.ready_facts({"title": "T", "scheduledFor": "2026-11-16T03:30:00Z", "projectId": None}, "post")

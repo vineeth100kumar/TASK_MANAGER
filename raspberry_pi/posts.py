@@ -880,6 +880,44 @@ async def _move_task(post: dict, stage: str, status: str) -> None:
         logstore.warn("posts", f"Couldn't move the task for post {post['id']}: {e}")
 
 
+def _task_stage(item: dict) -> tuple:
+    """(stage, status) the item's task should show for where the item stands."""
+    if item.get("posted"):
+        return "published", "done"
+    if item.get("status") == "done":
+        return "editing", "in_progress"
+    return "scripting", "in_progress"
+
+
+async def relink_project(item: dict, project_id: str, kind: str, save) -> dict:
+    """Put a post or reel in a project, or move it to another one, at any time. Its task comes
+    along (or is made), so the project's Pipeline, Week and counts pick it up. kind is "Post" or "Reel"."""
+    if not project_id or not _find_record or not _create_record or not _update_record:
+        raise ValueError("Pick a project.")
+    project = _find_record("projects", project_id)
+    if not project:
+        raise ValueError("That project doesn't exist.")
+    item["projectId"] = project_id
+    fields = _stage_fields(item, *_task_stage(item))
+    task = None
+    if item.get("taskId"):
+        try:
+            task = await _update_record("workItems", item["taskId"], {"projectId": project_id, "areaId": None, "isInbox": False, **fields})
+        except Exception:
+            task = None   # the old task was deleted: make a new one below
+    if task is None:
+        id_key = "postId" if kind == "Post" else "reelId"
+        task = await _create_record("workItems", {
+            "title": f"{kind}: {item['title']}", "projectId": project_id, "entityType": "task",
+            "labels": [kind.lower()], id_key: item["id"],
+            "description": f"Made with Auto Content. Open the {kind.lower()} from Sage > {kind}s.",
+            **fields,
+        })
+        item["taskId"] = task.get("id")
+    await save(item)
+    return item
+
+
 # Set by db_server (speaker.py): Herald says a scheduled post or reel is ready.
 on_content_ready: Optional[Callable[[dict], Awaitable[None]]] = None
 
@@ -1178,6 +1216,22 @@ async def posts_posted(post_id: str, undo: bool = False):
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+    return {"success": True, "post": with_media(post)}
+
+
+class ProjectBody(BaseModel):
+    projectId: str = ""
+
+
+@router.post("/api/posts/{post_id}/project")
+async def posts_project(post_id: str, body: ProjectBody):
+    post = get(post_id)
+    if not post:
+        return _missing()
+    try:
+        await relink_project(post, body.projectId, "Post", save_async)
+    except ValueError as e:
+        return _bad(str(e))
     return {"success": True, "post": with_media(post)}
 
 
