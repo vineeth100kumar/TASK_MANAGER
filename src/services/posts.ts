@@ -25,6 +25,8 @@ export interface Post {
   format: string;
   projectId: string | null;
   taskId: string | null;
+  /** ISO time (UTC) it is meant to go live; null when not scheduled. */
+  scheduledFor?: string | null;
   status: PostStatus;
   error: string;
   log?: PostLogLine[];
@@ -111,6 +113,8 @@ export const postsApi = {
     call<{ post: Post }>(`/api/posts/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.post),
   review: (id: string, action: ReviewAction) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.post),
+  schedule: (id: string, at: string | null) =>
+    call<{ post: Post }>(`/api/posts/${enc(id)}/schedule`, { method: 'POST', body: JSON.stringify({ at }) }).then(d => d.post),
   restore: (id: string) => call<{ post: Post }>(`/api/posts/${enc(id)}/restore`, { method: 'POST' }).then(d => d.post),
   send: (id: string) => call<{ post: Post }>(`/api/posts/${enc(id)}/send`, { method: 'POST' }).then(d => d.post),
   remove: (id: string) => call<{ success: boolean }>(`/api/posts/${enc(id)}`, { method: 'DELETE' }),

@@ -103,6 +103,18 @@ class CheckTests(unittest.TestCase):
         self.assertTrue(posts.check(EXAMPLE)["ok"])
 
 
+class ScheduleParse(unittest.TestCase):
+    def test_times_become_utc_and_empty_clears(self):
+        self.assertEqual(posts.parse_schedule("2026-11-24T09:00:00+05:30"), "2026-11-24T03:30:00Z")
+        self.assertEqual(posts.parse_schedule("2026-11-24T03:30:00Z"), "2026-11-24T03:30:00Z")
+        self.assertIsNone(posts.parse_schedule(""))
+        self.assertIsNone(posts.parse_schedule(None))
+
+    def test_junk_is_refused(self):
+        with self.assertRaises(ValueError):
+            posts.parse_schedule("next tuesday")
+
+
 class PillSplit(unittest.TestCase):
     """The cover's pill word: marks and closing punctuation must not hide it."""
 
@@ -265,6 +277,9 @@ class DrawTests(unittest.IsolatedAsyncioTestCase):
         # the project got a task that is Ready; Mark posted finishes it
         task = next(iter(self.box.items.values()))
         self.assertEqual((task["status"], task["stage"]), ("in_progress", "editing"))
+        sched = client.post(f"/api/posts/{post['id']}/schedule", json={"at": "2026-11-24T09:00:00+05:30"}).json()
+        self.assertEqual(sched["post"]["scheduledFor"], "2026-11-24T03:30:00Z")
+        self.assertIsNone(client.post(f"/api/posts/{post['id']}/schedule", json={"at": None}).json()["post"]["scheduledFor"])
         self.assertEqual(client.post(f"/api/posts/{post['id']}/posted").json()["post"]["posted"], True)
         self.assertEqual((task["status"], task["stage"]), ("done", "published"))
         client.post(f"/api/posts/{post['id']}/posted?undo=true")

@@ -379,6 +379,7 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "") -
         "voiceFile": "",
         "projectId": project_id or None,
         "taskId": None,
+        "scheduledFor": None,   # ISO time (UTC) the reel goes live; set from the project Pipeline
         "status": "waiting" if report["needsRecording"] else "queued",
         "review": "pending",   # pending | approved | rejected
         "archived": False,     # a rejected reel is archived: the script is kept, the video removed
@@ -988,6 +989,23 @@ async def reels_posted(reel_id: str, undo: bool = False):
         await _move_task(reel, "editing", "in_progress")
     else:
         await _move_task(reel, "published", "done")
+    return {"success": True, "reel": with_media(reel)}
+
+
+class ScheduleBody(BaseModel):
+    at: Optional[str] = None   # ISO datetime, or empty to unschedule
+
+
+@router.post("/api/reels/{reel_id}/schedule")
+async def reels_schedule(reel_id: str, body: ScheduleBody):
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    try:
+        reel["scheduledFor"] = posts.parse_schedule(body.at)
+    except ValueError as e:
+        return _bad(str(e))
+    await save_async(reel)
     return {"success": True, "reel": with_media(reel)}
 
 

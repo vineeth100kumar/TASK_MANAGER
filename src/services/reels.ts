@@ -29,6 +29,8 @@ export interface Reel {
   voiceSeconds?: number;
   projectId: string | null;
   taskId: string | null;
+  /** ISO time (UTC) it is meant to go live; null when not scheduled. */
+  scheduledFor?: string | null;
   status: ReelStatus;
   error: string;
   log?: ReelLogLine[];
@@ -134,6 +136,8 @@ export const reelsApi = {
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.reel),
   review: (id: string, action: ReviewAction) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.reel),
+  schedule: (id: string, at: string | null) =>
+    call<{ reel: Reel }>(`/api/reels/${enc(id)}/schedule`, { method: 'POST', body: JSON.stringify({ at }) }).then(d => d.reel),
   restore: (id: string) => call<{ reel: Reel }>(`/api/reels/${enc(id)}/restore`, { method: 'POST' }).then(d => d.reel),
   send: (id: string) => call<{ reel: Reel }>(`/api/reels/${enc(id)}/send`, { method: 'POST' }).then(d => d.reel),
   remove: (id: string) => call<{ success: boolean }>(`/api/reels/${enc(id)}`, { method: 'DELETE' }),

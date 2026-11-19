@@ -25,7 +25,12 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
   const [style, setStyle] = useState(edit?.style || '');
   // "script" = keep what the script says; "mine" = own recording; any voice id overrides it
   const [voice, setVoice] = useState('script');
-  const [project, setProject] = useState(projectId);
+  // Opened outside a project with exactly one content project: use it (pick "No project" to leave it out).
+  const [project, setProject] = useState(() => {
+    if (projectId || edit) return projectId;
+    const only = (api.sync.getState().projects.filter(Boolean) as Project[]).filter(p => p.type === 'content' && p.autoContent);
+    return only.length === 1 ? only[0].id : '';
+  });
   const [check, setCheck] = useState<ReelCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);

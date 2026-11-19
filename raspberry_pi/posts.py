@@ -520,6 +520,7 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "format": fmt or report["format"] or "portrait",
         "projectId": project_id or None,
         "taskId": None,
+        "scheduledFor": None,   # ISO time (UTC) the post goes live; set from the project Pipeline
         "status": "queued",
         "error": "",
         "log": [],
@@ -1123,6 +1124,36 @@ async def posts_posted(post_id: str, undo: bool = False):
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+    return {"success": True, "post": with_media(post)}
+
+
+class ScheduleBody(BaseModel):
+    at: Optional[str] = None   # ISO datetime, or empty to unschedule
+
+
+def parse_schedule(at: Optional[str]) -> Optional[str]:
+    """An ISO datetime as UTC text, or None to clear. Raises ValueError for junk."""
+    if not at:
+        return None
+    try:
+        when = datetime.datetime.fromisoformat(at.replace("Z", "+00:00"))
+    except ValueError:
+        raise ValueError("That date and time isn't valid.")
+    if when.tzinfo is None:
+        when = when.replace(tzinfo=datetime.timezone.utc)
+    return when.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+@router.post("/api/posts/{post_id}/schedule")
+async def posts_schedule(post_id: str, body: ScheduleBody):
+    post = get(post_id)
+    if not post:
+        return _missing()
+    try:
+        post["scheduledFor"] = parse_schedule(body.at)
+    except ValueError as e:
+        return _bad(str(e))
+    await save_async(post)
     return {"success": True, "post": with_media(post)}
 
 

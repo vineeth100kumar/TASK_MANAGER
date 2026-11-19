@@ -23,7 +23,12 @@ export function NewPostScreen({ status, projectId = '', edit = null, onMade, onC
   const [script, setScript] = useState(edit?.script || '');
   const [style, setStyle] = useState(edit?.style || '');
   const [format, setFormat] = useState(edit?.format || '');
-  const [project, setProject] = useState(projectId);
+  // Opened outside a project with exactly one content project: use it (pick "No project" to leave it out).
+  const [project, setProject] = useState(() => {
+    if (projectId || edit) return projectId;
+    const only = (api.sync.getState().projects.filter(Boolean) as Project[]).filter(p => p.type === 'content' && p.autoContent);
+    return only.length === 1 ? only[0].id : '';
+  });
   const [check, setCheck] = useState<ScriptCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
