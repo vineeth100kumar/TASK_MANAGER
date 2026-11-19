@@ -205,6 +205,14 @@ export const VOICE_PICKS: { id: string; label: string }[] = [
   { id: 'bm_george', label: 'British (UK, man)' },
 ];
 
+/** Optional Phonon 31M voices (the Pi needs the `ptts` package; shown only when the Pi lists them). */
+export const PHONON_PICKS: { id: string; label: string }[] = [
+  { id: 'phonon:Zoey', label: 'Phonon Zoey (US, woman)' },
+  { id: 'phonon:Freya', label: 'Phonon Freya (UK, woman)' },
+  { id: 'phonon:Easton', label: 'Phonon Easton (US, man)' },
+  { id: 'phonon:Alfie', label: 'Phonon Alfie (UK, man)' },
+];
+
 /** Replace or add `voice: <id>` in the script's frontmatter. `id` of "" or "script" leaves it
  *  alone, so whatever the script wrote (or the default) wins. Keeps the rest of the text as it is. */
 export function withVoice(script: string, id: string): string {
