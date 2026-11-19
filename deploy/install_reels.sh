@@ -18,6 +18,11 @@ fail=0
 "$VENV/bin/pip" install -q --index-url https://pypi.org/simple -r "$REPO/raspberry_pi/requirements-reels.txt" \
   || { echo "The voice packages didn't install."; fail=1; }
 
+# Optional Phonon 31M voice (voice: phonon:Zoey), installed on its own so a failure never blocks the rest.
+# Its model (~65 MB) is fetched by the package the first time a reel uses it; nothing is loaded until then.
+"$VENV/bin/pip" install -q --index-url https://pypi.org/simple ptts \
+  || echo "The optional Phonon voice package (ptts) didn't install; Kokoro voices still work."
+
 mkdir -p "$DIR"
 for f in kokoro-v1.0.onnx voices-v1.0.bin; do
   if [ -s "$DIR/$f" ]; then
