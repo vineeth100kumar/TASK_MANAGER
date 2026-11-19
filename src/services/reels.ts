@@ -31,6 +31,8 @@ export interface Reel {
   taskId: string | null;
   /** ISO time (UTC) it is meant to go live; null when not scheduled. */
   scheduledFor?: string | null;
+  /** Dropped: changed your mind, no reminders; the files are kept. */
+  wontPost?: boolean;
   status: ReelStatus;
   error: string;
   log?: ReelLogLine[];
@@ -136,6 +138,8 @@ export const reelsApi = {
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.reel),
   review: (id: string, action: ReviewAction) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/review`, { method: 'POST', body: JSON.stringify({ action }) }).then(d => d.reel),
+  skip: (id: string, undo = false) =>
+    call<{ reel: Reel }>(`/api/reels/${enc(id)}/skip`, { method: 'POST', body: JSON.stringify({ undo }) }).then(d => d.reel),
   setProject: (id: string, projectId: string) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/project`, { method: 'POST', body: JSON.stringify({ projectId }) }).then(d => d.reel),
   schedule: (id: string, at: string | null) =>

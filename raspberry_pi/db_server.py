@@ -2178,6 +2178,7 @@ phone_link.away_after = lambda: phone_link.QUICK_AWAY_AFTER if speaker.get_setti
 phone_link.audio_busy = lambda: (not speaker.uses_usb(speaker.get_settings())) and (spotify.connect.playing() or speaker.speaker.passing())
 notifier.speak_reminder = speaker.speaker.on_reminder
 posts.on_content_ready = speaker.speaker.on_content_ready
+posts.on_post_due = speaker.speaker.on_post_due
 from desk import desk as desk_wake  # noqa: E402
 desk_wake.on_wake = speaker.speaker.on_wake
 

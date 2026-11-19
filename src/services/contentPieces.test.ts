@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { columnOf, countPieces, moveToDay, weekStart, type Piece } from './contentPieces';
 
 const piece = (over: Partial<Piece>): Piece => ({
-  kind: 'post', id: 'a', title: 't', status: 'done', scheduledFor: null, posted: false, archived: false, projectId: null, createdAt: '', ...over,
+  kind: 'post', id: 'a', title: 't', status: 'done', scheduledFor: null, posted: false, wontPost: false, archived: false, projectId: null, createdAt: '', ...over,
 });
 
 describe('columnOf', () => {
@@ -12,6 +12,8 @@ describe('columnOf', () => {
     expect(columnOf(piece({}))).toBe('ready');
     expect(columnOf(piece({ scheduledFor: '2026-11-24T03:30:00Z' }))).toBe('scheduled');
     expect(columnOf(piece({ scheduledFor: '2026-11-24T03:30:00Z', posted: true }))).toBe('posted');
+    expect(columnOf(piece({ wontPost: true }))).toBe('dropped');
+    expect(columnOf(piece({ status: 'planned', wontPost: true }))).toBe('dropped');
   });
 });
 

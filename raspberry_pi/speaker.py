@@ -522,6 +522,15 @@ at most once, do not praise the work, and do not read anything but the title and
 Facts (JSON):
 """
 
+POST_DUE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 22 words) spoken aloud to tell the person it is time to \
+post something that is finished and ready. Facts: "kind" (post or reel), "title", "project" (may be empty), \
+"when" (when it was due, such as Monday at 9 AM; may be empty), and "stillWaiting" (true if this is the \
+reminder the next morning, because it was not posted yet: say so plainly, without scolding). Mention the \
+title at most once and do not praise the work. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
 BACK_ONLINE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 14 words) spoken aloud to say that \
 Sage is back online. "reason" says why it was down: update (restarted with the latest changes), \
 restart, reboot, power (a power cut or blip) or crash (it fell over). Be honest about the reason: \
@@ -2180,6 +2189,19 @@ class Speaker:
         if not text:
             when = f" for {facts['when']}" if facts.get("when") else ""
             text = f"Your {what}{when} is ready" + (", though its time has already passed." if facts.get("late") else ".")
+        await self.say(text, "content", meta={"kind": "content", "title": str(facts.get("title") or "")})
+
+    async def on_post_due(self, facts: dict) -> None:
+        """It is time to post a finished post or reel (called on the loop). Spoken only while you're home
+        and the speaker is on; the push and the email go out either way."""
+        settings = get_settings()
+        home = bool(self.phone and self.phone.available and self.phone.home)
+        if not (self.loop and has_output(settings) and home):
+            return
+        what = facts.get("kind", "post")
+        text = await self._ai_line({**facts, "name": settings.get("callMe", "")}, POST_DUE_PROMPT, timeout=6)
+        if not text:
+            text = (f"Your {what} is still not posted." if facts.get("stillWaiting") else f"Time to post your {what}.")
         await self.say(text, "content", meta={"kind": "content", "title": str(facts.get("title") or "")})
 
     def on_reminder(self, item: dict, message: dict) -> None:

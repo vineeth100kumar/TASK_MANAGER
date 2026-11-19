@@ -182,6 +182,86 @@ class PlannedPosts(unittest.IsolatedAsyncioTestCase):
         posts.delete(post["id"])
         posts.connect(db_server.DB_PATH, None, None, None, None)
 
+    async def _finished_post(self, scheduled):
+        with mock.patch.object(posts, "_spawn"):
+            post = posts.start(SMALL)
+        post.update(status="done", slides=[], slideCount=2, scheduledFor=scheduled)
+        posts.save(post)
+        return post
+
+    async def test_post_time_reminders_come_at_the_time_then_next_morning(self):
+        tz = content_schedule.notifier._tz(content_schedule.notifier.get_prefs())
+        due = datetime.datetime(2026, 11, 20, 3, 30, tzinfo=UTC)   # a Friday
+        post = await self._finished_post("2026-11-20T03:30:00Z")
+        sent = []
+
+        async def deliver(kind, item, stage):
+            sent.append((kind, stage))
+
+        before = due - datetime.timedelta(minutes=5)
+        self.assertEqual(await content_schedule.remind_due(before, deliver), [])
+        at = await content_schedule.remind_due(due + datetime.timedelta(minutes=1), deliver)
+        self.assertEqual([(k, st) for k, _, st in at if _ == post["id"]], [("post", 1)])
+        # nothing more the same evening
+        self.assertEqual([x for x in await content_schedule.remind_due(due + datetime.timedelta(hours=8), deliver) if x[1] == post["id"]], [])
+        # next morning at 9 local: one more
+        local_due = due.astimezone(tz)
+        morning = (local_due + datetime.timedelta(days=1)).replace(hour=9, minute=0, second=0, microsecond=0)
+        again = await content_schedule.remind_due(morning + datetime.timedelta(minutes=1), deliver)
+        self.assertEqual([st for _, i, st in again if i == post["id"]], [2])
+        # and then never again
+        self.assertEqual([x for x in await content_schedule.remind_due(morning + datetime.timedelta(days=1), deliver) if x[1] == post["id"]], [])
+        posts.delete(post["id"])
+
+    async def test_no_reminder_once_posted_or_dropped_and_a_new_time_restarts_them(self):
+        due = datetime.datetime(2026, 11, 20, 3, 30, tzinfo=UTC)
+        now = due + datetime.timedelta(minutes=1)
+        sent = []
+
+        async def deliver(kind, item, stage):
+            sent.append(item["id"])
+
+        dropped = await self._finished_post("2026-11-20T03:30:00Z")
+        posted = await self._finished_post("2026-11-20T03:30:00Z")
+        client.post(f"/api/posts/{dropped['id']}/skip", json={})
+        client.post(f"/api/posts/{posted['id']}/posted")
+        out = await content_schedule.remind_due(now, deliver)
+        self.assertNotIn(dropped["id"], [i for _, i, _ in out])
+        self.assertNotIn(posted["id"], [i for _, i, _ in out])
+        # a dropped post has no date left, and coming back needs a new one
+        self.assertIsNone(posts.get(dropped["id"])["scheduledFor"])
+        back = client.post(f"/api/posts/{dropped['id']}/skip", json={"undo": True}).json()["post"]
+        self.assertFalse(back["wontPost"])
+        client.post(f"/api/posts/{dropped['id']}/schedule", json={"at": "2026-11-20T03:30:00Z"})
+        again = await content_schedule.remind_due(now, deliver)
+        self.assertIn(dropped["id"], [i for _, i, _ in again])
+        client.post(f"/api/posts/{dropped['id']}/schedule", json={"at": "2026-11-20T03:30:00Z"})   # same time again: restarts
+        self.assertEqual(posts.get(dropped["id"])["remindStage"], 0)
+        posts.delete(dropped["id"])
+        posts.delete(posted["id"])
+
+    async def test_very_old_dates_are_not_reminded(self):
+        post = await self._finished_post("2026-11-01T03:30:00Z")
+        sent = []
+
+        async def deliver(kind, item, stage):
+            sent.append(item["id"])
+
+        await content_schedule.remind_due(datetime.datetime(2026, 11, 20, 3, 30, tzinfo=UTC), deliver)
+        self.assertNotIn(post["id"], sent)
+        self.assertEqual(posts.get(post["id"])["remindStage"], 2)
+        posts.delete(post["id"])
+
+    async def test_a_dropped_planned_post_is_never_drawn(self):
+        with mock.patch.object(posts, "_spawn"):
+            post = posts.start(SMALL, scheduled_for=at(0.2))
+        client.post(f"/api/posts/{post['id']}/skip", json={})
+        with mock.patch.object(posts, "_spawn") as spawn:
+            content_schedule.release_due(NOW)
+        spawn.assert_not_called()
+        self.assertEqual(posts.get(post["id"])["status"], "planned")
+        posts.delete(post["id"])
+
     async def test_ready_facts_name_the_slot(self):
         facts = posts.ready_facts({"title": "T", "scheduledFor": "2026-11-16T03:30:00Z", "projectId": None}, "post")
         self.assertEqual((facts["kind"], facts["title"]), ("post", "T"))
