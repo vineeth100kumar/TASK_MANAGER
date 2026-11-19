@@ -26,6 +26,12 @@ MODEL_URLS = {
 # American (a) and British (b) English, female (f) and male (m). The first is the default.
 VOICES = ["af_heart", "af_bella", "af_nicole", "af_sarah", "af_sky", "am_adam", "am_michael", "am_puck",
           "bf_emma", "bf_isabella", "bf_lily", "bm_george", "bm_lewis", "bm_daniel"]
+# Phonon 31M (Gradium, Apache-2.0), an optional voice: `voice: phonon:Zoey`. Loaded only while a reel
+# that asks for it is being made, then freed. The `ptts` package fetches its q8 model on first use.
+PHONON_PREFIX = "phonon:"
+PHONON_VOICES = ["Zoey", "Juniper", "Everly", "Harper", "Hadley", "Delia", "Easton", "Micah", "Trevor", "Russell",
+                 "Preston", "Miles", "Maeve", "Freya", "Pippa", "Elodie-Rose", "Imogen", "Lottie", "Bryony",
+                 "Alfie", "Hugh", "Edwin", "Spencer", "Toby", "Teddy"]
 GAP = 0.38            # seconds of quiet between one slide's narration and the next
 
 
@@ -72,8 +78,20 @@ def _known(name: str) -> bool:
     return name in VOICES or bool(re.fullmatch(r"[abjzefhip][fm]_[a-z]+", name))
 
 
+def is_phonon(name: str) -> bool:
+    return str(name or "").strip().lower().startswith(PHONON_PREFIX)
+
+
+def phonon_name(name: str) -> str:
+    return str(name).strip()[len(PHONON_PREFIX):].strip()
+
+
 def check_voice(name: str) -> Optional[str]:
     """A plain message when the voice (or any voice in a blend) isn't one Kokoro has; None when fine."""
+    if is_phonon(name):
+        if phonon_name(name).lower() in (v.lower() for v in PHONON_VOICES):
+            return None
+        return f"'{name}' isn't a Phonon voice I know. Use phonon: plus one of {', '.join(PHONON_VOICES)}."
     blend = parse_blend(name)
     bad = [n for n, _ in blend if not _known(n)]
     if blend and not bad:
@@ -249,8 +267,42 @@ def _style(spec: str):
     return _styles[spec]
 
 
+_phonon = None
+
+
+def _phonon_engine():
+    global _phonon
+    if _phonon is None:
+        import ptts
+        _phonon = ptts.TTS("hf://gradium/phonon-31m-en", lang="en", quant="q8")
+    return _phonon
+
+
+def free_phonon() -> None:
+    """Let go of Phonon's memory once the reel is spoken."""
+    global _phonon
+    _phonon = None
+    import gc
+    gc.collect()
+
+
+def _synthesize_phonon(text: str, voice: str, speed: float):
+    import numpy as np
+    tts = _phonon_engine()
+    delta = max(-0.6, min(0.6, round(1.0 / max(0.5, min(2.0, speed)) - 1.0, 2)))   # + slower, - faster
+    samples = np.asarray(tts.synth(text, voice=phonon_name(voice), conditions={"duration_delta": delta}),
+                         dtype="float32")
+    rate = int(getattr(tts, "sample_rate", SAMPLE_RATE))
+    if rate != SAMPLE_RATE:
+        n = int(len(samples) * SAMPLE_RATE / rate)
+        samples = np.interp(np.linspace(0, len(samples) - 1, n), np.arange(len(samples)), samples).astype("float32")
+    return samples
+
+
 def synthesize(text: str, voice: str, speed: float):
     """Speech for the text (already made speakable) as float samples at SAMPLE_RATE."""
+    if is_phonon(voice):
+        return _synthesize_phonon(text, voice, speed)
     first = parse_blend(voice)[0][0]
     lang = "en-gb" if first.startswith("b") else "en-us"
     samples, rate = _engine().create(text, voice=_style(voice), speed=max(0.5, min(2.0, speed)), lang=lang)
@@ -268,6 +320,13 @@ def render_tts(scenes: List[Scene], voice: str, speed: float, work: Path,
     """Speak every slide's `say:` line sentence by sentence and join them, with pauses that follow the
     punctuation, each slide at its own pace and voice, then finish the sound.
     `engine(text, voice, speed)` can replace Kokoro (used by the tests)."""
+    try:
+        return _render_tts(scenes, voice, speed, work, say, engine, pauses, polish, loudness, pronounce)
+    finally:
+        free_phonon()
+
+
+def _render_tts(scenes, voice, speed, work, say, engine, pauses, polish, loudness, pronounce) -> Track:
     import numpy as np
     speak = engine or synthesize
     parts, windows, cursor = [], [], 0.0

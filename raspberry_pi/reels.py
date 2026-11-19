@@ -267,9 +267,12 @@ def _engine_on_path() -> None:
     posts._engine_on_path()
 
 
-def _voice_problem() -> str:
-    """Why Kokoro can't speak here (own recordings still work), or ''. Cheap: nothing is loaded."""
+def _voice_problem(voice_name: str = "") -> str:
+    """Why the voice can't speak here (own recordings still work), or ''. Cheap: nothing is loaded."""
     import importlib.util
+    if str(voice_name or "").strip().lower().startswith("phonon:"):
+        return "" if importlib.util.find_spec("ptts") else (
+            "The Phonon voice package isn't installed (re-run deploy/install_pi.sh, or use a Kokoro voice).")
     if importlib.util.find_spec("kokoro_onnx") is None:
         return "The Kokoro voice package isn't installed (re-run deploy/install_pi.sh). Your own recording still works."
     d = Path(os.environ.get("REEL_MODEL_DIR", "") or (Path.home() / ".cache" / "sage-reels"))
@@ -289,8 +292,8 @@ def _timing_backend() -> str:
 def _voices() -> List[str]:
     _engine_on_path()
     try:
-        from autocontent.reel.voice import VOICES
-        return list(VOICES)
+        from autocontent.reel.voice import PHONON_VOICES, VOICES
+        return list(VOICES) + ["phonon:" + v for v in PHONON_VOICES]
     except Exception:
         return []
 
@@ -407,7 +410,7 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "", s
         "emailError": "",
     }
     # The built-in voice can't speak here: say so now, rather than after a minute of drawing.
-    voice_problem = _voice_problem() if reel["status"] in ("queued", "planned") else ""
+    voice_problem = _voice_problem(reel.get("voice") or "") if reel["status"] in ("queued", "planned") else ""
     if voice_problem:
         reel.update(status="failed", error=voice_problem, finishedAt=_utc())
     save(reel)
@@ -464,7 +467,7 @@ def restart(reel: dict, script: str = "", style: str = "") -> dict:
     reel.update(status="queued", error="", log=[], seconds=None, madeIn=None, size=0, timeline=[], warnings=[],
                 finishedAt=None, emailed=False, emailError="", posted=False, postedAt=None,
                 progress={"percent": 0, "stage": ""})
-    voice_problem = "" if reel["needsRecording"] else _voice_problem()
+    voice_problem = "" if reel["needsRecording"] else _voice_problem(reel.get("voice") or "")
     if voice_problem:
         reel.update(status="failed", error=voice_problem, finishedAt=_utc())
         save(reel)

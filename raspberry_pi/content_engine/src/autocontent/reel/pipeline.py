@@ -123,7 +123,14 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             (f"Slide {s.n}: " + p for s in reel.scenes if s.voice for p in [voice.check_voice(s.voice)] if p), None)
         if problem:
             raise ReelError(problem)
-        if engine is None:
+        phonon = voice.is_phonon(meta["voice"]) or any(voice.is_phonon(s.voice) for s in reel.scenes)
+        if engine is None and phonon:
+            try:
+                import ptts  # noqa: F401
+            except ImportError:
+                raise ReelError("The Phonon voice isn't installed on this Pi (re-run deploy/install_pi.sh), "
+                                "or use a Kokoro voice.")
+        elif engine is None:
             ok, why = voice.kokoro_ready()
             if not ok:
                 raise ReelError(f"The voice isn't ready on this Pi: {why}. Or record your own and use `voice: mine`.")
