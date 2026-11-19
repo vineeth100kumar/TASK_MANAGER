@@ -47,6 +47,7 @@ current lives here (`lumo/` and `raspberry_pi/desk/`).
    +- Groq (Ollama only if SAGE_LOCAL_AI=1) <-- chat_capture, canvas_thinker, radar*, sparks, industry, voice_command
    +- claude_api.py <-- Claude (REST /api/claude/*, MCP /mcp/{token})
    +- phone_link.py <-- iPhone over BLE (notifications, now playing, calls)
+   +- presence.py   <-- pure home/away rules (kernel link, phone data); phone_link feeds it
    +- speaker.py (Herald voice) + spotify.py + room_music.py --> Bluetooth soundbar / USB audio
    +- posts.py, reels.py --> content_engine --> slides / video
    +- desk/ --ws :8765 (pairing code)--> LUMO ESP32 clock
@@ -129,7 +130,7 @@ Radar, Data and Migration, Server and Reset).
 | Radar: Lab | `radar/LabTab`, `EdgeEditor` | `sparks.py` |
 | Radar: industry search | `radar/IndustrySearch`, `IndustryPage` | `industry.py` |
 | LUMO page | `components/lumo/*Tab.tsx`, `DepthFacePanel`, `ScreenFitPanel`, `alarmSounds.ts`, `modals/DeskClockSettings` | `desk/` (below) |
-| Bluetooth, phone link | `modals/BluetoothSettings`, `common/PhoneCorner`, `PresenceCard` | `bluetooth_control.py`, `phone_link.py` |
+| Bluetooth, phone link | `modals/BluetoothSettings`, `common/PhoneCorner`, `PresenceCard` | `bluetooth_control.py`, `phone_link.py`, `presence.py` (tests: `test_phone_robust.py`) |
 | Herald (voice on the soundbar) | `modals/SpeakerCard` | `speaker.py`, `herald_extras.py`, `herald_journal.py`, `speak_worker.py`, `/api/speaker/*`, `/api/herald/presence` |
 | Spotify and arrival music | `modals/SpotifyCard` | `spotify.py` (Soloist, PipeWire bridge), `room_music.py`, `audio_probe.py`, `/api/spotify/*` |
 | Drop share links | `views/DropView`, `services/drop.ts`, Notes share menu | `drop.py` |

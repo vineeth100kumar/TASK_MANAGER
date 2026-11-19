@@ -20,11 +20,15 @@ Spec references: Apple's "ANCS Specification" and "AMS Specification".
 
 import asyncio
 import logging
+import json
 import os
 import struct
 import time
 from collections import deque
+from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
+
+import presence
 
 log = logging.getLogger("phone_link")
 
@@ -52,8 +56,8 @@ BATTERY_EVERY_S = 300
 # Trusting BlueZ's Connected flag alone showed "phone connected / Home" forever.
 # Must stay above BATTERY_EVERY_S so a present but silent phone, kept fresh only
 # by the 5-minute battery heartbeat, is never dropped between reads.
-DATA_LIVE = int(os.getenv("SAGE_PHONE_DATA_LIVE", "45"))
-PRESENCE_LIVENESS = int(os.getenv("SAGE_PHONE_LIVENESS", "360"))
+DATA_LIVE = int(os.getenv("SAGE_PHONE_DATA_LIVE", str(presence.DATA_LIVE)))
+PRESENCE_LIVENESS = int(os.getenv("SAGE_PHONE_LIVENESS", str(presence.FLAG_LIVE)))
 # Self-healing a wedged BLE link. BlueZ can report the phone connected with its
 # services resolved while the link is actually dead: notify sessions won't start
 # and nothing arrives. Healing it (disconnect so the phone reconnects with a
@@ -73,7 +77,15 @@ PROBE_FAILS = int(os.getenv("SAGE_PHONE_PROBE_FAILS", "1"))
 SUBSCRIBE_FAILS = int(os.getenv("SAGE_PHONE_SUBSCRIBE_FAILS", "3"))
 # Shortest gap between two forced reconnects, so a phone that keeps coming back
 # wedged is retried at a steady pace, not in a tight loop.
-FORCE_MIN_GAP = int(os.getenv("SAGE_PHONE_FORCE_GAP", "90"))
+FORCE_MIN_GAP = int(os.getenv("SAGE_PHONE_FORCE_GAP", "3600"))
+# The healing ladder never drops the phone more than this many times a day.
+# Past that, Sage says the iPhone needs a re-pair rather than looping.
+FORCE_MAX_PER_DAY = int(os.getenv("SAGE_PHONE_FORCE_MAX_DAY", "3"))
+# ConnectProfile nudges back off 60 s, 120 s ... up to this many seconds.
+PROFILE_MAX_GAP = int(os.getenv("SAGE_PHONE_PROFILE_MAX_GAP", "600"))
+# Where the iPhone's address is remembered, so it is found on any kind of link.
+PINNED_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "phone_pinned.json"
+JOURNAL_KEEP = 200
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -86,11 +98,6 @@ STUCK_DROP_AFTER = int(os.getenv("SAGE_PHONE_STUCK_DROP", "900"))
 # How often (seconds) the Pi actively asks for the ANCS profile when the phone
 # is on a classic-only link, so iOS opens the BLE GATT session itself.
 PROFILE_RETRY = int(os.getenv("SAGE_PHONE_PROFILE_RETRY", "60"))
-# Classic-paired-connected still counts as "home" for this many seconds after
-# the link was last seen, even if the BLE side never came up. Presence does
-# not need notifications or now-playing to work: a bonded iPhone being in
-# range IS the signal we care about.
-CLASSIC_PRESENCE = int(os.getenv("SAGE_PHONE_CLASSIC_PRESENCE", "60"))
 
 BLUEZ = "org.bluez"
 ANCS_SERVICE = "7905f431-b5ce-4e99-a40f-4b1e122d00d0"
@@ -298,7 +305,14 @@ class PhoneLink:
         self._classic_only = False
         self._ble_stuck_since = 0.0  # when ServicesResolved first stayed false
         self._profile_last_try = 0.0  # when the Pi last asked for the ANCS profile
-        self._classic_seen_at = 0.0   # the phone was paired+Connected (even w/o BLE)
+        self.pinned = self._load_pin()        # the iPhone's address, remembered
+        self.presence_reason = ""             # why Sage thinks you are home or away
+        self.journal: Deque[dict] = deque(maxlen=JOURNAL_KEEP)  # what the link did and why
+        self._bluez_owner = ""                # bluetoothd's bus name, to notice a restart
+        self._advert_checked = 0.0
+        self._profile_tries = 0
+        self._forces: List[float] = []        # when the phone was last dropped on purpose
+        self.needs_repair = False
         self._advertising = False
         self._adv_exported = False
         self._adv_last_try = 0.0
@@ -338,6 +352,9 @@ class PhoneLink:
             "notifications": list(reversed(self.notifications)),
             "link": self.link,
             "battery": self.battery,
+            "presenceReason": self.presence_reason,
+            "needsRepair": self.needs_repair,
+            "journal": list(self.journal)[-40:],
         }
 
     async def _emit(self, event: dict) -> None:
@@ -347,6 +364,7 @@ class PhoneLink:
     async def _emit_status(self) -> None:
         state = self.snapshot()
         state.pop("notifications")
+        state.pop("journal", None)
         await self._emit({"type": "PHONE_STATUS", **state})
 
     async def add_notification(self, item: dict) -> None:
@@ -395,7 +413,100 @@ class PhoneLink:
             if bool(home) != self.home:
                 log.info("Presence: you are now %s (phone %s)", "home" if home else "away", "connected" if connected else "not connected")
             self.home = bool(home)
+            if not self.home:
+                await self._forget_live_data()
             await self._emit_status()
+
+    async def _forget_live_data(self) -> None:
+        """You are away: what the phone last said is old. Don't show it as live."""
+        self.media.update({"title": "", "artist": "", "album": "", "playing": False, "app": "",
+                           "duration": 0.0, "elapsed": None})
+        self.media_at = 0.0
+        await self._emit({"type": "PHONE_MEDIA", "media": self.media})
+        await self.clear_notifications()
+
+    # --- The remembered phone, the journal, the kernel's link list ---
+
+    @staticmethod
+    def _load_pin() -> str:
+        try:
+            return str(json.loads(PINNED_FILE.read_text()).get("address", "")).upper()
+        except Exception:
+            return ""
+
+    def _pin(self, address: str, why: str) -> None:
+        address = (address or "").upper()
+        if not address or address == self.pinned:
+            return
+        self.pinned = address
+        self.note("pin", f"remembered the iPhone's address {address} ({why})")
+        try:
+            PINNED_FILE.write_text(json.dumps({"address": address}))
+        except Exception as e:
+            log.info("Could not save the iPhone's address: %s", e)
+
+    def note(self, event: str, detail: str) -> None:
+        """One line in the link journal (last JOURNAL_KEEP, shown in Settings)."""
+        self.journal.append({"at": int(time.time() * 1000), "event": event, "detail": detail})
+
+    async def _kernel_links(self) -> Optional[set]:
+        """Addresses the kernel holds a radio link to right now, or None when
+        the Pi can't read the list (no hcitool, or not allowed)."""
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "hcitool", "con", stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
+            out, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+            if proc.returncode != 0:
+                return None
+            return presence.parse_hcitool_con(out.decode(errors="replace"))
+        except Exception:
+            return None
+
+    async def _watch_bluez(self) -> None:
+        """Notice bluetoothd restarting or the adapter being reset: both wipe
+        the Pi's BLE advertisement and pairing agent, and nothing told Sage, so
+        the iPhone could not find the Pi over BLE until Sage restarted."""
+        try:
+            intro = await self._bus.introspect("org.freedesktop.DBus", "/org/freedesktop/DBus")
+            bus = self._bus.get_proxy_object("org.freedesktop.DBus", "/org/freedesktop/DBus", intro).get_interface("org.freedesktop.DBus")
+            owner = await bus.call_get_name_owner(BLUEZ)
+        except Exception:
+            return
+        restarted = bool(self._bluez_owner and owner != self._bluez_owner)
+        self._bluez_owner = owner
+        lost_advert = False
+        now = time.time()
+        if self._advertising and now - self._advert_checked >= 30:
+            self._advert_checked = now
+            try:
+                manager = (await self._char("/org/bluez/hci0")).get_interface("org.bluez.LEAdvertisingManager1")
+                lost_advert = (await manager.get_active_instances()) == 0
+            except Exception:
+                pass
+        if restarted or lost_advert:
+            self.note("bluez", "bluetoothd restarted" if restarted else "the Pi's BLE advertisement was lost")
+            self.say("bluez", "Bluetooth was restarted or reset; advertising and the pairing agent again so the iPhone can find the Pi.")
+            self._advertising = False
+            self._adv_last_try = 0.0
+            self._chars.clear()
+            self._unwatch()
+            if self.control:
+                try:
+                    await self.control.register_agent()
+                except Exception as e:
+                    self.say("agent", f"could not register the pairing agent again: {e}")
+
+    def _may_force(self, now: float) -> bool:
+        """The last rung of the healing ladder: at most once an hour and
+        FORCE_MAX_PER_DAY times a day. Past that, stop and ask for a re-pair."""
+        self._forces = [t for t in self._forces if now - t < 86400]
+        if len(self._forces) >= FORCE_MAX_PER_DAY:
+            if not self.needs_repair:
+                self.needs_repair = True
+                self.note("repair", f"dropped the phone {len(self._forces)} times today and it is still not "
+                                    f"answering; stopping. Forget the Pi on the iPhone and pair again.")
+            return False
+        return not self._forces or now - self._forces[-1] >= FORCE_MIN_GAP
 
     async def send_command(self, command: str) -> bool:
         char = self._chars.get(AMS_REMOTE_COMMAND)
@@ -472,33 +583,37 @@ class PhoneLink:
         objects = await self._objects()
         if self.control:
             await self.control.refresh(objects)
+        await self._watch_bluez()
         phone_path, phone_name, dev = None, "", None
         for path, ifaces in objects.items():
             d = ifaces.get("org.bluez.Device1")
             if d and d["Paired"].value and d["Connected"].value:
+                address = (d["Address"].value if d.get("Address") else "").upper()
                 uuids = {u.lower() for u in d.get("UUIDs").value} if d.get("UUIDs") else set()
                 services = self._services_under(objects, path)
-                if ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids:
+                by_service = ANCS_SERVICE in services or AMS_SERVICE in services or ANCS_SERVICE in uuids
+                by_pin = bool(self.pinned and address == self.pinned)
+                icon = d.get("Icon").value if d.get("Icon") else ""
+                by_icon = not self.pinned and icon == "phone"
+                if by_service or by_pin or by_icon:
                     phone_path, phone_name, dev = path, d.get("Alias").value if d.get("Alias") else "", d
+                    self._pin(address, "found on its Apple notification service" if by_service else "a paired phone")
                     break
-        # BlueZ says the phone is connected, but that flag stays true on a dead
-        # zombie link after the phone has left (no notify session starts, no
-        # data arrives). Count it as present only while the link has recently
-        # proven alive OR a classic-paired link has been seen in the last
-        # minute. A bonded iPhone being in range is the signal that matters
-        # for "home"; notifications and now-playing are nice-to-have on BLE.
+        # Home needs real evidence (presence.py): the kernel holds a radio link
+        # to the remembered iPhone, or the phone is sending data. BlueZ's own
+        # "Connected" flag alone is not trusted: it stays true on a dead zombie
+        # link after the phone has left. The kernel list is only trusted when
+        # it shows the phone (an iPhone's BLE address can change), never to say
+        # the phone is gone.
         now_t = time.time()
-        linked = phone_path is not None
-        if linked:
-            self._classic_seen_at = now_t
-        alive = bool(self._alive_at and now_t - self._alive_at < PRESENCE_LIVENESS) \
-            or bool(self._classic_seen_at and now_t - self._classic_seen_at < CLASSIC_PRESENCE)
-        # Data flowing from the phone (now playing, notifications, battery) is
-        # proof it is here even when the Device1 match above misses it (e.g.
-        # ANCS not in the cached UUIDs yet). Short window so leaving is still
-        # noticed quickly.
-        data_live = bool(self._alive_at and now_t - self._alive_at < DATA_LIVE)
-        await self.set_presence((linked and alive) or data_live, phone_name or self.device_name)
+        links = await self._kernel_links()
+        radio = True if (links is not None and self.pinned and self.pinned in links) else None
+        data_age = now_t - self._alive_at if self._alive_at else None
+        verdict = presence.decide(radio, data_age, phone_path is not None, DATA_LIVE, PRESENCE_LIVENESS)
+        if verdict.reason != self.presence_reason:
+            self.note("presence", f"{'home' if verdict.present else 'away'}: {verdict.reason}")
+        self.presence_reason = verdict.reason
+        await self.set_presence(verdict.present, phone_name or self.device_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
             self.say("state", "no paired phone is connected to the Pi; waiting")
@@ -521,10 +636,11 @@ class PhoneLink:
             # drop as a very last resort after STUCK_DROP_AFTER (15 min) and
             # never more often than FORCE_MIN_GAP.
             self._chars.clear()
-            if now - self._profile_last_try >= PROFILE_RETRY:
+            if now - self._profile_last_try >= min(PROFILE_MAX_GAP, PROFILE_RETRY * 2 ** self._profile_tries):
                 self._profile_last_try = now
+                self._profile_tries += 1
                 await self._connect_profile(phone_path, phone_name, address)
-            if stuck_for >= STUCK_DROP_AFTER and now - self._force_at >= FORCE_MIN_GAP:
+            if stuck_for >= STUCK_DROP_AFTER and self._may_force(now):
                 await self._force_fresh_link(phone_path,
                     f"{phone_name} ({address}) has been connected without BLE for "
                     f"{int(stuck_for)} s; disconnecting as a last resort.")
@@ -534,6 +650,7 @@ class PhoneLink:
             return
         self._ble_tries = 0
         self._ble_stuck_since = 0.0
+        self._profile_tries = 0
         stale = self._stale_reason(objects, phone_path) if self._chars else ""
         if stale:
             self.say("state", f"now playing from {phone_name} went quiet ({stale}); subscribing again.")
@@ -603,7 +720,7 @@ class PhoneLink:
             if ok is False:
                 self._probe_fails += 1
         broken = self._probe_fails >= PROBE_FAILS or self._subscribe_fails >= SUBSCRIBE_FAILS
-        if broken and now - self._ble_dead_since >= DEAD_AFTER and now - self._force_at >= FORCE_MIN_GAP:
+        if broken and now - self._ble_dead_since >= DEAD_AFTER and self._may_force(now):
             await self._force_fresh_link(device_path,
                 f"{name} ({address}) shows a BLE link but it is not answering "
                 f"(no data for {int(now - self._ble_dead_since)} s; "
@@ -623,6 +740,8 @@ class PhoneLink:
         self._subscribe_fails = 0
         self._classic_only = False
         self._force_at = time.time()
+        self._forces.append(self._force_at)
+        self.note("heal", why)
         self._chars.clear()
         self._unwatch()
         try:
@@ -874,6 +993,8 @@ class PhoneLink:
         """Log a phone-link line. The same line for the same key is written
         once, then at most once a minute with how often it happened."""
         now = time.time()
+        if key in ("state", "profile", "open-ble", "disconnect", "advertise"):
+            self.note(key, message[:200])
         last = self._said.get(key)
         if last and last[0] == message:
             last[2] += 1
