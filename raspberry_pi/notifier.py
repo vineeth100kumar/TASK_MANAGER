@@ -518,6 +518,9 @@ def parse_when(value: Any, tz: ZoneInfo) -> Optional[datetime.datetime]:
 def open_items() -> List[dict]:
     conn = _connect()
     rows = conn.execute("SELECT payload FROM entities WHERE table_name = 'workItems' AND deleted = 0").fetchall()
+    # Tasks left open in a project marked complete stay out of reminders, digests and plans.
+    closed = item_shape.closed_project_ids(
+        json.loads(r[0]) for r in conn.execute("SELECT payload FROM entities WHERE table_name = 'projects' AND deleted = 0").fetchall())
     conn.close()
     items = []
     for (payload,) in rows:
@@ -527,7 +530,7 @@ def open_items() -> List[dict]:
             continue
         # Status decides, as in the app; an old completedAt on a reopened item doesn't.
         item = item_shape.normalize_item(item)
-        if not item_shape.is_open(item):
+        if not item_shape.is_open(item) or item_shape.in_closed_project(item, closed):
             continue
         items.append(item)
     return items

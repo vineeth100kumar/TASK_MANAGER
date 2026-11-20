@@ -188,9 +188,14 @@ async function sweepLooseItems(): Promise<void> {
 // LUMO alarms are reminders underneath but not tasks: they live on the LUMO
 // page, so no list, count, board, calendar or export starts with them.
 // Hidden tasks are the same: they live on the locked Hidden page.
-function liveItems(): WorkItem[] {
+// Open tasks of a project marked complete are hidden too (reopening brings them
+// back); inside that project (scopeProjectId) they stay visible.
+function liveItems(scopeProjectId?: string): WorkItem[] {
   const projects = state.projects.filter(Boolean);
-  return state.workItems.filter(i => isLive(i) && !isAlarm(i) && !isHidden(i)).map(i => normalizeItem(i, projects));
+  const closed = new Set(projects.filter(p => p.completedAt && p.id !== scopeProjectId).map(p => p.id));
+  return state.workItems
+    .filter(i => isLive(i) && !isAlarm(i) && !isHidden(i) && !(i.status !== 'done' && i.projectId && closed.has(i.projectId)))
+    .map(i => normalizeItem(i, projects));
 }
 
 function hydrateWorkItem(raw: WorkItem): WorkItem {
@@ -373,12 +378,12 @@ export const api = {
     query: async (filters?: ItemFilters & { projectId?: string; lifeContext?: LifeContext }): Promise<Selection> => {
       await initializeStore();
       const { projectId, lifeContext, ...rest } = filters || {};
-      const sel = selectItems(liveItems(), { projectId, lifeContext, filters: rest }, state.projects.filter(Boolean));
+      const sel = selectItems(liveItems(projectId), { projectId, lifeContext, filters: rest }, state.projects.filter(Boolean));
       return { ...sel, items: sel.items.map(hydrateWorkItem) };
     },
 
     /** Every live item in the one shape, right now (for strips and counts that can't wait). */
-    snapshot: (): WorkItem[] => liveItems(),
+    snapshot: (scopeProjectId?: string): WorkItem[] => liveItems(scopeProjectId),
 
     /** The hidden tasks, open ones first, for the locked Hidden page. */
     hidden: async (): Promise<WorkItem[]> => {

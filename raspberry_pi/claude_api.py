@@ -193,7 +193,8 @@ def overview() -> dict:
     items = [item_shape.normalize_item(i, types.get(i.get("projectId"))) for i in _rows("workItems")] if "workItems" in TABLES else []
     # LUMO alarms are reminders underneath but not tasks; hidden tasks are
     # counted but not listed (sage_list with hidden "only" shows them).
-    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and not item_shape.is_hidden(i)]
+    closed = item_shape.closed_project_ids(_rows("projects")) if "projects" in TABLES else set()
+    open_items = [i for i in items if item_shape.is_open(i) and not item_shape.is_alarm(i) and not item_shape.is_hidden(i) and not item_shape.in_closed_project(i, closed)]
     hidden_open = sum(1 for i in items if item_shape.is_open(i) and item_shape.is_hidden(i))
 
     def brief(i: dict) -> dict:

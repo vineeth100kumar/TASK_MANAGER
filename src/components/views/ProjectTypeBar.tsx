@@ -20,7 +20,7 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, pipelin
     const projects = api.sync.getState().projects.filter(Boolean) as Project[];
     return {
       projects,
-      items: selectItems(api.workItems.snapshot(), { projectId, lifeContext }, projects).items,
+      items: selectItems(api.workItems.snapshot(projectId), { projectId, lifeContext }, projects).items,
     };
   };
   const [data, setData] = useState(read);

@@ -36,7 +36,7 @@ export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { proje
   const statuses = projectTypeInfo(project).statuses;
 
   const readTasks = useCallback(() => {
-    const all = api.workItems.snapshot() as WorkItem[];
+    const all = api.workItems.snapshot(projectId) as WorkItem[];
     setTasks(all.filter(t => t.projectId === projectId && t.status !== 'done' && !(t as any).postId && !(t as any).reelId));
   }, [projectId]);
 
