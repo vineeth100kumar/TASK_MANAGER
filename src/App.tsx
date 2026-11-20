@@ -30,7 +30,7 @@ import { onlyDated, type Shown } from './services/items';
 import { TaskInspector } from './components/tasks/TaskInspector';
 import { CreateTaskModal } from './components/tasks/CreateTaskModal';
 import {
-  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, PostsView, ReelsView, RecordingsView, HiddenView, ProjectBranchesView,
+  NotesView, NotesLock, CanvasView, RadarView, LumoView, DropView, RecordingsView, HiddenView, ProjectBranchesView,
   CalendarView, TimelineView, TableView,
   SettingsModal, SyncDiagnosticsModal, TrashModal, ShortcutSheet, MorningPickThree, EveningShutdown, WeeklyReview,
   prefetchViews,
@@ -43,7 +43,7 @@ import { BootBoundary } from './components/common/BootBoundary';
 import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
 import { ContentSummary } from './components/views/ContentSummary';
-import { ContentWeekView } from './components/views/ContentWeekView';
+import { ContentHub } from './components/views/ContentHub';
 import { ProjectPipeline } from './components/views/ProjectPipeline';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
@@ -542,12 +542,10 @@ function MainApp() {
               <LumoView />
             ) : activeView === 'drop' ? (
               <DropView />
-            ) : activeView === 'posts' ? (
-              <PostsView projectId={postsProject} focus={postsFocus} />
-            ) : activeView === 'reels' ? (
-              <ReelsView projectId={reelsProject} focus={reelsFocus} />
-            ) : activeView === 'contentweek' ? (
-              <ContentWeekView />
+            ) : (activeView === 'posts' || activeView === 'reels' || activeView === 'contentweek') ? (
+              <ContentHub tab={activeView} onTab={setActiveView}
+                postsProject={postsProject} postsFocus={postsFocus}
+                reelsProject={reelsProject} reelsFocus={reelsFocus} />
             ) : activeView === 'recordings' ? (
               <RecordingsView />
             ) : activeView === 'hidden' ? (

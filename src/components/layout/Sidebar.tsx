@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { parseLocalDate, getTodayString } from '../../utils/dateUtils';
 import { HabitHistory } from '../habits/HabitViews';
 import { motion, AnimatePresence } from 'framer-motion';
-import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, CheckCircle2, CalendarClock } from 'lucide-react';
-import ClapperIcon from '../icons/ClapperIcon';
+import { X, Plus, Sun, Moon, LayoutDashboard, Inbox, Target, Activity, FileText, Loader2, Trash2, ExternalLink, Download, Database, Hourglass, Layers, Settings, ChevronUp, ChevronDown, Pencil, PenLine, Radar, AlarmClock, UploadCloud, Coffee, Briefcase, EyeOff, GalleryHorizontal, CheckCircle2 } from 'lucide-react';
 import { api } from '../../services/api';
 import { Project, Area, Goal, Habit, Note, LifeFilter } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
@@ -12,8 +11,6 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { Select } from '../common/Select';
 import { prefetchView } from '../views/lazyViews';
 import { DatePicker } from '../common/DatePicker';
-import { openPosts } from '../../services/posts';
-import { openReels } from '../../services/reels';
 import { ProjectTypePicker } from '../common/ProjectTypePicker';
 import { groupProjectsByType, projectTypeId } from '../../services/projectTypes';
 
@@ -381,12 +378,8 @@ export function Sidebar({
                 { id: 'canvas', name: 'Canvas', icon: PenLine },
                 // Temporary share links for reports and site samples.
                 { id: 'drop', name: 'Drop', icon: UploadCloud, color: 'text-sky-500' },
-                // Instagram carousels the Pi draws from a pasted script (Auto Content).
-                ...(lifeContext === 'personal' ? [] : [{ id: 'posts', name: 'Posts', icon: GalleryHorizontal, color: 'text-pink-500' }]),
-                // Vertical videos with a voice-over the Pi makes from a pasted script.
-                ...(lifeContext === 'personal' ? [] : [{ id: 'reels', name: 'Reels', icon: ClapperIcon, color: 'text-rose-500' }]),
-                // The week plan: everything scheduled to post, across content projects.
-                ...(lifeContext === 'personal' ? [] : [{ id: 'contentweek', name: 'Content week', icon: CalendarClock, color: 'text-sky-500' }]),
+                // One door for all content: Calendar, Posts (Auto Content carousels) and Reels.
+                ...(lifeContext === 'personal' ? [] : [{ id: 'content', name: 'Content', icon: GalleryHorizontal, color: 'text-pink-500' }]),
                 // Record audio from the Pi's USB microphone. Parked for now — the
                 // mic isn't working yet, so the Recordings page is hidden (the
                 // backend routes are off unless SAGE_MIC=1). Restore this line to
@@ -413,9 +406,7 @@ export function Sidebar({
                   item.id === 'radar' ? activeView === 'radar' : 
                   item.id === 'lumo' ? activeView === 'lumo' : 
                   item.id === 'drop' ? activeView === 'drop' : 
-                  item.id === 'posts' ? activeView === 'posts' : 
-                  item.id === 'reels' ? activeView === 'reels' :
-                  item.id === 'contentweek' ? activeView === 'contentweek' :
+                  item.id === 'content' ? (activeView === 'posts' || activeView === 'reels' || activeView === 'contentweek') :
                   item.id === 'recordings' ? activeView === 'recordings' :
                   item.id === 'hidden' ? activeView === 'hidden' : 
                   item.id === 'inbox' ? activeView === 'inbox' :
@@ -436,11 +427,7 @@ export function Sidebar({
                       setActiveView('lumo');
                     } else if (item.id === 'drop') {
                       setActiveView('drop');
-                    } else if (item.id === 'posts') {
-                      openPosts();
-                    } else if (item.id === 'reels') {
-                      openReels();
-                    } else if (item.id === 'contentweek') {
+                    } else if (item.id === 'content') {
                       setActiveView('contentweek');
                     } else if (item.id === 'recordings') {
                       setActiveView('recordings');
