@@ -1901,6 +1901,7 @@ class Speaker:
             return
         if not call_tasks.should_make_task(name, self._call_task_at.get(name.lower(), 0.0), now):
             return self._note(f"missed call from {name or 'someone'}", "silent", "no task: unknown caller or one made lately")
+        self._call_task_at = {k: t for k, t in self._call_task_at.items() if now - t < 4 * call_tasks.CALL_TASK_GAP_S}
         self._call_task_at[name.lower()] = now
         asyncio.run_coroutine_threadsafe(self._make_call_task(name, settings), self.loop)
 
@@ -2201,7 +2202,11 @@ class Speaker:
             log.info("Recap reminders failed: %s", e)
             reminders = []
         stats, now = self._rank_stats(), time.time()
-        ranked = lambda kinds: sender_rank.rank_names(stats, [r["who"] for r in heard if r["kind"] in kinds], now)
+
+        def ranked(kinds: tuple) -> List[str]:
+            """The people who matter most first, so recap_line's four names are the right four."""
+            return sender_rank.rank_names(stats, [r["who"] for r in heard if r["kind"] in kinds], now)
+
         line = herald_extras.recap_line(
             ranked(("whatsapp", "message")), ranked(("email",)), ranked(("call",)),
             reminders, settings.get("callMe", ""), self._recap_idx)
