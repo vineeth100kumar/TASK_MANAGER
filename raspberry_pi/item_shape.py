@@ -122,6 +122,17 @@ def is_hidden(item: dict) -> bool:
     return _truthy(item.get("isHidden"))
 
 
+def closed_project_ids(projects: Iterable[dict]) -> set:
+    """Ids of projects marked complete (completedAt set). Their leftover open
+    tasks are hidden everywhere except inside the project (the web app's
+    api.ts liveItems does the same); reopening the project brings them back."""
+    return {p.get("id") for p in projects if p and p.get("completedAt")}
+
+
+def in_closed_project(item: dict, closed: set) -> bool:
+    return bool(closed) and item.get("projectId") in closed
+
+
 def is_alarm(item: dict) -> bool:
     """A LUMO alarm: a reminder labelled "alarm" that the desk clock rings
     (desk/alarms.py and the web app use the same test). Alarms live on the

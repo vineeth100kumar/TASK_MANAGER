@@ -66,3 +66,12 @@ class ItemShapeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ClosedProjectTests(unittest.TestCase):
+    def test_closed_project_open_items_are_flagged(self):
+        closed = item_shape.closed_project_ids([{"id": "a", "completedAt": "2026-11-01"}, {"id": "b"}])
+        self.assertEqual(closed, {"a"})
+        self.assertTrue(item_shape.in_closed_project({"projectId": "a"}, closed))
+        self.assertFalse(item_shape.in_closed_project({"projectId": "b"}, closed))
+        self.assertFalse(item_shape.in_closed_project({"projectId": "a"}, set()))
