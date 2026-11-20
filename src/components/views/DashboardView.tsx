@@ -24,12 +24,15 @@ import { ReminderPrompt } from '../common/ReminderPrompt';
 import { RadarBriefCard } from '../radar/RadarBriefCard';
 import { HiddenWorkLine } from '../common/HiddenWorkLine';
 import { holidayMap, nextHoliday, holidayLabel, useHolidayPref } from '../../utils/holidays';
+import { ContentChip, openChip } from '../../services/contentCalendar';
+import { GalleryHorizontal, Clapperboard } from 'lucide-react';
 
 interface DashboardViewProps {
   workspaceId: string;
   onSelectTask: (id: string) => void;
   lifeContext?: LifeContext;
   onNavigateView?: (view: string) => void;
+  content?: ContentChip[];
 }
 
 interface TodayData {
@@ -42,7 +45,7 @@ interface TodayData {
 
 // Today is one list: everything overdue, due today, starting today or starred,
 // overdue first, then by priority, then by time. No buckets.
-export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: DashboardViewProps) {
+export function DashboardView({ onSelectTask, lifeContext, onNavigateView, content = [] }: DashboardViewProps) {
   const [data, setData] = useCachedState<TodayData | null>(`today-list:${lifeContext || 'all'}`, null);
   const [time, setTime] = useState(new Date());
   const [showSnoozed, setShowSnoozed] = useState(false);
@@ -111,6 +114,7 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
   }
 
   const todayIso = getTodayString();
+  const postingToday = content.filter(c => c.dueDate === todayIso).sort((a, b) => a.dueTime.localeCompare(b.dueTime));
   const items = data.items || [];
   const snoozed = data.snoozed || [];
   const overdueCount = items.filter(i => isOverdue(i, todayIso)).length;
@@ -282,6 +286,26 @@ export function DashboardView({ onSelectTask, lifeContext, onNavigateView }: Das
           </div>
         )}
       </section>
+      )}
+
+      {/* Posting today: scheduled posts and reels, so content sits with the day's work. */}
+      {postingToday.length > 0 && (
+        <section>
+          <p className="eyebrow text-gray-400 mb-2 px-1">Posting today</p>
+          <div className="space-y-2">
+            {postingToday.map(c => {
+              const Icon = c.contentKind === 'post' ? GalleryHorizontal : Clapperboard;
+              return (
+                <button key={c.id} type="button" onClick={() => openChip(c)}
+                  className={`w-full surface-item is-interactive rounded-2xl px-4 py-3 flex items-center gap-3 text-left ${c.posted ? 'opacity-50' : ''}`}>
+                  <Icon size={16} className={c.contentKind === 'post' ? 'text-pink-500 shrink-0' : 'text-rose-500 shrink-0'} />
+                  <span className={`flex-1 min-w-0 truncate text-[14px] font-semibold ${c.posted ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{c.title}</span>
+                  <span className="text-[12px] font-medium text-gray-400 tabular-nums shrink-0">{c.posted ? 'posted' : c.dueTime}</span>
+                </button>
+              );
+            })}
+          </div>
+        </section>
       )}
 
       {/* Habits: a fresh entry each day, so a missed day shows as missed instead of carrying over. */}

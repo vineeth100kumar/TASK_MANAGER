@@ -18,6 +18,7 @@ import { MobileTabBar } from './components/layout/MobileTabBar';
 import { VoiceAssistant } from './components/layout/VoiceAssistant';
 import { RingingBanner } from './components/layout/RingingBanner';
 import { DashboardView } from './components/views/DashboardView';
+import { useScheduledContent } from './services/contentCalendar';
 import { InboxView } from './components/views/InboxView';
 import { FocusView } from './components/views/FocusView';
 import { WaitingForView } from './components/views/WaitingForView';
@@ -55,6 +56,9 @@ function MainApp() {
   });
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   
+  // Scheduled posts/reels, shown as chips in the main Calendar and Today.
+  const scheduledContent = useScheduledContent();
+
   // Navigation State
   const [activeView, setActiveView] = useState('dashboard');
   // Posts page: a project to show posts of, and a post or New post to open (nonce makes a repeat tap count).
@@ -557,11 +561,12 @@ function MainApp() {
             ) : activeView === 'waiting_for' ? (
               <WaitingForView lifeContext={lifeContext} onSelectTask={setSelectedItemId} />
             ) : activeView === 'dashboard' ? (
-              <DashboardView 
-                workspaceId={activeWorkspace} 
-                onSelectTask={(id) => setSelectedItemId(id)} 
+              <DashboardView
+                workspaceId={activeWorkspace}
+                onSelectTask={(id) => setSelectedItemId(id)}
                 lifeContext={lifeContext}
                 onNavigateView={(v) => setActiveView(v)}
+                content={scheduledContent}
               />
             ) : (
               <div>
@@ -614,7 +619,7 @@ function MainApp() {
                         )}
                         {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}
                         {presentationMode === 'table' && <TableView tasks={workItems} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'calendar' && <CalendarView tasks={workItems} onSelect={setSelectedItemId} />}
+                        {presentationMode === 'calendar' && <CalendarView tasks={workItems} content={scheduledContent} onSelect={setSelectedItemId} />}
                       </LayoutGroup>
                     </motion.div>
                   </AnimatePresence>
