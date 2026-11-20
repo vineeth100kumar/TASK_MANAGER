@@ -136,11 +136,6 @@ export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { proje
           <h4 className="text-[14px] font-semibold leading-snug line-clamp-2">{p.title}</h4>
           {p.scheduledFor && col === 'scheduled' && <p className="mt-1.5 text-[11.5px] font-semibold text-sky-600 dark:text-sky-400">Post {whenText(p.scheduledFor)}{p.status !== 'planned' && ' · reminder set'}</p>}
         </button>
-        {col === 'ready' && (
-          <button type="button" onClick={() => moveTo(p, 'scheduled')} className="mt-2 flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300">
-            <CalendarClock size={12} /> Remind me to post
-          </button>
-        )}
         {col === 'scheduled' && p.status === 'planned' && (
           <div className="mt-2 space-y-1.5">
             <p className="text-[11.5px] text-gray-500">Script saved. Draws {p.scheduledFor ? drawAtText(p.scheduledFor) : 'later'}, reminder at post time.</p>
@@ -159,7 +154,8 @@ export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { proje
           </div>
         )}
         {col === 'ready' && (
-          <div className="mt-1.5 flex flex-wrap gap-1.5">
+          <div className="mt-2 flex flex-wrap gap-1.5">
+            <button type="button" onClick={() => moveTo(p, 'scheduled')} className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300"><CalendarClock size={12} /> Schedule</button>
             <button type="button" onClick={() => moveTo(p, 'posted')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold bg-black/[0.05] dark:bg-white/10">Mark posted</button>
             <button type="button" onClick={() => moveTo(p, 'dropped')} className="h-7 px-2.5 rounded-full text-[12px] font-semibold text-gray-500 hover:bg-black/[0.05] dark:hover:bg-white/10">Won't post</button>
           </div>

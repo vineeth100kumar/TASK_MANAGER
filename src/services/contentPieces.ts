@@ -4,7 +4,7 @@ import type { Post } from './posts';
 import type { Reel } from './reels';
 
 export type Kind = 'post' | 'reel';
-export type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; wontPost: boolean; archived: boolean; projectId: string | null; createdAt: string };
+export type Piece = { kind: Kind; id: string; title: string; status: string; scheduledFor: string | null; posted: boolean; wontPost: boolean; archived: boolean; review: string; projectId: string | null; createdAt: string };
 export type ColumnId = 'idea' | 'script' | 'drafting' | 'ready' | 'scheduled' | 'posted' | 'dropped';
 
 /** The Pi starts drawing a planned piece this long before its slot (content_schedule.py, LEAD_MINUTES). */
@@ -21,8 +21,11 @@ export function columnOf(p: Piece): ColumnId {
 
 export const toPiece = (kind: Kind, x: Post | Reel): Piece => ({
   kind, id: x.id, title: x.title, status: x.status, scheduledFor: x.scheduledFor || null,
-  posted: x.posted, wontPost: Boolean(x.wontPost), archived: Boolean(x.archived), projectId: x.projectId, createdAt: x.createdAt,
+  posted: x.posted, wontPost: Boolean(x.wontPost), archived: Boolean(x.archived), review: x.review || 'pending', projectId: x.projectId, createdAt: x.createdAt,
 });
+
+/** Approved and not dropped: what belongs on the calendars. */
+export const isApproved = (p: Piece): boolean => p.review === 'approved' && !p.wontPost;
 
 /** "Mon 24 Nov, 9:00 AM" from an ISO time, in the viewer's time zone. */
 export function whenText(iso: string): string {

@@ -537,7 +537,7 @@ def start(script: str, title: str = "", style: str = "", fmt: str = "", project_
         "auditNote": "",
         "seconds": None,
         "finishedAt": None,
-        "review": "pending",   # pending | approved | rejected
+        "review": "approved" if planned_for else "pending",   # a date means you intend to post it
         "archived": False,     # a rejected post is archived: the script is kept, the slides removed
         "archivedAt": None,
         "posted": False,
@@ -1312,6 +1312,8 @@ async def posts_schedule(post_id: str, body: ScheduleBody):
     except ValueError as e:
         return _bad(str(e))
     post["remindStage"] = 0   # a new time starts the reminders again
+    if post["scheduledFor"] and post.get("review") != "rejected":
+        post["review"] = "approved"   # scheduling is your approval: it shows on the calendar
     await save_async(post)
     if post["status"] == "planned" and not post["scheduledFor"]:
         release(post)   # a planned post with no date is simply drawn now

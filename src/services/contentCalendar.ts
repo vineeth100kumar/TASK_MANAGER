@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Post, postsApi, postsAvailable, POST_EVENT, openPosts } from './posts';
 import { Reel, reelsApi, reelsAvailable, REEL_EVENT, openReels } from './reels';
-import { toPiece, columnOf } from './contentPieces';
+import { toPiece, columnOf, isApproved } from './contentPieces';
 
 /** A scheduled post/reel shaped like a calendar item (entityType 'post' | 'reel'). */
 export interface ContentChip {
@@ -29,10 +29,11 @@ const localTime = (iso: string) => {
 
 const chipOf = (kind: 'post' | 'reel', x: Post | Reel): ContentChip | null => {
   const piece = toPiece(kind, x);
-  if (!piece.scheduledFor) return null;
+  if (!piece.scheduledFor || !isApproved(piece)) return null;
+  // The main Calendar and Today are for planning: upcoming approved content, not past posts.
+  if (piece.posted) return null;
   const col = columnOf(piece);
-  // Show what has a real slot on the calendar: scheduled (incl. planned) or already posted.
-  if (col !== 'scheduled' && col !== 'posted') return null;
+  if (col !== 'scheduled') return null;
   return {
     id: `${kind}:${piece.id}`,
     contentKind: kind, contentId: piece.id,
