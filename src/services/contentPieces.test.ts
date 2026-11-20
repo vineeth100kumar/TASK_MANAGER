@@ -1,8 +1,17 @@
 import { describe, expect, it } from 'vitest';
-import { columnOf, countPieces, moveToDay, weekStart, type Piece } from './contentPieces';
+import { columnOf, countPieces, isApproved, moveToDay, weekStart, type Piece } from './contentPieces';
 
 const piece = (over: Partial<Piece>): Piece => ({
-  kind: 'post', id: 'a', title: 't', status: 'done', scheduledFor: null, posted: false, wontPost: false, archived: false, projectId: null, createdAt: '', ...over,
+  kind: 'post', id: 'a', title: 't', status: 'done', scheduledFor: null, posted: false, wontPost: false, archived: false, review: 'approved', projectId: null, createdAt: '', ...over,
+});
+
+describe('isApproved', () => {
+  it('is true only for approved, not-dropped pieces', () => {
+    expect(isApproved(piece({ review: 'approved' }))).toBe(true);
+    expect(isApproved(piece({ review: 'pending' }))).toBe(false);
+    expect(isApproved(piece({ review: 'rejected' }))).toBe(false);
+    expect(isApproved(piece({ review: 'approved', wontPost: true }))).toBe(false);
+  });
 });
 
 describe('columnOf', () => {
