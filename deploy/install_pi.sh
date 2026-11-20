@@ -189,6 +189,16 @@ part_services() {
   # to use the Pi as a speaker even if a stray SDP record slipped through.
   # Dropped-in on bluetooth.service so it is re-applied after every reboot;
   # hciconfig is still in bluez and idempotent.
+  # BlueZ's own config is the proper place: it re-applies the class whenever
+  # the adapter powers on, which the hciconfig line below cannot (it only runs
+  # once, 2 s after the service starts, and is kept as a backup).
+  if [ -f /etc/bluetooth/main.conf ]; then
+    if grep -qE '^[#[:space:]]*Class[[:space:]]*=' /etc/bluetooth/main.conf; then
+      sed -i -E 's/^[#[:space:]]*Class[[:space:]]*=.*/Class = 0x000704/' /etc/bluetooth/main.conf
+    else
+      sed -i -E '0,/^\[General\]/s//[General]\nClass = 0x000704/' /etc/bluetooth/main.conf
+    fi
+  fi
   if command -v hciconfig >/dev/null 2>&1; then
     mkdir -p /etc/systemd/system/bluetooth.service.d
     printf '[Service]\nExecStartPost=/bin/sh -c "sleep 2 && /usr/bin/hciconfig hci0 class 0x000704 || true"\n' \

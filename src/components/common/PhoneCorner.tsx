@@ -36,6 +36,7 @@ interface PhoneStatus {
   connected: boolean;
   home: boolean;
   deviceName: string;
+  presenceReason?: string;
 }
 
 const PEEK_MS = 6000;
@@ -85,7 +86,7 @@ export const PhoneCorner = () => {
       const res = await fetch(`${baseUrl}/api/phone`, { headers: piHeaders() });
       if (!res.ok) return;
       const data = await res.json();
-      setStatus({ available: data.available, connected: data.connected, home: data.home, deviceName: data.deviceName });
+      setStatus({ available: data.available, connected: data.connected, home: data.home, deviceName: data.deviceName, presenceReason: data.presenceReason });
       setNotifications(data.notifications || []);
       setMedia(data.media || null);
     } catch {
@@ -109,7 +110,7 @@ export const PhoneCorner = () => {
       } else if (event.type === 'PHONE_MEDIA') {
         setMedia(event.media);
       } else if (event.type === 'PHONE_STATUS') {
-        setStatus({ available: event.available, connected: event.connected, home: event.home, deviceName: event.deviceName });
+        setStatus({ available: event.available, connected: event.connected, home: event.home, deviceName: event.deviceName, presenceReason: event.presenceReason });
         if (event.media) setMedia(event.media);
       }
     };
@@ -156,8 +157,8 @@ export const PhoneCorner = () => {
   const hasMedia = !!media?.title;
   if (isMobile || !baseUrl || (!status?.available && notifications.length === 0)) return null;
 
-  const dot = status?.connected ? 'bg-emerald-500' : status?.home ? 'bg-amber-400' : 'bg-gray-300 dark:bg-gray-600';
-  const presence = status?.connected ? 'Home · phone connected' : status?.home ? 'Home · phone just left range' : 'Away';
+  const dot = status?.connected && status?.home ? 'bg-emerald-500' : status?.home ? 'bg-amber-400' : 'bg-gray-300 dark:bg-gray-600';
+  const presence = status?.home ? (status?.presenceReason ? `Home · ${status.presenceReason}` : status?.connected ? 'Home · phone connected' : 'Home · phone just left range') : 'Away';
 
   return (
     <div ref={panelRef} className="fixed z-[90] right-4 bottom-4 flex flex-col-reverse items-end gap-2 w-[22rem] pointer-events-none">
