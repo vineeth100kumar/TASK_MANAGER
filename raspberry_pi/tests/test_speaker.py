@@ -538,6 +538,127 @@ class HeraldNoticeTest(unittest.TestCase):
             for c in run.call_args_list:
                 c.args[0].close()
 
+    def test_notice_window_is_five_minutes_then_fresh(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True)
+        n = {"appId": "net.whatsapp.WhatsApp", "title": "Shreyansh"}
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.time, "time") as clock, \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            clock.return_value = 1000.0
+            s.on_phone_notification(n)
+            clock.return_value = 1000.0 + 299
+            s.on_phone_notification(n)
+            assert run.call_count == 1
+            clock.return_value = 1000.0 + 301
+            s.on_phone_notification(n)
+            assert run.call_count == 2
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def _herald(self, **settings):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True)
+        s._stats = {}
+        return s, speaker.get_settings() | settings
+
+    def test_one_line_per_sender_message_then_reaction(self):
+        s, st = self._herald()
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value=st), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Arya", "message": "hi"})
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Arya", "message": "Liked \u201chi\u201d"})
+            assert run.call_count == 1
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_old_senders_are_forgotten(self):
+        s, st = self._herald()
+        s._notice_at = {f"p{i}": 1.0 for i in range(50)}
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value=st), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Arya"})
+            assert len(s._notice_at) == 1
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_regulars_only_and_stranger_window(self):
+        s, st = self._herald(announceRegularsOnly=True)
+        n = {"appId": "net.whatsapp.WhatsApp", "title": "Bran"}
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value=st), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_phone_notification(n)                    # a stranger: counted, not spoken
+            assert run.call_count == 0
+            for _ in range(4):
+                s.on_phone_notification(n)                # now regular
+            assert run.call_count == 1
+            for c in run.call_args_list:
+                c.args[0].close()
+        s2, st2 = self._herald()
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker, "get_settings", return_value=st2), \
+             mock.patch.object(speaker.time, "time") as clock, \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            clock.return_value = 1000.0
+            s2.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Rickon"})
+            clock.return_value = 1000.0 + 400             # past 5 min, inside 15: a stranger waits
+            s2.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Rickon"})
+            assert run.call_count == 1
+            clock.return_value = 1000.0 + 901
+            s2.on_phone_notification({"appId": "net.whatsapp.WhatsApp", "title": "Rickon"})
+            assert run.call_count == 2
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_missed_call_makes_one_task(self):
+        s, st = self._herald()
+        call = {"appId": "com.apple.mobilephone", "category": "missed call", "title": "Sansa"}
+        with mock.patch.object(speaker, "get_settings", return_value=st), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_phone_notification(call)
+            s.on_phone_notification(call)
+            s.on_phone_notification({**call, "title": "+91 98765 43210"})
+            assert run.call_count == 1
+            for c in run.call_args_list:
+                c.args[0].close()
+        s3, st3 = self._herald(callBackTasks=False)
+        with mock.patch.object(speaker, "get_settings", return_value=st3), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s3.on_phone_notification(call)
+            assert run.call_count == 0
+
+    def test_battery_stages_and_away_delay(self):
+        w = ""
+        seen = []
+        for level in (25, 18, 12, 8, 7, 40, 18):
+            stage, w = speaker.battery_next(level, w)
+            seen.append(stage)
+        assert seen == ["", "low", "", "critical", "", "", "low"]
+        assert speaker.away_delay(80, True, 30, 300) == 30
+        assert speaker.away_delay(4, True, 30, 300) == 300
+        assert speaker.away_delay(12, True, 30, 300) == 30
+        assert speaker.away_delay(None, True, 30, 300) == 30
+        assert speaker.away_delay(80, False, 30, 300) == 300
+
+    def test_no_goodbye_when_phone_nearly_dead(self):
+        s, st = self._herald()
+        s.phone = mock.Mock(home=True, battery=4)
+        with mock.patch.object(speaker, "get_settings", return_value=st), \
+             mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_leave()
+            assert not run.called
+
     def test_back_online_picks_strongest_reason(self):
         outage = {"reasons": [{"kind": "restart"}, {"kind": "update"}, {"kind": "reboot"}]}
         self.assertEqual(speaker._back_online_kind(outage), "update")
