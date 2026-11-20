@@ -5,14 +5,18 @@ import { formatTime } from '../../utils/reminders';
 import { dayOf } from '../../services/items';
 import { holidayMap, holidayLabel, useHolidayPref } from '../../utils/holidays';
 import { HolidayTag } from '../common/HolidayTag';
+import { ContentChip, openChip } from '../../services/contentCalendar';
 
 interface CalendarViewProps {
   tasks: any[];
+  content?: ContentChip[];
   onSelect: (id: string) => void;
 }
 
-export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
+export function CalendarView({ tasks, content = [], onSelect }: CalendarViewProps) {
   const [currentMonth, setCurrentMonth] = useState(new Date());
+  // A content chip opens its post/reel; a task goes through onSelect.
+  const pick = (item: any) => (item.contentKind ? openChip(item) : onSelect(item.id));
 
   const getDates = () => {
     const dates = new Map<string, any[]>();
@@ -26,7 +30,7 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
 
     // A start-to-due range covers every day in it; anything else sits on its
     // one day (items.ts dayOf), whatever kind it is.
-    tasks.forEach(task => {
+    [...tasks, ...content].forEach(task => {
       const start = task.startDate;
       const due = task.dueDate;
       if (start && due && start < due && task.entityType !== 'event' && task.entityType !== 'reminder') {
@@ -118,14 +122,14 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
                     {hols.slice(0, 2).map(h => <HolidayTag key={h.name} holiday={h} size="xs" className="w-full" />)}
                     {hols.length > 2 && <p className="px-1.5 text-[11px] font-semibold text-rose-500/80" title={hols.slice(2).map(h => h.name).join(', ')}>+{hols.length - 2} holiday{hols.length > 3 ? 's' : ''}</p>}
                     {items.slice(0, MAX_CHIPS).map(task => (
-                      <button key={task.id} type="button" onClick={e => { e.stopPropagation(); onSelect(task.id); }} title={task.title}
+                      <button key={task.id} type="button" onClick={e => { e.stopPropagation(); pick(task); }} title={task.title}
                         className={`w-full flex items-center gap-1 text-left text-[11.5px] font-semibold px-1.5 py-[3px] rounded-md truncate transition-[filter,transform] hover:brightness-95 dark:hover:brightness-125 active:scale-[0.98] ${chipColor(task)}`}>
                         {timeOf(task) && <span className="shrink-0 font-medium opacity-70 tabular-nums">{formatTime(timeOf(task)).replace(':00', '').replace(' ', '')}</span>}
                         <span className="truncate">{task.title}</span>
                       </button>
                     ))}
                     {items.length > MAX_CHIPS && (
-                      <button type="button" onClick={e => { e.stopPropagation(); setSelectedDay(cell.dateStr); onSelect(items[MAX_CHIPS].id); }}
+                      <button type="button" onClick={e => { e.stopPropagation(); setSelectedDay(cell.dateStr); pick(items[MAX_CHIPS]); }}
                         className="px-1.5 text-[11px] font-semibold text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">+{items.length - MAX_CHIPS} more</button>
                     )}
                   </div>
@@ -156,7 +160,7 @@ export function CalendarView({ tasks, onSelect }: CalendarViewProps) {
         {agenda.length === 0 ? (
           (holidays.get(selectedDay)?.length ? null : <p className="px-1 py-6 text-center text-[13px] text-gray-400">Nothing on this day.</p>)
         ) : agenda.map(task => (
-          <button key={task.id} type="button" onClick={() => onSelect(task.id)}
+          <button key={task.id} type="button" onClick={() => pick(task)}
             className="w-full surface-item is-interactive rounded-2xl px-4 py-3 flex items-center gap-3 text-left">
             <span className={`w-2 h-2 rounded-full shrink-0 ${dotColor(task)}`} />
             <span className={`flex-1 min-w-0 truncate text-[14px] font-semibold ${task.status === 'done' ? 'line-through text-gray-400' : 'text-gray-900 dark:text-white'}`}>{task.title}</span>
@@ -179,6 +183,8 @@ function chipColor(task: any): string {
   if (task.entityType === 'event') return 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-300';
   if (task.entityType === 'reminder') return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300';
   if (task.entityType === 'milestone') return 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300';
+  if (task.entityType === 'post') return 'bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-300';
+  if (task.entityType === 'reel') return 'bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300';
   return 'bg-blue-50 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300';
 }
 
@@ -187,5 +193,7 @@ function dotColor(task: any): string {
   if (task.entityType === 'event') return 'bg-purple-500';
   if (task.entityType === 'reminder') return 'bg-emerald-500';
   if (task.entityType === 'milestone') return 'bg-amber-500';
+  if (task.entityType === 'post') return 'bg-pink-500';
+  if (task.entityType === 'reel') return 'bg-rose-500';
   return 'bg-blue-500';
 }
