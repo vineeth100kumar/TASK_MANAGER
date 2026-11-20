@@ -666,6 +666,11 @@ class HeraldNoticeTest(unittest.TestCase):
         self.assertEqual(speaker._back_online_kind({"reasons": [{"kind": "power"}, {"kind": "update"}]}), "power")
         self.assertEqual(speaker._back_online_kind({}), "restart")
 
+    def test_whats_new_fallback(self):
+        self.assertEqual(speaker._whats_new_fallback([]), "")
+        self.assertEqual(speaker._whats_new_fallback(["Fix: Herald tells news", "B"]), "New since last time: Herald tells news; B.")
+        self.assertEqual(speaker._update_changes({"reasons": [{"kind": "update"}]}), [])
+
     def test_back_online_only_when_home(self):
         s = speaker.Speaker()
         s.loop = mock.Mock()

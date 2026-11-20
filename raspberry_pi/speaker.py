@@ -576,6 +576,16 @@ Do not mention clock times or durations. """ + _SPOKEN_RULES + """
 Facts (JSON):
 """
 
+WHATS_NEW_PROMPT = HONEST_PERSONA + """Write a short spoken line (at most 40 words) telling the person what is new \
+now that Sage restarted with an update. "changes" are the developer's commit titles, newest first. Pick \
+the two or three that matter most to the person, say each as a plain thing you can now do or that works \
+better, like a robot reporting its own upgrades ("I can now...", "I have learned to..."). Skip \
+internal fixes nobody would notice. Do not read commit titles word for word and do not mention commits, \
+code, or versions. """ + _SPOKEN_RULES + """
+
+Facts (JSON):
+"""
+
 RECAP_PROMPT = HONEST_PERSONA + """Write a short spoken line (at most 40 words) telling the person what \
 they missed. The facts list who messaged, emailed or tried to ring them (use each name exactly as \
 given, include every one, say nothing about what any message said, you do not know) and which \
@@ -687,6 +697,30 @@ BACK_ONLINE_LINES = {
     "power": "Back online after a power blip.",
     "crash": "Back online after a hiccup.",
 }
+
+
+def _whats_new_fallback(changes: List[str]) -> str:
+    """No-AI line: the first couple of titles, trimmed."""
+    items = [c.split(":", 1)[-1].strip().rstrip(".") for c in changes[:2]]
+    items = [i[:70] for i in items if i]
+    if not items:
+        return ""
+    return "New since last time: " + "; ".join(items) + "."
+
+
+def _update_changes(outage: dict) -> List[str]:
+    """Commit titles the update brought in; empty if nothing changed."""
+    try:
+        import system_health
+        import uptime
+        old = (outage or {}).get("fromCommit")
+        new = system_health.COMMIT
+        if not old or not new or old == new:
+            return []
+        return uptime.changes(old, new, 8)
+    except Exception as e:
+        log.info("What's-new lookup failed: %s", e)
+        return []
 
 
 def _back_online_kind(outage: dict) -> str:
@@ -1793,12 +1827,20 @@ class Speaker:
             return self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
         self._last_welcome_at = now
         self._note(event, "back online")
+        changes = _update_changes(outage) if kind == "update" else []
 
         async def announce() -> None:
             line = ""
             if settings.get("witty", True):
                 line = await self._ai_line({"reason": kind, "name": settings.get("callMe", "")}, BACK_ONLINE_PROMPT, timeout=5)
             await self.say(line or BACK_ONLINE_LINES.get(kind, BACK_ONLINE_LINES["restart"]), "welcome")
+            if kind == "update" and changes:
+                new = ""
+                if settings.get("witty", True):
+                    new = await self._ai_line({"changes": changes, "name": settings.get("callMe", "")}, WHATS_NEW_PROMPT, timeout=6)
+                new = new or _whats_new_fallback(changes)
+                if new:
+                    await self.say(new, "welcome")
         asyncio.run_coroutine_threadsafe(announce(), self.loop)
 
     def _may_announce(self, event: str, settings: dict) -> bool:
