@@ -8,7 +8,7 @@ import { Reel, reelsApi, reelsAvailable, REEL_EVENT, openReels } from '../../ser
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
-import { Piece, columnOf, moveToDay, toPiece, weekStart, whenText } from '../../services/contentPieces';
+import { Piece, columnOf, moveToDay, toLocalInput, toPiece, weekStart, whenText } from '../../services/contentPieces';
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 const timeText = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -20,6 +20,7 @@ export function ContentCalendar({ projectId = '' }: { projectId?: string }) {
   const [start, setStart] = useState(() => weekStart(new Date()));
   const [dragged, setDragged] = useState<Piece | null>(null);
   const [over, setOver] = useState('');
+  const [picking, setPicking] = useState<{ piece: Piece; value: string } | null>(null);
 
   const projects = (api.sync.getState().projects.filter(Boolean) as Project[]);
   const nameOf = (id: string | null) => projects.find(p => p.id === id)?.name || '';
@@ -62,11 +63,7 @@ export function ContentCalendar({ projectId = '' }: { projectId?: string }) {
   const unscheduled = (pieces || []).filter(p => columnOf(p) === 'ready');
   const weekCount = days.reduce((n, d) => n + (byDay.get(dayKey(d)) || []).filter(p => !p.posted).length, 0);
 
-  const drop = async (day: Date) => {
-    const p = dragged;
-    setDragged(null); setOver('');
-    if (!p || p.posted) return;
-    const at = moveToDay(day, p.scheduledFor);
+  const schedule = async (p: Piece, at: string) => {
     try {
       await (p.kind === 'post' ? postsApi.schedule(p.id, at) : reelsApi.schedule(p.id, at));
       showToast(`Scheduled for ${whenText(at)}`);
@@ -76,21 +73,55 @@ export function ContentCalendar({ projectId = '' }: { projectId?: string }) {
     }
   };
 
+  // The datetime-local value for a given day, keeping the piece's own time, else 9:00.
+  const dayValue = (day: Date, from: string | null) => {
+    const d = new Date(day.getFullYear(), day.getMonth(), day.getDate(), 9, 0, 0, 0);
+    if (from) { const f = new Date(from); d.setHours(f.getHours(), f.getMinutes()); }
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
+  const drop = async (day: Date) => {
+    const p = dragged;
+    setDragged(null); setOver('');
+    if (!p || p.posted) return;
+    // Already has a time: just move the day, keep the time. No time yet: ask for it, no 9 AM guess.
+    if (p.scheduledFor) await schedule(p, moveToDay(day, p.scheduledFor));
+    else setPicking({ piece: p, value: dayValue(day, null) });
+  };
+
+  const confirmPick = async () => {
+    if (!picking) return;
+    const when = new Date(picking.value);
+    if (isNaN(when.getTime())) { showToast('Pick a date and time', 'error'); return; }
+    const { piece } = picking;
+    setPicking(null);
+    await schedule(piece, when.toISOString());
+  };
+
   const open = (p: Piece) => (p.kind === 'post' ? openPosts({ postId: p.id }) : openReels({ reelId: p.id }));
   const range = `${days[0].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} – ${days[6].toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}`;
 
   const card = (p: Piece) => {
     const Icon = p.kind === 'post' ? GalleryHorizontal : Clapperboard;
     return (
-      <button key={p.kind + p.id} type="button" draggable={!p.posted} onClick={() => open(p)}
+      <div key={p.kind + p.id} draggable={!p.posted}
         onDragStart={e => { setDragged(p); e.dataTransfer.setData('text/plain', p.id); }} onDragEnd={() => { setDragged(null); setOver(''); }}
-        className={`surface-item p-2.5 rounded-xl text-left w-full ${p.posted ? 'opacity-50' : 'cursor-grab active:cursor-grabbing'}`}>
-        <span className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400">
-          <Icon size={11} /> {p.kind}{p.scheduledFor ? ` · ${timeText(p.scheduledFor)}` : ''}{p.posted ? ' · posted' : ''}
-        </span>
-        <span className="block mt-1 text-[13px] font-semibold leading-snug line-clamp-2">{p.title}</span>
-        {!projectId && nameOf(p.projectId) && <span className="block mt-0.5 text-[11px] text-gray-500 truncate">{nameOf(p.projectId)}</span>}
-      </button>
+        className={`surface-item p-2.5 rounded-xl ${p.posted ? 'opacity-50' : 'cursor-grab active:cursor-grabbing'}`}>
+        <button type="button" onClick={() => open(p)} className="block text-left w-full">
+          <span className="flex items-center gap-1 text-[10.5px] font-semibold uppercase tracking-wide text-gray-400">
+            <Icon size={11} /> {p.kind}{p.scheduledFor ? ` · ${timeText(p.scheduledFor)}` : ''}{p.posted ? ' · posted' : ''}
+          </span>
+          <span className="block mt-1 text-[13px] font-semibold leading-snug line-clamp-2">{p.title}</span>
+          {!projectId && nameOf(p.projectId) && <span className="block mt-0.5 text-[11px] text-gray-500 truncate">{nameOf(p.projectId)}</span>}
+        </button>
+        {!p.posted && (
+          <button type="button" onClick={() => setPicking({ piece: p, value: toLocalInput(p.scheduledFor) })}
+            className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-sky-600 dark:text-sky-400 hover:underline">
+            <CalendarClock size={11} /> {p.scheduledFor ? 'Change time' : 'Set time'}
+          </button>
+        )}
+      </div>
     );
   };
 
@@ -125,6 +156,24 @@ export function ContentCalendar({ projectId = '' }: { projectId?: string }) {
           ? <p className="text-[12.5px] text-gray-400">Nothing waiting. Finished posts and reels with no date show up here; drag one onto a day.</p>
           : <div className="grid gap-2 grid-cols-1 sm:grid-cols-2 md:grid-cols-4">{unscheduled.map(card)}</div>}
       </div>
+
+      {picking && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40" onClick={() => setPicking(null)}>
+          <div className="w-full max-w-xs surface rounded-2xl p-4 space-y-3" onClick={e => e.stopPropagation()}>
+            <h4 className="text-[14px] font-semibold">When should it post?</h4>
+            <p className="text-[12.5px] text-gray-500 line-clamp-2">{picking.piece.title}</p>
+            <input type="datetime-local" value={picking.value} autoFocus
+              onChange={e => setPicking({ ...picking, value: e.target.value })}
+              onKeyDown={e => { if (e.key === 'Enter') confirmPick(); }}
+              className="field w-full" />
+            <p className="text-[12px] text-gray-500">You get a reminder at this time (push, email and Herald) and once more next morning if it is not marked posted.</p>
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setPicking(null)} className="h-9 px-3 rounded-xl text-[13px] font-semibold bg-black/[0.05] dark:bg-white/10">Cancel</button>
+              <button type="button" onClick={confirmPick} className="h-9 px-3 rounded-xl text-[13px] font-semibold bg-sky-600 text-white">Set time</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
