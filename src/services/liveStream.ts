@@ -11,6 +11,7 @@ import { POST_EVENT } from './posts';
 import { REEL_EVENT } from './reels';
 import { LUMO_EVENT } from './lumo';
 import { applyLifeModeEvent, loadLifeMode } from './lifeMode';
+import { applyWhereEvent, loadWhere } from './location';
 
 export type LiveEvent =
   | { type: 'SYNC_APPLIED'; serverRevision: number }
@@ -68,6 +69,10 @@ export class LiveStream {
         this.setConnected(true);
         // A mode change may have been missed while disconnected.
         loadLifeMode();
+        loadWhere();
+      } else if (event?.type === 'WHERE') {
+        // Where you are changed: an iPhone Shortcuts arrive or leave (see location.ts).
+        applyWhereEvent(event);
       } else if (event?.type === 'LIFE_MODE') {
         // Work or Chill changed: arriving, leaving, or a pick on another device.
         applyLifeModeEvent(event);

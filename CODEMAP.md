@@ -130,6 +130,7 @@ Radar, Data and Migration, Server and Reset).
 | Radar: Lab | `radar/LabTab`, `EdgeEditor` | `sparks.py` |
 | Radar: industry search | `radar/IndustrySearch`, `IndustryPage` | `industry.py` |
 | LUMO page | `components/lumo/*Tab.tsx`, `DepthFacePanel`, `ScreenFitPanel`, `alarmSounds.ts`, `modals/DeskClockSettings` | `desk/` (below) |
+| Where you are (Home/Work/out via iPhone Shortcuts) | `modals/LocationGuide` (inside `CaptureGuide`), `services/location.ts` | `location.py`, `notifier.place_nudge` (tasks labelled `@Place`), `/api/presence/location`, `/api/presence/places/{name}`, `/ws` WHERE |
 | Bluetooth, phone link | `modals/BluetoothSettings`, `common/PhoneCorner`, `PresenceCard` | `bluetooth_control.py`, `phone_link.py`, `presence.py` (tests: `test_phone_robust.py`) |
 | Herald (voice on the soundbar) | `modals/SpeakerCard` | `speaker.py`, `herald_extras.py`, `herald_journal.py`, `speak_worker.py`, `/api/speaker/*`, `/api/herald/presence` |
 | Spotify and arrival music | `modals/SpotifyCard` | `spotify.py` (Soloist, PipeWire bridge), `room_music.py`, `audio_probe.py`, `/api/spotify/*` |
@@ -216,6 +217,7 @@ reads; `config/` holds brand and AI tuning; `styles/` and `assets/` are artwork.
 | Notifications | `GET /api/notifications`, `POST .../subscribe`, `.../unsubscribe`, `PUT .../prefs`, `POST .../email-password`, `.../test` |
 | Email capture | `GET /api/email-capture`, `POST .../password`, `PUT .../prefs`, `POST .../test` |
 | Modes | `GET/PUT /api/life-mode`, `POST .../welcomed`, `.../leave` |
+| Location | `GET/POST /api/presence/location`, `PUT/DELETE /api/presence/places/{name}` |
 | Phone | `GET /api/phone`, `POST /api/phone/notifications`, `DELETE .../{id}`, `POST /api/phone/media` |
 | Bluetooth | `GET /api/bluetooth`, `POST .../power`, `.../pairing`, `.../scan`, `.../name`, `.../confirm`, `.../devices/{address}/{action}` |
 | Herald, speaker | `GET /api/herald/presence`, `GET /api/speaker`, `POST .../settings`, `.../say`, `.../announce`, `.../wifi`, `.../{action}` |

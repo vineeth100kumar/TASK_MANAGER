@@ -39,6 +39,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 import item_shape
 import life_mode
+import location
 import system_health
 
 DB_PATH = os.getenv("SAGE_DB_PATH", "sage_sync.db")
@@ -1055,6 +1056,38 @@ def _send_held(conn: sqlite3.Connection, prefs: dict, items: List[dict]) -> Opti
     key = f"chill-held:{int(time.time())}"
     _mark_sent(conn, key)
     return key
+
+
+def place_nudge(place: str) -> int:
+    """You just arrived at `place`: one push naming the open tasks tied to it
+    (label @Place). Each task is nudged once per day per place; hidden tasks
+    show as a generic line, and in Chill work tasks stay quiet. Returns how
+    many tasks were named."""
+    prefs = get_prefs()
+    tz = _tz(prefs)
+    today = datetime.datetime.now(tz).date().isoformat()
+    chill = life_mode.current()["mode"] == "chill"
+    where = location.clean_name(place).casefold()
+    conn = _connect()
+    try:
+        fresh = []
+        for item in open_items():
+            if item_shape.is_alarm(item) or not location.wants(item, place):
+                continue
+            if chill and life_mode.hidden_in_chill(item):
+                continue
+            if _already_sent(conn, f"place:{item.get('id')}:{where}:{today}"):
+                continue
+            fresh.append(item)
+        if not fresh:
+            return 0
+        if _deliver(prefs, location.nudge_message(place, fresh, _title), None):
+            for item in fresh:
+                _mark_sent(conn, f"place:{item.get('id')}:{where}:{today}")
+            return len(fresh)
+        return 0
+    finally:
+        conn.close()
 
 
 def run_once(now_utc: Optional[datetime.datetime] = None) -> List[str]:

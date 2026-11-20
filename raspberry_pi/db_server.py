@@ -30,6 +30,7 @@ import drop
 import industry
 import item_actions
 import life_mode
+import location
 import phone_link
 import recorder
 import herald_journal
@@ -2018,6 +2019,48 @@ async def life_mode_leave():
     state = _life_mode_state()
     await events.broadcast({"type": "LIFE_MODE", **{k: v for k, v in state.items() if k != "success"}})
     return state
+
+
+# --- Where you are: Home, Work or out, from iPhone Shortcuts (see location.py) ---
+@app.get("/api/presence/location")
+def where_state():
+    return {"success": True, **location.state()}
+
+
+@app.post("/api/presence/location")
+async def where_event(body: Dict[str, Any]):
+    """An iPhone Shortcuts "When I arrive / leave" automation. Body:
+    {"place": "Home", "action": "arrive" | "leave"}."""
+    try:
+        result = await asyncio.to_thread(location.record, body.get("place"), str(body.get("action") or "").lower())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    nudged = 0
+    if result["changed"] and result["here"]:
+        import notifier
+        try:
+            nudged = await asyncio.to_thread(notifier.place_nudge, result["here"]["place"])
+        except Exception as e:
+            print(f"Place nudge failed: {e}")
+    await events.broadcast({"type": "WHERE", **{k: v for k, v in result.items() if k != "changed"}})
+    return {"success": True, **result, "nudged": nudged}
+
+
+@app.put("/api/presence/places/{name}")
+async def where_set_kind(name: str, body: Dict[str, Any]):
+    try:
+        state = await asyncio.to_thread(location.set_kind, name, str(body.get("kind") or ""))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    await events.broadcast({"type": "WHERE", **state})
+    return {"success": True, **state}
+
+
+@app.delete("/api/presence/places/{name}")
+async def where_remove(name: str):
+    state = await asyncio.to_thread(location.remove_place, name)
+    await events.broadcast({"type": "WHERE", **state})
+    return {"success": True, **state}
 
 
 @app.post("/api/phone/notifications")
