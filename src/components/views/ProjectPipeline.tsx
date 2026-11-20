@@ -11,7 +11,6 @@ import { api } from '../../services/api';
 import type { Project, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
-import { ContentCalendar } from './ContentCalendar';
 import { ColumnId, Piece, columnOf, drawAtText, toLocalInput, toPiece, whenText } from '../../services/contentPieces';
 
 const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: string; drop: boolean }[] = [
@@ -24,14 +23,13 @@ const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: stri
   { id: 'dropped', label: "Won't post", icon: Ban, tint: 'text-gray-400', drop: true },
 ];
 
-export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string; onSelectTask: (id: string) => void }) {
+export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { projectId: string; onSelectTask: (id: string) => void; onOpenWeek?: () => void }) {
   const { showToast } = useToast();
   const [pieces, setPieces] = useState<Piece[] | null>(null);
   const [tasks, setTasks] = useState<WorkItem[]>([]);
   const [error, setError] = useState('');
   const [dragged, setDragged] = useState<Piece | null>(null);
   const [over, setOver] = useState<ColumnId | null>(null);
-  const [mode, setMode] = useState<'board' | 'week'>('board');
   const [picking, setPicking] = useState<{ piece: Piece; value: string } | null>(null);
 
   const project = (api.sync.getState().projects.filter(Boolean) as Project[]).find(p => p.id === projectId);
@@ -184,16 +182,10 @@ export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string
       <div className="flex flex-wrap items-center gap-2 mb-4">
         <button type="button" onClick={() => openPosts({ projectId, newPost: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[13px] font-semibold"><Plus size={14} /> New post</button>
         <button type="button" onClick={() => openReels({ projectId, newReel: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[13px] font-semibold"><Plus size={14} /> New reel</button>
-        <div className="flex rounded-xl bg-black/[0.05] dark:bg-white/10 p-0.5 ml-auto" role="group" aria-label="Pipeline view">
-          {(['board', 'week'] as const).map(m => (
-            <button key={m} type="button" onClick={() => setMode(m)} aria-pressed={mode === m}
-              className={`h-8 px-3 rounded-[10px] text-[12.5px] font-semibold capitalize ${mode === m ? 'bg-white dark:bg-[#2c2c2e] shadow-sm' : 'text-gray-500'}`}>{m}</button>
-          ))}
-        </div>
+        <button type="button" onClick={() => onOpenWeek?.()} className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[12.5px] font-semibold ml-auto"><CalendarClock size={14} /> Content week</button>
       </div>
-      {mode === 'week' && <ContentCalendar projectId={projectId} />}
       {error && <p className="text-[13px] text-red-600 mb-3">{error}</p>}
-      {mode === 'board' && <div className="flex gap-4 overflow-x-auto pb-12 min-h-[60vh] items-start snap-x">
+      {<div className="flex gap-4 overflow-x-auto pb-12 min-h-[60vh] items-start snap-x">
         {COLUMNS.map(col => {
           const list = col.id === 'idea' ? ideas : col.id === 'script' ? scripts : byColumn[col.id];
           const count = list.length;

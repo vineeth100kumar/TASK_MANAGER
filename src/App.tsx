@@ -578,7 +578,7 @@ function MainApp() {
                 {isProjectPage && !pipelineOn && api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent && (
                   <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
                 )}
-                {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : (<>
+                {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} onOpenWeek={() => setActiveView('contentweek')} /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
