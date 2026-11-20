@@ -389,7 +389,7 @@ def start(script: str, title: str = "", style: str = "", project_id: str = "", s
         "remindStage": 0,       # post-time reminders sent so far: 0 none, 1 at the time, 2 next morning (content_schedule.py)
         "wontPost": False,      # dropped: no reminders, shown as Dropped, files kept
         "status": "waiting" if report["needsRecording"] else ("planned" if plan else "queued"),
-        "review": "pending",   # pending | approved | rejected
+        "review": "approved" if planned_for else "pending",   # a date means you intend to post it
         "archived": False,     # a rejected reel is archived: the script is kept, the video removed
         "archivedAt": None,
         "error": "",
@@ -1068,6 +1068,8 @@ async def reels_schedule(reel_id: str, body: ScheduleBody):
     except ValueError as e:
         return _bad(str(e))
     reel["remindStage"] = 0   # a new time starts the reminders again
+    if reel["scheduledFor"] and reel.get("review") != "rejected":
+        reel["review"] = "approved"   # scheduling is your approval: it shows on the calendar
     await save_async(reel)
     if reel["status"] == "planned" and not reel["scheduledFor"]:
         release(reel)   # a planned reel with no date is simply made now
