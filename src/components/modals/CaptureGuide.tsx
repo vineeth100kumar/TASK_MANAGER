@@ -4,7 +4,8 @@
 // shortcuts, and forwarding email to the Inbox (see /api/voice and
 // /api/email-capture on the Pi).
 import { useEffect, useState } from 'react';
-import { Mic, LayoutGrid, Mail, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
+import { Mic, LayoutGrid, Mail, MapPin, ChevronDown, Copy, Check, Send, Sparkles } from 'lucide-react';
+import { LocationGuide } from './LocationGuide';
 import { getPiApiKey, piBackendUrl, piHeaders } from '../../services/piBackend';
 import { useToast } from '../../context/ToastContext';
 import { SiriSetupDemo } from './SiriSetupDemo';
@@ -512,6 +513,20 @@ export function CaptureGuide({ publicUrl }: { publicUrl?: string | null }) {
             <CopyField label="Focus" value={`${base}/?view=focus`} />
           </Step>
         </Steps>
+      </Section>
+
+      <Section
+        icon={<MapPin size={18} />} tint="bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600"
+        title="Where you are" hint="Home, Work or out, with no app open · tiny battery cost"
+        open={open === 'where'} onToggle={() => toggle('where')}
+      >
+        <LocationGuide
+          base={base}
+          sendsKey={sendsKey}
+          keyHint={<>Value below.</>}
+        >
+          {sendsKey && <CopyField label="Header value" value={keyValue} shown={keyShown} />}
+        </LocationGuide>
       </Section>
 
       <Section
