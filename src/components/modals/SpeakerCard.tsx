@@ -152,7 +152,11 @@ export function SpeakerCard({ devices }: { devices: BluetoothDevice[] }) {
           <Switch on={set.announceMessages !== false} onChange={on => save({ announceMessages: on })} label="Herald: announce other messages"
             hint="Instagram, Telegram, iMessage, Messenger and others. Only who, never what." />
           <Switch on={set.announceBattery !== false} onChange={on => save({ announceBattery: on })} label="Herald: tell me when my phone battery is low"
-            hint="Once at 20% or below, again after it has charged past 30%." />
+            hint="At 20% or below, again at 10%, then once more after it has charged past 30%." />
+          <Switch on={set.callBackTasks !== false} onChange={on => save({ callBackTasks: on })} label="Herald: missed call becomes a call-back task"
+            hint="Only people you have saved. One task per caller every 30 minutes." />
+          <Switch on={set.announceRegularsOnly === true} onChange={on => save({ announceRegularsOnly: on })} label="Herald: only announce people who message me often"
+            hint="Sage learns who that is by counting. Others wait for the recap and are announced at most every 15 minutes." />
           <PresenceCard />
           <Switch on={set.headsUp !== false} onChange={on => save({ headsUp: on })} label="Herald: weather heads-up as I leave"
             hint="A word about rain, a storm or snow right after the goodbye. Traffic isn't included." />

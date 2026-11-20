@@ -59,6 +59,9 @@ from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 import herald_extras
 import herald_journal
+import call_tasks
+import item_actions
+import sender_rank
 try:
     import event_registry
 except ImportError:
@@ -113,6 +116,8 @@ DEFAULTS: Dict[str, Any] = {
     "announceWhatsApp": True,  # Herald: "a message from X" for WhatsApp (never the text)
     "announceEmail": True,     # Herald: "an email from X" (never the subject or body)
     "announceMessages": True,  # Herald: "a message from X" for Instagram, Telegram, iMessage, etc.
+    "callBackTasks": True,     # Herald: a missed call from someone you know becomes a "Call X back" task
+    "announceRegularsOnly": False,  # Herald: only announce people who message you often (others wait for the recap)
     "announceBattery": True,   # Herald: phone battery is low (20% and below, once until it charges)
     "recap": True,             # Herald: after a trip, who messaged you while you were out and which reminders slipped by
     "headsUp": True,           # Herald: a word about rain, storm or snow as you head out
@@ -189,7 +194,7 @@ def get_settings() -> dict:
 def clean_settings(update: dict, current: Optional[dict] = None) -> dict:
     """Merge an update into the settings, refusing values that don't fit. Pure."""
     out = dict(current or DEFAULTS)
-    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "recap", "callEtiquette", "headsUp", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
+    for key in ("announceWhatsApp", "announceEmail", "announceMessages", "announceBattery", "callBackTasks", "announceRegularsOnly", "recap", "callEtiquette", "headsUp", "greet", "goodbye", "leaveInstantly", "reminders", "phoneSpeaker", "witty", "chimes"):
         if key in update:
             out[key] = bool(update[key])
     if not PHONE_SPEAKER_ALLOWED:
@@ -432,10 +437,33 @@ IGNORED_APPS = {
     "in.redbus.android", "com.olacabs.customer",
     "com.nykaa.app", "com.healthkart.app",
 }
-NOTICE_GAP_S = 20       # the same sender is announced at most once per 20 s (a reaction counts apart from a message)
+NOTICE_GAP_S = 300      # one announcement per sender per 5 min; the next message after that opens a fresh window (a reaction counts apart from a message)
 _REACTION_RE = re.compile(r"^(reacted|liked|loved|laughed at|emphasized|disliked|questioned)\b", re.I)
+NOTICE_GAP_STRANGER_S = 900   # someone who rarely writes: one announcement per 15 min
 BATTERY_LOW = 20
+BATTERY_CRITICAL = 10     # a second, firmer warning
+BATTERY_DYING = 15        # a link lost at or below this is read as a dead phone, not as you leaving
 BATTERY_RESET = 30
+STATS_KEY = "senderStats"
+
+
+def battery_next(level: int, warned: str) -> tuple:
+    """(stage to announce or "", new warned stage). Stages: "", "low", "critical". Pure."""
+    if level >= BATTERY_RESET:
+        return "", ""
+    if level <= BATTERY_CRITICAL and warned != "critical":
+        return "critical", "critical"
+    if level <= BATTERY_LOW and warned == "":
+        return "low", "low"
+    return "", warned
+
+
+def away_delay(battery: Optional[int], leave_instantly: bool, quick: float, slow: float) -> float:
+    """How long the phone may be off Bluetooth before you count as away. A nearly
+    empty phone that drops off has most likely died, so give it the slow delay. Pure."""
+    if leave_instantly and not (battery is not None and battery <= BATTERY_DYING):
+        return quick
+    return slow
 
 _PHONE_NUMBER_RE = re.compile(r"^[\d\s\+\-\(\)]{7,}$")
 
@@ -473,6 +501,14 @@ _NOTICE_LINES = {
         "{who} has reacted to your message{name}. Nothing urgent.",
         "If I may{name}, {who} reacted to something you sent.",
     ],
+    "missedcall": [
+        "You missed a call from {who}{name}. I've put a call back on your list.",
+        "{who} rang while you were away{name}. Calling back is on your list.",
+        "If I may{name}, {who} called and I've added a call back to your tasks.",
+    ],
+    "batterycritical": [
+        "Pardon me{name}, your phone is nearly out of battery. I'd plug it in at once.",
+    ],
     "battery": [
         "Pardon me{name}, your phone is running low on battery. Perhaps a charger is in order.",
     ],
@@ -505,7 +541,7 @@ Gotham or any film."""
 
 NOTICE_PROMPT = HONEST_PERSONA + """Write ONE short line (at most 18 words) spoken aloud to tell the \
 person about the event in the facts. "what" says which: whatsapp (a WhatsApp message), message \
-(a chat message), email, reaction (someone reacted to their message), or phone battery low (give the \
+(a chat message), email, reaction (someone reacted to their message), or missed call (they rang and you missed it; a task to call back has been made), or phone battery low (give the \
 percentage, and say so plainly if it is very low). For a person, say who it is from by the exact name \
 given in "from" and nothing else about it: you do not know and must never guess or imply what it \
 says, how important it is, or whether it is good news. Vary how you say it each time. """ + _SPOKEN_RULES + """
@@ -1071,7 +1107,10 @@ class Speaker:
         self.emit: Optional[Emit] = None
         self.phone = None            # phone_link.link, set by run()
         self._notice_at: Dict[str, float] = {}   # last announce per sender
-        self._battery_warned = False
+        self._battery_warned = ""             # "", "low" or "critical": the last battery warning said
+        self._call_task_at: Dict[str, float] = {}
+        self._stats: Optional[Dict[str, dict]] = None   # who messages you (sender_rank), loaded on first use
+        self._stats_saved = 0.0
         self.queue: Optional[asyncio.Queue] = None  # made in run()
         self.speaking = ""
         self.last: Optional[dict] = None
@@ -1773,10 +1812,44 @@ class Speaker:
             self._note(event, "silent", "quiet hours"); return False
         return True
 
+    # --- who messages you (sender_rank) ---
+
+    def _rank_stats(self) -> Dict[str, dict]:
+        if self._stats is None:
+            conn = _connect()
+            try:
+                row = conn.execute("SELECT value FROM metadata WHERE key = ?", (STATS_KEY,)).fetchone()
+            finally:
+                conn.close()
+            try:
+                loaded = json.loads(row[0]) if row else {}
+            except ValueError:
+                loaded = {}
+            self._stats = loaded if isinstance(loaded, dict) else {}
+        return self._stats
+
+    def _save_rank_stats(self, now: float) -> None:
+        """At most once a minute: the counts are a hint, a lost minute costs nothing."""
+        if self._stats is None or now - self._stats_saved < 60:
+            return
+        self._stats_saved = now
+        self._stats = sender_rank.prune(self._stats, now)
+        try:
+            conn = _connect()
+            try:
+                conn.execute("INSERT OR REPLACE INTO metadata (key, value) VALUES (?, ?)", (STATS_KEY, json.dumps(self._stats)))
+                conn.commit()
+            finally:
+                conn.close()
+        except Exception as e:
+            log.info("Sender stats not saved: %s", e)
+
     def on_phone_notification(self, entry: dict) -> None:
         """phone_link calls this for each new notification from the phone."""
         if entry.get("preExisting"):
             return self._collect_recap(entry)
+        if entry.get("category") == "missed call":
+            return self._missed_call(entry)
         kind = notice_kind(entry.get("appId", ""))
         if not kind or kind == "ignored":
             return
@@ -1790,33 +1863,80 @@ class Speaker:
         announce_kind = kind
         if kind in ("whatsapp", "message") and _REACTION_RE.match((entry.get("message") or "").strip()):
             announce_kind = "reaction"
+        now = time.time()
+        # Every named sender is counted, spoken or not, so the ranking keeps learning.
+        regular = False
+        if sender:
+            stats = self._rank_stats()
+            regular = sender_rank.is_regular(stats, sender, now)
+            sender_rank.bump(stats, sender, now)
+            self._save_rank_stats(now)
         event = f"{announce_kind} from {sender or 'someone'}"
+        if settings.get("announceRegularsOnly") and not regular:
+            return self._note(event, "silent", "not someone who messages you often")
         if not self._may_announce(event, settings):
             return
-        key = f"{announce_kind}:{sender.lower()}"
-        now = time.time()
-        if now - self._notice_at.get(key, 0) < NOTICE_GAP_S:
-            return self._note(event, "silent", "same sender under a minute ago")
+        # One announcement per sender per window, whatever they send. A regular
+        # has the short window; a stranger waits longer. The next message after
+        # the window opens a fresh one.
+        key = sender.lower() or announce_kind
+        gap = NOTICE_GAP_S if regular else NOTICE_GAP_STRANGER_S
+        if now - self._notice_at.get(key, 0) < gap:
+            return self._note(event, "silent", "same sender announced recently")
         self._notice_at[key] = now
+        for k in [k for k, t in self._notice_at.items() if now - t > 4 * NOTICE_GAP_STRANGER_S]:
+            del self._notice_at[k]
         self._note(event, "announced")
         asyncio.run_coroutine_threadsafe(self._notice(announce_kind, {"what": announce_kind, "from": sender}, settings), self.loop)
 
+    def _missed_call(self, entry: dict) -> None:
+        """A missed call from someone you know: a "Call X back" task, then a word about it.
+        The task is made even in quiet hours or while away; only the voice waits."""
+        if not self.loop:
+            return
+        settings = get_settings()
+        name = (entry.get("title") or "").strip()[:60]
+        now = time.time()
+        if not settings.get("callBackTasks", True):
+            return
+        if not call_tasks.should_make_task(name, self._call_task_at.get(name.lower(), 0.0), now):
+            return self._note(f"missed call from {name or 'someone'}", "silent", "no task: unknown caller or one made lately")
+        self._call_task_at[name.lower()] = now
+        asyncio.run_coroutine_threadsafe(self._make_call_task(name, settings), self.loop)
+
+    async def _make_call_task(self, name: str, settings: dict) -> None:
+        tz_now = self.now()
+        payload = call_tasks.task_payload(name, tz_now.date().isoformat(), item_actions.utc_now().isoformat())
+        try:
+            item, rev = await asyncio.to_thread(item_actions.create_item, payload, call_tasks.SOURCE, "missed-call")
+        except Exception as e:
+            log.info("Call back task not saved: %s", e)
+            return self._note(f"missed call from {name}", "silent", f"task not saved: {e}")
+        if self.emit:
+            await self.emit(item_actions.change_event(rev, item["id"], call_tasks.SOURCE))
+        event = f"missed call from {name}"
+        if self._may_announce(event, settings):
+            self._note(event, "announced", "task made")
+            await self._notice("missedcall", {"what": "missed call", "from": name}, settings)
+        else:
+            self._note(event, "task made", "voice held")
+
     def on_phone_battery(self, level: int) -> None:
         """phone_link calls this every few minutes with the phone's battery %."""
-        if level >= BATTERY_RESET:
-            self._battery_warned = False
-            return
-        if level > BATTERY_LOW or self._battery_warned:
+        stage, self._battery_warned = battery_next(level, self._battery_warned)
+        if not stage:
             return
         settings = get_settings()
         if not settings["announceBattery"]:
             return
         event = f"phone battery {level}%"
         if not self._may_announce(event, settings):
+            # Not said, so it may be said at the next reading.
+            self._battery_warned = "" if stage == "low" else "low"
             return
-        self._battery_warned = True
         self._note(event, "announced")
-        asyncio.run_coroutine_threadsafe(self._notice("battery", {"what": "phone battery low", "percent": level}, settings), self.loop)
+        kind = "batterycritical" if stage == "critical" else "battery"
+        asyncio.run_coroutine_threadsafe(self._notice(kind, {"what": "phone battery low", "percent": level}, settings), self.loop)
 
     async def _ai_or(self, fallback: str, facts: dict, prompt: str, settings: dict, check: bool = True) -> str:
         """Groq writes the line from `facts`; the template `fallback` stands in if Groq is
@@ -1836,12 +1956,12 @@ class Speaker:
         text = ""
         if settings["witty"]:
             text = await self._ai_line({**facts, "name": call_me}, NOTICE_PROMPT, timeout=5)
-            if text and kind != "battery" and not names_ok(text, [who] if who else []):
+            if text and not kind.startswith("battery") and not names_ok(text, [who] if who else []):
                 text = ""
-            if text and kind == "battery" and str(facts.get("percent", "")) not in text:
+            if text and kind.startswith("battery") and str(facts.get("percent", "")) not in text:
                 text = ""
         await self.say(text or notice_line(kind, who, call_me), "notice",
-                       meta={"kind": kind, "who": who} if kind != "battery" else None)
+                       meta={"kind": kind, "who": who} if not kind.startswith("battery") else None)
 
     async def announce_command(self, what: str) -> str:
         """Confirm a spoken command that has been carried out ("alarm set for 6:30
@@ -1866,6 +1986,9 @@ class Speaker:
             return self._note(event, "silent", "Sage's speaker isn't running yet")
         if not settings["goodbye"]:
             return self._note(event, "silent", "'Say goodbye' is off")
+        battery = getattr(self.phone, "battery", None)
+        if isinstance(battery, int) and battery <= BATTERY_DYING:
+            return self._note(event, "silent", "your phone's battery was nearly empty, so it may just have died")
         if not has_output(settings):
             return self._note(event, "silent", "no sound card or soundbar to play on")
         if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
@@ -2077,10 +2200,10 @@ class Speaker:
         except Exception as e:
             log.info("Recap reminders failed: %s", e)
             reminders = []
+        stats, now = self._rank_stats(), time.time()
+        ranked = lambda kinds: sender_rank.rank_names(stats, [r["who"] for r in heard if r["kind"] in kinds], now)
         line = herald_extras.recap_line(
-            [r["who"] for r in heard if r["kind"] in ("whatsapp", "message")],
-            [r["who"] for r in heard if r["kind"] == "email"],
-            [r["who"] for r in heard if r["kind"] == "call"],
+            ranked(("whatsapp", "message")), ranked(("email",)), ranked(("call",)),
             reminders, settings.get("callMe", ""), self._recap_idx)
         self._recap_idx += 1
         if line:
