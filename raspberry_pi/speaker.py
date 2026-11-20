@@ -442,7 +442,7 @@ _REACTION_RE = re.compile(r"^(reacted|liked|loved|laughed at|emphasized|disliked
 NOTICE_GAP_STRANGER_S = 900   # someone who rarely writes: one announcement per 15 min
 BATTERY_LOW = 20
 BATTERY_CRITICAL = 10     # a second, firmer warning
-BATTERY_DYING = 15        # a link lost at or below this is read as a dead phone, not as you leaving
+BATTERY_DYING = 5         # a link lost at or below this is read as a dead phone, not as you leaving
 BATTERY_RESET = 30
 STATS_KEY = "senderStats"
 

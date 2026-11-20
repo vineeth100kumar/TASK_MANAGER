@@ -645,13 +645,14 @@ class HeraldNoticeTest(unittest.TestCase):
             seen.append(stage)
         assert seen == ["", "low", "", "critical", "", "", "low"]
         assert speaker.away_delay(80, True, 30, 300) == 30
-        assert speaker.away_delay(12, True, 30, 300) == 300
+        assert speaker.away_delay(4, True, 30, 300) == 300
+        assert speaker.away_delay(12, True, 30, 300) == 30
         assert speaker.away_delay(None, True, 30, 300) == 30
         assert speaker.away_delay(80, False, 30, 300) == 300
 
     def test_no_goodbye_when_phone_nearly_dead(self):
         s, st = self._herald()
-        s.phone = mock.Mock(home=True, battery=9)
+        s.phone = mock.Mock(home=True, battery=4)
         with mock.patch.object(speaker, "get_settings", return_value=st), \
              mock.patch.object(speaker, "has_output", return_value=True), \
              mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
