@@ -1,0 +1,6 @@
+# A hierarchy: root, then items; the third field names a parent (the root by default).
+engine: tree
+root: Revenue | $13.3b
+item: Auto | 56%
+item: Industrial | 24%
+item: Mobile | 20%

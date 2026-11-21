@@ -1,0 +1,7 @@
+# A schedule: label | length | start (the start is optional: steps run one after another).
+engine: line
+layout: swimlane
+item: Design | 2 days | 0
+item: Fab | 9 days | 2
+item: Test | 1 day | 11
+item: Ship | 1 day | 12

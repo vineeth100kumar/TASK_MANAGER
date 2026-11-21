@@ -1,0 +1,6 @@
+# Sizes against sizes: each square's AREA follows its value.
+engine: space
+layout: scale
+item: A village | 1
+item: A town | 4
+item: One fab's staff | 9

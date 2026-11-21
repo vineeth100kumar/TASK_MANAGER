@@ -1,0 +1,7 @@
+# Boxes placed anywhere (x,y,width,height as percent of the diagram's box): a floor plan, a map, a site.
+engine: space
+box: 4,3,92,13 | Screen
+box: 4,22,44,34 | Stalls
+box: 52,22,44,34 | Stalls
+box: 4,62,44,34 | Balcony
+box: 52,62,44,34 | Boxes

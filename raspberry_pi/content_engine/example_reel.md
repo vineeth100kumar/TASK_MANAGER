@@ -39,6 +39,15 @@ right: Reality
 - One afternoon to go live
 say: It is not about a fancy app. It is about starting this week.
 
+## statement
+headline: Most shops are **not online**
+align: top
+say: Look at ten shops on one street. Only one has a catalogue online. Nine do not.
+diagram: waffle
+  rows: 2 x 5
+  on: 1 "online" @ "one has"
+  base: rest "offline"
+
 ## cta
 headline: Which step comes **first?**
 subtext: COMMENT 1, 2 OR 3

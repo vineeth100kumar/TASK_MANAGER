@@ -1,0 +1,7 @@
+# Facts in rows and columns. Cells are numbered across, then down; `rows 2` and `cols 3` work too.
+engine: grid
+layout: table
+head: | 2006 | 2015 | 2023
+row: Plants | 23 | 15 | 9
+row: Staff | 37k | 45k | 34k
+row: Revenue | $5.0b | $6.1b | $13.3b

@@ -1,0 +1,9 @@
+# One value against a limit.
+engine: space
+layout: meter
+value: 72
+max: 100
+limit: 55
+label: 72% of capacity
+limit_label: Safe limit 55%
+note: Seventeen points over
