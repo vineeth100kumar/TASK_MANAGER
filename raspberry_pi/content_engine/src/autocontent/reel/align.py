@@ -41,7 +41,7 @@ _NUMBERS.update({"thirty": "30", "forty": "40", "fifty": "50", "sixty": "60", "s
 def norm(word: str) -> str:
     """A word as compared between the script and what was heard: lower case, no punctuation, and
     small numbers as digits (a recogniser writes "10" where the script says "ten", and the reverse)."""
-    w = re.sub(r"[^a-z0-9₹%$]+", "", word.lower())
+    w = re.sub(r"[^a-z0-9%$]+", "", word.lower())      # ₹ dropped: "₹600" and a heard "600" are one word
     return _NUMBERS.get(w, w)
 
 

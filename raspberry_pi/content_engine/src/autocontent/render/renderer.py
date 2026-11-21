@@ -421,6 +421,9 @@ class SlideRenderer:
                 else:
                     main_words = headline_text
                     pill_word = ""
+                # The pill is already the emphasis. A ==highlight== that landed inside it would be drawn in
+                # the accent colour on the accent pill, so the word vanished ("A ... ."): drop the marks there.
+                pill_word = pill_word.replace("==", "")
                 # A number keeps its unit on the same line ("₹4 lakh crore", "40 per cent")
                 main_words = _UNIT_GLUE.sub(lambda m: m.group(0).replace(" ", "\u00a0"), main_words)
                 pill_word = _UNIT_GLUE.sub(lambda m: m.group(0).replace(" ", "\u00a0"), pill_word)

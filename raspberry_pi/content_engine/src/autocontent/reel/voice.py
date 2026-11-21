@@ -132,8 +132,8 @@ def speakable(text: str, pronounce: Optional[dict] = None) -> str:
             return f"{m.group(1)} {unit + ' ' if unit else ''}{word}"
         return sub
 
-    t = re.sub(r"(?:₹|Rs\.?\s?)\s?(\d[\d,]*(?:\.\d+)?)(?:\s*(crore|lakhs?|cr|k|mn|m|bn|b|l)\b)?", money("₹", "rupees"), t, flags=re.I)
-    t = re.sub(r"\$\s?(\d[\d,]*(?:\.\d+)?)(?:\s*(k|mn|m|bn|b)\b)?", money("$", "dollars"), t, flags=re.I)
+    t = re.sub(r"(?:₹|Rs\.?\s?)\s?(\d(?:[\d,]*\d)?(?:\.\d+)?)(?:\s*(crore|lakhs?|cr|k|mn|m|bn|b|l)\b)?", money("₹", "rupees"), t, flags=re.I)
+    t = re.sub(r"\$\s?(\d(?:[\d,]*\d)?(?:\.\d+)?)(?:\s*(k|mn|m|bn|b)\b)?", money("$", "dollars"), t, flags=re.I)
     t = re.sub(r"(\d)\s*%", r"\1 percent", t)
     t = re.sub(r"(\d)\s*[x×]\b", r"\1 times", t)
     t = t.replace("&", " and ").replace("+", " plus ").replace("=", " equals ")
@@ -188,9 +188,14 @@ def pieces(text: str) -> List[Tuple[str, float]]:
 def phonon_speakable(text: str, pronounce: Optional[dict] = None) -> str:
     """Narration for Phonon: it normalises numbers, money, percent and abbreviations itself (lang en),
     so only quotes and dashes are tidied and the script's own `pronounce:` respellings applied.
-    Kokoro's respellings (U P I, sass, pie) and symbol-to-word rewrites are NOT used."""
+    Kokoro's respellings (U P I, sass, pie) are NOT used. Rupee amounts are written out ("6,000 rupees"), as Phonon
+    reads a bare ₹ as euros; its other symbols it reads itself."""
     t = text.replace("’", "'").replace("‘", "'").replace("“", '"').replace("”", '"')
     t = re.sub(r"\s*[–—]\s*", ", ", t)
+    # Phonon reads a bare ₹ as euros, so rupee amounts are written out; its normaliser says the rest
+    t = re.sub(r"(?:₹|Rs\.?\s?)\s?(\d(?:[\d,]*\d)?(?:\.\d+)?)(?:\s*(crore|lakhs?|cr|k|mn|m|bn|b|l)\b)?",
+               lambda m: f"{m.group(1)} {_UNITS.get((m.group(2) or '').strip().lower(), (m.group(2) or '').strip().lower()) + ' ' if m.group(2) else ''}rupees",
+               t, flags=re.I)
     t = re.sub(r"\s+", " ", t).strip()
     return apply_pronounce_only(t, pronounce)
 

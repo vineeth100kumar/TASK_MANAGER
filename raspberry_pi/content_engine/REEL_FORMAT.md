@@ -410,7 +410,7 @@ Skip this section if you use Kokoro or your own recording; nothing above changes
 like this:
 
 - **Let Phonon read numbers and symbols itself.** Write `65%`, `₹5 lakh`, `$3.5 million`, `9:30`, `2026`
-  as normal text. Phonon turns them into words. Do not respell them, and the Kokoro respellings
+  as normal text. Phonon turns them into words. (Rupee amounts are the one exception: Sage writes ₹ and Rs. amounts out as "rupees" itself, because Phonon reads a bare ₹ as euros.) Do not respell them, and the Kokoro respellings
   (`U P I`, `sass`, `pie`) are not applied.
 - **Abbreviations:** use the form people say. For letters, keep `N X P` / `A I` spaced as before (captions
   still show NXP / AI). For a word-like acronym write it as a word (`NASA`). If one is read wrongly, add
