@@ -1,0 +1,6 @@
+# Compare sizes: bar length follows the value.
+engine: line
+layout: bars
+item: Auto | 56%
+item: Industrial | 24%
+item: Mobile | 20%

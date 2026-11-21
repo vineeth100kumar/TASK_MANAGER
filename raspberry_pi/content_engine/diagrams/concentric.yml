@@ -1,0 +1,6 @@
+# Nested circles, biggest first (a market inside a market).
+engine: nest
+layout: concentric
+layer: Everyone | 100
+layer: Can reach | 40
+layer: Buy | 10

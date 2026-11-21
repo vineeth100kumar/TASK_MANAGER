@@ -53,6 +53,7 @@ say: <what the voice says over this slide>            (REQUIRED on every slide; 
 show: <cue> | <cue> | <cue>                            (optional: the words in `say:` at which each piece of the slide should appear, in order; copy them exactly from `say:`)
 motion: rise | pop | stagger | wipe | kenburns | fade  (optional, best left out: each piece always arrives in the way that suits it. This is only used for a piece the reel doesn't recognise.)
 objects: arrow-right @ 50,80 120 accent | icon:rocket @ 30,40 80 success   (optional: overlay shapes and icons; pipe-separated, each: name @ x%,y% size colour animation rotation)
+diagram: seatmap + indented lines                      (optional: an explainer diagram built from your numbers; see DIAGRAMS below)
 duration: 3                                            (optional, only for a slide with no `say:`: seconds to hold it)
 pause: 0.5                                             (optional: extra silence after this slide's narration)
 tone: hook | emphasis | calm | excited | serious | dramatic | slow | fast | normal   (optional: how this slide is delivered; sets its pace)
@@ -73,6 +74,18 @@ LAYOUT RULES (a reel is 9:16; Instagram covers the top and bottom, so the slide 
 - Anything that still doesn't fit is made to fit: the slide is set smaller, then its kicker goes, then its source line. Write to the limits above and none of that has to happen.
 - cta: the subtext sits beside the pill, so keep it to 3 or 4 short words (SAVE THIS + COMMENT 1, 2 OR 3).
 - Do not write `music:`; music is added in Instagram.
+
+DIAGRAMS (explain with a picture the viewer can follow, not just words)
+Add a `diagram:` block to a slide to draw how something works: how many of a set, steps in order, where a process breaks, what a whole is made of, what happened when, how two things differ. It is built from your numbers, so it can't disagree with the narration, and each part can appear or light up at the exact word you tie it to with `@ "word"`.
+- Use it on a `statement` slide with a SHORT headline (up to 5 words) and `align: top`. Do not put bullets or body text on that slide: the diagram needs the room. One diagram per slide, and 1 or 2 diagram slides in a reel is plenty.
+- Pick the one that fits the idea: seatmap (n of a fixed set: seats, people, units; `rows: 8 x 16`), waffle (a rate: 31 of 100), heatmap, table (facts in rows and columns), flow (steps, widths follow the values), swimlane (a schedule), funnel (what is left at each stage), bars (compare sizes), timeline (when things happened), cycle (a loop of stages), hierarchy (a root and its parts), matrix (two axes), meter (one value against a limit), scale (size against size, by area), overlap (what two groups share), section (layers top to bottom), concentric (a market inside a market), plan and anatomy (free boxes and labelled parts).
+- Write it as `diagram: <name>` then indented `key: value` lines (indent two spaces; no comment lines). Your lines replace the preset's sample data: `item: Label | value | note` (repeat per item; flow, funnel, bars, timeline, cycle, scale, swimlane), `rows: 8 x 16`, `on: 1-32 "sold" @ "thirty two"`, `warn: Fab "the queue" @ "nine"`, `mark: rows 1-3 "cheap rows" @ "cheap"`.
+- States: `on` lights parts in the accent colour (the thing you are talking about), `warn` marks the broken one, `ghost` shows a part as not yet there, `base` is the quiet default. Pick parts by number (`1-32`), `rows 2`, `cols 3`, `all`, `rest` or by name (`Fab`). A quoted label becomes a legend entry with a live count.
+- `@ "word"` ties a change to a word that is spoken in that slide's `say:`: copy it exactly. Without it the change is there from the start. Use up to 5 cues per diagram, in the order they are spoken.
+- Examples:
+  `diagram: seatmap` / `  rows: 8 x 16` / `  on: 1-32 "sold" @ "thirty two"` / `  mark: rows 1-2 "cheap seats" @ "cheap"`
+  `diagram: flow` / `  item: Design | 2 days` / `  item: Fab | 9 days` / `  item: Test | 1 day` / `  warn: Fab "the queue" @ "nine"`
+  `diagram: funnel` / `  item: Saw the ad | 100%` / `  item: Clicked | 42%` / `  item: Paid | 6%` / `  on: Paid @ "six"`
 
 OBJECTS AND ICONS (optional overlays on any slide)
 Add `objects:` to place shapes, arrows, icons or visual markers on top of a slide. Each object gets its own entrance animation (timed to the slide) and a quick exit before the slide changes. Pipe-separated, format: `name @ x,y size colour animation rotation`.
@@ -290,6 +303,96 @@ Objects appear 0.25 s after the slide starts, staggered 0.18 s apart, and exit 0
 the slide changes.
 
 ---
+
+## Diagrams (explain, don't decorate)
+
+`objects:` places single icons. A **diagram** is a whole figure built from your numbers (a seat map, a
+flow with its slow step marked, a funnel, a timeline) in which every part can light up or arrive on the
+word that is spoken. Write one with a `diagram:` line followed by indented `key: value` lines:
+
+```
+**Good to know (rules the checker enforces):**
+- Your slide's own lines **replace** a preset's sample data (items, rows, values, and its `on:` lines by number). `base: rest` stays.
+- A name with a comma, or a number used as a name, goes in quotes: `warn: "Cheap, slow"`, `on: "2015"`.
+- A misspelt line (`legnd:`) is an error with a "did you mean" hint, not silently ignored.
+- Diagram lines may be indented with spaces or a tab, or sit unindented if the key is a diagram key.
+- At most 10 cues per diagram. `rest` may be empty. Cues that run late are squeezed to fit the slide.
+
+## statement
+headline: Two hundred seats. Forty sold.
+align: top
+say: A full house is two hundred seats. On a Tuesday only forty are sold, and the cheap rows go first.
+diagram: seatmap
+  rows: 10 x 20
+  on: 1-40 "sold" @ "forty"
+  mark: rows 1-3 "cheap rows" @ "cheap rows"
+```
+
+The first word after `diagram:` is a **preset** (below) or one of six **engines**. A preset is a
+small recipe file with sample data; the lines under it replace that data. Nothing here is code you have to
+write: change the numbers, the shape or the states, and it redraws and refits.
+
+### Presets
+
+| Preset | Engine | Explains | Its own lines |
+|---|---|---|---|
+| `seatmap` | grid | n of a fixed set | `rows: 8 x 16`, `stage: SCREEN`, `shape: seat\|square\|dot\|person` |
+| `waffle` | grid | a rate (31 in 100) | `rows: 10 x 10` (or `count: 60` + `cols: 10`), `shape: dot` |
+| `heatmap` | grid | how full / how much, cell by cell | `heat: 0 3 4 1 ...` (0 to 4, one per cell) |
+| `table` | grid | facts in rows and columns | `head: \| 2006 \| 2015`, `row: Plants \| 23 \| 15` |
+| `flow` | line | steps, width follows the value | `item: Fab \| 9 days` |
+| `swimlane` | line | a schedule | `item: Fab \| 9 days \| 2` (name \| length \| start) |
+| `funnel` | line | what is left at each stage (drops worked out) | `item: Paid \| 6%` |
+| `bars` | line | compare sizes | `item: Auto \| 56%` |
+| `timeline` | line | when things happened (spaced by year) | `item: 2015 \| Merger` |
+| `plan` | space | boxes placed anywhere (floor plan, site, map) | `box: x,y,w,h \| Label` (percent) |
+| `anatomy` | space | one thing with named parts | `box:` and `leader: x,y > x,y \| Name` |
+| `matrix` | space | two axes | `x: Faster`, `y: Dearer`, `point: 22,25 \| Label` (0 to 100) |
+| `meter` | space | one value against a limit | `value: 72`, `limit: 55`, `note: ...` |
+| `scale` | space | size against size (area follows value) | `item: A town \| 4` |
+| `cycle` | ring | a loop of stages (3 to 10) | `item: Test` |
+| `hierarchy` | tree | a root and its parts | `root: Revenue \| $13b`, `item: Auto \| 56% \| Parent` |
+| `overlap` | nest | what two or three groups share | `set: Cheap`, `set: Fast`, `overlap: Only \| 9%` |
+| `section` | nest | layers top to bottom (heights follow values) | `layer: Package \| 44` |
+| `concentric` | nest | a market inside a market | `layer: Everyone \| 100` |
+
+The six engines, for anything the presets don't cover: **grid** (rows x columns), **line** (a sequence or
+axis; `layout: flow\|timeline\|funnel\|swimlane\|bars`), **space** (parts at free x,y positions, or
+`layout: matrix\|meter\|scale`), **ring** (around a circle), **tree** (parents and children), **nest**
+(inside one another; `layout: overlap\|section\|concentric`). `diagram: space` with your own `box:`, `dot:`,
+`circle:`, `text:`, `arrow:`, `line:` and `leader:` lines can draw almost anything.
+
+### States, selectors and cues
+
+| Line | Meaning |
+|---|---|
+| `on: <parts> "legend" @ "word"` | the parts in the accent colour: the thing you are talking about |
+| `warn: <parts>` | the broken one (red outline, and a mark on boxes) |
+| `ghost: <parts>` | a part that is not there yet / no longer: faint dashed outline |
+| `base: <parts> "legend"` | the quiet default (use it to give the rest a legend label) |
+| `appear: <parts> @ "word"` | the parts are not drawn until the word |
+| `mark: <parts> "label" @ "word"` | a dashed outline round those parts, with a label |
+| `legend: auto\|off` | a legend with live counts, built from the quoted labels (on when there are any) |
+| `at: 50,57` and `size: 880 x 640` | where (centre, percent) and how big; leave both out and the diagram takes the room below the slide's text |
+
+Parts are picked by number (`3`, `1-32`, `5, 9-12`; across then down), `rows 2-3`, `cols 4`, `r2c5`, `all`,
+`rest` (the parts no other line named) or by name (`Fab`). `@ "word"` is copied from the slide's `say:`; a
+change without a cue is there from the start. At most 14 cues, in any order; the picture changes as each
+word is spoken.
+
+### Make your own preset
+
+A preset is a text file in `content_engine/diagrams/<name>.yml` (or in the folder named by the
+`SAGE_DIAGRAMS_DIR` environment variable) with the same `key: value` lines, one `engine: ...` line and
+sample data. Copy one, change it, give it a name, and `diagram: <name>` works at once. Lines starting with
+`#` are comments in a preset file (not in a slide).
+
+### Rules the checks enforce
+
+- A diagram slide should carry only a short headline (a warning over 16 words of slide text). Its text is set
+  smaller than a normal reel slide so the diagram has the room, and the Pi tells you if too little is left.
+- Cues that aren't in the narration are warned about and spread evenly instead.
+- Up to 600 parts and 14 cues; a bigger grid is refused with how to fix it.
 
 ## Your own voice
 

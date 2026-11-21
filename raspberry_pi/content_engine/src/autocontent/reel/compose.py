@@ -429,6 +429,10 @@ class SceneClip:
     def settles_at(self) -> float:
         """From this moment until the exit begins, the picture doesn't change (unless a piece zooms)."""
         done = [p.at + p.takes(self.motion) for p in self.pieces]
+        for o in self.objects:          # an overlay that arrives late, or is replaced by the next, keeps the frame moving
+            done.append(o.at + o.takes())
+            if o.exit_at > 0:
+                done.append(o.exit_at + OBJ_EXIT_DUR)
         return max(done or [self.t0]) + 0.05
 
     @property
@@ -677,7 +681,8 @@ class Timeline:
         moves any more."""
         clip = self.clips[i]
         fading = any(p.seq and t < p.at + DIM_IN + 0.02 for p in clip.pieces)
-        settled = not clip.moving and not fading and t >= clip.settles_at
+        leaving = bool(clip.objects) and t >= clip.t1 - EXIT - OBJ_EXIT_DUR     # an overlay is fading out
+        settled = not clip.moving and not fading and not leaving and t >= clip.settles_at
         cached = self._cache.get(i)
         if settled and cached is not None:
             frame = cached.copy()

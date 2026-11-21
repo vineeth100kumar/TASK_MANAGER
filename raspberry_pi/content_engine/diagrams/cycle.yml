@@ -1,0 +1,7 @@
+# Stages in a loop.
+engine: ring
+item: Research
+item: Design
+item: Test
+item: Ship
+item: Learn

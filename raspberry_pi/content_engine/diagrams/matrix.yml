@@ -1,0 +1,9 @@
+# Two axes, points placed 0-100 (bottom left is 0,0).
+engine: space
+layout: matrix
+x: Faster
+y: Dearer
+point: 22,25 | Cheap, slow
+point: 75,24 | Fast, cheap
+point: 25,76 | Dead end
+point: 76,78 | Fast, dear

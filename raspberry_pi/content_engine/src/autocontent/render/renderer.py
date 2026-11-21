@@ -950,7 +950,9 @@ class SlideRenderer:
             """, "headline below the brand row"))
 
         if "type_scale" in preset:
-            steps = [(_scale_fit_text(js, preset["type_scale"]), label) for js, label in steps]
+            # a reel slide that carries a diagram sets its text smaller (the pipeline asks with `reel_type_scale`)
+            k = float(slide.get("reel_type_scale") or preset["type_scale"])
+            steps = [(_scale_fit_text(js, k), label) for js, label in steps]
 
         ov_call = overrides_call(slide)
         if ov_call:

@@ -1,0 +1,7 @@
+# One thing with its parts named: leader: x,y > label x,y | name (percent of the diagram's box).
+engine: space
+box: 30,22,40,56 | The chip
+leader: 30,34 > 8,18 | Die
+leader: 70,34 > 92,18 | Package
+leader: 30,66 > 8,84 | Pads
+leader: 70,66 > 92,84 | Pins
