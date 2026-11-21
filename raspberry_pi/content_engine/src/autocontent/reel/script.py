@@ -12,6 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..spec import parse_spec, SpecIssue, ParsedSpec
 from .objects import parse_objects, SceneObject
+from .diagram import Diagram, DiagramError, parse_diagram
 
 _MARKER = re.compile(r"^(\s*autocontent\s*:\s*['\"]?)(?:reel|reels|video)\b", re.I)
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -32,6 +33,7 @@ SCENE_KEYS = {
     "duration": "duration", "hold": "duration", "pause": "pause",
     "speed": "speed", "tone": "tone", "delivery": "tone", "voice": "voice",
     "objects": "objects", "overlay": "objects", "overlays": "objects", "obj": "objects",
+    "diagram": "diagram", "figure": "diagram",
 }
 # How a slide is delivered: a speed multiplier on top of the reel's own speed.
 TONES = {"hook": 1.08, "fast": 1.1, "excited": 1.1, "energetic": 1.08, "normal": 1.0, "neutral": 1.0,
@@ -78,6 +80,7 @@ SLIDE_WORDS_FULL = 40        # over this, something has to go
 BULLETS_FULL = 4
 HEADLINE_WORDS = 9
 KICKER_CHARS = 28
+DIAGRAM_SLIDE_WORDS = 16      # text a slide may carry beside a diagram
 
 
 def _slide_text(slide: Dict[str, Any]) -> Tuple[List[str], int]:
@@ -112,6 +115,7 @@ class Scene:
     duration: Optional[float] = None    # seconds to hold a scene that has no narration
     pause: float = 0.0                  # extra silence after the narration, seconds
     objects: List[SceneObject] = field(default_factory=list)   # overlay objects on this slide
+    diagram: Optional[Diagram] = None   # the explainer diagram drawn on this slide (see diagram.py)
 
     @property
     def words(self) -> List[str]:
@@ -221,7 +225,8 @@ def _split(text: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, T
         if current and raw[:2].strip() == "" and raw.strip() and not raw.lstrip().startswith(("-", "|", "*")) \
                 and not re.match(r"^\s*\d+[.)]", raw):
             store, key = current
-            store[key] = (store[key][0] + " " + raw.strip(), store[key][1])
+            # a diagram is a block of `key: value` lines, so its lines stay lines
+            store[key] = (store[key][0] + ("\n" if key == "diagram" else " ") + raw.strip(), store[key][1])
             out[idx] = ""
             continue
         if raw.strip():
@@ -348,6 +353,12 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             scene.pause = _number(sec["pause"][0], 0.0, 5.0, "pause", sec["pause"][1], reel.issues, 0.0) or 0.0
         if "objects" in sec:
             scene.objects = parse_objects(sec["objects"][0])
+        if "diagram" in sec:
+            try:
+                scene.diagram = parse_diagram(sec["diagram"][0])
+            except DiagramError as e:
+                reel.issues.append(SpecIssue("ERROR", "DIAGRAM_BAD", f"Slide {i + 1}'s diagram: {e}",
+                                             slide=i + 1, line=sec["diagram"][1], hint=e.hint or None))
         reel.scenes.append(scene)
     reel.post_text = post_text
     reel.issues += check_reel(reel)
@@ -406,6 +417,17 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                     issues.append(SpecIssue("WARN", "CUE_NOT_FOUND", f"The cue '{cue}' on slide {s.n} isn't in its narration; it will be spread evenly instead.",
                                             slide=s.n, line=s.line, hint="Cue words must be copied from the `say:` line."))
                     break
+        if s.diagram is not None:
+            hay = _norm(s.say)
+            for cue in s.diagram.cues():
+                if not _norm(cue) or _norm(cue) not in hay:
+                    issues.append(SpecIssue("WARN", "DIAGRAM_CUE_NOT_FOUND",
+                                            f"The diagram cue '{cue}' on slide {s.n} isn't in its narration; that change will be spread evenly instead.",
+                                            slide=s.n, line=s.line, hint="Cue words must be copied from the `say:` line."))
+            if n_words > DIAGRAM_SLIDE_WORDS:
+                issues.append(SpecIssue("WARN", "DIAGRAM_CROWDED",
+                                        f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
+                                        slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
     seconds = reel.estimate_seconds()
     if seconds > MAX_SECONDS:
         issues.append(SpecIssue("WARN", "REEL_LONG", f"About {seconds:.0f} seconds; reels over {MAX_SECONDS:.0f} seconds lose most viewers.",

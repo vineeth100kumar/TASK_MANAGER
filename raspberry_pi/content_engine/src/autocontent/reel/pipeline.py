@@ -9,14 +9,17 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 from PIL import Image
 
 from ..progress import report
+from ..render.style_config import CANVAS_FORMATS
 from . import align as aligner
 from . import captions as caps
 from . import compose, timing, voice
 from . import layers as layers_mod
 from .layers import extract_scene
+from .diagram import parse_diagram, plan_steps
 from .objects import SceneObject, render_object_svg, get_default_anim, obj_position, OBJ_ANIMS
 from .script import ReelScript, parse_reel
 
+DIAGRAM_TYPE_SCALE = 1.05   # a slide with a diagram sets its text near feed size, not at the full reel size
 PosterAt = 1.2   # seconds into the reel for the poster picture: the cover once its headline is up
 
 
@@ -43,6 +46,29 @@ def _render_svg_to_png(page, svg_str: str, obj, out_path: Path, canvas_w: int, c
                     omit_background=True, full_page=False)
     # restore viewport for next slide
     page.set_viewport_size({"width": canvas_w, "height": canvas_h})
+
+
+def _render_png(page, svg_str: str, w: int, h: int, out_path: Path, canvas_w: int, canvas_h: int) -> None:
+    """Render an SVG picture of known size to a transparent PNG (one diagram picture)."""
+    html = (f"<!DOCTYPE html><html><head><style>html, body {{ margin: 0; padding: 0; background: transparent; "
+            f"width: {w}px; height: {h}px; overflow: hidden; }} svg {{ display: block; }}</style></head>"
+            f"<body>{svg_str}</body></html>")
+    page.set_content(html, wait_until="domcontentloaded")
+    page.set_viewport_size({"width": max(2, w), "height": max(2, h)})
+    page.screenshot(path=str(out_path), clip={"x": 0, "y": 0, "width": w, "height": h}, omit_background=True, full_page=False)
+    page.set_viewport_size({"width": canvas_w, "height": canvas_h})
+
+
+def _ink_bottom(layers) -> int:
+    """The lowest row of the slide's own pieces that actually has something drawn in it (a piece's box
+    is bigger than its ink)."""
+    low = 0
+    for ly in layers:
+        with Image.open(ly.path) as im:
+            ink = im.convert("RGBA").getchannel("A").point(lambda v: 255 if v > 16 else 0).getbbox()
+        if ink:
+            low = max(low, ly.box[1] + ink[3])
+    return low
 
 
 class ReelError(Exception):
@@ -171,6 +197,8 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
         page = browser.new_page(viewport={"width": compose.W, "height": compose.H},
                                 device_scale_factor=layers_mod.OVERSAMPLE)
         for i, slide in enumerate(slides):
+            if reel.scenes[i].diagram is not None and not reel.scenes[i].diagram.placed:
+                slide["reel_type_scale"] = DIAGRAM_TYPE_SCALE      # text smaller, so the diagram has the room
             progress(f"Cutting slide {i + 1} of {len(slides)} into pieces ({slide.get('type')})...")
             sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers",
                                scale=layers_mod.OVERSAMPLE)
@@ -244,6 +272,36 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                         image=Image.open(obj_path).convert("RGBA"),
                         box=(ox, oy, ow, oh), at=obj_arrive, anim=anim,
                         rotate=obj.rotate))
+            # --- the diagram: one picture per spoken cue, each replacing the one before ---
+            if sc.diagram is not None:
+                dgm = sc.diagram
+                if not dgm.placed and sl.layers:
+                    # the room the slide's own text leaves, down to where the captions begin
+                    top = _ink_bottom(sl.layers) + 28
+                    room = int(CANVAS_FORMATS["reel"]["content_bottom"]) - top
+                    if room < 380:
+                        progress(f"  slide {i + 1}: only {max(room, 0)}px is left for the diagram; shorten the headline")
+                    top = min(top, int(CANVAS_FORMATS["reel"]["content_bottom"]) - 380)
+                    dgm = parse_diagram(dgm.source, compose.W, compose.H,
+                                        box=(100, top, compose.W - 200, int(min(max(room, 380), 860))))
+                steps, missed = plan_steps(dgm.cues(), per_scene[i], t0, t1, compose.EXIT, timing.find_cue)
+                for cue in missed:
+                    progress(f"  slide {i + 1}: the diagram cue '{cue}' wasn't heard; that change is spread over the slide")
+                dx, dy = dgm.x, dgm.y
+                pictures, last_svg = [], None
+                for k, (when, applied) in enumerate(steps):
+                    svg = dgm.svg(applied, sl.theme, brand.get("accent_hex"))
+                    if svg == last_svg:
+                        continue                # that cue changed nothing visible
+                    last_svg = svg
+                    png = work / "diagrams" / f"s{i + 1:02d}_{k:02d}.png"
+                    png.parent.mkdir(exist_ok=True)
+                    _render_png(page, svg, dgm.w, dgm.h, png, compose.W, compose.H)
+                    pictures.append((when, png))
+                for k, (when, png) in enumerate(pictures):
+                    later = pictures[k + 1][0] + 0.32 if k + 1 < len(pictures) else 0.0   # the next one is fully in first
+                    clip.objects.append(compose.ObjectPiece(image=Image.open(png).convert("RGBA"), box=(dx, dy, dgm.w, dgm.h),
+                                                            at=when, anim="fade", exit_at=later))
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 

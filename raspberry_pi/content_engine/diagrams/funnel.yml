@@ -1,0 +1,7 @@
+# What is left at each stage. The drop between stages is worked out for you.
+engine: line
+layout: funnel
+item: Saw the ad | 100%
+item: Clicked | 42%
+item: Added to cart | 18%
+item: Paid | 6%

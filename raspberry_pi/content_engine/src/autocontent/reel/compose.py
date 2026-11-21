@@ -429,6 +429,10 @@ class SceneClip:
     def settles_at(self) -> float:
         """From this moment until the exit begins, the picture doesn't change (unless a piece zooms)."""
         done = [p.at + p.takes(self.motion) for p in self.pieces]
+        for o in self.objects:          # an overlay that arrives late, or is replaced by the next, keeps the frame moving
+            done.append(o.at + o.takes())
+            if o.exit_at > 0:
+                done.append(o.exit_at + OBJ_EXIT_DUR)
         return max(done or [self.t0]) + 0.05
 
     @property

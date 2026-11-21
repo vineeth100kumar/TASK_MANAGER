@@ -1,0 +1,7 @@
+# A fixed set of seats: how many are taken, and which ones.
+engine: grid
+shape: seat
+rows: 8 x 16
+stage: SCREEN
+on: 1-32 "sold"
+base: rest "empty"

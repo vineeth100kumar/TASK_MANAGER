@@ -1,0 +1,6 @@
+# A rate made countable: 31 of 100 dots lit.
+engine: grid
+shape: dot
+rows: 10 x 10
+on: 1-31 "gone"
+base: rest "stayed"
