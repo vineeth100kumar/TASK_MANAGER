@@ -42,6 +42,12 @@ class ApiSecretTests(unittest.TestCase):
         res = client.get(PATH, headers={"Authorization": f"Bearer {SECRET}"})
         self.assertEqual((res.status_code, res.json()["secret"]), (200, SECRET))
 
+    def test_key_without_the_word_bearer_is_accepted(self):
+        # A Siri shortcut with the bare key in the Authorization field.
+        res = client.get(PATH, headers={"Authorization": SECRET})
+        self.assertEqual((res.status_code, res.json()["secret"]), (200, SECRET))
+        self.assertEqual(client.get(PATH, headers={"Authorization": "nope"}).status_code, 401)
+
     def test_the_pis_own_screen_may_read_it(self):
         with mock.patch.object(db_server, "is_pi_itself", return_value=True):
             res = client.get(PATH)
