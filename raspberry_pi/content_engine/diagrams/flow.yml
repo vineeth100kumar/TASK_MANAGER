@@ -1,0 +1,7 @@
+# Steps in order. Box width follows the second field (the value); the third is a small note.
+engine: line
+layout: flow
+item: Design | 2 days
+item: Fab | 9 days
+item: Test | 1 day
+item: Ship | 1 day

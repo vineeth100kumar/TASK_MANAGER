@@ -1,0 +1,8 @@
+# Layers top to bottom; heights follow the value when you give one.
+engine: nest
+layout: section
+title: What's actually in the chip
+layer: Package | 44
+layer: Die | 30
+layer: Substrate | 52
+layer: Board | 70

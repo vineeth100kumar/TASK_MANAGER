@@ -8,9 +8,10 @@ as one H.264/AAC mp4. See REEL_FORMAT.md.
 
 from .script import ReelScript, Scene, parse_reel, is_reel_text, check_reel
 from .objects import SceneObject, parse_objects, SHAPES
+from .diagram import Diagram, DiagramError, parse_diagram, list_presets
 
 __all__ = ["ReelScript", "Scene", "parse_reel", "is_reel_text", "check_reel",
-           "SceneObject", "parse_objects", "SHAPES"]
+           "SceneObject", "parse_objects", "SHAPES", "Diagram", "DiagramError", "parse_diagram", "list_presets"]
 
 
 def make_reel(*args, **kwargs):
