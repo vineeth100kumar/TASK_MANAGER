@@ -12,7 +12,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from ..spec import parse_spec, SpecIssue, ParsedSpec
 from .objects import parse_objects, SceneObject
-from .diagram import Diagram, DiagramError, parse_diagram
+from .diagram import Diagram, DiagramError, KEYS as DIAGRAM_KEYS, parse_diagram
 
 _MARKER = re.compile(r"^(\s*autocontent\s*:\s*['\"]?)(?:reel|reels|video)\b", re.I)
 _FENCE = re.compile(r"^\s*(```|~~~)")
@@ -222,7 +222,9 @@ def _split(text: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, T
             out[idx] = ""
             current = (sections[section_line], key)
             continue
-        if current and raw[:2].strip() == "" and raw.strip() and not raw.lstrip().startswith(("-", "|", "*")) \
+        in_diagram = bool(current) and current[1] == "diagram" and bool(re.match(r"^\s*([A-Za-z_][\w-]*)\s*:", raw)) and (
+            raw[:1] in (" ", "\t") or re.match(r"^\s*([A-Za-z_][\w-]*)", raw).group(1).lower().replace("-", "_") in DIAGRAM_KEYS)
+        if current and (raw[:2].strip() == "" or in_diagram) and raw.strip() and not raw.lstrip().startswith(("-", "|", "*")) \
                 and not re.match(r"^\s*\d+[.)]", raw):
             store, key = current
             # a diagram is a block of `key: value` lines, so its lines stay lines
@@ -356,6 +358,8 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         if "diagram" in sec:
             try:
                 scene.diagram = parse_diagram(sec["diagram"][0])
+                if not scene.diagram.placed:         # it will be fitted to the room under the slide's text: check it fits there too
+                    parse_diagram(sec["diagram"][0], box=(100, 0, 880, 380))
             except DiagramError as e:
                 reel.issues.append(SpecIssue("ERROR", "DIAGRAM_BAD", f"Slide {i + 1}'s diagram: {e}",
                                              slide=i + 1, line=sec["diagram"][1], hint=e.hint or None))

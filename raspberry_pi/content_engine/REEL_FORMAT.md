@@ -311,6 +311,13 @@ flow with its slow step marked, a funnel, a timeline) in which every part can li
 word that is spoken. Write one with a `diagram:` line followed by indented `key: value` lines:
 
 ```
+**Good to know (rules the checker enforces):**
+- Your slide's own lines **replace** a preset's sample data (items, rows, values, and its `on:` lines by number). `base: rest` stays.
+- A name with a comma, or a number used as a name, goes in quotes: `warn: "Cheap, slow"`, `on: "2015"`.
+- A misspelt line (`legnd:`) is an error with a "did you mean" hint, not silently ignored.
+- Diagram lines may be indented with spaces or a tab, or sit unindented if the key is a diagram key.
+- At most 10 cues per diagram. `rest` may be empty. Cues that run late are squeezed to fit the slide.
+
 ## statement
 headline: Two hundred seats. Forty sold.
 align: top

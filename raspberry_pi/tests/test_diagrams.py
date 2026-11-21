@@ -139,7 +139,7 @@ class ErrorTests(unittest.TestCase):
         self.assertIn("seatmap", e.hint)
 
     def test_a_selector_that_names_nothing_is_refused(self):
-        self.bad("grid\nrows: 2 x 2\non: 99", "matches no parts")
+        self.bad("grid\nrows: 2 x 2\non: 99", "no part called")
         self.bad("flow\nwarn: Nonesuch", "no part called")
 
     def test_bad_sizes_and_lines(self):
@@ -147,7 +147,7 @@ class ErrorTests(unittest.TestCase):
         self.bad("grid\nthis is not a line", "Can't read the line")
         self.bad("grid\nrows: 40 x 40", "too many")
         self.bad("flow\nitem: Only one | 1", "at least two")
-        self.bad("hierarchy\nitem: X | 1 | Nobody", "isn't in the tree")
+        self.bad("hierarchy\nroot: Top\nitem: X | 1 | Nobody", "isn't in the tree")
         self.bad("cycle\nitem: A\nitem: B", "between 3 and 10")
 
     def test_too_many_cues(self):
@@ -157,6 +157,43 @@ class ErrorTests(unittest.TestCase):
     def test_a_dense_grid_is_refused_with_a_hint(self):
         e = self.bad("grid\nrows: 30 x 20\nsize: 300 x 200", "too dense")
         self.assertTrue(e.hint)
+
+
+class ReviewFixTests(unittest.TestCase):
+    def test_tab_indent_stays_in_diagram(self):
+        r = parse_reel(script("diagram: seatmap\n\trows: 2 x 2\n\ton: 1"))
+        self.assertTrue(r.ok, [str(i) for i in r.issues])
+        self.assertNotIn("rows:", r.post_text)
+
+    def test_unknown_line_suggests(self):
+        with self.assertRaises(DiagramError) as cm:
+            parse_diagram("grid\nrows: 2 x 2\nlegnd: auto")
+        self.assertIn("legend", cm.exception.hint)
+
+    def test_empty_rest_is_fine(self):
+        parse_diagram("grid\nrows: 1 x 2\non: 1-2\nbase: rest")
+
+    def test_quoted_numeric_label(self):
+        d = parse_diagram("timeline\nitem: 2015 | 2015\nitem: 2020 | 2020\non: \"2015\"")
+        self.assertTrue(d.svg([]))
+
+    def test_scale_item_without_value(self):
+        parse_diagram("scale\nitem: A\nitem: B")
+
+    def test_tree_loop_is_an_error(self):
+        with self.assertRaises(DiagramError):
+            parse_diagram("hierarchy\nroot: R\nitem: A | 1 | B\nitem: B | 1 | A")
+
+    def test_slide_content_replaces_preset_sample(self):
+        d = parse_diagram("seatmap\nrows: 2 x 3")
+        self.assertEqual(len([p for p in d.parts if p.sel]), 6)
+
+    def test_plan_steps_stay_inside_slide(self):
+        from types import SimpleNamespace as NS
+        from autocontent.reel.diagram import plan_steps
+        words = [NS(start=9.0 + i) for i in range(3)]
+        steps, _ = plan_steps(["a", "b", "c"], words, 0.0, 3.0, 0.3, lambda c, w, after: after)
+        self.assertTrue(all(t <= 3.0 for t, _ in steps), steps)
 
 
 class EngineTests(unittest.TestCase):

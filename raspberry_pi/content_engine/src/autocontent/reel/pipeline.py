@@ -15,7 +15,7 @@ from . import captions as caps
 from . import compose, timing, voice
 from . import layers as layers_mod
 from .layers import extract_scene
-from .diagram import parse_diagram, plan_steps
+from .diagram import DiagramError, parse_diagram, plan_steps
 from .objects import SceneObject, render_object_svg, get_default_anim, obj_position, OBJ_ANIMS
 from .script import ReelScript, parse_reel
 
@@ -282,8 +282,11 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     if room < 380:
                         progress(f"  slide {i + 1}: only {max(room, 0)}px is left for the diagram; shorten the headline")
                     top = min(top, int(CANVAS_FORMATS["reel"]["content_bottom"]) - 380)
-                    dgm = parse_diagram(dgm.source, compose.W, compose.H,
-                                        box=(100, top, compose.W - 200, int(min(max(room, 380), 860))))
+                    try:
+                        dgm = parse_diagram(dgm.source, compose.W, compose.H,
+                                            box=(100, top, compose.W - 200, int(min(max(room, 380), 860))))
+                    except DiagramError as e:
+                        raise ReelError(f"Slide {i + 1}'s diagram doesn't fit the room under its text: {e} {e.hint}".strip())
                 steps, missed = plan_steps(dgm.cues(), per_scene[i], t0, t1, compose.EXIT, timing.find_cue)
                 for cue in missed:
                     progress(f"  slide {i + 1}: the diagram cue '{cue}' wasn't heard; that change is spread over the slide")
@@ -300,8 +303,11 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     pictures.append((when, png))
                 for k, (when, png) in enumerate(pictures):
                     later = pictures[k + 1][0] + 0.32 if k + 1 < len(pictures) else 0.0   # the next one is fully in first
-                    clip.objects.append(compose.ObjectPiece(image=Image.open(png).convert("RGBA"), box=(dx, dy, dgm.w, dgm.h),
-                                                            at=when, anim="fade", exit_at=later))
+                    piece = compose.ObjectPiece(image=Image.open(png).convert("RGBA"), box=(dx, dy, dgm.w, dgm.h),
+                                                at=when, anim="fade", exit_at=later)
+                    piece.array                     # take the pixels once and let go of the picture (RAM is short on a Pi)
+                    piece.image = None
+                    clip.objects.append(piece)
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 

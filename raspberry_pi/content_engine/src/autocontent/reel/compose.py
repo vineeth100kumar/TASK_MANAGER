@@ -681,7 +681,8 @@ class Timeline:
         moves any more."""
         clip = self.clips[i]
         fading = any(p.seq and t < p.at + DIM_IN + 0.02 for p in clip.pieces)
-        settled = not clip.moving and not fading and t >= clip.settles_at
+        leaving = bool(clip.objects) and t >= clip.t1 - EXIT - OBJ_EXIT_DUR     # an overlay is fading out
+        settled = not clip.moving and not fading and not leaving and t >= clip.settles_at
         cached = self._cache.get(i)
         if settled and cached is not None:
             frame = cached.copy()

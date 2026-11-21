@@ -18,6 +18,7 @@ This module draws SVG only and is pure Python (no browser), so it can be tested 
 cue into a transparent layer and lets them replace each other as the voice reaches each word.
 """
 
+import difflib
 import html
 import math
 import os
@@ -27,13 +28,19 @@ from pathlib import Path
 from typing import Callable, Dict, List, Optional, Sequence, Set, Tuple
 
 MAX_PARTS = 600
-MAX_CUES = 14
+MAX_CUES = 10
 ENGINES = ("grid", "line", "space", "ring", "tree", "nest")
 STATES = ("base", "on", "warn", "ghost")
 # keys that may be given more than once (each line adds one); every other key keeps its last value
 LIST_KEYS = {"item", "row", "point", "box", "dot", "circle", "text", "arrow", "line", "leader", "set", "layer",
              "on", "warn", "ghost", "base", "appear", "mark"}
 DIRECTIVE_KEYS = ("on", "warn", "ghost", "base", "appear")
+# what a slide's own lines replace in a preset: its sample data (and the state lines tied to it)
+CONTENT_KEYS = {"item", "row", "head", "heat", "root", "set", "overlap", "layer", "point", "box", "dot", "circle",
+                "text", "arrow", "line", "leader", "value", "limit", "limit_label", "label", "note", "title",
+                "rows", "count", "cols", "x", "y"}
+STYLE_KEYS = {"engine", "layout", "shape", "stage", "legend", "size", "at", "gap", "max", "unit"}
+KEYS = LIST_KEYS | CONTENT_KEYS | STYLE_KEYS
 FONT = "Inter Display, Inter, Helvetica, Arial, sans-serif"
 PRESET_DIR = Path(__file__).resolve().parents[3] / "diagrams"
 
@@ -202,43 +209,53 @@ def split_directive(v: str) -> Tuple[str, str, str]:
         label = m.group(1).strip()
         v = (v[:m.start()] + v[m.end():]).strip()
     if not v and label:                 # `warn: "Fab"` names the part, there is no legend label
-        v, label = label, ""
+        v, label = f'"{label}"', ""
     return v, label, cue
 
 
 def select(spec: str, parts: List[Part], used: Set[int], what: str) -> Set[int]:
-    """The parts a selector names: numbers and ranges, `rows 1-2`, `cols 3`, `r2c5`, `all`, `rest`, or names."""
+    """The parts a selector names: numbers and ranges, `rows 1-2`, `cols 3`, `r2c5`, `all`, `rest`, or names
+    (a name with a comma or a number for a name goes in quotes: `warn: "Cheap, slow"`, `on: "2015"`)."""
     pool = [p for p in parts if p.sel]
     ids: Set[int] = set()
     if not spec.strip():
         raise DiagramError(f"`{what}:` needs to say which parts.", "For example `on: 1-32` or `warn: Fab`.")
-    for tok in re.split(r"\s*,\s*", spec.strip()):
-        low = tok.strip().strip('"').lower()
-        if not low:
+    asked_rest = False
+    for tok in re.findall(r'"[^"]*"|[^,]+', spec):
+        raw = tok.strip()
+        if not raw:
             continue
+        quoted = raw.startswith('"')
+        low = raw.strip('"').strip().lower()
         m_axis = re.fullmatch(r"(rows?|cols?|columns?)\s+(\d+)(?:\s*-\s*(\d+))?", low)
         m_cell = re.fullmatch(r"r(\d+)c(\d+)", low)
-        m_num = re.fullmatch(r"(\d+)(?:\s*-\s*(\d+))?", low)
-        if low == "all":
+        m_num = re.fullmatch(r"(\d{1,6})(?:\s*-\s*(\d{1,6}))?", low)
+        if not quoted and low == "all":
             ids |= {p.id for p in pool}
-        elif low == "rest":
+        elif not quoted and low == "rest":
+            asked_rest = True
             ids |= {p.id for p in pool} - used
-        elif m_axis:
+        elif not quoted and m_axis:
             a, b = int(m_axis.group(2)), int(m_axis.group(3) or m_axis.group(2))
             key = "row" if m_axis.group(1).startswith("row") else "col"
             ids |= {p.id for p in pool if a <= getattr(p, key) <= max(a, b)}
-        elif m_cell:
+        elif not quoted and m_cell:
             ids |= {p.id for p in pool if p.row == int(m_cell.group(1)) and p.col == int(m_cell.group(2))}
-        elif m_num:
-            a, b = int(m_num.group(1)), int(m_num.group(2) or m_num.group(1))
-            ids |= {p.id for p in pool if a <= p.idx <= max(a, b)}
         else:
-            hit = [p for p in pool if p.label.lower() == low] or [p for p in pool if low in p.label.lower()]
+            if not quoted and m_num:
+                a, b = int(m_num.group(1)), int(m_num.group(2) or m_num.group(1))
+                hit = [p for p in pool if a <= p.idx <= max(a, b)]
+                if hit:
+                    ids |= {p.id for p in hit}
+                    continue
+            hit = [p for p in pool if p.label.lower() == low] or (
+                [] if quoted or m_num else [p for p in pool if low in p.label.lower()])
             if not hit:
-                raise DiagramError(f"`{what}:` found no part called '{tok.strip()}'.",
-                                   "Use a number like 3, a range like 1-5, `rows 2`, `all`, `rest` or a part's name.")
+                raise DiagramError(f"`{what}:` found no part called '{raw.strip(chr(34))}'.",
+                                   "Use a number like 3, a range like 1-5, `rows 2`, `all`, `rest` or a part's name "
+                                   "(in quotes if it has a comma or is a number).")
             ids |= {p.id for p in hit}
-    if not ids:
+    if not ids and not asked_rest:                    # `rest` may well be nothing: every part is already named
         raise DiagramError(f"`{what}: {spec}` matches no parts.", "Check the numbers against the diagram's size.")
     return ids
 
@@ -592,7 +609,7 @@ def _draw_mark(m: Mark, by_id: Dict[int, Part], pal: Dict[str, str], fs: float, 
 # furniture. `o` holds each scalar key's last value; `lists` holds every line of the repeated keys.
 
 def _two(v: str, what: str) -> Tuple[int, int]:
-    m = re.fullmatch(r"\s*(\d+)\s*[xX×*]\s*(\d+)\s*", v or "")
+    m = re.fullmatch(r"\s*(\d{1,5})\s*[xX×*]\s*(\d{1,5})\s*", v or "")
     if not m:
         raise DiagramError(f"`{what}` should look like `8 x 16`.", "Rows first, then columns.")
     return int(m.group(1)), int(m.group(2))
@@ -630,7 +647,7 @@ def build_grid(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> No
     if cell < 8:
         raise DiagramError(f"A {R} x {C} grid is too dense to read on a reel.", "Use fewer rows or columns.")
     x0 = (d.w - (C * cell + (C - 1) * gap)) / 2
-    heat = [int(v) for v in re.findall(r"\d+", o.get("heat", ""))]
+    heat = [int(v) for v in re.findall(r"\d{1,3}", o.get("heat", ""))[:MAX_PARTS]]
     hmax = max(heat) if heat else 0
     kind = {"dot": "dot", "person": "person"}.get(shape, "cell")
     for i in range(N):
@@ -682,6 +699,8 @@ def _items(lists: Dict[str, List[str]], key: str = "item") -> List[List[str]]:
 def build_line(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> None:
     fs = d.fs
     items = _items(lists)
+    if len(items) > 60:
+        raise DiagramError(f"{len(items)} items is too many for one diagram.", "A reel is too small to read more than about a dozen.")
     if len(items) < 2:
         raise DiagramError("This diagram needs at least two `item:` lines.", "For example `item: Design | 2 days | 2`.")
     n = len(items)
@@ -695,7 +714,7 @@ def build_line(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> No
         d.furniture.append(lambda pal: f'<path d="M{pad / 2:.1f} {ys:.1f} H{d.w - pad / 2:.1f}" stroke="{pal["mut"]}" '
                                        f'stroke-width="{6 * fs:.1f}" stroke-linecap="round"/>')
         for i, it in enumerate(items):
-            f = (vals[i] - vals[0]) / (vals[-1] - vals[0]) if numeric and vals[-1] != vals[0] else i / (n - 1)
+            f = (vals[i] - min(vals)) / (max(vals) - min(vals)) if numeric else i / (n - 1)
             cx = pad + f * (d.w - 2 * pad)
             d.add("tick", cx - 20 * fs, ys - 20 * fs, 40 * fs, 40 * fs, label=it[0], sub=it[1] if len(it) > 1 else "",
                   idx=i + 1, extra={"up": i % 2 == 0})
@@ -704,8 +723,8 @@ def build_line(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> No
         starts, t = [], 0.0
         rows = []
         for it in items:
-            dur = num(it[1], 1) if len(it) > 1 else 1
-            st = num(it[2]) if len(it) > 2 and it[2] else t
+            dur = max(num(it[1], 1) or 1, 0.01) if len(it) > 1 else 1
+            st = max(num(it[2], t) or 0, 0) if len(it) > 2 and it[2] else t
             rows.append((it[0], dur, st, it[1] if len(it) > 1 else ""))
             t = st + dur
         total = max(s + du for _, du, s, _ in rows) or 1
@@ -809,7 +828,7 @@ def build_space(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> N
         items = _items(lists)
         if not items:
             raise DiagramError("A scale diagram needs `item:` lines.", "For example `item: A village | 1`.")
-        vals = [max(num(it[1], 1) or 1, 1e-9) for it in items]
+        vals = [max(num(it[1], 1) or 1, 1e-9) if len(it) > 1 else 1.0 for it in items]
         gap = 26 * fs
         k = min((W - gap * (len(items) - 1)) / sum(math.sqrt(v) for v in vals), (H * 0.8) / math.sqrt(max(vals)))
         sides = [k * math.sqrt(v) for v in vals]
@@ -894,6 +913,8 @@ def build_tree(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> No
     if not root or not root[0]:
         raise DiagramError("A tree needs a `root:` line.", "For example `root: Revenue` then `item: Auto | 56%`.")
     nodes = [{"label": root[0], "value": root[1] if len(root) > 1 else "", "parent": None, "kids": []}]
+    if len(lists.get("item", [])) > 120:
+        raise DiagramError("A tree with more than 120 items is too big for a reel.", "Show the main branches only.")
     for it in _items(lists):
         nodes.append({"label": it[0], "value": it[1] if len(it) > 1 else "", "parent": it[2] if len(it) > 2 and it[2] else root[0], "kids": []})
     if len(nodes) < 2:
@@ -924,9 +945,13 @@ def build_tree(d: Diagram, o: Dict[str, str], lists: Dict[str, List[str]]) -> No
         n["lvl"] = lvl
 
     place(nodes[0], 0)
+    if any("xi" not in n for n in nodes):
+        raise DiagramError("The tree has parents that loop back on themselves.", "Every item has to lead back up to the root.")
     avail_h = d.h - d.legend_h
     col = d.w / max(leaves[0], 1)
     bw = min(230 * fs, col - 14 * fs)
+    if bw < 60 * fs:
+        raise DiagramError(f"A tree with {leaves[0]} branches on one row is too wide to read.", "Group the items under a few parents, or use fewer.")
     bh = min(96 * fs, avail_h / L * 0.56)
     row_h = (avail_h - bh - 8 * fs) / max(L - 1, 1) if L > 1 else 0
     made = {}
@@ -1011,12 +1036,25 @@ DEFAULT_LAYOUT = {"grid": "seat", "line": "flow", "space": "free", "ring": "cycl
 # ----------------------------------------------------------------------------- parse a whole recipe
 
 def _merge(base: List[Tuple[str, str]], over: List[Tuple[str, str]]) -> List[Tuple[str, str]]:
-    """A preset's lines under a slide's own. For a repeated key the slide's lines take the place of the
-    preset's (same position, so the order the preset set up still reads right); other keys add on."""
+    """A preset's lines under a slide's own. The slide's lines replace the preset's sample data: when the
+    slide gives any content of its own (items, rows, a value ...) the preset's content goes, and so do its
+    state lines that pick parts by number (`on: 1-32`; a `base: rest` line fits any content and stays). For
+    a repeated key the slide's lines take the preset's place, so the order the preset set up still reads right."""
+    new_content = any(k in CONTENT_KEYS for k, _ in over)
     mine: Dict[str, List[Tuple[str, str]]] = {}
     for k, v in over:
         if k in LIST_KEYS:
             mine.setdefault(k, []).append((k, v))
+
+    def keep(k: str, v: str) -> bool:
+        if not new_content:
+            return True
+        if k in CONTENT_KEYS:
+            return False
+        if k in DIRECTIVE_KEYS or k == "mark":
+            return bool(re.fullmatch(r"\s*(rest|all)\b[^,]*", v.split("@")[0].strip().lower()) or k == "base" and v.lower().startswith("rest"))
+        return True
+
     out: List[Tuple[str, str]] = []
     placed: Set[str] = set()
     for k, v in base:
@@ -1024,13 +1062,25 @@ def _merge(base: List[Tuple[str, str]], over: List[Tuple[str, str]]) -> List[Tup
             if k not in placed:
                 out += mine[k]
                 placed.add(k)
-        else:
+        elif keep(k, v):
             out.append((k, v))
     return out + [(k, v) for k, v in over if not (k in LIST_KEYS and k in placed)]
 
 
 def parse_diagram(text: str, canvas_w: int = 1080, canvas_h: int = 1920,
                   box: Optional[Tuple[int, int, int, int]] = None) -> Diagram:
+    """See `_parse_diagram`. Whatever goes wrong in a recipe (it may be written by an AI) comes out as a
+    DiagramError that says what to fix, never as a crash."""
+    try:
+        return _parse_diagram(text, canvas_w, canvas_h, box)
+    except DiagramError:
+        raise
+    except (IndexError, KeyError, ValueError, TypeError, ZeroDivisionError, OverflowError, RecursionError) as e:
+        raise DiagramError(f"This diagram couldn't be drawn ({type(e).__name__}).",
+                           "Check each line has the fields it needs, for example `item: Label | value`.")
+
+
+def _parse_diagram(text: str, canvas_w: int, canvas_h: int, box: Optional[Tuple[int, int, int, int]]) -> Diagram:
     """The `diagram:` block of a slide (first line is the engine or preset name, the rest are its lines).
     `box` (x, y, width, height in canvas pixels) overrides where and how big it is drawn: the pipeline
     uses it to fit the diagram into the room the slide's own text leaves."""
@@ -1054,6 +1104,10 @@ def parse_diagram(text: str, canvas_w: int = 1080, canvas_h: int = 1920,
         raise DiagramError("A diagram needs an engine.", f"Use one of: {', '.join(ENGINES)}.")
     o: Dict[str, str] = {}
     lists: Dict[str, List[str]] = {}
+    for k, _v in entries:
+        if k not in KEYS:
+            near = difflib.get_close_matches(k, sorted(KEYS), n=1)
+            raise DiagramError(f"Unknown diagram line '{k}:'.", f"Did you mean `{near[0]}:`?" if near else "See REEL_FORMAT.md for the lines a diagram takes.")
     for k, v in entries:
         (lists.setdefault(k, []).append(v)) if k in LIST_KEYS else o.__setitem__(k, v)
     layout = o.get("layout", DEFAULT_LAYOUT[head]).lower()
@@ -1138,9 +1192,12 @@ def plan_steps(cues: Sequence[str], words, t0: float, t1: float, exit_s: float, 
     prev = first
     applied: List[str] = []
     for i in order:
-        t = min(max(times[i], prev + gap), latest)
-        t = max(t, prev + 0.12)
+        t = max(times[i], prev + gap)
         applied = applied + [cues[i]]
         out.append((t, list(applied)))
         prev = t
+    if n and out[-1][0] > latest:         # more changes than the slide has time for: squeeze them all in, in order
+        span = max(latest - first, 0.0)
+        top = out[-1][0] - first
+        out = [(first + (t - first) * span / top, a) for t, a in out]
     return out, missed
