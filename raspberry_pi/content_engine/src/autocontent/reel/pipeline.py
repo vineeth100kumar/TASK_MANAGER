@@ -185,10 +185,14 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     spec_file = work / "reel_spec.md"
     spec_file.write_text(reel.post_text, encoding="utf-8")
     try:
-        _, data, _issues = build_from_spec(spec_file, out_dir=deck_dir, style=style, canvas_format="reel", tag=tag,
+        _, data, build_issues = build_from_spec(spec_file, out_dir=deck_dir, style=style, canvas_format="reel", tag=tag,
                                            fetch_images=fetch_images)
     except SpecError as e:
         raise ReelError("The slides have errors; nothing was made.", [i for i in e.issues if i.severity == "ERROR"])
+    picture_warnings = [str(i) for i in build_issues if i.severity == "WARN"
+                        and i.code in ("IMAGE_FAILED", "IMAGE_PLACEHOLDER", "IMAGE_SEARCH_FAILED")]
+    for w in picture_warnings:
+        progress(f"  PICTURE PROBLEM: {w}")
     renderer = SlideRenderer(data.get("style", "grid_pill"), canvas_format="reel")
     renderer.base_dir = deck_dir
     renderer.collect_fit = True
@@ -362,7 +366,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
         "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
         "timeline": [{"n": i + 1, "type": slides[i].get("type"), "start": round(a, 2), "end": round(b, 2), "reveals": reveals[i]}
                      for i, (a, b) in enumerate(windows)],
-        "warnings": [str(i) for i in reel.issues if i.severity == "WARN"],
+        "warnings": [str(i) for i in reel.issues if i.severity == "WARN"] + picture_warnings,
     }
     (out_dir / "reel.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     if not keep_work:
