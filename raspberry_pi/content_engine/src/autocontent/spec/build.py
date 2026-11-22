@@ -5,6 +5,7 @@ import json
 import re
 import shutil
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -83,26 +84,114 @@ def _cache_dir() -> Path:
     return OUTPUT_DIR / "_cache" / "images"
 
 
+# Wikimedia refuses generic or browser-looking agents with HTTP 403; its policy asks for a tool name + contact link.
+DOWNLOAD_UA = "SageReels/1.0 (https://github.com/vineeth100kumar/TASK_MANAGER; personal use) python-urllib"
+_FILE_REF = re.compile(r"^(?:file|image|commons)\s*:\s*(.+)$", re.I)
+
+
+def is_remote_ref(ref: str) -> bool:
+    """A picture reference that must be downloaded: a web link or a bare Commons name (File:Name.jpg)."""
+    return bool(re.match(r"^https?://", ref, re.I) or _FILE_REF.match(ref))
+
+
+def _commons_file_name(url: str) -> Optional[str]:
+    """The Commons file name behind a File: page link, a bare File: ref, or an upload.wikimedia.org link."""
+    import urllib.parse
+    m = _FILE_REF.match(url)
+    if m:
+        return urllib.parse.unquote(m.group(1)).strip().replace(" ", "_")
+    u = urllib.parse.urlparse(url)
+    host = u.netloc.lower()
+    if host.endswith("wikimedia.org") or host.endswith("wikipedia.org"):
+        path = urllib.parse.unquote(u.path)
+        m = re.search(r"/wiki/(?:File|Image):(.+)$", path, re.I)
+        if m:
+            return m.group(1).strip().replace(" ", "_")
+        if host == "upload.wikimedia.org":
+            parts = [x for x in path.split("/") if x]
+            if "thumb" in parts and len(parts) >= 2:      # .../thumb/a/ab/Name.jpg/800px-Name.jpg
+                return parts[-2]
+            return parts[-1] if parts else None
+    return None
+
+
+def _candidate_urls(ref: str) -> List[str]:
+    """Where to try, best first: the link itself, then Commons' own redirector for the same file."""
+    import urllib.parse
+    out: List[str] = []
+    name = _commons_file_name(ref)
+    if name:
+        q = urllib.parse.quote(name)
+        redirect = f"https://commons.wikimedia.org/wiki/Special:FilePath/{q}?width=2000"
+        if re.match(r"^https?://", ref, re.I) and "/wiki/" not in ref:
+            out.append(ref)
+        out.append(redirect)
+    else:
+        out.append(ref)
+    return out
+
+
+def _fetch_bytes(url: str) -> Tuple[bytes, str]:
+    """GET a link (redirects followed, retried on busy answers); returns (data, content type)."""
+    import time
+    last: Exception = ValueError("no answer")
+    for attempt in range(3):
+        req = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_UA, "Accept": "image/*,*/*;q=0.5"})
+        try:
+            with urllib.request.urlopen(req, timeout=25) as resp:
+                return resp.read(MAX_DOWNLOAD_BYTES + 1), resp.headers.get("Content-Type", "")
+        except urllib.error.HTTPError as e:
+            last = e
+            if e.code in (429, 500, 502, 503, 504) and attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            last = e
+            if attempt < 2:
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            raise
+    raise last
+
+
+def _og_image(html: bytes, base: str) -> Optional[str]:
+    import urllib.parse
+    text = html[:400000].decode("utf-8", "replace")
+    m = (re.search(r'<meta[^>]+property=["\']og:image["\'][^>]+content=["\']([^"\']+)', text, re.I)
+         or re.search(r'<meta[^>]+content=["\']([^"\']+)["\'][^>]+property=["\']og:image', text, re.I))
+    return urllib.parse.urljoin(base, m.group(1).replace("&amp;", "&")) if m else None
+
+
 def _download(url: str, dest_stem: Path = None) -> Path:
-    """The picture behind a link, downloaded once and kept in output/_cache/images (so a link that
-    later expires, or is offline, still works for decks built from it again)."""
+    """The picture behind a link (or a Commons File: name), downloaded once and kept in output/_cache/images
+    (so a link that later expires, or is offline, still works for decks built from it again)."""
     cache = _cache_dir()
     key = hashlib.sha1(url.encode("utf-8")).hexdigest()[:20]
     hit = next(iter(sorted(cache.glob(key + ".*"))), None) if cache.is_dir() else None
     if hit is not None:
         report("Using the saved copy of the downloaded image")
         return hit
-    req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (AutoContent post builder)"})
-    try:
-        with urllib.request.urlopen(req, timeout=25) as resp:
-            ctype = resp.headers.get("Content-Type", "")
-            data = resp.read(MAX_DOWNLOAD_BYTES + 1)
-    except urllib.error.HTTPError as e:
-        raise ValueError(f"the site answered HTTP {e.code} (many sites block downloads, and generated-image links expire); "
-                         "save the picture into the images folder and use its file name") from None
-    except (urllib.error.URLError, TimeoutError, OSError) as e:
-        raise ValueError(f"the link could not be reached ({getattr(e, 'reason', e)}); check the internet connection, "
-                         "or save the picture into the images folder") from None
+    data, ctype, errors = b"", "", []
+    for cand in _candidate_urls(url):
+        try:
+            data, ctype = _fetch_bytes(cand)
+            if ctype.lower().startswith("text/html"):      # a web page that shows the picture: use its og:image
+                page = _og_image(data, cand)
+                if not page:
+                    errors.append(f"{cand[:80]} is a web page without a picture")
+                    data = b""
+                    continue
+                data, ctype = _fetch_bytes(page)
+            break
+        except urllib.error.HTTPError as e:
+            errors.append(f"HTTP {e.code} from {urllib.parse.urlparse(cand).netloc}")
+        except (urllib.error.URLError, TimeoutError, OSError) as e:
+            errors.append(f"could not reach {urllib.parse.urlparse(cand).netloc} ({getattr(e, 'reason', e)})")
+        data = b""
+    if not data:
+        raise ValueError("; ".join(errors) + ". Many sites block downloads and generated-image links expire: "
+                         "upload the picture with the script, or save it into the images folder and use its file name")
     if len(data) > MAX_DOWNLOAD_BYTES:
         raise ValueError("the file is larger than 20 MB")
     if ctype and not ctype.startswith("image/") and "octet-stream" not in ctype:
@@ -113,7 +202,7 @@ def _download(url: str, dest_stem: Path = None) -> Path:
         with Image.open(io.BytesIO(data)) as im:
             ext = {"JPEG": ".jpg", "PNG": ".png", "WEBP": ".webp", "GIF": ".gif", "BMP": ".bmp"}.get(im.format or "", ".img")
     except Exception:
-        raise ValueError("the link did not return a readable picture") from None
+        raise ValueError("the link did not return a readable picture (SVG and PDF files are not supported; use JPG, PNG or WEBP)") from None
     cache.mkdir(parents=True, exist_ok=True)
     path = cache / (key + ext)
     path.write_bytes(data)
@@ -177,7 +266,7 @@ def collect_images(slides: List[Dict[str, Any]], out_dir: Path, base_dirs: List[
         assets.mkdir(parents=True, exist_ok=True)
         stem = assets / f"slide_{n:02d}"
         try:
-            if re.match(r"^https?://", ref, re.I):
+            if is_remote_ref(ref):
                 report(f"Getting the image for slide {n} from its link...")
                 dest = _store_image(_download(ref), stem)
             else:
@@ -202,7 +291,7 @@ def collect_images(slides: List[Dict[str, Any]], out_dir: Path, base_dirs: List[
             continue
         s["image_source"] = ref
         s["image"] = f"assets/{dest.name}"
-        _apply_credit(s, src.name if not re.match(r"^https?://", ref, re.I) else "")
+        _apply_credit(s, "" if is_remote_ref(ref) else src.name)
     return issues
 
 
@@ -225,7 +314,7 @@ def validate_spec_text(text: str, base_dir: Optional[Path] = None) -> Dict[str, 
         needs, query = False, ""
         if s.get("type") == "image":
             ref = (s.get("image") or "").strip()
-            found = bool(ref) and (bool(re.match(r"^https?://", ref, re.I)) or resolve_image(ref, _image_dirs(base_dir)) is not None)
+            found = bool(ref) and (is_remote_ref(ref) or resolve_image(ref, _image_dirs(base_dir)) is not None)
             if s.get("image_search") and not ref and stock.pick_for(s["image_search"]):
                 found = True
             needs = not found and bool(s.get("image_prompt") or s.get("image_search") or ref)

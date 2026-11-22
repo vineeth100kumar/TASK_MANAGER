@@ -278,7 +278,8 @@ say: Imagine a college orders ten electronics kits from you, at ₹600 each.
 show: electronics kits | at ₹600 each
 ```
 - `search:` 2 to 4 plain words describing a thing, place or scene (not people, brands, logos or text). A free photo is found and credited for you.
-- Use `image: <link>` ONLY with a link the user gave you.
+- Use `image: <link>` ONLY with a link or file name the user gave you. It can be a web link to a JPG, PNG or WEBP (not SVG), a Wikimedia Commons page or `File:Name.jpg`, or a page with a main picture.
+- If a picture can't be fetched, the slide is drawn as text and the reel's warnings say why (PICTURE PROBLEM).
 - `caption:` optional, under 12 words.
 - Photos are drawn as black-and-white halftone dots. Add `filter: none` to keep their real colours.
 - PIECES: 1 headline, 2 picture, 3 caption (if any).
