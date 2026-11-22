@@ -150,6 +150,78 @@ class ReelScriptTests(unittest.TestCase):
         self.assertTrue(10 < r.estimate_seconds() < 60)
 
 
+class SixtyFpsTests(unittest.TestCase):
+    def test_fps_and_quality_headers(self):
+        r = parse_reel(SCRIPT.replace("autocontent: reel", "autocontent: reel\nfps: 60\nquality: max", 1))
+        self.assertEqual((r.meta["fps"], r.meta["quality"]), (60, "max"))
+        d = parse_reel(SCRIPT)
+        self.assertEqual((d.meta["fps"], d.meta["quality"]), (30, "standard"))
+
+    def test_unknown_quality_warns_and_uses_standard(self):
+        r = parse_reel(SCRIPT.replace("autocontent: reel", "autocontent: reel\nquality: ultra", 1))
+        self.assertEqual(r.meta["quality"], "standard")
+        self.assertIn("QUALITY_UNKNOWN", [i.code for i in r.issues if i.severity == "WARN"])
+
+    def test_counter_follows_fps_and_30_is_unchanged(self):
+        self.assertEqual(len(layers.count_steps("65%")), 15)
+        self.assertEqual(len(layers.count_steps("65%", 30)), 15)
+        self.assertEqual(len(layers.count_steps("65%", 60)), 30)
+        self.assertEqual(layers.count_steps("65%", 60)[-1], "65%")
+
+    def _encode(self, fps, **kw):
+        from unittest import mock
+        seen = {"frames": 0, "reports": []}
+
+        class FakeProc:
+            def __init__(s, cmd, **k):
+                seen["cmd"] = cmd
+                s.stdin = mock.Mock(write=lambda b: seen.__setitem__("frames", seen["frames"] + 1))
+                s.stderr = mock.Mock(read=lambda: b"")
+                s.returncode = 0
+
+            def wait(s): return 0
+            def poll(s): return 0
+
+        tl = compose.Timeline([], [], 2.0)
+        tl.frame = lambda t: np.zeros((2, 2, 3), np.uint8)
+        out = Path(tempfile.mkdtemp()) / "o.mp4"
+        with mock.patch.object(compose.subprocess, "Popen", FakeProc), \
+                mock.patch.object(Path, "replace", lambda s, t: None):
+            compose.encode(tl, None, out, fps=fps, progress=seen["reports"].append, **kw)
+        return seen
+
+    def test_encode_settings_per_quality(self):
+        for quality, preset, crf in (("standard", "veryfast", "19"), ("high", "slow", "17"), ("max", "slower", "16")):
+            cmd = self._encode(60, quality=quality)["cmd"]
+            self.assertEqual(cmd[cmd.index("-preset") + 1], preset)
+            self.assertEqual(cmd[cmd.index("-crf") + 1], crf)
+            self.assertEqual(cmd[cmd.index("-x264-params") + 1], "ref=4")
+            self.assertEqual(cmd[cmd.index("-level") + 1], "4.2")
+            self.assertEqual(cmd[cmd.index("-g") + 1], "120")
+            self.assertEqual(cmd[cmd.index("-maxrate") + 1], "25M")
+            self.assertEqual(cmd[cmd.index("-bufsize") + 1], "50M")
+
+    def test_explicit_preset_overrides_quality_and_frames_follow_fps(self):
+        seen = self._encode(60, quality="max", preset="ultrafast")
+        self.assertEqual(seen["cmd"][seen["cmd"].index("-preset") + 1], "ultrafast")
+        self.assertEqual(seen["frames"], 120)
+        self.assertGreaterEqual(len(seen["reports"]), 100)       # about every 1%
+        self.assertEqual(self._encode(30)["frames"], 60)
+
+    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "needs ffmpeg")
+    def test_real_60fps_encode(self):
+        tl = compose.Timeline([], [], 1.0)
+        tl.frame = lambda t: np.full((compose.H, compose.W, 3), int(t * 200), np.uint8)
+        out = Path(tempfile.mkdtemp()) / "o.mp4"
+        compose.encode(tl, None, out, fps=60, preset="ultrafast")
+        info = subprocess.run(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries",
+                               "stream=r_frame_rate,level,refs,width,height", "-of", "json", str(out)],
+                              capture_output=True, text=True).stdout
+        v = json.loads(info)["streams"][0]
+        self.assertEqual((v["r_frame_rate"], v["level"], v["width"], v["height"]), ("60/1", 42, 1080, 1920))
+        self.assertLessEqual(int(v["refs"]), 4)
+
+
 class TimingTests(unittest.TestCase):
     WORDS = [Timed(w, 1.0 + i * 0.4, 1.0 + i * 0.4 + 0.3) for i, w in enumerate("your regulars are already two thirds of your sales".split())]
 

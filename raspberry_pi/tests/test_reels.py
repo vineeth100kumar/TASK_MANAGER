@@ -478,5 +478,37 @@ class EnginePriorityTests(unittest.TestCase):
         self.assertEqual(round(pct("  encoding 50%")), 80)
 
 
+class StallWatchdogTests(unittest.IsolatedAsyncioTestCase):
+    """A render is stopped when it goes quiet, not for being slow."""
+
+    async def run_engine(self, body, **patches):
+        from test_post_isolation import fake_engine, new_post  # noqa: F401
+        engine = fake_engine(body)
+        folder = Path(tempfile.mkdtemp()) / "r1"
+        (folder / "out").mkdir(parents=True)
+        (folder / "script.md").write_text("x")
+        reel = {"id": "r1", "style": "grid_pill", "progress": {}, "log": []}
+        with mock.patch.object(reels, "ENGINE_DIR", engine), mock.patch.object(posts, "ENGINE_DIR", engine), \
+                mock.patch.object(reels, "save_async", mock.AsyncMock()), mock.patch.object(reels, "_announce", mock.AsyncMock()), \
+                mock.patch.object(reels, "_note", lambda *a, **k: None), mock.patch.object(reels, "MEMORY_CHECK_SECONDS", 0.2), \
+                mock.patch.multiple(reels, **patches):
+            return await reels._draw(reel, folder, folder / "script.md")
+
+    async def test_a_silent_engine_is_stopped(self):
+        with self.assertRaises(reels.RenderStalled) as ctx:
+            await self.run_engine("import time; time.sleep(60)", STALL_SECONDS=1)
+        self.assertIn("stopped making progress", str(ctx.exception))
+
+    async def test_a_slow_engine_that_keeps_talking_is_left_alone(self):
+        body = "import time\nfor i in range(5):\n    print('  encoding %d%%' % i, flush=True); time.sleep(0.5)"
+        self.assertEqual(await self.run_engine(body, STALL_SECONDS=3), 0)
+
+    async def test_the_hard_cap_still_applies(self):
+        body = "import time\nwhile True:\n    print('  encoding 1%', flush=True); time.sleep(0.2)"
+        with self.assertRaises(reels.RenderStalled) as ctx:
+            await self.run_engine(body, STALL_SECONDS=5, MAX_RENDER_SECONDS=1)
+        self.assertIn("hours", str(ctx.exception))
+
+
 if __name__ == "__main__":
     unittest.main()

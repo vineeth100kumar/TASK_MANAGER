@@ -212,10 +212,15 @@ CHROME_CSS = """
 NO_VIDEO_CSS = ", ".join(HIDDEN + REDRAWN) + " { display: none !important; }" + CHROME_CSS
 
 
-COUNT_FRAMES = 15      # how many in-between values a counting number is photographed at
+COUNT_FRAMES = 15      # how many in-between values a counting number is photographed at, at 30 fps
 
 
-def count_steps(text: str) -> List[str]:
+def count_frames_for(fps: int = 30) -> int:
+    """The counter is photographed about once per two video frames, so it stays smooth at 60 fps."""
+    return max(1, round(COUNT_FRAMES * fps / 30))
+
+
+def count_steps(text: str, fps: int = 30) -> List[str]:
     """A big number counting up to itself: "65%" -> "0%", "9%", ... "65%".
     Returns [] when there is no number to count, or it is too small to be worth it."""
     m = re.search(r"\d[\d,]*(?:\.\d+)?", text or "")
@@ -231,8 +236,9 @@ def count_steps(text: str) -> List[str]:
     decimals = len(raw.split(".")[1]) if "." in raw else 0
     grouped = "," in raw
     out = []
-    for i in range(COUNT_FRAMES):
-        u = (i + 1) / COUNT_FRAMES
+    frames = count_frames_for(fps)
+    for i in range(frames):
+        u = (i + 1) / frames
         v = value * (1 - (1 - u) ** 3)          # fast, then easing into the real number
         shown = f"{v:,.{decimals}f}" if grouped else f"{v:.{decimals}f}"
         out.append(text[:m.start()] + shown + text[m.end():])
@@ -305,7 +311,7 @@ def _accent_words(colours: List[str]) -> Tuple[List[int], Tuple[int, int, int]]:
 
 
 def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], total: int, seed: int,
-                  out_dir: Path, scale: float = 1.0) -> SceneLayers:
+                  out_dir: Path, scale: float = 1.0, fps: int = 30) -> SceneLayers:
     """Draw one slide and write its base picture and layer pictures into out_dir.
     Returns the layers in the order they are listed for the slide type."""
     n = int(slide.get("n", 1))
@@ -369,7 +375,7 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
         if found["backing"] and words:
             backing = out_dir / f"s{n:02d}_g{k + 1:02d}_bk.png"
             _shoot(page, k, backing, (x, y, w, h), extra=NO_TEXT_CSS.replace("__K__", str(k)))
-        count = _count_frames(page, k, str(box[5]), out_dir, n, k, (x, y, w, h))
+        count = _count_frames(page, k, str(box[5]), out_dir, n, k, (x, y, w, h), fps)
         scene.layers.append(Layer(path=path, box=(round(x * scale), round(y * scale), pw, ph),
                                   follow=bool(box[4]), classes=str(box[5]), words=words,
                                   accents=accents, accent_rgb=accent_rgb, count=count,
@@ -403,13 +409,13 @@ SET_TEXT_JS = """
 
 
 def _count_frames(page, k: int, classes: str, out_dir: Path, n: int, gi: int,
-                  clip: Tuple[int, int, int, int]) -> List[Path]:
+                  clip: Tuple[int, int, int, int], fps: int = 30) -> List[Path]:
     """Photograph a big number at each value on its way up to the real one, in the same spot,
     so the compositor can run it like a counter instead of switching it on."""
     if "stat-number" not in classes:
         return []
     text = page.evaluate(SET_TEXT_JS, {"k": k, "text": None})
-    steps = count_steps(str(text or ""))
+    steps = count_steps(str(text or ""), fps)
     if not steps:
         return []
     x, y, w, h = clip

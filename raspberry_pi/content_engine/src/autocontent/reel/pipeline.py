@@ -108,7 +108,7 @@ def align_tts(track: voice.Track, scenes, backend: str) -> Tuple[List[List[align
 
 def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = None, voice_file: Optional[Path] = None,
               style: Optional[str] = None, tag: Optional[str] = None, backend: str = "auto", fetch_images: bool = True,
-              engine: Optional[Callable] = None, preset: str = "veryfast", progress: Callable[[str], None] = report,
+              engine: Optional[Callable] = None, preset: Optional[str] = None, quality: Optional[str] = None, progress: Callable[[str], None] = report,
               keep_work: bool = False) -> Dict[str, Any]:
     """Make the reel for a script. Returns a summary dict (also written as reel.json)."""
     from ..spec import build_from_spec
@@ -131,6 +131,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
         raise ReelError("The reel script has errors; nothing was made.", [i for i in reel.issues if i.severity == "ERROR"])
     meta = reel.meta
     fps = int(meta["fps"])
+    quality = quality if quality in compose.QUALITY_PRESETS else str(meta.get("quality") or "standard")
 
     # --- the voice ---
     own = voice_file is not None or reel.uses_own_voice
@@ -212,7 +213,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                 slide["reel_type_scale"] = DIAGRAM_TYPE_SCALE      # text smaller, so the diagram has the room
             progress(f"Cutting slide {i + 1} of {len(slides)} into pieces ({slide.get('type')})...")
             sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers",
-                               scale=layers_mod.OVERSAMPLE)
+                               scale=layers_mod.OVERSAMPLE, fps=fps)
             scenes_layers.append(sl)
             themes[i + 1] = sl.theme
         bad = [r for r in renderer.fit_report if not r["ok"]]
@@ -342,17 +343,19 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     # --- the video ---
     accent = next((p.accent_rgb for c in clips for p in c.pieces if p.accents), (238, 68, 37))
     timeline = compose.Timeline(clips, caption_clips, total, accent=accent)
-    progress(f"Encoding the video ({total:.0f} seconds at {fps} frames a second)...")
+    q_preset, q_crf = compose.QUALITY_PRESETS[quality]
+    progress(f"Encoding the video ({total:.0f} seconds at {fps} frames a second, {quality} quality: "
+             f"{preset or q_preset}, crf {q_crf})...")
     mp4 = out_dir / "reel.mp4"
     last = [-1]
 
     def encoding(frac: float) -> None:
         pct = int(frac * 100)
-        if pct // 10 != last[0] // 10:
-            progress(f"  encoding {pct}%")
+        # one line per percent; a slow frame rate that stays on the same percent still says so every report
+        progress(f"  encoding {pct}%")
         last[0] = pct
 
-    compose.encode(timeline, track.path, mp4, fps=fps, progress=encoding, preset=preset)
+    compose.encode(timeline, track.path, mp4, fps=fps, progress=encoding, preset=preset, quality=quality)
     poster_path = out_dir / "poster.jpg"
     compose.poster(timeline, min(PosterAt, total - 0.1), poster_path)
 
@@ -361,7 +364,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     (out_dir / "script.md").write_text(script_text, encoding="utf-8")
     shutil.copy2(track.path, out_dir / "voice.wav")
     summary = {
-        "title": meta.get("title") or "Reel", "seconds": round(total, 1), "fps": fps, "scenes": len(slides),
+        "title": meta.get("title") or "Reel", "seconds": round(total, 1), "fps": fps, "quality": quality, "preset": preset or q_preset, "scenes": len(slides),
         "voice": "own recording" if track.kind == "recording" else meta["voice"], "wordTiming": used,
         "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
         "timeline": [{"n": i + 1, "type": slides[i].get("type"), "start": round(a, 2), "end": round(b, 2), "reveals": reveals[i]}

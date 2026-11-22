@@ -8,6 +8,7 @@ H.264 encoder). The finished picture is identical on any machine.
 """
 
 import math
+import time
 import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -731,10 +732,18 @@ class Timeline:
         return frame
 
 
+QUALITY_PRESETS = {"standard": ("veryfast", 19), "high": ("slow", 17), "max": ("slower", 16)}
+PROGRESS_EVERY_S = 30.0      # a progress report at least this often, however slow the frames come
+
+
 def encode(timeline: Timeline, audio: Optional[Path], out: Path, fps: int = 30,
-           progress: Callable[[float], None] = lambda f: None, preset: str = "veryfast", crf: int = 19,
-           threads: int = 0) -> None:
-    """Write the reel: H.264 High + AAC in an mp4 that starts playing before it has downloaded."""
+           progress: Callable[[float], None] = lambda f: None, preset: Optional[str] = None, crf: Optional[int] = None,
+           threads: int = 0, quality: str = "standard") -> None:
+    """Write the reel: H.264 High + AAC in an mp4 that starts playing before it has downloaded.
+    `quality` picks the x264 preset and CRF; an explicit `preset` (or `crf`) overrides it."""
+    q_preset, q_crf = QUALITY_PRESETS.get(quality, QUALITY_PRESETS["standard"])
+    preset = preset or q_preset
+    crf = q_crf if crf is None else crf
     total = timeline.total
     frames = int(math.ceil(total * fps))
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -751,13 +760,21 @@ def encode(timeline: Timeline, audio: Optional[Path], out: Path, fps: int = 30,
             "-colorspace", "bt709", "-color_primaries", "bt709", "-color_trc", "bt709", "-g", str(fps * 2),
             "-c:a", "aac", "-b:a", "192k", "-ar", "48000", "-ac", "2", "-af", "apad",
             "-t", f"{total:.3f}", "-movflags", "+faststart", str(tmp)]
+    if quality != "standard" or fps > 30:
+        # slow presets use many reference frames; level 4.2 at this size allows 4. Standard 30 fps stays as it was.
+        i = cmd.index("-level") + 2
+        cmd[i:i] = ["-x264-params", "ref=4", "-maxrate", "25M", "-bufsize", "50M"]
     if threads:
         cmd[cmd.index("-c:v"):cmd.index("-c:v")] = ["-threads", str(threads)]
     proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=subprocess.PIPE)
     try:
+        step = max(1, frames // 100)
+        last_report = time.monotonic()
         for n in range(frames):
             proc.stdin.write(timeline.frame(n / fps).tobytes())
-            if n % 15 == 0:
+            now = time.monotonic()
+            if n % step == 0 or now - last_report >= PROGRESS_EVERY_S:
+                last_report = now
                 progress(n / frames)
         proc.stdin.close()
         err = proc.stderr.read().decode("utf-8", errors="replace")

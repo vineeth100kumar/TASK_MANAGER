@@ -18,7 +18,7 @@ _MARKER = re.compile(r"^(\s*autocontent\s*:\s*['\"]?)(?:reel|reels|video)\b", re
 _FENCE = re.compile(r"^\s*(```|~~~)")
 
 HEADER_KEYS = {
-    "aspect": "aspect", "ratio": "aspect", "fps": "fps", "voice": "voice", "voiceover": "voice",
+    "aspect": "aspect", "ratio": "aspect", "fps": "fps", "quality": "quality", "voice": "voice", "voiceover": "voice",
     "speed": "speed", "captions": "captions", "caption_style": "captions", "subtitles": "captions",
     "music": "music", "transition": "transition", "end_hold": "end_hold",
     "format": "format", "size": "format",
@@ -41,6 +41,7 @@ TONES = {"hook": 1.08, "fast": 1.1, "excited": 1.1, "energetic": 1.08, "normal":
 # `pace: auto` (default) gives these slide types a tone when the script doesn't name one.
 AUTO_TONE_BY_TYPE = {"stat": "emphasis", "quote": "calm", "cta": "emphasis"}
 PAUSE_STYLES = {"tight": 0.7, "short": 0.7, "natural": 1.0, "normal": 1.0, "relaxed": 1.35, "long": 1.35, "slow": 1.35}
+QUALITIES = ("standard", "high", "max")      # the encode: quick, slow and finer, slowest and finest
 POLISH_STYLES = ("natural", "warm", "bright", "clean", "off")
 # Inline marks inside `say:` that are not spoken: [pause], [pause 0.6], [breath], [beat]
 PAUSE_MARK = re.compile(r"\[\s*(pause|breath|beat)(?:\s+(\d+(?:\.\d+)?)\s*s?)?\s*\]", re.I)
@@ -308,6 +309,13 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     for key, (value, line) in header.items():
         if key == "fps":
             meta[key] = int(_number(value, 24, 60, "fps", line, reel.issues, 30) or 30)
+        elif key == "quality":
+            v = value.strip().lower()
+            if v not in QUALITIES:
+                reel.issues.append(SpecIssue("WARN", "QUALITY_UNKNOWN", f"Unknown quality '{value}'; using standard.", line=line,
+                                             hint=f"Use one of: {', '.join(QUALITIES)}."))
+                v = "standard"
+            meta[key] = v
         elif key == "speed":
             meta[key] = _number(value, 0.6, 1.4, "speed", line, reel.issues, 1.0)
         elif key == "end_hold":
@@ -349,6 +357,7 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         else:
             meta[key] = value
     meta.setdefault("fps", 30)
+    meta.setdefault("quality", "standard")
     meta.setdefault("captions", "on")
     meta.setdefault("voice", DEFAULT_VOICE)
     meta.setdefault("speed", 1.0)

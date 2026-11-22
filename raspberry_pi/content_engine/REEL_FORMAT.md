@@ -547,7 +547,8 @@ themes and pictures) plus these lines. Most lines have other spellings; the chec
 | `loudness:` | header | Target loudness, 9 to 23 meaning −9 to −23 LUFS; default 14 (Instagram). | `lufs:` |
 | `pronounce:` | header | `word = how it sounds; word = how it sounds`. Respelled before speaking; captions keep the written word. Built in (Kokoro): UPI, GST, EV, IPO (spelled), SaaS ("sass"), Pi ("pie"). Capitalised words match exactly; lower-case ones match any case. | `say_as:`, `pronunciation:` |
 | `captions:` | header | `on` (word by word, brand marker under the word being spoken) or `off`. | `subtitles:`, `caption_style:` |
-| `fps:` | header | 24 to 60, default 30. | |
+| `fps:` | header | Frames per second, 24 to 60, default 30. `fps: 60` makes a true 60 fps video (motion is drawn for every frame; it takes about twice as long). | |
+| `quality:` | header | `standard` (default; fast), `high` (x264 slow, CRF 17) or `max` (x264 slower, CRF 16). Better quality means a longer render, hours on a Pi for a long `max` reel at 60 fps. An unknown value warns and uses `standard`. | |
 | `end_hold:` | header | Seconds the last slide stays after the last word; 0 to 6, default 1.2. | |
 | `transition:` | header | Accepted; every slide change is the same wipe today. | |
 | `music:` | header | **Ignored, with a warning.** Add audio in Instagram. | |
@@ -781,4 +782,4 @@ reel; warnings don't. Every check runs before anything is drawn, so checking is 
 2. The voice is made (Kokoro or Phonon, offline on the Pi's CPU) or your recording is levelled.
 3. Each word gets a start time; each slide's pieces are timed to their cue words.
 4. Each slide is photographed as a background plus one transparent picture per piece; the pieces are animated and blended frame by frame, with the word-by-word captions on top.
-5. ffmpeg encodes H.264 High / AAC, 30 fps, yuv420p, BT.709, with the index at the front so it plays and seeks at once.
+5. ffmpeg encodes H.264 High (level 4.2) / AAC, 1080x1920 at the `fps:` you chose (30 by default, up to 60), at the `quality:` you chose, yuv420p, BT.709, with the index at the front so it plays and seeks at once.

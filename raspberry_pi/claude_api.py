@@ -1688,7 +1688,8 @@ def _tools() -> List[dict]:
         {"name": "sage_reel_create", "description": "Send a script to Sage to be made into an Instagram reel. The Pi speaks "
          "the narration with a free voice (Kokoro; no cost), draws the slides like a post's, makes each piece appear in time "
          "with the voice, adds word-by-word captions and encodes an mp4 (a few minutes), then emails Vineeth and the reel "
-         "appears in Sage > Reels. Music is not added; he adds trending audio in Instagram. With `voice: mine` in the "
+         "appears in Sage > Reels. Header lines `fps: 60` (true 60 fps) and `quality: standard|high|max` trade render time "
+         "(up to hours on the Pi) for smoothness and detail. Music is not added; he adds trending audio in Instagram. With `voice: mine` in the "
          "script it waits for his own recording instead. With a project it becomes a task there (a content project with "
          "Use Auto Content on). Returns the reel's id, status, link and caption; send wait (seconds) to wait for it.",
          "inputSchema": {"type": "object", "required": ["script"], "properties": {
