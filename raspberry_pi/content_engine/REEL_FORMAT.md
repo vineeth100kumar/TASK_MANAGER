@@ -62,6 +62,11 @@ voice: am_michael                                      (optional: a different vo
 
 WHAT APPEARS, IN ORDER (each is one "piece"; with no `show:` they are spread evenly over the narration)
 cover: headline, then the pill | point: headline, text, each bullet | list: headline, each item | stat: label, big number, explanation | compare: headline, left column, right column | quote: quote, author | chart/table: headline, then the chart or table | image: headline, picture (slow push-in), caption | cta: headline, pill, subtext
+
+PICTURES (`image:` on an image slide) can be a web link (redirects followed; Wikimedia Commons works), a Commons page
+link or bare name (`File:Arduino Uno.jpg`), a page that has a main picture (its og:image), or a file uploaded with
+the script / in the images folder. JPG, PNG and WEBP only (no SVG). If a picture cannot be fetched the slide is drawn
+as text and the reel's warnings say why ("PICTURE PROBLEM"), so check them before posting.
 A `source:` line arrives with the last piece.
 
 After the slides: `## caption` (the Instagram caption: a hook line, 3-6 short paragraphs of value, a question for the comments) and `## hashtags` (3 to 5 specific hashtags).

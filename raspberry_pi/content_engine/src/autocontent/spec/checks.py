@@ -282,7 +282,7 @@ def check_image(slide: Dict[str, Any], n: int, base_dirs: Sequence[Path], allow_
                            f"This slide has no picture yet; it shows a placeholder with the prompt \"{prompt[:70]}\".", n, "image",
                            _PLACEHOLDER_HINT)]
         return []
-    if re.match(r"^https?://", ref, re.I):
+    if re.match(r"^(?:https?://|(?:file|image|commons)\s*:)", ref, re.I):
         if not allow_urls:
             return [_issue("ERROR", "IMAGE_NOT_LOCAL", f"The image '{ref}' was never downloaded into the deck.", n, "image")]
         return []
