@@ -60,8 +60,18 @@ MAX_QUEUE = 4                # reels waiting or being made at once
 # A quiet minute between videos: when one render finishes, the next queued reel waits this long
 # before it starts, so the Pi settles (and its CPU, memory and disk recover) between videos.
 COOLDOWN_SECONDS = int(os.environ.get("SAGE_REELS_COOLDOWN", "60"))
-RENDER_TIMEOUT = 2400        # seconds; a Pi 5 needs a few minutes for a minute of video
-KEEP = 30                    # reels kept (a finished one is 10 to 60 MB)
+def _env_seconds(name: str, default: int) -> int:
+    try:
+        return max(1, int(float(os.environ.get(name, default))))
+    except ValueError:
+        return default
+
+
+# A render is stopped only when it goes quiet (no progress line for STALL_SECONDS), or, as a last
+# resort, when it has run longer than MAX_RENDER_SECONDS. A 60 fps "max" reel can take hours on a Pi.
+STALL_SECONDS = _env_seconds("SAGE_REELS_STALL_S", 900)
+MAX_RENDER_SECONDS = _env_seconds("SAGE_REELS_MAX_RENDER_S", 21600)
+KEEP = 40                    # reels kept (a finished one is 10 to 60 MB)
 LOG_LINES = 120
 MAX_VOICE_MB = 150           # an uploaded recording
 VOICE_EXTENSIONS = {"m4a", "mp3", "wav", "aac", "ogg", "oga", "opus", "flac", "caf", "amr", "3gp", "mp4", "mov", "webm", "mkv"}
@@ -589,8 +599,8 @@ async def _run(reel: dict) -> None:
         code = None
         try:
             code = await _draw(reel, folder, script_file)
-        except asyncio.TimeoutError:
-            reel["status"], reel["error"] = "failed", f"Making it took longer than {RENDER_TIMEOUT // 60} minutes and was stopped."
+        except RenderStalled as e:
+            reel["status"], reel["error"] = "failed", str(e)
         except Exception as e:
             reel["status"], reel["error"] = "failed", str(e)[:300] or e.__class__.__name__
         _last_finished = time.monotonic()  # the cooldown for the next video runs from here
@@ -604,6 +614,10 @@ async def _run(reel: dict) -> None:
             logstore.warn("reels", f"Reel {reel['id']} failed: {reel['error']}")
 
 
+class RenderStalled(Exception):
+    """The engine went quiet, or ran past the hard cap, and was stopped."""
+
+
 def _engine_env() -> Dict[str, str]:
     env = posts._engine_env()
     env.setdefault("REEL_WHISPER_MODEL", "base.en")
@@ -612,7 +626,9 @@ def _engine_env() -> Dict[str, str]:
 
 async def _draw(reel: dict, folder: Path, script_file: Path) -> int:
     argv = [sys.executable, "-m", "autocontent", "reel", str(script_file), "-o", str(folder / "out"),
-            "--style", reel["style"], "--preset", os.environ.get("REEL_PRESET", "veryfast")]
+            "--style", reel["style"]]
+    if os.environ.get("REEL_PRESET"):         # only when set: otherwise the script's `quality:` picks the preset
+        argv += ["--preset", os.environ["REEL_PRESET"]]
     voice_file = _voice_path(reel) if reel.get("needsRecording") else None
     if voice_file:
         argv += ["--voice-file", str(voice_file)]
@@ -624,6 +640,7 @@ async def _draw(reel: dict, folder: Path, script_file: Path) -> int:
     )
     errors: List[str] = []
     last_save = [0.0]
+    last_line = [time.monotonic()]      # when the engine last said anything
 
     async def read() -> None:
         assert proc.stdout is not None
@@ -631,6 +648,7 @@ async def _draw(reel: dict, folder: Path, script_file: Path) -> int:
             raw = await proc.stdout.readline()
             if not raw:
                 return
+            last_line[0] = time.monotonic()
             line = raw.decode("utf-8", errors="replace").strip()
             if not line:
                 continue
@@ -675,11 +693,28 @@ async def _draw(reel: dict, folder: Path, script_file: Path) -> int:
 
     started = datetime.datetime.now()
     watcher = asyncio.create_task(watch())
+    work = asyncio.ensure_future(asyncio.gather(read(), proc.wait()))
+    begun = time.monotonic()
     try:
-        await asyncio.wait_for(asyncio.gather(read(), proc.wait()), timeout=RENDER_TIMEOUT)
-    except asyncio.TimeoutError:
+        while True:
+            done, _ = await asyncio.wait({work}, timeout=min(5.0, STALL_SECONDS))
+            if done:
+                work.result()
+                break
+            now = time.monotonic()
+            if now - last_line[0] > STALL_SECONDS:
+                raise RenderStalled(f"Making it stopped making progress for {max(1, round(STALL_SECONDS / 60))} minutes and was stopped. "
+                                    "Raise SAGE_REELS_STALL_S if a slow step needs longer.")
+            if now - begun > MAX_RENDER_SECONDS:
+                raise RenderStalled(f"Making it ran for more than {round(MAX_RENDER_SECONDS / 3600, 1):g} hours and was stopped. "
+                                    "Raise SAGE_REELS_MAX_RENDER_S for longer renders.")
+    except BaseException:
         lowprio.kill_group(proc.pid)
-        proc.kill()
+        try:
+            proc.kill()
+        except ProcessLookupError:
+            pass
+        work.cancel()
         raise
     finally:
         watcher.cancel()

@@ -489,7 +489,8 @@ def reel_cmd(
     style: Optional[str] = typer.Option(None, "--style", "-s", help="Style pack: grid_pill | beige_grain"),
     tag: Optional[str] = typer.Option(None, "--tag", help="Topic pill, such as #business"),
     aligner: str = typer.Option("auto", "--aligner", help="Word timing: auto | whisper | spread"),
-    preset: str = typer.Option("veryfast", "--preset", help="x264 speed preset (slower = smaller file)"),
+    preset: Optional[str] = typer.Option(None, "--preset", help="x264 speed preset; overrides --quality's (slower = smaller file)"),
+    quality: Optional[str] = typer.Option(None, "--quality", help="standard | high | max (default: the script's `quality:`, else standard)"),
     no_fetch: bool = typer.Option(False, "--no-fetch", help="Don't download stock pictures"),
 ):
     """Make a 1080x1920 reel (H.264 + AAC mp4) from a reel script: slides appear in time with the voice-over."""
@@ -499,13 +500,15 @@ def reel_cmd(
         _fail(f"File not found: {file_path}")
     if voice_file is not None and not voice_file.exists():
         _fail(f"Voice file not found: {voice_file}")
+    if quality is not None and quality not in ("standard", "high", "max"):
+        _fail(f"Unknown quality '{quality}'.", "Use --quality standard, high or max.")
     text = file_path.read_text(encoding="utf-8-sig", errors="replace")
     if out is None:
         from .spec.build import _slug
         out = OUTPUT_DIR / f"reel_{_slug(file_path.stem)}"
     try:
         summary = make_reel(text, out, base_dir=file_path.resolve().parent, voice_file=voice_file, style=style, tag=tag,
-                            backend=aligner, fetch_images=not no_fetch, preset=preset)
+                            backend=aligner, fetch_images=not no_fetch, preset=preset, quality=quality)
     except ReelError as e:
         typer.secho(f"\n{e}", fg=typer.colors.RED, err=True)
         _print_spec_issues(e.issues)
