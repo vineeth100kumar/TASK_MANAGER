@@ -63,6 +63,7 @@ class DataDir(unittest.TestCase):
         self.assertEqual(s["mode"], "card")
         self.assertTrue(s["mounted"])
         self.assertIn("freeBytes", s)
+        self.assertIn("codeOnCard", s)  # move_system_to_card.sh moved the checkout?
 
     def test_health_flags_fallback_and_low_space(self):
         base = {"server": {"webApp": True, "auth": True}, "workers": [], "radar": {}, "markets": {},
