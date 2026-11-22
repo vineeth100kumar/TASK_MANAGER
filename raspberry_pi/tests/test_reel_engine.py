@@ -615,6 +615,29 @@ class MotionTests(unittest.TestCase):
         self.assertIn('<span class="hlw">expanded NXP\'s reach.</span>', out)
         self.assertNotIn("==", out.split("<body")[1])
 
+    def test_a_highlight_in_a_cover_headline_does_not_vanish_into_the_pill(self):
+        """`You made a **profit**.` with a `pill:` for the bottom: the last words go in the big pill, and a
+        highlight inside it was drawn accent on accent, so only "A" and "." showed."""
+        from autocontent.render.renderer import SlideRenderer
+        r = SlideRenderer("grid_pill", canvas_format="reel")
+        slide = {"n": 1, "type": "cover", "headline": "You made a ==profit==.", "pill": "Can you restock?"}
+        html = r.build_slide_html(slide, {"page_name": "Mind Deeds", "handle": "@mind.deeds"}, 1, 1)
+        self.assertNotIn("==", html.split("<body")[1])
+        self.assertNotIn('<span class="hlw">profit</span>', html)
+
+    def test_phonon_is_given_rupees_not_the_rupee_sign(self):
+        from autocontent.reel.voice import phonon_speakable
+        out = phonon_speakable("At ₹600 each you spend ₹6,000, or Rs. 5 lakh, ₹2 crore.")
+        self.assertNotIn("₹", out)
+        self.assertIn("600 rupees each", out)
+        self.assertIn("6,000 rupees", out)
+        self.assertIn("5 lakh rupees", out)
+        self.assertIn("2 crore rupees", out)
+
+    def test_a_rupee_cue_finds_the_number_the_voice_said(self):
+        from autocontent.reel.align import norm
+        self.assertEqual(norm("₹6,000"), norm("6,000"))
+
     def test_a_stray_highlight_mark_is_dropped(self):
         from autocontent.render.renderer import decorate_html
         out = decorate_html('<style></style><body><h1 class="x">An ==unclosed mark</h1></body>', {}, "#EE4425")
