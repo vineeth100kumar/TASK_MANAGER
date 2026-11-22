@@ -186,7 +186,8 @@ ALARM_RING, NOTIF, SONG_INFO, LIGHTS, HAPTIC, TONE, WEATHER, FIT, OTA, REBOOT.
 compose, verify), `validators/`, `render/` (slides, charts, halftone), `reel/`
 (timing, voice, captions, compose), `llm/` (groq, gemini, ollama, fake),
 `ingest/`. `POST_FORMAT.md` and `REEL_FORMAT.md` are the script formats Claude
-reads; `config/` holds brand and AI tuning; `styles/` and `assets/` are artwork.
+reads (`tests/test_reel_format_guide.py` parses every example in the reel guide's AI
+prompt, so the guide can't drift from the engine); `config/` holds brand and AI tuning; `styles/` and `assets/` are artwork.
 
 ## LUMO firmware `lumo/esp32_client/`
 

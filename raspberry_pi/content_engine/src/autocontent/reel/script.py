@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..spec import parse_spec, SpecIssue, ParsedSpec
-from .objects import parse_objects, SceneObject
+from .objects import parse_objects, object_problems, SceneObject
 from .diagram import Diagram, DiagramError, KEYS as DIAGRAM_KEYS, parse_diagram
 
 _MARKER = re.compile(r"^(\s*autocontent\s*:\s*['\"]?)(?:reel|reels|video)\b", re.I)
@@ -97,6 +97,49 @@ def _slide_text(slide: Dict[str, Any]) -> Tuple[List[str], int]:
         elif isinstance(v, dict):
             parts += [str(x) for x in v.values() if str(x).strip()]
     return parts, sum(len(re.findall(r"\S+", p)) for p in parts)
+
+
+def expected_pieces(slide: Dict[str, Any], style: str = "grid_pill") -> Optional[int]:
+    """How many pieces (things that arrive one after another) the slide will be cut into, the way
+    layers.GROUPS cuts it, or None when it can't be told before drawing. Used to check `show:`."""
+    t = slide.get("type", "")
+    grid = style != "beige_grain"
+    has = lambda k: bool(str(slide.get(k) or "").strip())
+    if t == "cover":
+        if not grid:
+            return 1
+        pill = str(slide.get("pill") or "").strip().lower()
+        head = str(slide.get("headline") or "")
+        if pill in ("none", "no", "off", "-") or ("==" in head and not pill) or len(head.split()) < 2:
+            return 1
+        return 2
+    if t == "point":
+        return 1 + has("body") + len(slide.get("bullets") or [])
+    if t == "list":
+        return 1 + len(slide.get("items") or [])
+    if t == "stat":
+        return has("headline") + 1 + (1 if grid else has("body"))
+    if t == "quote":
+        return 1 + has("author")
+    if t == "statement":
+        return 1 + has("body")
+    if t == "compare":
+        return 3
+    if t in ("chart", "table"):
+        return 2
+    if t == "image":
+        return 2 + (has("body") or bool(slide.get("bullets")))
+    if t == "cta":
+        return 3 if grid else None
+    return None
+
+
+def pill_fits(headline: str, pill: str) -> bool:
+    """True when a cover's `pill:` is how its headline ends, which is the only way the renderer uses it
+    (otherwise the headline's last word goes in the pill instead). Mirrors renderer._pill_split."""
+    strip = lambda s: re.sub(r"[\s?!.,:;…”’\"')]+$", "", re.sub(r"==|\*\*", "", s or "")).strip().lower()
+    head, want = strip(headline), strip(pill)
+    return bool(want) and head.endswith(want) and len(want) < len(head)
 
 
 @dataclass
@@ -355,6 +398,10 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             scene.pause = _number(sec["pause"][0], 0.0, 5.0, "pause", sec["pause"][1], reel.issues, 0.0) or 0.0
         if "objects" in sec:
             scene.objects = parse_objects(sec["objects"][0])
+            for problem in object_problems(sec["objects"][0]):
+                reel.issues.append(SpecIssue("WARN", "OBJECT_IGNORED", f"Slide {i + 1}'s objects: {problem}.",
+                                             slide=i + 1, line=sec["objects"][1],
+                                             hint="Write each as `name @ x,y size colour animation`, with a built-in shape name."))
         if "diagram" in sec:
             try:
                 scene.diagram = parse_diagram(sec["diagram"][0])
@@ -414,6 +461,28 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
             issues.append(SpecIssue("WARN", "KICKER_LONG",
                                     f"Slide {s.n}'s kicker is {len(kicker)} characters; it is a label, not a sentence.",
                                     slide=s.n, line=s.line, hint=f"Keep it under {KICKER_CHARS} characters, or drop it."))
+        style = str(reel.meta.get("style") or "grid_pill")
+        if slide_type == "cover" and style != "beige_grain":
+            pill = str(s.slide.get("pill") or "").strip()
+            if pill and pill.lower() not in ("none", "no", "off", "-") and not pill_fits(str(s.slide.get("headline") or ""), pill):
+                issues.append(SpecIssue("WARN", "PILL_NOT_IN_HEADLINE",
+                                        f"Slide {s.n}'s pill '{pill}' is not how its headline ends, so it is not used: "
+                                        "the headline's last word goes in the pill instead.",
+                                        slide=s.n, line=s.line,
+                                        hint="Make `pill:` the last 1 to 3 words of the headline, or write `pill: none`."))
+        pieces = expected_pieces(s.slide, style)
+        if s.show and pieces:
+            if len(s.show) > pieces:
+                issues.append(SpecIssue("WARN", "CUES_TOO_MANY",
+                                        f"Slide {s.n} has {len(s.show)} cues in `show:` but only {pieces} pieces; the extra cues are not used.",
+                                        slide=s.n, line=s.line,
+                                        hint=f"Write {pieces - 1} cue{'s' if pieces != 2 else ''}: one for each piece after the first."))
+            elif len(s.show) < pieces - 1:
+                issues.append(SpecIssue("WARN", "CUES_SHIFTED",
+                                        f"Slide {s.n} has {pieces} pieces but {len(s.show)} cue{'s' if len(s.show) != 1 else ''} in `show:`, "
+                                        "so the first cue is spent on the first piece (which always opens the slide) and the rest land one piece early.",
+                                        slide=s.n, line=s.line,
+                                        hint=f"Write exactly {pieces - 1} cue{'s' if pieces != 2 else ''}: one for each piece after the first."))
         if s.show and s.say:
             hay = _norm(s.say)
             for cue in s.show:

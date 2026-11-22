@@ -372,6 +372,41 @@ _OBJ_RE = re.compile(
 )
 
 
+def object_problems(text: str) -> List[str]:
+    """What an `objects:` line asks for that won't happen as written, in plain words (for the script check).
+
+    The parser is forgiving: a part it can't read is dropped, text after the fields is ignored, an
+    unknown name is drawn as a plain dot and an unknown colour becomes the accent. Each of those used
+    to pass silently, so a script could ask for `rotate 45deg` or `icon:rocket` and get something else."""
+    out: List[str] = []
+    if not text or not text.strip():
+        return out
+    for part in re.split(r"\s*\|\s*", text.strip()):
+        part = part.strip()
+        if not part:
+            continue
+        m = _OBJ_RE.match(part)
+        if not m:
+            out.append(f"'{part[:40]}' isn't `name @ x,y size colour animation`; it is left out")
+            continue
+        kind = m.group("kind").lower().strip()
+        if kind not in SHAPES and not (kind.startswith("icon:") and lucide_svg(kind[5:], 24, "#000")) \
+                and not lucide_svg(kind, 24, "#000"):
+            out.append(f"'{kind}' isn't a built-in shape{' and no icon set is installed' if _find_lucide() is None else ''}; "
+                       "it is drawn as a plain dot")
+        colour = (m.group("colour") or "").lower()
+        if colour and not colour.startswith("#") and colour not in COLOUR_TOKENS:
+            hint = " (that is an animation: write the colour before it)" if colour in OBJ_ANIMS else ""
+            out.append(f"'{colour}' isn't a colour{hint}; the accent is used")
+        anim = (m.group("anim") or "").lower()
+        if anim and anim not in OBJ_ANIMS:
+            out.append(f"'{anim}' isn't an animation; the shape's own is used")
+        rest = part[m.end():].strip()
+        if rest:
+            out.append(f"'{rest[:30]}' after '{kind}' is ignored (rotation is written r45)")
+    return out
+
+
 def parse_objects(text: str) -> List[SceneObject]:
     """Parse an `objects:` value into a list of SceneObject."""
     if not text or not text.strip():
