@@ -35,6 +35,7 @@ on_back_online: Optional[Any] = None
 STATE_FILE = notifier.DATA_DIR / "sage_uptime.json"
 BEAT_EVERY_SECONDS = 60
 SETTLE_SECONDS = 90
+ANNOUNCE_GAP_SECONDS = 300  # don't repeat the spoken "back online" line within this window (restart storms)
 RETRY_SECONDS = [60, 120, 300, 600, 1800]
 # A pending email older than this is dropped instead of arriving days late.
 GIVE_UP_AFTER = datetime.timedelta(days=2)
@@ -121,6 +122,8 @@ def on_start(now: Optional[datetime.datetime] = None, commit: Optional[str] = No
     write_state({
         "commit": commit, "startedAt": _iso(now), "lastBeat": _iso(now),
         "clean": False, "stoppedAt": None, "pending": outage,
+        # kept across restarts: the "back online" line's repeat guard (see run)
+        "lastBackOnlineAt": prev.get("lastBackOnlineAt"),
     })
     return outage
 
@@ -282,10 +285,17 @@ async def run() -> None:
             try:
                 await asyncio.to_thread(send_pending)
                 if on_back_online:
-                    try:
-                        on_back_online(outage)
-                    except Exception as e:
-                        logstore.warn("uptime", f"Back-online announce failed: {e}")
+                    last = _parse(read_state().get("lastBackOnlineAt"))
+                    if last and (_now() - last).total_seconds() < ANNOUNCE_GAP_SECONDS:
+                        logstore.info("uptime", "Back-online line said recently; not repeating")
+                    else:
+                        try:
+                            if on_back_online(outage):
+                                state = read_state()
+                                state["lastBackOnlineAt"] = _iso(_now())
+                                write_state(state)
+                        except Exception as e:
+                            logstore.warn("uptime", f"Back-online announce failed: {e}")
                 outage = None
             except Exception as e:
                 logstore.warn("uptime", f"Back-up email failed, will retry: {e}")
