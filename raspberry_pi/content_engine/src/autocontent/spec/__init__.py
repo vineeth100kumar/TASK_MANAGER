@@ -9,12 +9,13 @@ from .parser import (
     SPEC_VERSION, SLIDE_TYPES, SpecIssue, ParsedSpec,
     is_spec_text, is_spec_file, parse_spec, parse_value,
 )
+from .overlays import parse_post
 from .checks import check_slides, check_caption, issues_summary
 from .build import build_from_spec, validate_spec_text, auto_caption
 
 __all__ = [
     "SPEC_VERSION", "SLIDE_TYPES", "SpecIssue", "ParsedSpec",
-    "is_spec_text", "is_spec_file", "parse_spec", "parse_value",
+    "is_spec_text", "is_spec_file", "parse_spec", "parse_post", "parse_value",
     "check_slides", "check_caption", "issues_summary",
     "build_from_spec", "validate_spec_text", "auto_caption",
 ]

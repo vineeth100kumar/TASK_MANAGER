@@ -315,10 +315,10 @@ def spec_check(
     file_path: Path = typer.Argument(..., help="Path to a post spec (.md)")
 ):
     """Check a post spec without rendering: every error and warning with its line number."""
-    from .spec import parse_spec, issues_summary, is_spec_file
+    from .spec import parse_post, issues_summary, is_spec_file
     if not file_path.exists():
         _fail(f"File not found: {file_path}")
-    spec = parse_spec(file_path.read_text(encoding="utf-8-sig", errors="replace"), base_dir=file_path.resolve().parent,
+    spec = parse_post(file_path.read_text(encoding="utf-8-sig", errors="replace"), base_dir=file_path.resolve().parent,
                       require_marker=False)
     if not is_spec_file(file_path):
         typer.secho("This file has no 'autocontent: post' header, so `run` treats it as an ordinary report "

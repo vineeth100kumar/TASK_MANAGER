@@ -1000,6 +1000,14 @@ class SlideRenderer:
                 if not self.collect_fit:
                     raise RuntimeError(f"Slide {slide_n} {label} failed to fit: {res.get('reason')}")
                 problems.append(msg)
+        if slide.get("objects") or slide.get("diagram"):
+            # a post's explainer objects and diagram (a reel draws its own, animated, and never sets these)
+            from ..spec.overlays import draw as draw_overlays
+            accent = clean_colors({"accent": slide.get("accent")}).get("accent") or self.color_overrides.get("accent") \
+                or self.style_config.colors.accent
+            problems += [f"The diagram or objects: {m}" for m in draw_overlays(
+                page, slide, accent, self.style_config.canvas.width, self.style_config.canvas.height,
+                self.style_config.layout.footer_y)]
         if self.collect_fit:
             problems += [p for p in (page.evaluate(FIT_PROBE_JS) or []) if p not in problems]
             self.fit_report.append({"n": slide_n, "type": slide.get("type"), "ok": not problems, "problems": problems})

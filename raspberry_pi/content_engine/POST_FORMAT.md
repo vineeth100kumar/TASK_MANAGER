@@ -61,6 +61,21 @@ After the slides: `## caption` (the Instagram caption: a hook line, 3-6 short pa
 
 PICTURES (free, copyright-free photos found and credited for you)
 When a slide needs a photo, write an `## image` slide with `search: <2 to 4 plain words describing the picture>` (e.g. `search: street food stall night`). Sage finds a free photo (Unsplash, Pexels, Pixabay or Wikimedia Commons), puts "Photo by NAME on SOURCE" on the slide and adds a "Photo credits" line to the caption. Describe things, places and scenes, not people, brands, logos or text; those are hidden. Use 1 to 3 picture slides per post. Never invent a file name or link.
+Only when the user gave you a picture, write `image: <it>` instead: a web link to a JPG, PNG or WEBP (not SVG), a Wikimedia Commons page or `File:Name.jpg`, or a web page with a main picture. If a picture cannot be fetched the slide is drawn as text and Sage says so (PICTURE PROBLEM).
+
+EXPLAINER DIAGRAMS AND OBJECTS (optional; one or two slides per post, never on a cover)
+When the idea is "how many of a set", "steps in order", "what is left after each stage", "where it breaks" or "how big vs how big", draw it. Put a `diagram:` block on a `statement` or `point` slide with a short headline (5 words or fewer), `align: top` and no bullets, as the LAST lines of the slide. The diagram fills the room under the headline.
+diagram: waffle
+  rows: 2 x 3
+  shape: square
+  on: 1-2 "you have"
+  ghost: rest "still missing"
+- First line `diagram: <preset>`; every line after it is indented two spaces and is `key: value`. No blank lines or comments inside.
+- Presets: seatmap (n of a fixed set), waffle (a rate, 31 in 100), flow (steps in order: `item: Name | value`, 2 to 6, `warn: Name`), funnel (what is left per stage: `item: Stage | 100%`, 3 to 5), bars (`item: Name | value`, 2 to 5), timeline (`item: 2015 | What happened`, 3 to 6), cycle (a loop: `item: Name`, 3 to 6), hierarchy (`root: Name | value`, `item: Name | value`), matrix (`x: Faster`, `y: Dearer`, `point: 20,30 | Label`), meter (`value: 72`, `max: 100`, `limit: 55`, `label: text`), overlap (`set: Name`, `set: Name`, `overlap: Label | 9%`), scale (`item: Name | number`, 2 to 4), table (`head: | Col | Col`, `row: Name | a | b`).
+- A post shows the finished picture, so leave out `@ "word"` cues. States: `on:` the part you are talking about (accent colour), `warn:` the problem part (red), `ghost:` a missing part, `base: rest "label"` the quiet rest. Pick parts by item name, number (`3`, `1-32`), `rows 1-3`, `all` or `rest`. A quoted label (`on: 1-2 "you have"`) becomes a legend entry with a live count.
+objects: arrow-down @ 80,30 120 accent
+- `objects:` places up to 2 small shapes for emphasis, on any slide, in empty space only: `<name> @ <x>,<y> <size> <colour>`, separated by ` | `. x,y are percent of the slide (x 10 to 90, y 15 to 70), size 60 to 200 pixels, colour accent, dark, muted, success, warning, danger, info or a hex like `#1E9E5A`.
+- Names (only these): arrow-right, arrow-left, arrow-up, arrow-down, arrow-up-right, circle, circle-filled, square, triangle, diamond, star, hexagon, line, plus, minus, x, check, badge, callout, speech, underline, bracket-left, bracket-right, highlight, sparkle, zap, flame, target, eye, money, chart-up, clock, lock, globe, users, lightbulb, shield, gear, heart. Never `icon:` names.
 
 DESIGN KNOBS (any slide; all optional)
 theme: light | dark | accent      (dark = black page, accent = page in the accent colour)
@@ -186,12 +201,34 @@ that does not fit): headlines 6 to 10 words, bullets and list items under 12 wor
 - `search: workshop 3d printer` fetches a free stock photo (Wikimedia Commons without a key; Unsplash,
   Pexels, Pixabay with free keys in Settings) and adds the credit.
 - `prompt: <what it should show>` draws a "Picture needed" box until you add the file.
-- A picture slide with no picture, or one that cannot be found, is drawn as a text slide.
+- A picture slide with no picture, or one that cannot be found, is drawn as a text slide, and the
+  render says why (`PICTURE PROBLEM: ...` in the progress and in the warnings).
+- `image:` also takes a Wikimedia Commons page link, a bare `File:Name.jpg`, or a web page that has a
+  main picture (its `og:image` is used). Downloads send a descriptive User-Agent, follow redirects, retry
+  busy answers and fall back to Commons' own redirector. JPG, PNG and WEBP only (not SVG or PDF). Each
+  picture is downloaded once and kept.
 - Pictures are black-and-white halftone dots by default (brand.json `image_defaults`). Per slide or in
   the header: `filter:` (`none`, `grayscale`, `sepia`, `warm`, `cool`, `vivid`, `moody`, `high contrast`,
   `halftone`...), `dot_size`, `duotone: accent`, `tint: blue 30%`, `focus: top`, `fit: contain`,
   `rounded: large`, `border: thick accent`, `text_position: above | below`. Pictures have no border unless
   a slide asks for one; `filter: none` keeps a picture's original colours.
+
+### Explainer diagrams and objects
+
+The same `diagram:` and `objects:` lines a reel uses (the reel code draws them; see
+[REEL_FORMAT.md](REEL_FORMAT.md) "Diagrams in full" and "Objects in full" for every preset, engine
+and shape). A post draws the **finished** picture: every state line applies at once and `@ "word"`
+cues are ignored. Differences from a reel:
+
+- A diagram slide gets the room between the end of its own text and the footer. If less than 340px
+  is left the render says so (shorten the text, or put the diagram on a slide with a short headline).
+- `at:` and `size:` inside a diagram place it exactly (percent of the slide and pixels); leave both
+  out to let it fill the room.
+- `objects:` positions are percent of the slide (1080x1350 portrait, 1080x1080 square); they are drawn on top of
+  everything, so keep them in empty space. `icon:` objects need the Lucide set, which the Pi does not have.
+- A bad diagram is an error with the line number and a "did you mean" hint; an object that cannot be
+  drawn as written is a warning (OBJECT_IGNORED).
+- The lines are kept in `slides.json`, so re-rendering a saved post redraws them.
 
 ### Caption and hashtags
 
