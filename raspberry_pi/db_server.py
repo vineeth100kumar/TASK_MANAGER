@@ -198,9 +198,19 @@ WEBAUTHN_OPEN_PATHS = {
 }
 
 
+OAUTH_PATHS = {"/register", "/authorize", "/token", "/oauth/register", "/oauth/authorize", "/oauth/token"}
+
+
 @app.middleware("http")
 async def require_login(request, call_next):
     path = request.url.path
+    if path.startswith("/.well-known/") or path in OAUTH_PATHS:
+        # Sage's connector (MCP) address needs no sign-in: its secret is in the
+        # URL. A client (Claude, ChatGPT) probes these paths to see whether it
+        # must do OAuth; without this they got a redirect to the HTML login
+        # page and the client reported "couldn't register with the sign-in
+        # service". A plain JSON 404 says: no OAuth here, just use the URL.
+        return JSONResponse({"detail": "Not Found"}, status_code=404)
     if (
         not access_gate.enabled
         or request.method == "OPTIONS"

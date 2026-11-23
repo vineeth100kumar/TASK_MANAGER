@@ -560,6 +560,23 @@ class LogStoreTests(unittest.TestCase):
         newest = logstore.read(limit=1)["entries"][0]["msg"]
         self.assertIn("line 9999", newest)
 
+    def test_oauth_probes_get_a_plain_404_not_the_login_page(self):
+        # Claude/ChatGPT probe these to see if a connector needs OAuth. With the
+        # password gate on they used to be redirected to the HTML login page.
+        from unittest import mock as _m
+        import access_gate
+        stored = access_gate.hash_password("1234", iterations=1000)
+        with _m.patch.object(access_gate, "enabled", True), _m.patch.object(access_gate, "PASSWORD_HASH", stored), \
+                _m.patch.object(claude_api, "TOKEN", TOKEN), _m.patch.object(claude_api, "enabled", True):
+            c = TestClient(db_server.app, follow_redirects=False)
+            for path in ["/.well-known/oauth-protected-resource", "/.well-known/oauth-authorization-server",
+                         f"/.well-known/oauth-protected-resource/mcp/{TOKEN}", "/register"]:
+                res = c.get(path)
+                self.assertEqual(res.status_code, 404, path)
+                self.assertEqual(res.json(), {"detail": "Not Found"})
+            self.assertEqual(c.post("/register", json={}).status_code, 404)
+            self.assertEqual(c.post(f"/mcp/{TOKEN}", json={"jsonrpc": "2.0", "id": 1, "method": "ping"}).status_code, 200)
+
 
 if __name__ == "__main__":
     unittest.main()
