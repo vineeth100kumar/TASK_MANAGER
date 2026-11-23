@@ -219,9 +219,14 @@ def _clean(value: str) -> str:
     return re.sub(r"\s+", " ", value.replace("**", "").replace("==", "")).strip(" \t\"“”")
 
 
-def _split(text: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, Tuple[str, int]]], str]:
+def _split(text: str, scene_keys: Optional[Dict[str, str]] = None, header_too: bool = True
+           ) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, Tuple[str, int]]], str]:
     """Lift the reel-only lines out. Returns (header values, per-section values keyed by the line
-    of the section's `##` heading, the remaining text as a post spec)."""
+    of the section's `##` heading, the remaining text as a post spec).
+
+    A post spec uses the same reader for just its explainer lines (`objects:` and `diagram:`):
+    spec/overlays.py passes those keys and header_too=False, which leaves the header alone."""
+    scene_keys = SCENE_KEYS if scene_keys is None else scene_keys
     lines = text.lstrip("﻿").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     out = list(lines)
     header: Dict[str, Tuple[str, int]] = {}
@@ -229,7 +234,7 @@ def _split(text: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, T
     i = 0
     while i < len(lines) and not lines[i].strip():
         i += 1
-    in_front = i < len(lines) and lines[i].strip() == "---"
+    in_front = header_too and i < len(lines) and lines[i].strip() == "---"
     in_fence = False
     section_line = 0
     current: Optional[Tuple[Dict[str, Tuple[str, int]], str]] = None   # where an indented continuation goes
@@ -260,8 +265,8 @@ def _split(text: str) -> Tuple[Dict[str, Tuple[str, int]], Dict[int, Dict[str, T
             current = None
             continue
         m = re.match(r"^\s*([A-Za-z_]+)\s*:\s*(.*)$", raw)
-        if m and m.group(1).lower() in SCENE_KEYS and section_line:
-            key = SCENE_KEYS[m.group(1).lower()]
+        if m and m.group(1).lower() in scene_keys and section_line:
+            key = scene_keys[m.group(1).lower()]
             sections[section_line][key] = (m.group(2).strip(), ln)
             out[idx] = ""
             current = (sections[section_line], key)

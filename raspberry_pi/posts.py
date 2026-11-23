@@ -457,8 +457,8 @@ def check(script: str) -> dict:
     """Parse the script the way the engine will: every error and warning with its
     line and slide number, plus the slides, caption and hashtags it found."""
     _engine_on_path()
-    from autocontent.spec import parse_spec  # the engine's own parser
-    spec = parse_spec(script, base_dir=str(ENGINE_DIR), require_marker=False)
+    from autocontent.spec import parse_post  # the engine's own parser (posts, with explainer objects and diagrams)
+    spec = parse_post(script, base_dir=str(ENGINE_DIR), require_marker=False)
     issues = [{
         "severity": i.severity, "code": i.code, "message": i.message, "line": i.line,
         "slide": i.slide, "hint": i.hint or "",

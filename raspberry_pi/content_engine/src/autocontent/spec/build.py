@@ -15,6 +15,7 @@ from ..progress import report
 from ..settings import OUTPUT_DIR, load_brand_config
 from . import stock
 from .checks import check_slides, check_caption, resolve_image, issues_summary
+from .overlays import parse_post
 from .parser import SPEC_VERSION, ParsedSpec, SpecIssue, parse_spec, _image_dirs, image_to_text, plain
 
 MAX_DOWNLOAD_BYTES = 20 * 1024 * 1024
@@ -297,7 +298,7 @@ def collect_images(slides: List[Dict[str, Any]], out_dir: Path, base_dirs: List[
 
 def validate_spec_text(text: str, base_dir: Optional[Path] = None) -> Dict[str, Any]:
     """Parse and check a spec without writing anything: the Create screen's Validate step."""
-    spec = parse_spec(text, base_dir=base_dir)
+    spec = parse_post(text, base_dir=base_dir)
     preview = []
     for n, s in enumerate(spec.slides, start=1):
         title = s.get("headline") or s.get("number") or s.get("body") or s.get("image") or ""
@@ -396,7 +397,7 @@ def build_from_spec(
     spec_path = Path(spec_path).resolve()
     report(f"Reading post spec {spec_path.name}...")
     text = spec_path.read_text(encoding="utf-8-sig", errors="replace")
-    spec = parse_spec(text, base_dir=spec_path.parent, require_marker=require_marker)
+    spec = parse_post(text, base_dir=spec_path.parent, require_marker=require_marker)
     report(f"Spec checks: {len(spec.slides)} slides, {issues_summary(spec.issues)}")
     for issue in spec.issues:
         report(f"  {issue}")
@@ -416,6 +417,9 @@ def build_from_spec(
     if any(i.severity == "ERROR" for i in img_issues):
         raise SpecError(issues + img_issues)
     issues += img_issues
+    for i in img_issues:      # the same line a reel prints, so a post's log (and its notes) say why a picture is missing
+        if i.severity == "WARN" and i.code in ("IMAGE_FAILED", "IMAGE_PLACEHOLDER", "IMAGE_SEARCH_FAILED"):
+            report(f"  PICTURE PROBLEM: {i}")
 
     data = _assemble_deck(spec, slides, brand, title, timestamp, spec_path.name, style, canvas_format, tag)
     deck_brand = data["brand"]
@@ -446,7 +450,7 @@ def deck_checks(folder: Path, data: Dict[str, Any], caption: Optional[str] = Non
 def preview_deck(text: str, base_dir: Optional[Path] = None) -> Tuple[ParsedSpec, Dict[str, Any]]:
     """Parse spec text and assemble the deck in memory (nothing written, no pictures fetched).
     The Write screen's live preview renders slides from this."""
-    spec = parse_spec(text, base_dir=base_dir)
+    spec = parse_post(text, base_dir=base_dir)
     brand = load_brand_config()
     slides = [dict(s) for s in spec.slides]
     data = _assemble_deck(spec, slides, brand, spec.meta.get("title") or "Untitled", "preview", "preview.md", None, None, None)

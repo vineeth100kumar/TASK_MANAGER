@@ -182,7 +182,7 @@ ALARM_RING, NOTIF, SONG_INFO, LIGHTS, HAPTIC, TONE, WEATHER, FIT, OTA, REBOOT.
 
 ### Content engine `raspberry_pi/content_engine/`
 
-`src/autocontent/`: `spec/` (script parser and checks), `pipeline/` (extract,
+`src/autocontent/`: `spec/` (script parser and checks; `spec/overlays.py` lets a post slide carry the reel's `objects:` and `diagram:` lines and draws them finished, tests `tests/test_post_overlays.py`), `pipeline/` (extract,
 compose, verify), `validators/`, `render/` (slides, charts, halftone), `reel/`
 (timing, voice, captions, compose), `llm/` (groq, gemini, ollama, fake),
 `ingest/`. `POST_FORMAT.md` and `REEL_FORMAT.md` are the script formats Claude
