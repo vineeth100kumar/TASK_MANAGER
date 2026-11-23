@@ -80,14 +80,21 @@ class Guide(unittest.TestCase):
             self.assertEqual(object_problems(f"{n} @ 50,50 100 accent"), [], n)
 
 
-try:
-    import playwright  # noqa: F401
-    HAVE_PW = True
-except ImportError:
-    HAVE_PW = False
+def _browser_works() -> bool:
+    try:
+        from playwright.sync_api import sync_playwright
+        from autocontent.render.renderer import browser_launch_options
+        with sync_playwright() as p:
+            p.chromium.launch(**browser_launch_options()).close()
+        return True
+    except Exception:
+        return False
 
 
-@unittest.skipUnless(HAVE_PW, "Playwright is not installed here")
+HAVE_PW = _browser_works()
+
+
+@unittest.skipUnless(HAVE_PW, "no Chromium for Playwright here")
 class Drawing(unittest.TestCase):
     def test_overlays_are_drawn_on_the_slide(self):
         from PIL import Image
