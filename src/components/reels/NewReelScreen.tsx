@@ -216,14 +216,14 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
         </div>)}
         {at(2) && (<div className="grid grid-cols-1 gap-3 pt-1">
           {!edit && (
-            <div className="sm:col-span-2">
+            <div>
               <label className="field-label mb-1.5" htmlFor="post-at">Post at (optional)</label>
               <input id="post-at" type="datetime-local" value={postAt} onChange={e => setPostAt(e.target.value)} className="field w-full" />
               {postAt && <p className="mt-1 text-[11.5px] text-gray-500">{ownVoice ? 'Record your voice next; the Pi makes it right after.' : 'The Pi saves the script and makes it about an hour before. Herald tells you when it is ready.'}</p>}
             </div>
           )}
           {!edit && !projectId && (
-            <div className="sm:col-span-2">
+            <div>
               <label className="field-label mb-1.5">Project</label>
               <Select value={project} onChange={setProject} className="field w-full" aria-label="Project">
                 <option value="">No project</option>
