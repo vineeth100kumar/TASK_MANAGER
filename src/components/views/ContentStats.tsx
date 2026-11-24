@@ -202,7 +202,7 @@ export function ContentStats({ projectId }: { projectId: string }) {
           <p className="text-[12px] font-semibold text-gray-500">Followers</p>
           <p className="text-[24px] font-semibold tabular-nums leading-tight">{compact(data.followers)}</p>
           <p className={`text-[12px] font-semibold tabular-nums ${data.followersChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-            {data.followersChange >= 0 ? '+' : ''}{data.followersChange} in {data.days}d
+            {data.followersChange >= 0 ? '+' : ''}{data.followersChange} in {data.storedDays ?? data.days}d
           </p>
         </div>
         {TILE_METRICS.map(key => (
@@ -212,7 +212,7 @@ export function ContentStats({ projectId }: { projectId: string }) {
               {typeof data.totals[key] === 'number' ? metricValue(key, data.totals[key]) : '-'}
             </p>
             <p className="text-[12px] text-gray-400">
-              {key === 'total_interactions' && data.engagementRate !== null ? `${data.engagementRate}% of reach` : `last ${data.days}d`}
+              {key === 'total_interactions' && data.engagementRate !== null ? `${data.engagementRate}% of reach` : `last ${data.days}d${key === 'reach' && data.approxReach ? ' (about)' : ''}`}
             </p>
           </div>
         ))}

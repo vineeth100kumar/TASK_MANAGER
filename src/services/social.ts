@@ -29,6 +29,9 @@ export interface SocialDay {
 
 export interface SocialOverview extends SocialStatus {
   days: number;
+  storedDays?: number;        // days Sage has kept itself (followers change covers these)
+  live?: boolean;             // totals came straight from Instagram for this window
+  approxReach?: boolean;      // 90d reach is summed from pieces, so it can run a little high
   daily: SocialDay[];
   totals: Record<string, number>;
   followers: number;

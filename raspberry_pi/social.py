@@ -604,6 +604,60 @@ def status(project_id: str) -> dict:
     return out
 
 
+# --- Live windows: what Instagram itself says for the last 7 / 30 / 90 days ---
+
+_WINDOW_TTL = 600  # seconds; the tiles and All view ask often, Meta needn't be asked each time
+_WINDOW_CHUNK = 30  # days; Meta caps one insights call at about 30 days
+_window_cache: Dict[Tuple[str, int], Tuple[float, dict]] = {}
+
+
+async def _window_once(client: httpx.AsyncClient, token: str, ig_user_id: str, host: str,
+                       since: int, until: int) -> Tuple[Dict[str, float], List[str]]:
+    return await _insights(client, f"/{ig_user_id}/insights", ACCOUNT_METRICS, token,
+                           {"period": "day", "metric_type": "total_value",
+                            "since": since, "until": until}, host=host)
+
+
+async def window_insights(project_id: str, days: int) -> Optional[dict]:
+    """Instagram's own totals for the last `days` days, asked live. None when the
+    page isn't connected. Meta forgets account metrics after ~90 days, so cap there."""
+    import time
+    days = max(1, min(90, int(days)))
+    key = (project_id, days)
+    hit = _window_cache.get(key)
+    if hit and time.time() - hit[0] < _WINDOW_TTL:
+        return hit[1]
+    row = account_row(project_id)
+    if not row or not row.get("token") or not row.get("ig_user_id"):
+        return None
+    token, ig_user_id = str(row["token"]), str(row["ig_user_id"])
+    host = str(row.get("host") or GRAPH)
+    until = int(time.time())
+    since = until - days * 86400
+    async with httpx.AsyncClient() as client:
+        try:
+            totals, dropped = await _window_once(client, token, ig_user_id, host, since, until)
+            chunked = False
+        except SocialError:
+            totals, dropped, chunked = {}, [], True
+        if chunked or not totals:
+            # One call refused a long range: ask in 30-day pieces and add them up.
+            # Reach counts each account once per piece, so it can run a little high.
+            totals, dropped = {}, []
+            end = until
+            while end > since:
+                start = max(since, end - _WINDOW_CHUNK * 86400)
+                part, drop = await _window_once(client, token, ig_user_id, host, start, end)
+                for k, v in part.items():
+                    totals[k] = totals.get(k, 0) + v
+                dropped += drop
+                end = start
+            chunked = days > _WINDOW_CHUNK
+    result = {"days": days, "totals": totals, "dropped": sorted(set(dropped)), "approxReach": chunked}
+    _window_cache[key] = (time.time(), result)
+    return result
+
+
 def overview(project_id: str, days: int = 30) -> dict:
     conn = _db()
     try:
@@ -777,8 +831,20 @@ def social_forget(project: str):
 
 
 @router.get("/api/social/{project}/overview")
-def social_overview(project: str, days: int = 30):
-    return {"success": True, **overview(project, days)}
+async def social_overview(project: str, days: int = 30):
+    out = overview(project, days)
+    try:
+        live = await window_insights(project, days)
+    except Exception as e:  # Meta slow or down: keep the stored numbers
+        logstore.log("warn", "social", f"live window failed: {e}")
+        live = None
+    if live and live["totals"]:
+        reach = live["totals"].get("reach") or 0
+        out.update(storedDays=out["days"], days=live["days"], totals=live["totals"], live=True, approxReach=live["approxReach"],
+                   engagementRate=round(100 * (live["totals"].get("total_interactions") or 0) / reach, 2) if reach else None)
+    else:
+        out["live"] = False
+    return {"success": True, **out}
 
 
 @router.get("/api/social/{project}/posts")
