@@ -842,9 +842,32 @@ def social_overview(args: dict) -> dict:
     return out
 
 
+def _sage_source(kind: Optional[str], sage_id: Optional[str], full: bool = False) -> Optional[dict]:
+    """The Sage post or reel an Instagram post was made from: its title (the topic), the script it
+    was written from, and what Sage planned for the caption and hashtags."""
+    if not kind or not sage_id:
+        return None
+    src = (_posts if kind == "post" else _reels)
+    piece = src.get(sage_id) if src is not None else None
+    if not piece:
+        return None
+    out = {"kind": kind, "id": sage_id, "title": piece.get("title"), "style": piece.get("style"),
+           "plannedCaption": piece.get("caption") or "", "plannedHashtags": piece.get("hashtags") or [],
+           "madeAt": piece.get("finishedAt") or piece.get("createdAt")}
+    out["script"] = piece.get("script") or "" if full else (piece.get("script") or "")[:400]
+    return out
+
+
 def social_posts(args: dict) -> dict:
     project_id = _social_project(args.get("project"))
-    out = social.posts(project_id, int(args.get("limit") or 30))
+    sort = str(args.get("sort") or "date").lower()
+    if sort not in social.SORT_KEYS:
+        raise ApiError(400, "sort is one of: " + ", ".join(social.SORT_KEYS))
+    out = social.posts(project_id, int(args.get("limit") or 30), sort)
+    for p in out["posts"]:
+        p["source"] = _sage_source(p.get("sageKind"), p.get("sageId"))
+    for w in out["top"].values():
+        w["source"] = _sage_source(w.get("sageKind"), w.get("sageId"))
     out["project"] = (_find("projects", project_id) or {}).get("name")
     return out
 
@@ -1580,8 +1603,9 @@ archived true show the archive.
 Each content project is one Instagram page. sage_social_overview gives that page's followers, reach, views and
 interactions with the day-by-day history Sage keeps (Meta forgets account metrics after about 90 days), and
 sage_social_posts gives every post and reel with its numbers, how it did against the page's own average reach, and
-which Sage script it came from: read both before suggesting what to post next, so advice comes from the page's real
-numbers. sage_social_post opens one post with its growth curve, and sage_social_refresh pulls from Instagram now
+which Sage script it came from (plus each post's title, full caption and hashtags, a `top` winner per number, and a
+`sort` to put the best views, likes, comments or saves first): read both before suggesting what to post next, so advice
+comes from the page's real numbers. sage_social_post opens one post with its growth curve, and sage_social_refresh pulls from Instagram now
 instead of waiting for the morning pull. A page has to be connected in the Content dashboard first (pick its project, Connect Instagram).
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
@@ -1737,14 +1761,21 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "properties": {
              "project": {"type": "string", "description": "The content project (id or name). Left out, the only connected page"},
              "days": {"type": "integer", "description": "How many days back (default 30, max 400)"}}}},
-        {"name": "sage_social_posts", "description": "The page's Instagram posts and reels, newest first, each with reach, "
-         "views, likes, comments, shares, saves and (for reels) average watch time, how it did against the page's "
-         "average reach, and which Sage post or reel it was made from. This answers which formats actually work.",
+        {"name": "sage_social_posts", "description": "The page's Instagram posts and reels, each with its title (the "
+         "caption's first line), full caption, hashtags, reach, views, likes, comments, shares, saves and (for reels) "
+         "average watch time, how it did against the page's average reach, and which Sage post or reel it was made "
+         "from. `top` names the winner for views, likes, comments, saves, shares and reach, with its full caption, "
+         "hashtags and topic. `source` is the Sage script behind a post (title = its topic). `hashtagStats` gives "
+         "each hashtag's post count and average views, likes and reach. Sort it to answer which posts, captions "
+         "and hashtags actually work.",
          "inputSchema": {"type": "object", "properties": {
              "project": {"type": "string", "description": "The content project (id or name)"},
-             "limit": {"type": "integer", "description": "At most this many (default 30, max 100)"}}}},
+             "limit": {"type": "integer", "description": "At most this many (default 30, max 100)"},
+             "sort": {"type": "string", "enum": list(social.SORT_KEYS),
+                      "description": "Order the posts by this number, best first (default date = newest first)"}}}},
         {"name": "sage_social_post", "description": "One Instagram post or reel in full: its numbers now, its growth "
-         "curve (day 1, 3, 7 and 30), its caption and link, and the Sage script it came from.",
+         "curve (day 1, 3, 7 and 30), its title, full caption, hashtags and link, and the full Sage script it came "
+         "from (`source`, whose title is the topic).",
          "inputSchema": {"type": "object", "required": ["id"], "properties": {
              "id": {"type": "string", "description": "The Instagram media id, as sage_social_posts gives it"}}}},
         {"name": "sage_social_refresh", "description": "Pull the page's numbers from Instagram now instead of waiting for "
@@ -1887,7 +1918,9 @@ async def _call_tool(name: str, args: dict) -> dict:
     if name == "sage_social_posts":
         return social_posts(args)
     if name == "sage_social_post":
-        return social.post(str(args.get("id") or ""))
+        one = social.post(str(args.get("id") or ""))
+        one["source"] = _sage_source(one.get("sageKind"), one.get("sageId"), full=True)
+        return one
     if name == "sage_social_refresh":
         return await social_refresh(args)
     if name == "sage_reel_format":

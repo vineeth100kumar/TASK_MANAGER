@@ -194,12 +194,15 @@ class InsightsTest(unittest.TestCase):
         self.assertEqual(set(out), {"reach", "views", "likes"})
         self.assertGreater(len(client.calls), 1)  # it narrowed down rather than giving up
 
-    def test_a_failure_that_is_not_about_a_metric_gives_up_quietly(self):
-        reply = FakeResponse(400, {"error": {"message": "Application request limit reached"}})
-        (out, dropped), client = self._run([reply], ["reach", "views"])
-        self.assertEqual(out, {})
-        self.assertEqual(dropped, ["reach", "views"])
-        self.assertEqual(len(client.calls), 1)  # no pointless halving on a rate limit
+    def test_a_failure_that_is_not_about_a_metric_is_raised_with_its_reason(self):
+        # Used to blank every tile and say "Instagram refused these metrics". Now the
+        # real reason (permission, token, rate limit) reaches the dashboard.
+        reply = FakeResponse(400, {"error": {"message": "(#10) Application does not have permission"}})
+        client = FakeClient([reply])
+        with self.assertRaises(social.SocialError) as ctx:
+            asyncio.run(social._insights(client, "/9/insights", ["reach", "views"], "token"))
+        self.assertIn("permission", str(ctx.exception))
+        self.assertEqual(len(client.calls), 1)  # no pointless halving
 
     def test_empty_metric_list_asks_nothing(self):
         (out, dropped), client = self._run([], [])
@@ -348,3 +351,100 @@ class WindowInsightsTest(unittest.TestCase):
 
     def test_not_connected(self):
         self.assertIsNone(asyncio.run(social.window_insights("nope", 7)))
+
+
+class PullKeepsPostsWhenInsightsFailTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        social.connect(os.path.join(self.tmp.name, "t.db"))
+        social._save_account("p1", ig_user_id="17", token="T" * 80, host=social.GRAPH_FB, username="x")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_account_numbers_refused_still_pulls_posts_and_says_why(self):
+        async def deny(*a, **k):
+            raise social.SocialError("(#10) Application does not have permission", 502)
+
+        with mock.patch.object(social, "account", mock.AsyncMock(return_value={"followers_count": 2, "id": "17"})), \
+             mock.patch.object(social, "account_insights", deny), \
+             mock.patch.object(social, "media_list", mock.AsyncMock(return_value=[])):
+            out = asyncio.run(social.pull("p1"))
+        self.assertTrue(out["ok"])
+        self.assertIn("permission", social.account_row("p1")["problem"])
+
+
+class PostsForAiTest(unittest.TestCase):
+    """What an AI reads through sage_social_posts: titles, hashtags, winners, sorting."""
+
+    ROWS = [
+        # id, kind, caption, posted_at, metrics
+        ("a", "REELS", "JIO LISTED. WHO GOT THE MONEY?\nBody #India #Markets", "2026-11-09T10:00:00+0000",
+         {"views": 268, "likes": 91, "comments": 4, "saved": 22, "reach": 200}),
+        ("b", "REELS", "Fertilizer prices fell #india", "2026-11-02T10:00:00+0000",
+         {"views": 239, "likes": 60, "comments": 14, "saved": 11, "reach": 150}),
+        ("c", "FEED", "No numbers yet", "2026-11-22T10:00:00+0000", {}),
+    ]
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        social.connect(os.path.join(self.tmp.name, "t.db"))
+        conn = social._db()
+        for mid, kind, caption, posted, metrics in self.ROWS:
+            conn.execute(
+                "INSERT INTO social_media (id, project_id, kind, caption, permalink, thumbnail, posted_at,"
+                " sage_kind, sage_id, metrics, updated_at) VALUES (?, 'p1', ?, ?, '', '', ?, NULL, NULL, ?, '')",
+                (mid, kind, caption, posted, json.dumps(metrics)))
+        conn.commit()
+        conn.close()
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_title_and_hashtags_come_out_of_the_caption(self):
+        out = {p["id"]: p for p in social.posts("p1")["posts"]}
+        self.assertEqual(out["a"]["title"], "JIO LISTED. WHO GOT THE MONEY?")
+        self.assertEqual(out["a"]["hashtags"], ["india", "markets"])
+        self.assertEqual(social.hashtags("a #x #X, not#this & #y_z"), ["x", "y_z"])
+
+    def test_top_names_the_winner_with_its_caption(self):
+        top = social.posts("p1")["top"]
+        self.assertEqual(top["views"]["id"], "a")
+        self.assertEqual(top["comments"]["id"], "b")      # the other post wins this one
+        self.assertIn("Body", top["views"]["caption"])
+        self.assertEqual(top["views"]["hashtags"], ["india", "markets"])
+
+    def test_sort_puts_best_first_and_missing_numbers_last(self):
+        ids = [p["id"] for p in social.posts("p1", sort="views")["posts"]]
+        self.assertEqual(ids, ["a", "b", "c"])
+        ids = [p["id"] for p in social.posts("p1", sort="comments")["posts"]]
+        self.assertEqual(ids, ["b", "a", "c"])
+        ids = [p["id"] for p in social.posts("p1", sort="date")["posts"]]
+        self.assertEqual(ids, ["c", "a", "b"])
+        self.assertEqual(social.posts("p1", sort="nonsense")["sort"], "date")
+
+    def test_hashtag_stats_average_over_the_posts_that_use_the_tag(self):
+        stats = {r["tag"]: r for r in social.posts("p1")["hashtagStats"]}
+        self.assertEqual(stats["india"]["posts"], 2)
+        self.assertEqual(stats["india"]["avgViews"], 253.5)
+        self.assertEqual(stats["markets"]["avgViews"], 268.0)
+        self.assertEqual(social.posts("p1")["hashtagStats"][0]["tag"], "markets")  # best average first
+
+
+class SageSourceTest(unittest.TestCase):
+    """The topic behind an Instagram post: the Sage script it was made from."""
+
+    def test_source_gives_title_script_and_planned_caption(self):
+        import types
+        import claude_api
+        piece = {"title": "Why Jio listed", "script": "S" * 900, "caption": "cap", "hashtags": ["a"], "style": "mono"}
+        fake = types.SimpleNamespace(get=lambda i: piece if i == "x" else None)
+        with mock.patch.object(claude_api, "_posts", fake):
+            short = claude_api._sage_source("post", "x")
+            full = claude_api._sage_source("post", "x", full=True)
+            self.assertEqual(short["title"], "Why Jio listed")
+            self.assertEqual(len(short["script"]), 400)
+            self.assertEqual(len(full["script"]), 900)
+            self.assertEqual(full["plannedHashtags"], ["a"])
+            self.assertIsNone(claude_api._sage_source("post", "missing"))
+            self.assertIsNone(claude_api._sage_source(None, None))
