@@ -219,7 +219,10 @@ def _meta_message(res: httpx.Response) -> str:
 
 
 async def _get(client: httpx.AsyncClient, path: str, params: dict, host: str = GRAPH) -> dict:
-    res = await client.get(f"{host}/{VERSION}{path}", params=params, timeout=30)
+    try:
+        res = await client.get(f"{host}/{VERSION}{path}", params=params, timeout=30)
+    except httpx.HTTPError as e:
+        raise SocialError(f"Instagram didn't answer ({type(e).__name__}). Try Pull now again in a minute.", 502)
     if res.status_code >= 400:
         raise SocialError(_meta_message(res), 502)
     return res.json()
@@ -290,7 +293,10 @@ async def account(token: str, host: str = GRAPH, ig_user_id: str = "") -> dict:
                                              "access_token": token}, host=host)
 
 
-_UNSUPPORTED = re.compile(r"metric\[?\d*\]?|unsupported|does not support|invalid|unknown", re.I)
+# Only an error that names the metric means "drop this one". A permission, token or
+# rate-limit error is the same for every metric, so it must surface instead of
+# silently blanking every tile (and instead of 19 more calls that all fail).
+_UNSUPPORTED = re.compile(r"metric|unsupported|does not support", re.I)
 
 
 async def _insights(client: httpx.AsyncClient, path: str, metrics: List[str], token: str,
@@ -304,7 +310,9 @@ async def _insights(client: httpx.AsyncClient, path: str, metrics: List[str], to
         try:
             body = await _get(client, path, params, host=host)
         except SocialError as e:
-            if len(wanted) == 1 or not _UNSUPPORTED.search(str(e)):
+            if not _UNSUPPORTED.search(str(e)):
+                raise
+            if len(wanted) == 1:
                 dropped.extend(wanted)
                 return {}, dropped
             # Meta won't always say which one it hates: halve and try each side.
@@ -503,8 +511,14 @@ async def pull(project_id: str) -> dict:
         ig_user_id = ig_user_id or str(me.get("user_id") or me.get("id") or "")
         if not ig_user_id:
             raise SocialError("Instagram didn't say which account this token is for. Connect the page again.")
-        metrics, drop1 = await account_insights(token, ig_user_id, host=host)
-        dropped += drop1
+        # A permission/token/rate-limit answer is the same for every metric: keep it as the
+        # reason (shown as "Instagram said: ...") and still pull the posts, which may work.
+        why = None
+        try:
+            metrics, drop1 = await account_insights(token, ig_user_id, host=host)
+            dropped += drop1
+        except SocialError as e:
+            metrics, why = {}, str(e)
         day = _local_now().date().isoformat()
         conn = _db()
         try:
@@ -560,8 +574,10 @@ async def pull(project_id: str) -> dict:
             conn.commit()
         finally:
             conn.close()
-        _save_account(project_id, last_pull_at=_iso(now), problem=None,
+        _save_account(project_id, last_pull_at=_iso(now), problem=why,
                       dropped=json.dumps(sorted(set(dropped))) if dropped else None)
+        if why:
+            logstore.log("warn", "social", f"Instagram would not give the account numbers: {why}")
         if dropped:
             logstore.log("warn", "social", f"Instagram refused these metrics: {', '.join(sorted(set(dropped)))}")
         return {"ok": True, "media": len(media), "dropped": sorted(set(dropped))}
@@ -838,6 +854,7 @@ async def social_overview(project: str, days: int = 30):
     except Exception as e:  # Meta slow or down: keep the stored numbers
         logstore.log("warn", "social", f"live window failed: {e}")
         live = None
+        out["problem"] = out.get("problem") or str(e)
     if live and live["totals"]:
         reach = live["totals"].get("reach") or 0
         out.update(storedDays=out["days"], days=live["days"], totals=live["totals"], live=True, approxReach=live["approxReach"],

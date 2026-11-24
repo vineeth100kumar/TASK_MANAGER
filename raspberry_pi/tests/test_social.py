@@ -194,12 +194,15 @@ class InsightsTest(unittest.TestCase):
         self.assertEqual(set(out), {"reach", "views", "likes"})
         self.assertGreater(len(client.calls), 1)  # it narrowed down rather than giving up
 
-    def test_a_failure_that_is_not_about_a_metric_gives_up_quietly(self):
-        reply = FakeResponse(400, {"error": {"message": "Application request limit reached"}})
-        (out, dropped), client = self._run([reply], ["reach", "views"])
-        self.assertEqual(out, {})
-        self.assertEqual(dropped, ["reach", "views"])
-        self.assertEqual(len(client.calls), 1)  # no pointless halving on a rate limit
+    def test_a_failure_that_is_not_about_a_metric_is_raised_with_its_reason(self):
+        # Used to blank every tile and say "Instagram refused these metrics". Now the
+        # real reason (permission, token, rate limit) reaches the dashboard.
+        reply = FakeResponse(400, {"error": {"message": "(#10) Application does not have permission"}})
+        client = FakeClient([reply])
+        with self.assertRaises(social.SocialError) as ctx:
+            asyncio.run(social._insights(client, "/9/insights", ["reach", "views"], "token"))
+        self.assertIn("permission", str(ctx.exception))
+        self.assertEqual(len(client.calls), 1)  # no pointless halving
 
     def test_empty_metric_list_asks_nothing(self):
         (out, dropped), client = self._run([], [])
@@ -348,3 +351,24 @@ class WindowInsightsTest(unittest.TestCase):
 
     def test_not_connected(self):
         self.assertIsNone(asyncio.run(social.window_insights("nope", 7)))
+
+
+class PullKeepsPostsWhenInsightsFailTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        social.connect(os.path.join(self.tmp.name, "t.db"))
+        social._save_account("p1", ig_user_id="17", token="T" * 80, host=social.GRAPH_FB, username="x")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_account_numbers_refused_still_pulls_posts_and_says_why(self):
+        async def deny(*a, **k):
+            raise social.SocialError("(#10) Application does not have permission", 502)
+
+        with mock.patch.object(social, "account", mock.AsyncMock(return_value={"followers_count": 2, "id": "17"})), \
+             mock.patch.object(social, "account_insights", deny), \
+             mock.patch.object(social, "media_list", mock.AsyncMock(return_value=[])):
+            out = asyncio.run(social.pull("p1"))
+        self.assertTrue(out["ok"])
+        self.assertIn("permission", social.account_row("p1")["problem"])
