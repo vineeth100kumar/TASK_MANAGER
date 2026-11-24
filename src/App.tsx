@@ -585,7 +585,7 @@ function MainApp() {
                 {isContentPage && !contentOn && (
                   <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
                 )}
-                {contentTab === 'pipeline' ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : contentTab === 'plan' ? <ContentCalendar projectId={activeWorkspace} /> : contentTab === 'stats' ? <ProjectStats /> : (<>
+                {contentTab === 'pipeline' ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : contentTab === 'plan' ? <ContentCalendar projectId={activeWorkspace} /> : contentTab === 'stats' ? <ProjectStats projectId={activeWorkspace} /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
