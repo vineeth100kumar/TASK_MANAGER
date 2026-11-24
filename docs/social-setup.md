@@ -37,12 +37,29 @@ can switch back.
 ## Step 2 — Add Instagram to the app
 
 1. In the app, **Add product › Instagram**.
-2. Pick **API setup with Instagram login**. (Not "Facebook Login for Business" —
-   that one is the path that wants a Facebook Page.)
+2. Pick **API setup with Instagram login**. (Meta also calls this **API setup
+   with Unified login**. Either name is the right one — not "Facebook Login for
+   Business", which is the path that wants a Facebook Page.)
 
-## Step 3 — Get the two values Sage needs
+## Step 3 — Make a free Business portfolio and connect it
 
-Open **Instagram › API setup with Instagram login › 3. Set up Instagram business
+Meta now asks for a **Business portfolio** before it hands over the two values.
+It is **free**, takes a minute, and needs **no verification** for this. A
+portfolio is just a folder Meta puts the app in — think of it as a free account
+holder, not a company you have to prove exists.
+
+1. On the **API setup with Unified login** page you will see a yellow banner:
+   *"Business portfolio selection is mandatory."* Press **+ Business portfolio**.
+2. If you already have one, pick it. If not, it offers to **create** one: give it
+   any name (your own name is fine), and that is all it needs.
+3. Back on the setup page, the portfolio now shows as connected.
+
+> No business verification, no documents, no fee. A portfolio made here stays in
+> Development mode with the app, which is all Sage needs to read your own page.
+
+## Step 4 — Get the two values Sage needs
+
+Open **Instagram › API setup with Unified login › Set up Instagram business
 login › Business login settings**. You will see:
 
 | Field | What to do |
@@ -57,12 +74,12 @@ send you, and you copy the code out of the address bar yourself.
 > If your Pi has a public address you would rather use, set `SAGE_IG_REDIRECT`
 > in `/etc/sage/sage.env` to that URL and put the same URL in Meta.
 
-## Step 4 — Give Sage the app id and secret
+## Step 5 — Give Sage the app id and secret
 
 In Sage, open **Content**, pick this page's project in the dropdown, press **Connect Instagram**, and
 paste both values. They are saved on the Pi only, never on your phone.
 
-## Step 5 — Allow access
+## Step 6 — Allow access
 
 1. Press **Allow on Instagram** in Sage. It opens Instagram's own page.
 2. Log in with this page's account and allow the two permissions
@@ -72,7 +89,7 @@ paste both values. They are saved on the Pi only, never on your phone.
 4. Copy everything after `code=` from the address bar. Drop the `#_` at the end
    if it's there — Sage removes it anyway.
 
-## Step 6 — Paste the code
+## Step 7 — Paste the code
 
 Paste it into Sage and press **Connect**. Sage then:
 
@@ -93,10 +110,10 @@ change the hour), and **Pull now** fetches immediately.
 |---|---|
 | "Insufficient permission" | The account isn't Professional yet, or you allowed with the wrong account |
 | The code is refused | Codes last an hour and work once. Press **Allow on Instagram** again for a new one |
-| "Add your Instagram App ID and app secret" | Step 4 didn't save |
+| "Add your Instagram App ID and app secret" | Step 5 didn't save |
 | App Review / business verification is offered | **Skip it.** That's only for reading accounts you don't own |
 | A tile is blank | Instagram no longer gives that metric. Sage lists the dropped ones under the posts table |
-| The token banner keeps showing | A token left unrefreshed for 60 days dies. Connect again from Step 5 |
+| The token banner keeps showing | A token left unrefreshed for 60 days dies. Connect again from Step 6 |
 
 ## What Meta will and won't give
 
