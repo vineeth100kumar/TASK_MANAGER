@@ -452,7 +452,10 @@ async def pull(project_id: str) -> dict:
     dropped: List[str] = []
     try:
         me = await account(token)
-        metrics, drop1 = await account_insights(token, str(row.get("ig_user_id") or me.get("user_id") or ""))
+        ig_user_id = str(row.get("ig_user_id") or me.get("user_id") or me.get("id") or "")
+        if not ig_user_id:
+            raise SocialError("Instagram didn't say which account this token is for. Connect the page again.")
+        metrics, drop1 = await account_insights(token, ig_user_id)
         dropped += drop1
         day = _local_now().date().isoformat()
         conn = _db()
@@ -467,16 +470,24 @@ async def pull(project_id: str) -> dict:
             conn.close()
 
         media = await media_list(token, MEDIA_PER_PULL)
+        # Ask Instagram for every post's numbers BEFORE touching the database. Writing
+        # as we went would hold a write transaction open across 25 network calls, which
+        # is how "database is locked" started on a slow Pi last time.
+        fetched: List[Tuple[dict, str, Dict[str, float]]] = []
+        for item in media:
+            media_id = str(item.get("id") or "")
+            if not media_id:
+                continue
+            kind = _kind(item)
+            stats, drop2 = await media_insights(token, media_id, kind)
+            dropped += drop2
+            fetched.append((item, kind, stats))
+
         now = _utcnow()
         conn = _db()
         try:
-            for item in media:
+            for item, kind, stats in fetched:
                 media_id = str(item.get("id") or "")
-                if not media_id:
-                    continue
-                kind = _kind(item)
-                stats, drop2 = await media_insights(token, media_id, kind)
-                dropped += drop2
                 posted_at = str(item.get("timestamp") or "")
                 existing = conn.execute("SELECT sage_kind, sage_id FROM social_media WHERE id = ?",
                                         (media_id,)).fetchone()
