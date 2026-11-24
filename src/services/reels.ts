@@ -109,6 +109,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 
 const enc = encodeURIComponent;
 
+/** The reel script format guide as text, to show inside the app. */
+export async function fetchReelFormat(): Promise<string> {
+  const res = await fetch(`${piBackendUrl()}/api/reels/format`, { headers: piHeaders({}) });
+  if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
+  return res.text();
+}
+
 /** Download the reel script format guide (REEL_FORMAT.md) from the Pi. */
 export async function downloadReelFormat(): Promise<void> {
   const res = await fetch(`${piBackendUrl()}/api/reels/format`, { headers: piHeaders({}) });

@@ -45,6 +45,9 @@ import { ProjectTypeBar } from './components/views/ProjectTypeBar';
 import { ContentSummary } from './components/views/ContentSummary';
 import { ContentHub } from './components/views/ContentHub';
 import { ProjectPipeline } from './components/views/ProjectPipeline';
+import { ProjectStats } from './components/views/ProjectStats';
+import { ContentCalendar } from './components/views/ContentCalendar';
+import { AddContent } from './components/content/AddContent';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
@@ -486,7 +489,13 @@ function MainApp() {
   };
   const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
   // A project's board and list group by its type's statuses; elsewhere, the usual four.
-  const pipelineOn = isProjectPage && presentationMode === 'pipeline' && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
+  // A content page (Auto Content on) has three tabs: Make (pipeline), Plan (its calendar), Stats.
+  const isContentPage = isProjectPage && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
+  const contentTab = isContentPage && (presentationMode === 'pipeline' || presentationMode === 'plan' || presentationMode === 'stats') ? presentationMode : '';
+  const contentOn = contentTab !== '';
+  // A content tab (pipeline/plan/stats) is not one of the item views. A phone keeps the
+  // mode when you open another project, so fall back to the list rather than show nothing.
+  const pageView = ['list', 'board', 'branches', 'timeline', 'table', 'calendar'].includes(presentationMode) ? presentationMode : 'list';
   const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
 
   return (
@@ -568,19 +577,19 @@ function MainApp() {
               />
             ) : (
               <div>
-                {isProjectPage && !pipelineOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
+                {isProjectPage && !contentOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
                 {isProjectPage && (
                   <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })}
-                    pipelineOn={pipelineOn} onPipeline={() => setPresentationMode(pipelineOn ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : 'pipeline')} />
+                    contentTab={contentTab} onContentTab={tab => setPresentationMode(contentTab === tab ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : tab)} />
                 )}
-                {isProjectPage && !pipelineOn && api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent && (
+                {isContentPage && !contentOn && (
                   <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
                 )}
-                {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} onOpenWeek={() => setActiveView('contentweek')} /> : (<>
+                {contentTab === 'pipeline' ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : contentTab === 'plan' ? <ContentCalendar projectId={activeWorkspace} /> : contentTab === 'stats' ? <ProjectStats /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
-                  count={presentationMode === 'calendar' || presentationMode === 'timeline' ? onlyDated({ items: workItems, count: shown }).count : shown}
+                  count={pageView === 'calendar' || pageView === 'timeline' ? onlyDated({ items: workItems, count: shown }).count : shown}
                   lifeContext={lifeContext}
                   onShowBoth={() => setLifeFilter('all')}
                   onShowList={() => setPresentationMode('list')}
@@ -601,11 +610,11 @@ function MainApp() {
                   </div>
                 ) : (
                   <AnimatePresence mode="wait">
-                    <motion.div key={presentationMode + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
+                    <motion.div key={pageView + activeWorkspace} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}>
                       <LayoutGroup>
-                        {presentationMode === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} hideHome={isProjectPage} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'branches' && (
+                        {pageView === 'list' && <ListView tasks={workItems} statuses={pageStatuses} onSelect={setSelectedItemId} selectedId={selectedItemId} onTransition={handleTransitionStatus} />}
+                        {pageView === 'board' && <BoardView tasks={workItems} statuses={pageStatuses} hideHome={isProjectPage} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {pageView === 'branches' && (
                           <ProjectBranchesView
                             items={workItems}
                             lifeContext={lifeContext}
@@ -615,9 +624,9 @@ function MainApp() {
                             onTransition={handleTransitionStatus}
                           />
                         )}
-                        {presentationMode === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}
-                        {presentationMode === 'table' && <TableView tasks={workItems} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
-                        {presentationMode === 'calendar' && <CalendarView tasks={workItems} content={scheduledContent} onSelect={setSelectedItemId} />}
+                        {pageView === 'timeline' && <TimelineView tasks={workItems} onSelect={setSelectedItemId} />}
+                        {pageView === 'table' && <TableView tasks={workItems} onSelect={setSelectedItemId} onTransition={handleTransitionStatus} />}
+                        {pageView === 'calendar' && <CalendarView tasks={workItems} content={scheduledContent} onSelect={setSelectedItemId} />}
                       </LayoutGroup>
                     </motion.div>
                   </AnimatePresence>
@@ -632,6 +641,7 @@ function MainApp() {
 
         <RingingBanner />
         <VoiceAssistant />
+        <AddContent />
         <MobileTabBar
           activeView={activeView} activeWorkspace={activeWorkspace} lifeContext={lifeContext}
           onCreate={() => setIsCreateModalOpen(true)}

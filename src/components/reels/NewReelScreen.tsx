@@ -2,12 +2,14 @@
 // The script is checked as you type (line numbers, scenes, how long it will run, which voice),
 // and Make is pinned to the bottom of a phone so it is always under the thumb.
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, BookOpen, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, ArrowRight, BookOpen, ClipboardPaste, FileUp, LoaderCircle, Mail, Mic, Sparkles, Wand2 } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { EXAMPLE_REEL, ReelCheck, downloadReelFormat, ReelMakerStatus, STYLE_LABELS, VOICE_PICKS, PHONON_PICKS, formatSeconds, reelsApi, withVoice } from '../../services/reels';
 import { useToast } from '../../context/ToastContext';
 import { Select } from '../common/Select';
+import { StepBar } from '../content/StepBar';
+import { ADD_STEPS } from '../content/AddContent';
 import type { Reel } from '../../services/reels';
 
 interface Props {
@@ -35,6 +37,10 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
   const [check, setCheck] = useState<ReelCheck | null>(null);
   const [checking, setChecking] = useState(false);
   const [busy, setBusy] = useState(false);
+  // New items go step by step: 0 script, 1 look, 2 when. Editing keeps everything on one screen.
+  const linear = !edit;
+  const [step, setStep] = useState(0);
+  const at = (n: number) => !linear || step === n;
   const file = useRef<HTMLInputElement>(null);
 
   const projects = useMemo(
@@ -96,6 +102,8 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
         <button type="button" onClick={onCancel} className="text-[13px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">Cancel</button>
       </div>
 
+      {linear && <StepBar steps={ADD_STEPS} current={step + 2} />}
+
       {status && !status.ready && (
         <div className="mb-4 rounded-2xl border border-amber-300/60 bg-amber-50 dark:bg-amber-500/10 dark:border-amber-500/30 p-3.5 text-[13px] text-amber-900 dark:text-amber-200 flex gap-2.5">
           <AlertTriangle size={16} className="shrink-0 mt-0.5" />
@@ -110,6 +118,7 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
       )}
 
       <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 md:p-5 space-y-4">
+        {at(0) && (<>
         <div className="flex flex-wrap items-center gap-2">
           <button type="button" onClick={paste} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-purple-600 text-white text-[13px] font-semibold active:scale-95 transition-transform">
             <ClipboardPaste size={15} /> Paste
@@ -185,8 +194,9 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
             {check.ok && errors.length === 0 && <div className="text-[13px] text-emerald-700 dark:text-emerald-400 font-semibold">Script OK: {check.scenes.length} slides</div>}
           </div>
         )}
+        </>)}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+        {at(1) && (<div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
           <div>
             <label className="field-label mb-1.5">Style</label>
             <Select value={effectiveStyle} onChange={setStyle} className="field w-full" aria-label="Style">
@@ -203,15 +213,17 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
               <option value="mine">Your own recording</option>
             </Select>
           </div>
+        </div>)}
+        {at(2) && (<div className="grid grid-cols-1 gap-3 pt-1">
           {!edit && (
-            <div className="sm:col-span-2">
+            <div>
               <label className="field-label mb-1.5" htmlFor="post-at">Post at (optional)</label>
               <input id="post-at" type="datetime-local" value={postAt} onChange={e => setPostAt(e.target.value)} className="field w-full" />
               {postAt && <p className="mt-1 text-[11.5px] text-gray-500">{ownVoice ? 'Record your voice next; the Pi makes it right after.' : 'The Pi saves the script and makes it about an hour before. Herald tells you when it is ready.'}</p>}
             </div>
           )}
-          {!edit && (
-            <div className="sm:col-span-2">
+          {!edit && !projectId && (
+            <div>
               <label className="field-label mb-1.5">Project</label>
               <Select value={project} onChange={setProject} className="field w-full" aria-label="Project">
                 <option value="">No project</option>
@@ -219,24 +231,34 @@ export function NewReelScreen({ status, projectId = '', edit = null, onMade, onC
               </Select>
             </div>
           )}
-        </div>
-        {!edit && projects.length === 0 && (
+        </div>)}
+        {at(2) && !edit && projects.length === 0 && (
           <p className="text-[12px] text-gray-400">To keep reels as tasks, edit a Content project and switch on <b>Use Auto Content</b>.</p>
         )}
       </div>
 
       <div className="fixed md:static bottom-[calc(4rem+env(safe-area-inset-bottom))] inset-x-0 z-20 md:z-auto p-3 md:p-0 md:mt-4 bg-white/90 dark:bg-[#141416]/90 md:bg-transparent backdrop-blur-xl md:backdrop-blur-none border-t md:border-0 border-black/5 dark:border-white/10 pb-3 md:pb-0">
         <div className="max-w-3xl mx-auto flex flex-col md:flex-row md:items-center gap-2 md:gap-4">
+          {linear && step > 0 && (
+            <button type="button" onClick={() => setStep(step - 1)} className="flex items-center justify-center gap-1.5 h-12 md:h-11 px-4 rounded-2xl bg-black/[0.05] dark:bg-white/10 text-[14px] font-semibold"><ArrowLeft size={16} /> Back</button>
+          )}
+          {linear && step < 2 ? (
+            <button type="button" disabled={step === 0 && (!script.trim() || (check ? !check.ok : false))} onClick={() => setStep(step + 1)}
+              className="flex-1 md:flex-none md:min-w-[200px] flex items-center justify-center gap-2 h-12 md:h-11 px-6 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] disabled:opacity-40 shadow-sm shadow-purple-600/20 active:scale-[0.98] transition">
+              Next <ArrowRight size={18} />
+            </button>
+          ) : (
           <button type="button" disabled={blocked} onClick={make}
             className="flex-1 md:flex-none md:min-w-[200px] flex items-center justify-center gap-2 h-12 md:h-11 px-6 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] disabled:opacity-40 shadow-sm shadow-purple-600/20 active:scale-[0.98] transition">
             {busy ? <LoaderCircle size={18} className="animate-spin" /> : <Wand2 size={18} />} {edit ? 'Make again' : ownVoice ? 'Next: record your voice' : postAt ? 'Save, make it later' : 'Make reel'}
           </button>
-          <p className="text-[12.5px] text-gray-500 flex items-start gap-1.5">
+          )}
+          {at(2) && <p className="text-[12.5px] text-gray-500 flex items-start gap-1.5">
             <Mail size={14} className="shrink-0 mt-0.5" />
             {status?.emailReady && status.emailOn
               ? <span>A few minutes. We'll email {status.emailTo || 'you'} when it's done, so you can close this page. Add music in Instagram.</span>
               : <span>A few minutes. Email is off or not set up, so keep this page open (Settings &gt; Notifications).</span>}
-          </p>
+          </p>}
         </div>
       </div>
     </div>
