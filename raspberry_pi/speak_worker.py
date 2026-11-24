@@ -90,7 +90,7 @@ def main() -> int:
     raw = Path(job["out"]).with_suffix(".raw.wav")
     v.write_wav(raw, np.concatenate([lead, speech]))
     gain = max(0.1, min(1.0, int(job.get("volume") or 80) / 100))
-    af = v.POLISH_CHAINS["natural"] + f",loudnorm=I=-16:TP=-1.5:LRA=11,volume={gain:.2f}"
+    af = v.POLISH_CHAINS["natural"] + f",loudnorm=I=-23:TP=-2:LRA=11,volume={gain:.2f}"
     proc = subprocess.run(["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-i", str(raw), "-af", af,
                            "-ac", "2", "-ar", "48000", "-sample_fmt", "s16", job["out"]],
                           capture_output=True, text=True, timeout=120)
