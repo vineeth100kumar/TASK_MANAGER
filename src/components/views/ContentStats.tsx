@@ -6,7 +6,7 @@
 // the Add flow. After that it is four tiles; "Details" opens the follower line Sage keeps
 // itself and the posts table, each measured against the page's own average.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ChevronDown, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert, Unlink } from 'lucide-react';
+import { BarChart3, ChevronDown, LoaderCircle, RefreshCw, TriangleAlert, Unlink } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import {
@@ -16,9 +16,7 @@ import {
 import { openPosts } from '../../services/posts';
 import { openReels } from '../../services/reels';
 import { useToast } from '../../context/ToastContext';
-import { StepBar } from '../content/StepBar';
 
-const CONNECT_STEPS = ['App', 'Allow', 'Paste'];
 const TILE_METRICS = ['reach', 'views', 'total_interactions'];
 
 function FollowerLine({ daily }: { daily: SocialOverview['daily'] }) {
@@ -47,45 +45,17 @@ function FollowerLine({ daily }: { daily: SocialOverview['daily'] }) {
 
 function Connect({ projectId, onDone }: { projectId: string; onDone: () => void }) {
   const { showToast } = useToast();
-  const [step, setStep] = useState(0);
-  const [appId, setAppId] = useState('');
-  const [appSecret, setAppSecret] = useState('');
-  const [code, setCode] = useState('');
-  const [authUrl, setAuthUrl] = useState<string | null>(null);
-  const [redirect, setRedirect] = useState('');
+  const [token, setToken] = useState('');
   const [busy, setBusy] = useState(false);
-
-  useEffect(() => {
-    socialApi.app().then(a => {
-      setAppId(a.appId || '');
-      setAuthUrl(a.authorizeUrl);
-      setRedirect(a.redirectUri);
-      if (a.appReady) setStep(1);
-    }).catch(() => undefined);
-  }, []);
-
-  const saveApp = async () => {
-    setBusy(true);
-    try {
-      const a = await socialApi.saveApp(appId.trim(), appSecret.trim());
-      setAuthUrl(a.authorizeUrl);
-      setRedirect(a.redirectUri);
-      setStep(1);
-    } catch (e: any) {
-      showToast(e.message || "Couldn't save that", 'error');
-    } finally {
-      setBusy(false);
-    }
-  };
 
   const connect = async () => {
     setBusy(true);
     try {
-      await socialApi.connect(projectId, code.trim());
+      await socialApi.connect(projectId, token.trim());
       showToast('Instagram connected');
       onDone();
     } catch (e: any) {
-      showToast(e.message || "Instagram wouldn't accept that", 'error');
+      showToast(e.message || "Instagram wouldn't accept that token", 'error');
       setBusy(false);
     }
   };
@@ -93,70 +63,26 @@ function Connect({ projectId, onDone }: { projectId: string; onDone: () => void 
   return (
     <div className="max-w-xl mx-auto">
       <h3 className="text-[17px] font-semibold mb-1">Connect this page's Instagram</h3>
-      <p className="text-[13px] text-gray-500 mb-4">Free, and it stays on your Pi. No Facebook Page and no app review.</p>
-      <StepBar steps={CONNECT_STEPS} current={step} />
+      <p className="text-[13px] text-gray-500 mb-4">Paste the access token from your Meta app. It stays on your Pi and never leaves it.</p>
       <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 md:p-5 space-y-4">
-        {step === 0 && (
-          <>
-            <p className="text-[13px] text-gray-600 dark:text-gray-300">
-              In your Meta app, open <b>Instagram &gt; API setup with Instagram login &gt; Business login settings</b> and
-              copy the two values. Add <code className="text-[12px]">{redirect || 'the redirect below'}</code> as an
-              OAuth redirect URI there.
-            </p>
-            <div>
-              <label className="field-label mb-1.5" htmlFor="ig-app-id">Instagram App ID</label>
-              <input id="ig-app-id" value={appId} onChange={e => setAppId(e.target.value)} className="field w-full" inputMode="numeric" />
-            </div>
-            <div>
-              <label className="field-label mb-1.5" htmlFor="ig-app-secret">Instagram app secret</label>
-              <input id="ig-app-secret" value={appSecret} onChange={e => setAppSecret(e.target.value)} className="field w-full" type="password" />
-              <p className="mt-1 text-[11.5px] text-gray-400">Kept on the Pi only, never synced to your phone.</p>
-            </div>
-            <button type="button" disabled={!appId.trim() || !appSecret.trim() || busy} onClick={saveApp}
-              className="h-11 w-full rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[14px] disabled:opacity-40">
-              {busy ? 'Saving' : 'Next'}
-            </button>
-          </>
-        )}
-        {step === 1 && (
-          <>
-            <p className="text-[13px] text-gray-600 dark:text-gray-300">
-              Open this and allow access with the Instagram account for this page. It must be a
-              <b> professional</b> account (Creator or Business).
-            </p>
-            {authUrl ? (
-              <a href={authUrl} target="_blank" rel="noreferrer"
-                className="flex items-center justify-center gap-1.5 h-11 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[14px]">
-                Allow on Instagram <ExternalLink size={15} />
-              </a>
-            ) : <p className="text-[13px] text-amber-600">Save the app id and secret first.</p>}
-            <p className="text-[12.5px] text-gray-500">
-              Instagram then sends you to <code className="text-[11.5px]">{redirect}</code>, which won't load. That's
-              fine: copy the <b>code</b> from the address bar.
-            </p>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setStep(0)} className="h-10 px-4 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[14px] font-semibold">Back</button>
-              <button type="button" onClick={() => setStep(2)} className="flex-1 h-10 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[14px] font-semibold">I have the code</button>
-            </div>
-          </>
-        )}
-        {step === 2 && (
-          <>
-            <div>
-              <label className="field-label mb-1.5" htmlFor="ig-code">The code from the address bar</label>
-              <textarea id="ig-code" value={code} onChange={e => setCode(e.target.value)} rows={3}
-                placeholder="AQB... (everything after code= )" className="field w-full font-mono text-[12.5px]" />
-              <p className="mt-1 text-[11.5px] text-gray-400">A code lasts an hour and works once. Sage swaps it for a 60-day token and keeps that fresh.</p>
-            </div>
-            <div className="flex gap-2">
-              <button type="button" onClick={() => setStep(1)} className="h-11 px-4 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[14px] font-semibold">Back</button>
-              <button type="button" disabled={!code.trim() || busy} onClick={connect}
-                className="flex-1 h-11 rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[14px] disabled:opacity-40">
-                {busy ? <LoaderCircle size={16} className="animate-spin mx-auto" /> : 'Connect'}
-              </button>
-            </div>
-          </>
-        )}
+        <ol className="text-[13px] text-gray-600 dark:text-gray-300 space-y-1.5 list-decimal pl-4">
+          <li>In your Meta app, open <b>Instagram &gt; API setup with Unified login</b>.</li>
+          <li>Add your Instagram account as an <b>Instagram Tester</b> (App roles &gt; Roles), and accept the invite in the Instagram app.</li>
+          <li>Under <b>Generate access tokens</b>, pick your account and copy the token. (A system-user token never expires.)</li>
+        </ol>
+        <div>
+          <label className="field-label mb-1.5" htmlFor="ig-token">Access token</label>
+          <textarea id="ig-token" value={token} onChange={e => setToken(e.target.value)} rows={3}
+            placeholder="EAAG... or IGAA..." className="field w-full font-mono text-[12.5px]" />
+          <p className="mt-1 text-[11.5px] text-gray-400">Treat it like a password. Kept on the Pi only, never synced to your phone.</p>
+        </div>
+        <button type="button" disabled={!token.trim() || busy} onClick={connect}
+          className="h-11 w-full rounded-xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[14px] disabled:opacity-40">
+          {busy ? <LoaderCircle size={16} className="animate-spin mx-auto" /> : 'Connect'}
+        </button>
+        <p className="text-[11.5px] text-gray-400">
+          On an older Meta app that still has "API setup with Instagram login", you can paste the code from the redirect here instead — Sage takes either.
+        </p>
       </div>
     </div>
   );

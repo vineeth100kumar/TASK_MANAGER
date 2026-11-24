@@ -16,6 +16,7 @@ import sqlite3
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -110,6 +111,59 @@ class SocialStorageTest(unittest.TestCase):
             self.assertEqual(conn.execute("SELECT COUNT(*) FROM social_day").fetchone()[0], 0)
         finally:
             conn.close()
+
+
+class LinkAccountTest(unittest.IsolatedAsyncioTestCase):
+    """How a pasted value is routed: a Unified-login system-user token vs the old code/token."""
+
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        social.connect(os.path.join(self.dir.name, "sage.db"))
+
+    async def asyncSetUp(self):
+        # pull() hits the network; stand it in.
+        patch = mock.patch.object(social, "pull", mock.AsyncMock(return_value={"ok": True}))
+        patch.start()
+        self.addCleanup(patch.stop)
+
+    async def test_a_long_token_takes_the_unified_facebook_path_and_never_expires(self):
+        with mock.patch.object(social, "assigned_accounts",
+                               mock.AsyncMock(return_value=[{"id": "178", "username": "mind"}])), \
+             mock.patch.object(social, "account",
+                               mock.AsyncMock(return_value={"username": "mind", "profile_picture_url": "p.jpg"})) as acct:
+            await social.link_account("p1", "EAA" + "x" * 90)
+        row = social.account_row("p1")
+        self.assertEqual(row["host"], social.GRAPH_FB)
+        self.assertEqual(row["ig_user_id"], "178")
+        self.assertEqual(row["username"], "mind")
+        self.assertIsNone(row["token_expires_at"])   # a system-user token never expires
+        # the account was read off the IG node, not /me
+        self.assertEqual(acct.await_args.kwargs.get("ig_user_id"), "178")
+        self.assertEqual(acct.await_args.kwargs.get("host"), social.GRAPH_FB)
+
+    async def test_a_long_token_with_no_assigned_account_falls_back_to_instagram_login(self):
+        # Unified login returns nothing -> treat it as an old Instagram-login long-lived token.
+        with mock.patch.object(social, "assigned_accounts", mock.AsyncMock(return_value=[])), \
+             mock.patch.object(social, "_long_lived", mock.AsyncMock(return_value=("tok", "2027-01-01T00:00:00+00:00"))), \
+             mock.patch.object(social, "account",
+                               mock.AsyncMock(return_value={"user_id": "9", "username": "mind"})):
+            await social.link_account("p1", "IGAA" + "y" * 90)
+        row = social.account_row("p1")
+        self.assertEqual(row["host"], social.GRAPH)
+        self.assertEqual(row["ig_user_id"], "9")
+        self.assertEqual(row["token_expires_at"], "2027-01-01T00:00:00+00:00")
+
+    async def test_a_short_code_takes_the_old_exchange_path(self):
+        with mock.patch.object(social, "assigned_accounts", mock.AsyncMock(return_value=[])) as asg, \
+             mock.patch.object(social, "exchange_code",
+                               mock.AsyncMock(return_value=("tok", "2027-01-01T00:00:00+00:00"))) as ex, \
+             mock.patch.object(social, "account",
+                               mock.AsyncMock(return_value={"user_id": "9", "username": "mind"})):
+            await social.link_account("p1", "AQBshortcode")
+        ex.assert_awaited_once()
+        asg.assert_not_awaited()   # a short code is never tried as a token
+        self.assertEqual(social.account_row("p1")["host"], social.GRAPH)
 
 
 class InsightsTest(unittest.TestCase):
