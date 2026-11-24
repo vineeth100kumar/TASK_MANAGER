@@ -46,7 +46,8 @@ from pydantic import BaseModel
 import logstore
 import system_health
 
-GRAPH = "https://graph.instagram.com"
+GRAPH = "https://graph.instagram.com"       # Instagram-login path (older apps)
+GRAPH_FB = "https://graph.facebook.com"      # Unified-login path (newer apps): a system-user token
 API = "https://api.instagram.com"
 VERSION = os.getenv("SAGE_SOCIAL_API_VERSION", "v25.0")
 AUTHORIZE = "https://www.instagram.com/oauth/authorize"
@@ -63,6 +64,8 @@ MEDIA_METRICS = {
     "STORY": ["reach", "views", "replies", "shares", "navigation"],
 }
 ACCOUNT_FIELDS = "user_id,username,account_type,followers_count,follows_count,media_count,profile_picture_url"
+# The IG node on graph.facebook.com is keyed by id and has no account_type.
+ACCOUNT_FIELDS_FB = "username,followers_count,follows_count,media_count,profile_picture_url"
 MEDIA_FIELDS = ("id,caption,media_type,media_product_type,permalink,timestamp,"
                 "thumbnail_url,media_url,like_count,comments_count")
 # Day 1, 3, 7 and 30 snapshots give a growth curve without re-pulling everything.
@@ -94,7 +97,8 @@ def connect(db_path: str) -> None:
             connected_at TEXT,
             last_pull_at TEXT,
             problem TEXT,
-            dropped TEXT
+            dropped TEXT,
+            host TEXT
         );
         CREATE TABLE IF NOT EXISTS social_day (
             project_id TEXT,
@@ -128,6 +132,10 @@ def connect(db_path: str) -> None:
         );
         """
     )
+    # host was added when Meta moved newer apps to Unified login (graph.facebook.com).
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(social_account)").fetchall()}
+    if "host" not in cols:
+        conn.execute("ALTER TABLE social_account ADD COLUMN host TEXT")
     conn.commit()
     conn.close()
 
@@ -210,8 +218,8 @@ def _meta_message(res: httpx.Response) -> str:
     return str(msg)
 
 
-async def _get(client: httpx.AsyncClient, path: str, params: dict) -> dict:
-    res = await client.get(f"{GRAPH}/{VERSION}{path}", params=params, timeout=30)
+async def _get(client: httpx.AsyncClient, path: str, params: dict, host: str = GRAPH) -> dict:
+    res = await client.get(f"{host}/{VERSION}{path}", params=params, timeout=30)
     if res.status_code >= 400:
         raise SocialError(_meta_message(res), 502)
     return res.json()
@@ -259,21 +267,34 @@ async def refresh_token(token: str) -> Tuple[str, str]:
         return new, _iso(_utcnow() + datetime.timedelta(seconds=secs))
 
 
-async def account(token: str) -> dict:
-    """The connected account itself. Falls back to fewer fields if Meta rejects one."""
+async def assigned_accounts(token: str) -> List[dict]:
+    """Unified login (graph.facebook.com): the Instagram accounts this system-user token
+    can act for. /me is the system user, so the account is read off this edge instead."""
+    async with httpx.AsyncClient() as client:
+        body = await _get(client, "/me/assigned_instagram_accounts",
+                          {"fields": "id,username", "access_token": token}, host=GRAPH_FB)
+        return list(body.get("data") or [])
+
+
+async def account(token: str, host: str = GRAPH, ig_user_id: str = "") -> dict:
+    """The connected account itself. On graph.facebook.com it reads the IG node by id
+    (/me is the system user there); on graph.instagram.com it reads /me. Falls back to
+    fewer fields if Meta rejects one."""
+    node = f"/{ig_user_id}" if (host == GRAPH_FB and ig_user_id) else "/me"
+    full = ACCOUNT_FIELDS_FB if host == GRAPH_FB else ACCOUNT_FIELDS
     async with httpx.AsyncClient() as client:
         try:
-            return await _get(client, "/me", {"fields": ACCOUNT_FIELDS, "access_token": token})
+            return await _get(client, node, {"fields": full, "access_token": token}, host=host)
         except SocialError:
-            return await _get(client, "/me", {"fields": "user_id,username,followers_count,media_count",
-                                              "access_token": token})
+            return await _get(client, node, {"fields": "username,followers_count,media_count",
+                                             "access_token": token}, host=host)
 
 
 _UNSUPPORTED = re.compile(r"metric\[?\d*\]?|unsupported|does not support|invalid|unknown", re.I)
 
 
 async def _insights(client: httpx.AsyncClient, path: str, metrics: List[str], token: str,
-                    extra: Optional[dict] = None) -> Tuple[Dict[str, float], List[str]]:
+                    extra: Optional[dict] = None, host: str = GRAPH) -> Tuple[Dict[str, float], List[str]]:
     """Ask for metrics and keep what Meta gives. A rejected metric is dropped and
     named, so one retired metric can't lose the whole pull."""
     wanted = list(metrics)
@@ -281,15 +302,15 @@ async def _insights(client: httpx.AsyncClient, path: str, metrics: List[str], to
     if wanted:
         params = {"metric": ",".join(wanted), "access_token": token, **(extra or {})}
         try:
-            body = await _get(client, path, params)
+            body = await _get(client, path, params, host=host)
         except SocialError as e:
             if len(wanted) == 1 or not _UNSUPPORTED.search(str(e)):
                 dropped.extend(wanted)
                 return {}, dropped
             # Meta won't always say which one it hates: halve and try each side.
             half = len(wanted) // 2
-            left, l_drop = await _insights(client, path, wanted[:half], token, extra)
-            right, r_drop = await _insights(client, path, wanted[half:], token, extra)
+            left, l_drop = await _insights(client, path, wanted[:half], token, extra, host)
+            right, r_drop = await _insights(client, path, wanted[half:], token, extra, host)
             left.update(right)
             return left, dropped + l_drop + r_drop
         out: Dict[str, float] = {}
@@ -305,23 +326,24 @@ async def _insights(client: httpx.AsyncClient, path: str, metrics: List[str], to
     return {}, dropped
 
 
-async def account_insights(token: str, ig_user_id: str) -> Tuple[Dict[str, float], List[str]]:
+async def account_insights(token: str, ig_user_id: str, host: str = GRAPH) -> Tuple[Dict[str, float], List[str]]:
     async with httpx.AsyncClient() as client:
         return await _insights(client, f"/{ig_user_id}/insights", ACCOUNT_METRICS, token,
-                               {"period": "day", "metric_type": "total_value"})
+                               {"period": "day", "metric_type": "total_value"}, host=host)
 
 
-async def media_list(token: str, limit: int) -> List[dict]:
+async def media_list(token: str, limit: int, host: str = GRAPH, ig_user_id: str = "") -> List[dict]:
+    node = f"/{ig_user_id}/media" if (host == GRAPH_FB and ig_user_id) else "/me/media"
     async with httpx.AsyncClient() as client:
-        body = await _get(client, "/me/media", {"fields": MEDIA_FIELDS, "limit": limit,
-                                                "access_token": token})
+        body = await _get(client, node, {"fields": MEDIA_FIELDS, "limit": limit,
+                                         "access_token": token}, host=host)
         return list(body.get("data") or [])
 
 
-async def media_insights(token: str, media_id: str, kind: str) -> Tuple[Dict[str, float], List[str]]:
+async def media_insights(token: str, media_id: str, kind: str, host: str = GRAPH) -> Tuple[Dict[str, float], List[str]]:
     metrics = MEDIA_METRICS.get(kind) or MEDIA_METRICS["FEED"]
     async with httpx.AsyncClient() as client:
-        return await _insights(client, f"/{media_id}/insights", metrics, token)
+        return await _insights(client, f"/{media_id}/insights", metrics, token, host=host)
 
 
 # --- Pulling ---
@@ -356,7 +378,7 @@ def _save_account(project_id: str, **fields: Any) -> None:
     conn = _db()
     try:
         keys = ["project_id", "ig_user_id", "username", "account_type", "picture", "token",
-                "token_expires_at", "connected_at", "last_pull_at", "problem", "dropped"]
+                "token_expires_at", "connected_at", "last_pull_at", "problem", "dropped", "host"]
         conn.execute(
             f"INSERT OR REPLACE INTO social_account ({','.join(keys)}) VALUES ({','.join('?' * len(keys))})",
             [row.get(k) for k in keys])
@@ -380,8 +402,32 @@ def forget(project_id: str) -> None:
 
 
 async def link_account(project_id: str, code_or_token: str) -> dict:
-    """Connect a page: a pasted code is swapped for a token, a pasted token is used."""
-    value = code_or_token.strip()
+    """Connect a page. Three kinds of input, newest first:
+      - a Unified-login system-user token (newer apps): long, and /me/assigned_instagram_accounts
+        on graph.facebook.com names the account. It never expires.
+      - a short OAuth code from the old Instagram-login flow: swapped for a 60-day token.
+      - an old Instagram-login long-lived token, pasted."""
+    value = code_or_token.strip().rstrip("#_")
+
+    # A long value is a token; try the Unified-login path (graph.facebook.com) first.
+    if len(value) >= 60:
+        try:
+            linked = await assigned_accounts(value)
+        except SocialError:
+            linked = []
+        if linked:
+            acct = linked[0]
+            ig_user_id = str(acct.get("id") or "")
+            me = await account(value, host=GRAPH_FB, ig_user_id=ig_user_id)
+            _save_account(project_id, ig_user_id=ig_user_id,
+                          username=str(me.get("username") or acct.get("username") or ""),
+                          account_type="", picture=str(me.get("profile_picture_url") or ""),
+                          token=value, token_expires_at=None,   # a system-user token never expires
+                          connected_at=_iso(_utcnow()), problem=None, host=GRAPH_FB)
+            await pull(project_id)
+            return status(project_id)
+
+    # Old Instagram-login path: a short code, or a pasted long-lived token.
     if len(value) < 60 and not value.startswith("IG"):
         token, expires = await exchange_code(value)
     else:
@@ -391,7 +437,7 @@ async def link_account(project_id: str, code_or_token: str) -> dict:
     _save_account(project_id, ig_user_id=str(me.get("user_id") or me.get("id") or ""),
                   username=str(me.get("username") or ""), account_type=str(me.get("account_type") or ""),
                   picture=str(me.get("profile_picture_url") or ""), token=token,
-                  token_expires_at=expires, connected_at=_iso(_utcnow()), problem=None)
+                  token_expires_at=expires, connected_at=_iso(_utcnow()), problem=None, host=GRAPH)
     await pull(project_id)
     return status(project_id)
 
@@ -449,13 +495,15 @@ async def pull(project_id: str) -> dict:
     if not row or not row.get("token"):
         raise SocialError("That page has no Instagram account connected yet.", 404)
     token = str(row["token"])
+    host = str(row.get("host") or GRAPH)
     dropped: List[str] = []
     try:
-        me = await account(token)
-        ig_user_id = str(row.get("ig_user_id") or me.get("user_id") or me.get("id") or "")
+        ig_user_id = str(row.get("ig_user_id") or "")
+        me = await account(token, host=host, ig_user_id=ig_user_id)
+        ig_user_id = ig_user_id or str(me.get("user_id") or me.get("id") or "")
         if not ig_user_id:
             raise SocialError("Instagram didn't say which account this token is for. Connect the page again.")
-        metrics, drop1 = await account_insights(token, ig_user_id)
+        metrics, drop1 = await account_insights(token, ig_user_id, host=host)
         dropped += drop1
         day = _local_now().date().isoformat()
         conn = _db()
@@ -469,7 +517,7 @@ async def pull(project_id: str) -> dict:
         finally:
             conn.close()
 
-        media = await media_list(token, MEDIA_PER_PULL)
+        media = await media_list(token, MEDIA_PER_PULL, host=host, ig_user_id=ig_user_id)
         # Ask Instagram for every post's numbers BEFORE touching the database. Writing
         # as we went would hold a write transaction open across 25 network calls, which
         # is how "database is locked" started on a slow Pi last time.
@@ -479,7 +527,7 @@ async def pull(project_id: str) -> dict:
             if not media_id:
                 continue
             kind = _kind(item)
-            stats, drop2 = await media_insights(token, media_id, kind)
+            stats, drop2 = await media_insights(token, media_id, kind, host=host)
             dropped += drop2
             fetched.append((item, kind, stats))
 
