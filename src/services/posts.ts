@@ -127,6 +127,13 @@ export const postsApi = {
 };
 
 /** A file from the Pi as a Blob (slides, the ZIP, the QR code). */
+/** The post script format guide as text, to show inside the app. */
+export async function fetchPostFormat(): Promise<string> {
+  const res = await fetch(`${piBackendUrl()}/api/posts/format`, { headers: piHeaders({}) });
+  if (!res.ok) throw new Error(`The Pi answered ${res.status}`);
+  return res.text();
+}
+
 /** Download the post script format guide (POST_FORMAT.md) from the Pi. */
 export async function downloadPostFormat(): Promise<void> {
   const res = await fetch(`${piBackendUrl()}/api/posts/format`, { headers: piHeaders({}) });

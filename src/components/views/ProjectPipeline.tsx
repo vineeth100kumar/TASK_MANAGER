@@ -11,6 +11,7 @@ import { api } from '../../services/api';
 import type { Project, WorkItem } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
 import { useDataChanges } from '../../hooks/useDataChanges';
+import { openAddContent } from '../content/AddContent';
 import { ColumnId, Piece, columnOf, drawAtText, toLocalInput, toPiece, whenText } from '../../services/contentPieces';
 
 const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: string; drop: boolean }[] = [
@@ -23,7 +24,7 @@ const COLUMNS: { id: ColumnId; label: string; icon: typeof Lightbulb; tint: stri
   { id: 'dropped', label: "Won't post", icon: Ban, tint: 'text-gray-400', drop: true },
 ];
 
-export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { projectId: string; onSelectTask: (id: string) => void; onOpenWeek?: () => void }) {
+export function ProjectPipeline({ projectId, onSelectTask }: { projectId: string; onSelectTask: (id: string) => void }) {
   const { showToast } = useToast();
   const [pieces, setPieces] = useState<Piece[] | null>(null);
   const [tasks, setTasks] = useState<WorkItem[]>([]);
@@ -176,9 +177,11 @@ export function ProjectPipeline({ projectId, onSelectTask, onOpenWeek }: { proje
   return (
     <div>
       <div className="flex flex-wrap items-center gap-2 mb-4">
-        <button type="button" onClick={() => openPosts({ projectId, newPost: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[13px] font-semibold"><Plus size={14} /> New post</button>
-        <button type="button" onClick={() => openReels({ projectId, newReel: true })} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-[13px] font-semibold"><Plus size={14} /> New reel</button>
-        <button type="button" onClick={() => onOpenWeek?.()} className="flex items-center gap-1.5 h-9 px-3 rounded-xl bg-black/[0.05] dark:bg-white/10 text-[12.5px] font-semibold ml-auto"><CalendarClock size={14} /> Content week</button>
+        <button type="button" onClick={() => openAddContent(projectId)} className="flex items-center gap-1.5 h-9 px-3.5 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[13px] font-semibold"><Plus size={14} /> Add</button>
+        <span className="ml-auto flex items-center gap-1 text-[12px] text-gray-500">Edit made ones:
+          <button type="button" onClick={() => openPosts({ projectId })} className="flex items-center gap-1 h-7 px-2.5 rounded-full font-semibold bg-black/[0.05] dark:bg-white/10"><GalleryHorizontal size={12} /> Posts</button>
+          <button type="button" onClick={() => openReels({ projectId })} className="flex items-center gap-1 h-7 px-2.5 rounded-full font-semibold bg-black/[0.05] dark:bg-white/10"><Clapperboard size={12} /> Reels</button>
+        </span>
       </div>
       {error && <p className="text-[13px] text-red-600 mb-3">{error}</p>}
       {<div className="flex gap-4 overflow-x-auto pb-12 min-h-[60vh] items-start snap-x">

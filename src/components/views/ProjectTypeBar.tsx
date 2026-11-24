@@ -1,7 +1,6 @@
 import { useEffect, useState } from 'react';
-import { CheckCircle2, Clapperboard, Workflow, GalleryHorizontal, Pencil, Plus, RotateCcw } from 'lucide-react';
-import { openPosts } from '../../services/posts';
-import { openReels } from '../../services/reels';
+import { BarChart3, CalendarClock, CheckCircle2, Workflow, Pencil, Plus, RotateCcw } from 'lucide-react';
+import { openAddContent } from '../content/AddContent';
 import { api } from '../../services/api';
 import type { LifeContext, Project } from '../../services/types';
 import { selectItems } from '../../services/items';
@@ -10,9 +9,16 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { useToast } from '../../context/ToastContext';
 import { ProjectTypeMenu } from '../common/ProjectTypePicker';
 
+export type ContentTab = 'pipeline' | 'plan' | 'stats';
+const CONTENT_TABS: { id: ContentTab; label: string; icon: typeof Workflow; title: string }[] = [
+  { id: 'pipeline', label: 'Make', icon: Workflow, title: 'Ideas, scripts, posts and reels through to posted' },
+  { id: 'plan', label: 'Plan', icon: CalendarClock, title: "This page's calendar" },
+  { id: 'stats', label: 'Stats', icon: BarChart3, title: "This page's Instagram numbers" },
+];
+
 // The strip at the top of a project's page: its type (tap to change) and one
 // chip per status that type uses, with a count; a chip shows only that status.
-export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, pipelineOn, onPipeline }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void; pipelineOn?: boolean; onPipeline?: () => void }) {
+export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, contentTab, onContentTab }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void; contentTab?: ContentTab | ''; onContentTab?: (tab: ContentTab) => void }) {
   const { showToast } = useToast();
   const read = () => {
     // The same items the page below starts from (before its filters), so
@@ -70,28 +76,17 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, pipelin
           title={project.completedAt ? 'Reopen this project' : 'Mark this project complete'}>
           {project.completedAt ? <><RotateCcw size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Mark complete</>}
         </button>
-        {project.autoContent && (
+        {project.autoContent && onContentTab && (
           <>
-            {onPipeline && (
-              <button type="button" onClick={onPipeline} aria-pressed={pipelineOn}
-                className={`flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold transition-opacity ${pipelineOn ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 hover:opacity-80'}`}
-                title="Ideas, scripts, posts and reels through to posted">
-                <Workflow size={12} /> Pipeline
+            {CONTENT_TABS.map(t => (
+              <button key={t.id} type="button" onClick={() => onContentTab(t.id)} aria-pressed={contentTab === t.id} title={t.title}
+                className={`flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold transition-colors ${contentTab === t.id ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 hover:opacity-80'}`}>
+                <t.icon size={12} /> {t.label}
               </button>
-            )}
-            <button type="button" onClick={() => openPosts({ projectId: project.id })}
-              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-pink-100 text-pink-700 dark:bg-pink-500/15 dark:text-pink-300 hover:opacity-80 transition-opacity"
-              title="Posts made with Auto Content">
-              <GalleryHorizontal size={12} /> Posts
-            </button>
-            <button type="button" onClick={() => openPosts({ projectId: project.id, newPost: true })}
+            ))}
+            <button type="button" onClick={() => openAddContent(project.id)}
               className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors">
-              <Plus size={12} /> New post
-            </button>
-            <button type="button" onClick={() => openReels({ projectId: project.id })}
-              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-rose-100 text-rose-700 dark:bg-rose-500/15 dark:text-rose-300 hover:opacity-80 transition-opacity"
-              title="Reels made with Auto Content">
-              <Clapperboard size={12} /> Reels
+              <Plus size={12} /> Add
             </button>
           </>
         )}

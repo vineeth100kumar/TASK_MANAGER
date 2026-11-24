@@ -45,6 +45,9 @@ import { ProjectTypeBar } from './components/views/ProjectTypeBar';
 import { ContentSummary } from './components/views/ContentSummary';
 import { ContentHub } from './components/views/ContentHub';
 import { ProjectPipeline } from './components/views/ProjectPipeline';
+import { ProjectStats } from './components/views/ProjectStats';
+import { ContentCalendar } from './components/views/ContentCalendar';
+import { AddContent } from './components/content/AddContent';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
 
@@ -486,7 +489,10 @@ function MainApp() {
   };
   const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
   // A project's board and list group by its type's statuses; elsewhere, the usual four.
-  const pipelineOn = isProjectPage && presentationMode === 'pipeline' && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
+  // A content page (Auto Content on) has three tabs: Make (pipeline), Plan (its calendar), Stats.
+  const isContentPage = isProjectPage && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
+  const contentTab = isContentPage && (presentationMode === 'pipeline' || presentationMode === 'plan' || presentationMode === 'stats') ? presentationMode : '';
+  const contentOn = contentTab !== '';
   const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
 
   return (
@@ -568,15 +574,15 @@ function MainApp() {
               />
             ) : (
               <div>
-                {isProjectPage && !pipelineOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
+                {isProjectPage && !contentOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
                 {isProjectPage && (
                   <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })}
-                    pipelineOn={pipelineOn} onPipeline={() => setPresentationMode(pipelineOn ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : 'pipeline')} />
+                    contentTab={contentTab} onContentTab={tab => setPresentationMode(contentTab === tab ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : tab)} />
                 )}
-                {isProjectPage && !pipelineOn && api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent && (
+                {isContentPage && !contentOn && (
                   <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
                 )}
-                {pipelineOn ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} onOpenWeek={() => setActiveView('contentweek')} /> : (<>
+                {contentTab === 'pipeline' ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : contentTab === 'plan' ? <ContentCalendar projectId={activeWorkspace} /> : contentTab === 'stats' ? <ProjectStats /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
@@ -632,6 +638,7 @@ function MainApp() {
 
         <RingingBanner />
         <VoiceAssistant />
+        <AddContent />
         <MobileTabBar
           activeView={activeView} activeWorkspace={activeWorkspace} lifeContext={lifeContext}
           onCreate={() => setIsCreateModalOpen(true)}
