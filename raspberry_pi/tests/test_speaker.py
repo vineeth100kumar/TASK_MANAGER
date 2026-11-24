@@ -701,6 +701,55 @@ class HeraldNoticeTest(unittest.TestCase):
             for c in run.call_args_list:
                 c.args[0].close()
 
+    def test_briefing_arrival_blocks_a_second_greeting(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True, available=True)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_arrival(3 * 3600)
+            self.assertEqual(s._herald[-1]["action"], "briefing")
+            self.assertGreater(s._last_welcome_at, 0)
+            before = run.call_count
+            s.on_arrival(10)   # Bluetooth flap moments later
+            self.assertEqual(run.call_count, before)
+            self.assertEqual(s._herald[-1]["action"], "silent")
+            self.assertIn("greeting was said", s._herald[-1]["why"])
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_recap_not_refired_by_a_flap(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True, available=True)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            s.on_arrival(3 * 3600)
+            first = run.call_count
+            s.on_arrival(3 * 3600)
+            self.assertEqual(run.call_count, first)
+            for c in run.call_args_list:
+                c.args[0].close()
+
+    def test_back_online_blocks_briefing_right_after(self):
+        s = speaker.Speaker()
+        s.loop = mock.Mock()
+        s.phone = mock.Mock(home=True, available=True)
+        with mock.patch.object(speaker, "has_output", return_value=True), \
+             mock.patch.object(speaker, "in_quiet", return_value=False), \
+             mock.patch.object(speaker.asyncio, "run_coroutine_threadsafe") as run:
+            self.assertTrue(s.on_back_online({"reasons": [{"kind": "update"}]}))
+            before = run.call_count
+            s.on_arrival(3 * 3600)   # would be a briefing
+            self.assertEqual(s._herald[-1]["action"], "silent")
+            # no greeting scheduled (only a recap may be)
+            self.assertLessEqual(run.call_count - before, 1)
+            self.assertNotEqual(s._herald[-1]["action"], "briefing")
+            for c in run.call_args_list:
+                c.args[0].close()
+
     def test_spam_filter_skips_phone_numbers(self):
         s = speaker.Speaker()
         s.loop = mock.Mock()

@@ -119,6 +119,60 @@ class UptimeTests(unittest.TestCase):
         uptime.beat(now=utc(2026, 10, 30, 9, 0, 5))
         self.assertTrue(uptime.read_state()["clean"])
 
+    def drive_run_once(self, announce):
+        """Run uptime.run() through one settled tick with an outage, then stop it."""
+        import asyncio
+        outage = {"downAt": "x", "upAt": "y", "reasons": [{"kind": "update"}]}
+        sleeps = []
+
+        async def fake_sleep(_s):
+            sleeps.append(1)
+            if len(sleeps) > 1:
+                raise asyncio.CancelledError()
+
+        calls = []
+
+        def clock():
+            calls.append(1)
+            return 0.0 if len(calls) == 1 else 1000.0
+
+        with mock.patch.object(uptime, "on_start", return_value=outage), \
+                mock.patch.object(uptime.system_health, "beat"), \
+                mock.patch.object(uptime, "beat"), \
+                mock.patch.object(uptime, "send_pending", return_value="sent"), \
+                mock.patch.object(uptime.asyncio, "sleep", fake_sleep), \
+                mock.patch.object(uptime, "time", mock.Mock(monotonic=clock)), \
+                mock.patch.object(uptime, "on_back_online", announce):
+            with self.assertRaises(asyncio.CancelledError):
+                asyncio.run(uptime.run())
+
+    def test_back_online_line_not_repeated_across_restarts(self):
+        said = mock.Mock(return_value=True)
+        self.drive_run_once(said)
+        self.assertEqual(said.call_count, 1)
+        self.assertIsNotNone(uptime._parse(uptime.read_state().get("lastBackOnlineAt")))
+        # a second process restarting moments later must stay quiet
+        again = mock.Mock(return_value=True)
+        self.drive_run_once(again)
+        self.assertFalse(again.called)
+        # once the window has passed it may speak again
+        old = uptime._now() - datetime.timedelta(seconds=uptime.ANNOUNCE_GAP_SECONDS + 5)
+        state = uptime.read_state()
+        state["lastBackOnlineAt"] = uptime._iso(old)
+        uptime.write_state(state)
+        later = mock.Mock(return_value=True)
+        self.drive_run_once(later)
+        self.assertEqual(later.call_count, 1)
+
+    def test_on_start_keeps_the_announce_stamp(self):
+        uptime.write_state({"lastBackOnlineAt": "2026-10-30T09:00:00+00:00", "lastBeat": "2026-10-30T09:00:00+00:00"})
+        uptime.on_start(now=utc(2026, 10, 30, 9, 1, 0), commit="a")
+        self.assertEqual(uptime.read_state()["lastBackOnlineAt"], "2026-10-30T09:00:00+00:00")
+
+    def test_silent_back_online_does_not_start_the_gap(self):
+        self.drive_run_once(mock.Mock(return_value=None))
+        self.assertIsNone(uptime.read_state().get("lastBackOnlineAt"))
+
 
 if __name__ == "__main__":
     unittest.main()

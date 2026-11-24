@@ -1171,6 +1171,7 @@ class Speaker:
         self._weather_at = 0.0
         self._herald: Deque[dict] = deque(maxlen=8)   # what Herald last decided, newest last
         self._last_welcome_at = 0.0
+        self._last_recap_at = 0.0
         self._last_goodbye_at = 0.0
         self._daily_day = ""      # the day whose welcome/goodbye lines are made
         self._ready: Dict[str, tuple] = {}     # kind -> (text, wav, made at): the next welcome/goodbye, made ahead
@@ -1791,20 +1792,23 @@ class Speaker:
         if in_quiet(self.now(), settings["quietStart"], settings["quietEnd"]):
             return self._note(event, "silent", "quiet hours")
         now = time.time()
-        if settings.get("recap", True) and away_s >= herald_extras.RECAP_MIN_AWAY_S:
+        if settings.get("recap", True) and away_s >= herald_extras.RECAP_MIN_AWAY_S \
+                and now - self._last_recap_at >= HERALD_GAP_S:
+            self._last_recap_at = now
             self._recap, self._recap_until = [], now + RECAP_WAIT_S - 2
             asyncio.run_coroutine_threadsafe(self._deliver_recap(now - away_s), self.loop)
+        if now - self._last_welcome_at < HERALD_GAP_S:
+            return self._note(event, "silent", f"a greeting was said under {int(HERALD_GAP_S)} s ago")
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
+            self._last_welcome_at = now
             self._note(event, "briefing")
             asyncio.run_coroutine_threadsafe(self.greet(), self.loop)
-        elif now - self._last_welcome_at >= HERALD_GAP_S:
+        else:
             self._last_welcome_at = now
             self._note(event, "welcome back")
             asyncio.run_coroutine_threadsafe(self._say_daily("welcome"), self.loop)
-        else:
-            self._note(event, "silent", f"another welcome was said under {int(HERALD_GAP_S)} s ago")
 
-    def on_back_online(self, outage: dict) -> None:
+    def on_back_online(self, outage: dict) -> bool:
         """Called once after Sage comes back from an update, restart, reboot,
         power cut or crash. Announces only if you're home, so a return while
         you're out stays silent. Suppresses the welcome-back that would
@@ -1842,6 +1846,7 @@ class Speaker:
                 if new:
                     await self.say(new, "welcome")
         asyncio.run_coroutine_threadsafe(announce(), self.loop)
+        return True
 
     def _may_announce(self, event: str, settings: dict) -> bool:
         if not self.loop:

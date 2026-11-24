@@ -162,7 +162,7 @@ Radar, Data and Migration, Server and Reset).
 | `content_schedule.py` | Background loop (every minute): a post/reel saved with a date (status `planned`) is drawn 1 hour before its slot, or earlier when the Pi is idle and the slot is within 24 h; Herald says when it is ready (`speaker.on_content_ready`). Also `remind_due`: a Ready item with a date gets push + email + Herald (`speaker.on_post_due`) at the post time and once next morning (09:00) if not posted (`remindStage`); dates over 3 days old stay silent. Env `SAGE_CONTENT_LEAD_MINUTES`, `SAGE_CONTENT_EARLY_HOURS` |
 | `life_mode.py`, `phone_link.py`, `bluetooth_control.py`, `public_link.py` | Modes, iPhone BLE, Bluetooth, public URL |
 | `speaker.py`, `speak_worker.py`, `herald_extras.py`, `herald_journal.py`, `call_tasks.py` (missed call -> call-back task), `sender_rank.py` (who messages you, learned by counts), `room_music.py`, `spotify.py`, `audio_probe.py` | Herald, music, audio diagnostics |
-| `system_health.py`, `logstore.py`, `diagnostics.py`, `uptime.py`, `lowprio.py` | Health report, capped log, blackout probe, "back up" emails, nice/ionice for heavy jobs |
+| `system_health.py`, `logstore.py`, `diagnostics.py`, `uptime.py`, `lowprio.py` | Health report, capped log, blackout probe, "back up" emails, nice/ionice for heavy jobs; `uptime.py` says the spoken "back online" line at most once per `ANNOUNCE_GAP_SECONDS` (300; `lastBackOnlineAt` in `sage_uptime.json`, kept across restarts). Herald's arrival greeting (briefing or welcome) and back-online share one `HERALD_GAP_S` guard; the recap has its own |
 
 ### Desk clock `raspberry_pi/desk/`
 
