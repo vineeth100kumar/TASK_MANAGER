@@ -33,6 +33,9 @@ __pycache__/
 *.py[cod]
 venv/
 *.db
+*.db-wal
+*.db-shm
+*.db-journal
 raspberry_pi/sage_secrets.json
 raspberry_pi/sage_settings.json
 raspberry_pi/sage_vapid_private.pem
