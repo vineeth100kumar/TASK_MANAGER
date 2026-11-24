@@ -27,6 +27,7 @@ import logstore
 import event_registry
 import desk
 import drop
+import social
 import industry
 import item_actions
 import life_mode
@@ -774,6 +775,7 @@ async def startup_event():
     _background(spotify.connect.run(events.broadcast, speaker.speaker))
     room_music.room.attach(asyncio.get_running_loop(), spotify.connect, speaker.speaker, spotify.get_settings)
     _background(drop.run())
+    _background(social.run())
     if desk.ENABLED:
         from desk import run as desk_run
         _background(desk_run.run(lambda: datetime.datetime.now(notifier._tz(notifier.get_prefs())), events, phone_link.link))
@@ -1048,6 +1050,14 @@ async def apply_operations(req: ProcessOperationsRequest, client_id: str = "") -
         raise HTTPException(status_code=500, detail=str(e))
 
     if applied_ops:
+        # A post or reel follows its task when the task is moved on the project's board (content_link.py).
+        moved = [op.entityId for op in applied_ops
+                 if op.entityType == "workItems" and op.operation in ("save", "patch")
+                 and any(k in (op.payload or {}) for k in ("stage", "status"))]
+        if moved:
+            _follow = asyncio.create_task(content_link.follow_ids(moved))
+            _background_tasks.add(_follow)
+            _follow.add_done_callback(_background_tasks.discard)
         await events.broadcast({
             "type": "SYNC_APPLIED",
             "serverRevision": new_server_rev,
@@ -1795,6 +1805,7 @@ import uptime
 import content_schedule
 import posts
 import reels
+import content_link
 notifier.init_tables()
 
 
@@ -2875,6 +2886,18 @@ app.include_router(reels.router)
 # Recorder (recorder.py): record audio from a USB microphone, play back and transcribe.
 recorder.connect(DB_PATH)
 app.include_router(recorder.router)
+
+# Social (social.py): each content project's Instagram numbers, pulled daily.
+# Pi-only tables and the token never leave the Pi, so they stay out of SYNC_TABLES.
+social.connect(DB_PATH)
+
+
+@app.exception_handler(social.SocialError)
+async def _social_error(request: Request, exc: social.SocialError):
+    return JSONResponse(status_code=exc.status, content={"success": False, "detail": str(exc)})
+
+
+app.include_router(social.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)

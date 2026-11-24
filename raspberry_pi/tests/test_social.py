@@ -1,0 +1,239 @@
+"""social.py: the Instagram numbers a content page keeps.
+
+Nothing here talks to Meta. The metric names move around, so what matters is
+that a refused metric is dropped rather than losing the pull, that the daily
+snapshot and the overview add up, and that a made-in-Sage post is matched to
+its Instagram post.
+
+This file must sort AFTER test_safety.py: whichever test imports db_server
+first fixes the data folder, which breaks test_safety's backup count.
+"""
+import asyncio
+import datetime
+import json
+import os
+import sqlite3
+import sys
+import tempfile
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+import social
+
+
+class FakeResponse:
+    def __init__(self, status: int, body: dict):
+        self.status_code = status
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class FakeClient:
+    """Stands in for httpx.AsyncClient: answers from a list of canned replies."""
+
+    def __init__(self, replies):
+        self.replies = replies
+        self.calls = []
+
+    async def get(self, url, params=None, timeout=None):
+        self.calls.append((url, dict(params or {})))
+        reply = self.replies.pop(0) if self.replies else FakeResponse(200, {"data": []})
+        return reply(params) if callable(reply) else reply
+
+
+class SocialStorageTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        social.connect(os.path.join(self.dir.name, "sage.db"))
+
+    def test_connect_is_repeatable(self):
+        social.connect(social.DB_PATH)  # a restart must not lose anything
+        self.assertEqual(social.accounts(), [])
+
+    def test_status_before_anything_is_connected(self):
+        state = social.status("p1")
+        self.assertFalse(state["connected"])
+        self.assertEqual(state["projectId"], "p1")
+
+    def test_overview_adds_up_the_days_and_leaves_counts_out_of_totals(self):
+        social._save_account("p1", token="t", username="mind", ig_user_id="9",
+                             connected_at=social._iso(social._utcnow()))
+        conn = social._db()
+        for day, followers, reach in (("2026-11-01", 100, 50), ("2026-11-02", 110, 70)):
+            conn.execute("INSERT INTO social_day (project_id, day, followers, follows, media_count, metrics)"
+                         " VALUES (?, ?, ?, ?, ?, ?)",
+                         ("p1", day, followers, 10, 5, json.dumps({"reach": reach, "total_interactions": 10})))
+        conn.commit()
+        conn.close()
+        out = social.overview("p1", 30)
+        self.assertEqual(out["followers"], 110)
+        self.assertEqual(out["followersChange"], 10)
+        self.assertEqual(out["totals"]["reach"], 120)
+        # followers and mediaCount are a state, not something to sum
+        self.assertNotIn("followers", out["totals"])
+        self.assertNotIn("mediaCount", out["totals"])
+        self.assertEqual(out["engagementRate"], round(100 * 20 / 120, 2))
+
+    def test_posts_measure_each_one_against_the_page_average(self):
+        social._save_account("p1", token="t")
+        conn = social._db()
+        for media_id, reach in (("m1", 50), ("m2", 150)):
+            conn.execute("INSERT INTO social_media (id, project_id, kind, caption, permalink, thumbnail,"
+                         " posted_at, sage_kind, sage_id, metrics, updated_at)"
+                         " VALUES (?, ?, 'REELS', 'c', '', '', '2026-11-01T00:00:00+00:00', NULL, NULL, ?, '')",
+                         (media_id, "p1", json.dumps({"reach": reach})))
+        conn.commit()
+        conn.close()
+        out = social.posts("p1")
+        self.assertEqual(out["averageReach"], 100)
+        self.assertEqual({p["id"]: p["vsAverage"] for p in out["posts"]}, {"m1": -50, "m2": 50})
+
+    def test_forget_clears_the_numbers_and_the_token(self):
+        social._save_account("p1", token="t")
+        conn = social._db()
+        conn.execute("INSERT INTO social_media (id, project_id, metrics) VALUES ('m1', 'p1', '{}')")
+        conn.execute("INSERT INTO social_media_snap (media_id, age_days, metrics, taken_at)"
+                     " VALUES ('m1', 1, '{}', '')")
+        conn.execute("INSERT INTO social_day (project_id, day, followers) VALUES ('p1', '2026-11-01', 5)")
+        conn.commit()
+        conn.close()
+        social.forget("p1")
+        self.assertIsNone(social.account_row("p1"))
+        conn = social._db()
+        try:
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM social_media").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM social_media_snap").fetchone()[0], 0)
+            self.assertEqual(conn.execute("SELECT COUNT(*) FROM social_day").fetchone()[0], 0)
+        finally:
+            conn.close()
+
+
+class InsightsTest(unittest.TestCase):
+    """A metric Meta retires must not cost us the others."""
+
+    def _run(self, replies, metrics):
+        client = FakeClient(replies)
+        return asyncio.run(social._insights(client, "/9/insights", metrics, "token")), client
+
+    def test_good_reply_is_read_from_total_value_and_values(self):
+        reply = FakeResponse(200, {"data": [
+            {"name": "reach", "total_value": {"value": 120}},
+            {"name": "views", "values": [{"value": 7}, {"value": 9}]},
+        ]})
+        (out, dropped), _ = self._run([reply], ["reach", "views"])
+        self.assertEqual(out, {"reach": 120.0, "views": 9.0})
+        self.assertEqual(dropped, [])
+
+    def test_one_dead_metric_is_dropped_and_the_rest_survive(self):
+        def answer(params):
+            asked = params["metric"].split(",")
+            if "impressions" in asked:
+                return FakeResponse(400, {"error": {"message": "metric[0] must be a valid insights metric"}})
+            return FakeResponse(200, {"data": [{"name": m, "total_value": {"value": 5}} for m in asked]})
+
+        (out, dropped), client = self._run([answer] * 12, ["reach", "impressions", "views", "likes"])
+        self.assertEqual(dropped, ["impressions"])
+        self.assertEqual(set(out), {"reach", "views", "likes"})
+        self.assertGreater(len(client.calls), 1)  # it narrowed down rather than giving up
+
+    def test_a_failure_that_is_not_about_a_metric_gives_up_quietly(self):
+        reply = FakeResponse(400, {"error": {"message": "Application request limit reached"}})
+        (out, dropped), client = self._run([reply], ["reach", "views"])
+        self.assertEqual(out, {})
+        self.assertEqual(dropped, ["reach", "views"])
+        self.assertEqual(len(client.calls), 1)  # no pointless halving on a rate limit
+
+    def test_empty_metric_list_asks_nothing(self):
+        (out, dropped), client = self._run([], [])
+        self.assertEqual((out, dropped), ({}, []))
+        self.assertEqual(client.calls, [])
+
+
+class MatchSageTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.dir.cleanup)
+        social.connect(os.path.join(self.dir.name, "sage.db"))
+        self.conn = social._db()
+        self.addCleanup(self.conn.close)
+        self.conn.execute("CREATE TABLE posts (id TEXT PRIMARY KEY, created_at TEXT, status TEXT, payload TEXT)")
+        self.conn.execute("CREATE TABLE reels (id TEXT PRIMARY KEY, created_at TEXT, status TEXT, payload TEXT)")
+
+    def _post(self, post_id, payload):
+        self.conn.execute("INSERT INTO posts (id, payload) VALUES (?, ?)", (post_id, json.dumps(payload)))
+        self.conn.commit()
+
+    def test_matches_a_sage_post_by_caption_in_the_same_project(self):
+        self._post("p-1", {"projectId": "proj", "caption": "Three small habits that give you an hour back",
+                           "createdAt": "2026-11-01T10:00:00+00:00"})
+        kind, found = social._match_sage("proj", "Three small habits that give you an hour back\n\n#habits",
+                                         "2026-11-01T12:00:00+00:00", self.conn)
+        self.assertEqual((kind, found), ("post", "p-1"))
+
+    def test_another_project_is_never_matched(self):
+        self._post("p-1", {"projectId": "other", "caption": "Three small habits that give you an hour back",
+                           "createdAt": "2026-11-01T10:00:00+00:00"})
+        self.assertEqual(social._match_sage("proj", "Three small habits that give you an hour back",
+                                            "2026-11-01T12:00:00+00:00", self.conn), (None, None))
+
+    def test_a_post_from_months_earlier_is_not_matched(self):
+        self._post("p-1", {"projectId": "proj", "caption": "Three small habits that give you an hour back",
+                           "createdAt": "2026-01-01T10:00:00+00:00"})
+        self.assertEqual(social._match_sage("proj", "Three small habits that give you an hour back",
+                                            "2026-11-01T12:00:00+00:00", self.conn), (None, None))
+
+    def test_a_caption_too_short_to_tell_apart_is_left_alone(self):
+        self._post("p-1", {"projectId": "proj", "caption": "Hi", "createdAt": "2026-11-01T10:00:00+00:00"})
+        self.assertEqual(social._match_sage("proj", "Hi", "2026-11-01T12:00:00+00:00", self.conn), (None, None))
+
+    def test_missing_tables_are_not_an_error(self):
+        conn = sqlite3.connect(":memory:")
+        conn.row_factory = sqlite3.Row
+        self.addCleanup(conn.close)
+        self.assertEqual(social._match_sage("proj", "A caption long enough to match", "", conn), (None, None))
+
+
+class ScheduleTest(unittest.TestCase):
+    def test_pull_is_due_once_a_day_after_the_hour(self):
+        morning = datetime.datetime(2026, 11, 24, social.PULL_HOUR, 5)
+        night = datetime.datetime(2026, 11, 24, social.PULL_HOUR - 1, 0)
+        self.assertTrue(social.due(morning, None))
+        self.assertFalse(social.due(night, None))
+        self.assertFalse(social.due(morning, "2026-11-24T06:30:00"))      # already done today
+        self.assertTrue(social.due(morning, "2026-11-23T06:30:00"))       # yesterday
+        self.assertTrue(social.due(morning, "nonsense"))                  # unreadable: pull again
+
+    def test_token_refreshes_near_the_end_but_not_in_its_first_day(self):
+        now = datetime.datetime(2026, 11, 24, 9, 0)
+        old = (now - datetime.timedelta(days=40)).isoformat()
+        fresh = (now - datetime.timedelta(hours=2)).isoformat()
+        self.assertTrue(social.token_due(10, old, now))
+        self.assertFalse(social.token_due(40, old, now))   # plenty of time left
+        self.assertFalse(social.token_due(10, fresh, now))  # Meta wants it a day old
+        self.assertFalse(social.token_due(None, old, now))
+        self.assertFalse(social.token_due(-1, old, now))    # already expired: refreshing can't help
+
+
+class MediaKindTest(unittest.TestCase):
+    def test_clips_count_as_reels_and_anything_odd_as_feed(self):
+        self.assertEqual(social._kind({"media_product_type": "CLIPS"}), "REELS")
+        self.assertEqual(social._kind({"media_product_type": "REELS"}), "REELS")
+        self.assertEqual(social._kind({"media_product_type": "STORY"}), "STORY")
+        self.assertEqual(social._kind({"media_product_type": "AD"}), "FEED")
+        self.assertEqual(social._kind({}), "FEED")
+
+    def test_every_media_kind_has_metrics(self):
+        for kind in ("REELS", "FEED", "STORY"):
+            self.assertTrue(social.MEDIA_METRICS[kind])
+        # impressions died on 21 Apr 2025; views replaced it
+        for metrics in social.MEDIA_METRICS.values():
+            self.assertNotIn("impressions", metrics)
+        self.assertNotIn("impressions", social.ACCOUNT_METRICS)
+
+
+if __name__ == "__main__":
+    unittest.main()

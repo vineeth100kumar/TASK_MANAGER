@@ -30,6 +30,7 @@ from fastapi import APIRouter, Request
 
 import item_shape
 import placement
+import social
 from fastapi.responses import JSONResponse, Response
 
 TOKEN = os.getenv("SAGE_CLAUDE_TOKEN", "").strip()
@@ -808,6 +809,52 @@ async def delete_drop(slug: str) -> dict:
     return {"deleted": str(slug)}
 
 
+# --- Instagram numbers for a content project (social.py) ---
+
+def _social_project(ref: Any) -> str:
+    """Which page's numbers to read. A name or id picks one; left out, the only
+    connected page is used, so the common case needs no argument."""
+    ref = str(ref or "").strip()
+    linked = [str(r.get("project_id")) for r in social.accounts() if r.get("token")]
+    if not ref:
+        if len(linked) == 1:
+            return linked[0]
+        if not linked:
+            raise ApiError(404, "No Instagram page is connected yet. Vineeth connects one in a content project's "
+                                "Content dashboard (Settings > Social holds the app id and secret).")
+        names = ", ".join(str((_find("projects", p) or {}).get("name") or p) for p in linked)
+        raise ApiError(400, f"Say which page: {names}.")
+    project = _post_project(ref)
+    project_id = str((project or {}).get("id") or "")
+    if project_id not in linked:
+        name = str((project or {}).get("name") or ref)
+        raise ApiError(404, f"{name} has no Instagram account connected, so it has no numbers yet.")
+    return project_id
+
+
+def social_overview(args: dict) -> dict:
+    project_id = _social_project(args.get("project"))
+    days = int(args.get("days") or 30)
+    out = social.overview(project_id, days)
+    out["project"] = (_find("projects", project_id) or {}).get("name")
+    if not out.get("daily"):
+        out["note"] = ("Nothing has been pulled yet. The Pi pulls every morning; sage_social_refresh pulls now.")
+    return out
+
+
+def social_posts(args: dict) -> dict:
+    project_id = _social_project(args.get("project"))
+    out = social.posts(project_id, int(args.get("limit") or 30))
+    out["project"] = (_find("projects", project_id) or {}).get("name")
+    return out
+
+
+async def social_refresh(args: dict) -> dict:
+    project_id = _social_project(args.get("project"))
+    await social.pull(project_id)
+    return social_overview({"project": project_id})
+
+
 # --- Instagram carousel posts made on the Pi (posts.py) ---
 
 POST_WAIT_MAX = 120  # seconds a tool call may wait for a post to finish
@@ -1530,6 +1577,12 @@ the moment it arrives: if it has errors nothing is queued and the reply has acce
 (line, problem, fix); apply them and send the corrected script again. Once a post or reel is done, sage_post_review and
 sage_reel_review approve it, reject it (archive) or restore it, and sage_post_list/sage_reel_list with
 archived true show the archive.
+Each content project is one Instagram page. sage_social_overview gives that page's followers, reach, views and
+interactions with the day-by-day history Sage keeps (Meta forgets account metrics after about 90 days), and
+sage_social_posts gives every post and reel with its numbers, how it did against the page's own average reach, and
+which Sage script it came from: read both before suggesting what to post next, so advice comes from the page's real
+numbers. sage_social_post opens one post with its growth curve, and sage_social_refresh pulls from Instagram now
+instead of waiting for the morning pull. A page has to be connected in the Content dashboard first (pick its project, Connect Instagram).
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
 why something failed. sage_registry is the live event stream — structured, timestamped events for every action,
@@ -1677,6 +1730,27 @@ def _tools() -> List[dict]:
          "inputSchema": {"type": "object", "required": ["id", "action"], "properties": {
              "id": {"type": "string"},
              "action": {"type": "string", "enum": ["approve", "reject", "reset", "restore"]}}}},
+        {"name": "sage_social_overview", "description": "How a content project's Instagram page is doing: followers now and the "
+         "change over the period, totals for reach, views, interactions, likes, comments, shares and saves, the "
+         "engagement rate, and a day-by-day series Sage keeps for good (Meta forgets account metrics after about 90 "
+         "days). Says if the page isn't connected yet. Use it before suggesting what to post.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "The content project (id or name). Left out, the only connected page"},
+             "days": {"type": "integer", "description": "How many days back (default 30, max 400)"}}}},
+        {"name": "sage_social_posts", "description": "The page's Instagram posts and reels, newest first, each with reach, "
+         "views, likes, comments, shares, saves and (for reels) average watch time, how it did against the page's "
+         "average reach, and which Sage post or reel it was made from. This answers which formats actually work.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "The content project (id or name)"},
+             "limit": {"type": "integer", "description": "At most this many (default 30, max 100)"}}}},
+        {"name": "sage_social_post", "description": "One Instagram post or reel in full: its numbers now, its growth "
+         "curve (day 1, 3, 7 and 30), its caption and link, and the Sage script it came from.",
+         "inputSchema": {"type": "object", "required": ["id"], "properties": {
+             "id": {"type": "string", "description": "The Instagram media id, as sage_social_posts gives it"}}}},
+        {"name": "sage_social_refresh", "description": "Pull the page's numbers from Instagram now instead of waiting for "
+         "the morning pull. Takes a few seconds.",
+         "inputSchema": {"type": "object", "properties": {
+             "project": {"type": "string", "description": "The content project (id or name)"}}}},
         {"name": "sage_reel_format", "description": "How to write a script for an Instagram reel (a 1080x1920 video "
          "with a voice-over): the post script format plus a `say:` line per slide for the narration, optional `show:` "
          "cues, `motion:`, and the header lines voice, captions and fps; with a full example and the list of voices. "
@@ -1808,6 +1882,14 @@ async def _call_tool(name: str, args: dict) -> dict:
         return await redo_post(args)
     if name == "sage_post_review":
         return await review_post(args)
+    if name == "sage_social_overview":
+        return social_overview(args)
+    if name == "sage_social_posts":
+        return social_posts(args)
+    if name == "sage_social_post":
+        return social.post(str(args.get("id") or ""))
+    if name == "sage_social_refresh":
+        return await social_refresh(args)
     if name == "sage_reel_format":
         return reel_format()
     if name == "sage_reel_check":

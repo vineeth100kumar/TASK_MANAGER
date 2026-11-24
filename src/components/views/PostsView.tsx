@@ -2,14 +2,15 @@
 // The list, the New post screen and one post's page, with the project filter
 // when it is opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, CalendarClock, CheckCircle2, ImagePlus, LoaderCircle, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CalendarClock, CheckCircle2, ImagePlus, LoaderCircle, TriangleAlert } from 'lucide-react';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { MakerStatus, POST_EVENT, Post, mediaUrl, postsApi, postsAvailable } from '../../services/posts';
 import { NewPostScreen } from '../posts/NewPostScreen';
 import { PostPage } from '../posts/PostPage';
 import { timeAgo } from '../../services/radar';
-import { drawAtText } from '../../services/contentPieces';
+import { drawAtText, inScope, scopeProjectId, NO_PROJECT } from '../../services/contentPieces';
+import { openAddContent } from '../content/AddContent';
 
 type Screen = { name: 'list' } | { name: 'new' } | { name: 'post'; id: string } | { name: 'edit'; post: Post };
 
@@ -22,8 +23,8 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
 
   const load = useCallback(async () => {
     try {
-      const data = await postsApi.list(projectId, archived);
-      setPosts(data.posts);
+      const data = await postsApi.list(scopeProjectId(projectId), archived);
+      setPosts(data.posts.filter(p => inScope(p.projectId, projectId)));
       setStatus(data.status);
       setError('');
     } catch (e: any) {
@@ -52,7 +53,7 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
     return <p className="max-w-xl mx-auto text-[14px] text-gray-500">Posts are made on your Raspberry Pi, and this copy of Sage isn't connected to one.</p>;
   }
   if (screen.name === 'new') {
-    return <NewPostScreen status={status} projectId={projectId} onCancel={back} onMade={id => setScreen({ name: 'post', id })} />;
+    return <NewPostScreen status={status} projectId={scopeProjectId(projectId)} onCancel={back} onMade={id => setScreen({ name: 'post', id })} />;
   }
   if (screen.name === 'edit') {
     const p = screen.post;
@@ -67,7 +68,7 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
 
   const projects = api.sync.getState().projects.filter(Boolean) as Project[];
   const projectName = (id: string | null) => projects.find(p => p.id === id)?.name || '';
-  const filtered = projectId ? projectName(projectId) : '';
+  const filtered = projectId && projectId !== NO_PROJECT ? projectName(projectId) : projectId === NO_PROJECT ? 'No project' : '';
 
   return (
     <div className="max-w-3xl mx-auto">
@@ -79,9 +80,6 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setArchived(a => !a)} className={`h-10 px-3.5 rounded-xl text-[13px] font-semibold flex items-center gap-1.5 ${archived ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-200' : 'bg-black/[0.06] dark:bg-white/10 text-gray-600 dark:text-gray-300'}`}>
             <Archive size={15} /> {archived ? 'Archived' : 'Archive'}
-          </button>
-          <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold active:scale-95 transition">
-            <Plus size={16} /> New post
           </button>
         </div>
       </div>
@@ -106,7 +104,7 @@ export function PostsView({ projectId = '', focus }: { projectId?: string; focus
           <ImagePlus size={28} className="mx-auto text-purple-500" />
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white">No posts yet</p>
           <p className="text-[13px] text-gray-500">Paste a script (or try the example) and get Instagram slides in about 30 seconds.</p>
-          <button onClick={() => setScreen({ name: 'new' })} className="h-10 px-5 rounded-xl bg-purple-600 text-white text-[14px] font-semibold">Make the first one</button>
+          <button onClick={() => openAddContent(scopeProjectId(projectId))} className="h-10 px-5 rounded-xl bg-purple-600 text-white text-[14px] font-semibold">Add the first one</button>
         </div>
       )}
       <ul className="space-y-2">

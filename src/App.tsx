@@ -42,11 +42,7 @@ import { SageLoader } from './components/common/SageLoader';
 import { BootBoundary } from './components/common/BootBoundary';
 import { TrustDevicePrompt } from './components/common/TrustDevicePrompt';
 import { ProjectTypeBar } from './components/views/ProjectTypeBar';
-import { ContentSummary } from './components/views/ContentSummary';
 import { ContentHub } from './components/views/ContentHub';
-import { ProjectPipeline } from './components/views/ProjectPipeline';
-import { ProjectStats } from './components/views/ProjectStats';
-import { ContentCalendar } from './components/views/ContentCalendar';
 import { AddContent } from './components/content/AddContent';
 import { ProjectFront } from './components/common/ProjectFront';
 import { projectTypeInfo, resolveStage, statusesFor } from './services/projectTypes';
@@ -64,11 +60,10 @@ function MainApp() {
 
   // Navigation State
   const [activeView, setActiveView] = useState('dashboard');
-  // Posts page: a project to show posts of, and a post or New post to open (nonce makes a repeat tap count).
-  const [postsProject, setPostsProject] = useState('');
+  // Content section: its project filter ('' every project, NO_PROJECT none, else a project id), and a
+  // post or New post to open (nonce makes a repeat tap count).
+  const [contentScope, setContentScope] = useState('');
   const [postsFocus, setPostsFocus] = useState<{ postId?: string; newPost?: boolean; nonce: number } | null>(null);
-  // Reels page, the same way.
-  const [reelsProject, setReelsProject] = useState('');
   const [reelsFocus, setReelsFocus] = useState<{ reelId?: string; newReel?: boolean; nonce: number } | null>(null);
   const [activeWorkspace, setActiveWorkspace] = useState('all'); 
   // Boards scroll sideways, which is awkward on a phone, so phones start in the list.
@@ -192,7 +187,7 @@ function MainApp() {
     if (postParam) { setActiveView('posts'); setPostsFocus({ postId: postParam, nonce: Date.now() }); }
     const onOpenPosts = (e: Event) => {
       const d = (e as CustomEvent<{ postId?: string; projectId?: string; newPost?: boolean }>).detail || {};
-      setPostsProject(d.projectId || '');
+      if (d.projectId) setContentScope(d.projectId);
       setPostsFocus({ postId: d.postId, newPost: d.newPost, nonce: Date.now() });
       setActiveView('posts');
     };
@@ -201,7 +196,7 @@ function MainApp() {
     if (reelParam) { setActiveView('reels'); setReelsFocus({ reelId: reelParam, nonce: Date.now() }); }
     const onOpenReels = (e: Event) => {
       const d = (e as CustomEvent<{ reelId?: string; projectId?: string; newReel?: boolean }>).detail || {};
-      setReelsProject(d.projectId || '');
+      if (d.projectId) setContentScope(d.projectId);
       setReelsFocus({ reelId: d.reelId, newReel: d.newReel, nonce: Date.now() });
       setActiveView('reels');
     };
@@ -489,12 +484,8 @@ function MainApp() {
   };
   const isProjectPage = activeView === 'tasks' && api.sync.getState().projects.some(p => p && p.id === activeWorkspace);
   // A project's board and list group by its type's statuses; elsewhere, the usual four.
-  // A content page (Auto Content on) has three tabs: Make (pipeline), Plan (its calendar), Stats.
-  const isContentPage = isProjectPage && Boolean(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)?.autoContent);
-  const contentTab = isContentPage && (presentationMode === 'pipeline' || presentationMode === 'plan' || presentationMode === 'stats') ? presentationMode : '';
-  const contentOn = contentTab !== '';
-  // A content tab (pipeline/plan/stats) is not one of the item views. A phone keeps the
-  // mode when you open another project, so fall back to the list rather than show nothing.
+  // Not every mode is an item view (the Radar and Branches pages set their own). A phone keeps
+  // the mode when you open another project, so fall back to the list rather than show nothing.
   const pageView = ['list', 'board', 'branches', 'timeline', 'table', 'calendar'].includes(presentationMode) ? presentationMode : 'list';
   const pageStatuses = statusesFor(isProjectPage ? activeWorkspace : null, api.sync.getState().projects);
 
@@ -553,8 +544,8 @@ function MainApp() {
               <DropView />
             ) : (activeView === 'posts' || activeView === 'reels' || activeView === 'contentweek') ? (
               <ContentHub tab={activeView} onTab={setActiveView}
-                postsProject={postsProject} postsFocus={postsFocus}
-                reelsProject={reelsProject} reelsFocus={reelsFocus} />
+                scope={contentScope} onScope={setContentScope}
+                postsFocus={postsFocus} reelsFocus={reelsFocus} />
             ) : activeView === 'recordings' ? (
               <RecordingsView />
             ) : activeView === 'hidden' ? (
@@ -577,15 +568,10 @@ function MainApp() {
               />
             ) : (
               <div>
-                {isProjectPage && !contentOn && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
+                {isProjectPage && !filters.stage && <ProjectFront items={workItems} onSelect={setSelectedItemId} />}
                 {isProjectPage && (
-                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })}
-                    contentTab={contentTab} onContentTab={tab => setPresentationMode(contentTab === tab ? projectTypeInfo(api.sync.getState().projects.find(p => p && p.id === activeWorkspace)).view : tab)} />
+                  <ProjectTypeBar projectId={activeWorkspace} lifeContext={lifeContext} stage={filters.stage || ''} onStage={stage => setFilters({ ...filters, stage })} />
                 )}
-                {isContentPage && !contentOn && (
-                  <ContentSummary projectId={activeWorkspace} onOpen={() => setPresentationMode('pipeline')} />
-                )}
-                {contentTab === 'pipeline' ? <ProjectPipeline projectId={activeWorkspace} onSelectTask={setSelectedItemId} /> : contentTab === 'plan' ? <ContentCalendar projectId={activeWorkspace} /> : contentTab === 'stats' ? <ProjectStats /> : (<>
                 {/* Global Quick Filter Bar */}
                 <FilterBar filters={filters} setFilters={setFilters} entityTypeCounts={typeCounts} />
                 <ShownLine
@@ -631,7 +617,6 @@ function MainApp() {
                     </motion.div>
                   </AnimatePresence>
                 )}
-                </>)}
               </div>
             )}
             </Suspense>
