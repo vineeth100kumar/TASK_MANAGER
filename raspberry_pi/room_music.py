@@ -199,7 +199,7 @@ class RoomMusic:
         await self._wait_for_herald(arrived)
         if m.playing():
             return self._note("no arrival music", "something is already playing")
-        before = self._volume() or 50
+        before = self._volume()   # 0 = unknown: then we leave the volume alone later
         target = int(s.get("arrivalVolume", 40))
         total = max(MIN_TOTAL_S, float(s.get("arrivalMinutes") or 2) * 60)
         uri = str(s.get("arrivalPlaylist") or "")
@@ -218,7 +218,8 @@ class RoomMusic:
                 if m.playing():
                     break
             if not m.playing():
-                await self._set(before)
+                if before:
+                    await self._set(before)
                 return self._note("no arrival music", "the playlist didn't start")
             started = True
             self._note("arrival music", "fading in")
@@ -254,8 +255,9 @@ class RoomMusic:
             if started and not took_over:
                 try:
                     if self.on_call and self.call_restore is not None:
-                        self.call_restore = before   # the call ends; volume goes back to yours then
-                    else:
+                        if before:
+                            self.call_restore = before   # the call ends; volume goes back to yours then
+                    elif before:
                         await self._set(before)
                 except Exception:
                     pass

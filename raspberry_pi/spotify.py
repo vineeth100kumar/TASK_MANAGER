@@ -282,6 +282,24 @@ def music_inputs(inputs: list, soloist_pid: int = 0) -> List[int]:
     return out
 
 
+def input_levels(inputs: list, ids: List[int]) -> Dict[int, float]:
+    """Each stream's current volume as a fraction (loudest channel), for the
+    ids we can read. Pure."""
+    out: Dict[int, float] = {}
+    for item in inputs or []:
+        try:
+            i = int(item.get("index"))
+            if i not in ids:
+                continue
+            pcts = [float(str(ch.get("value_percent")).rstrip("%"))
+                    for ch in (item.get("volume") or {}).values()]
+        except (TypeError, ValueError, AttributeError):
+            continue
+        if pcts:
+            out[i] = max(pcts) / 100
+    return out
+
+
 def now_playing(state: Optional[dict]) -> Optional[dict]:
     """The bits of Soloist's playback_state the web app shows. Pure."""
     if not state:
@@ -377,7 +395,7 @@ class SpotifyConnect:
         self.build_expired = False
         self.error: Optional[dict] = None
         self.held = False
-        self._ducked: List[int] = []
+        self._ducked: Dict[int, float] = {}
         self._ws = None
         self._connecting = False
         self._last_sent = ""
@@ -979,17 +997,20 @@ class SpotifyConnect:
             err = b"timed out"
         return proc.returncode, (err or b"").decode(errors="replace")
 
-    async def _music_inputs(self) -> List[int]:
-        """PipeWire stream ids of Soloist's playback (not Sage's voice)."""
+    async def _list_inputs(self) -> list:
         try:
             proc = await asyncio.create_subprocess_exec(
                 "pactl", "-f", "json", "list", "sink-inputs", env=audio_env(),
                 stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL)
             out, _ = await asyncio.wait_for(proc.communicate(), timeout=4)
-            return music_inputs(json.loads(out.decode() or "[]"), self.proc.pid if self.proc else 0)
+            return json.loads(out.decode() or "[]")
         except Exception as e:  # noqa: BLE001
             log.debug("Couldn't list sink inputs: %s", e)
             return []
+
+    async def _music_inputs(self) -> List[int]:
+        """PipeWire stream ids of Soloist's playback (not Sage's voice)."""
+        return music_inputs(await self._list_inputs(), self.proc.pid if self.proc else 0)
 
     async def _set_input_volume(self, ids: List[int], level: float) -> None:
         pct = f"{max(0, min(100, int(round(level * 100))))}%"
@@ -1004,26 +1025,32 @@ class SpotifyConnect:
 
     async def duck(self, level: float = DUCK_LEVEL) -> bool:
         """Fade the music down under Sage's voice (the stream's own volume, so
-        Spotify's volume on your phone doesn't move). True when it ducked."""
+        Spotify's volume on your phone doesn't move). It goes down to a share
+        of whatever it was at, and unduck() puts it back exactly. True when it
+        ducked."""
         if not self.playing():
             return False
-        ids = await self._music_inputs()
-        if not ids:
+        inputs = await self._list_inputs()
+        ids = music_inputs(inputs, self.proc.pid if self.proc else 0)
+        prior = input_levels(inputs, ids)   # a stream we can't read is left alone
+        if not prior:
             return False
-        self._ducked = ids
-        for step in fade_steps(1.0, level):
-            await self._set_input_volume(ids, step)
-            await asyncio.sleep(FADE_STEP_S)
+        self._ducked = prior
+        for i, was in prior.items():
+            for step in fade_steps(was, was * level):
+                await self._set_input_volume([i], step)
+                await asyncio.sleep(FADE_STEP_S)
         return True
 
     async def unduck(self) -> None:
-        ids, self._ducked = getattr(self, "_ducked", []), []
-        if not ids:
+        prior, self._ducked = getattr(self, "_ducked", {}), {}
+        if not prior:
             return
         await asyncio.sleep(0.25)
-        for step in fade_steps(DUCK_LEVEL, 1.0):
-            await self._set_input_volume(ids, step)
-            await asyncio.sleep(FADE_STEP_S)
+        for i, was in prior.items():
+            for step in fade_steps(was * DUCK_LEVEL, was):
+                await self._set_input_volume([i], step)
+                await asyncio.sleep(FADE_STEP_S)
 
     async def hold(self) -> bool:
         """Pause for Sage's voice when it can't be mixed in. True when it was
