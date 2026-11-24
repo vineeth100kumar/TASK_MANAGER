@@ -291,3 +291,60 @@ class MediaKindTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class WindowInsightsTest(unittest.TestCase):
+    """Tiles show Instagram's own 7/30/90-day totals, asked live."""
+
+    def setUp(self):
+        social._window_cache.clear()
+        self.tmp = tempfile.TemporaryDirectory()
+        social.connect(os.path.join(self.tmp.name, "t.db"))
+        social._save_account("p1", ig_user_id="17", token="T" * 80, host=social.GRAPH_FB,
+                             username="x")
+
+    def tearDown(self):
+        self.tmp.cleanup()
+
+    def test_one_call_with_since_until(self):
+        calls = []
+
+        async def fake(client, path, metrics, token, extra=None, host=social.GRAPH):
+            calls.append(extra)
+            return {"reach": 10.0, "views": 50.0}, []
+
+        with mock.patch.object(social, "_insights", fake):
+            out = asyncio.run(social.window_insights("p1", 7))
+        self.assertEqual(out["totals"]["views"], 50.0)
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0]["until"] - calls[0]["since"], 7 * 86400)
+        self.assertFalse(out["approxReach"])
+
+    def test_long_range_refused_is_asked_in_pieces(self):
+        calls = []
+
+        async def fake(client, path, metrics, token, extra=None, host=social.GRAPH):
+            calls.append(extra)
+            if extra["until"] - extra["since"] > 30 * 86400:
+                raise social.SocialError("range too long")
+            return {"views": 100.0}, []
+
+        with mock.patch.object(social, "_insights", fake):
+            out = asyncio.run(social.window_insights("p1", 90))
+        self.assertEqual(out["totals"]["views"], 300.0)  # three 30-day pieces
+        self.assertTrue(out["approxReach"])
+
+    def test_cached(self):
+        n = []
+
+        async def fake(client, path, metrics, token, extra=None, host=social.GRAPH):
+            n.append(1)
+            return {"views": 1.0}, []
+
+        with mock.patch.object(social, "_insights", fake):
+            asyncio.run(social.window_insights("p1", 30))
+            asyncio.run(social.window_insights("p1", 30))
+        self.assertEqual(len(n), 1)
+
+    def test_not_connected(self):
+        self.assertIsNone(asyncio.run(social.window_insights("nope", 7)))
