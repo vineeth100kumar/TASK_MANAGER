@@ -708,7 +708,57 @@ def overview(project_id: str, days: int = 30) -> dict:
     }
 
 
-def posts(project_id: str, limit: int = 30) -> dict:
+_TAG = re.compile(r"(?<![\w&])#([^\W_][\w]*)", re.UNICODE)
+
+# What the dashboard (and any AI) may sort the posts by. `date` is newest first.
+# Instagram calls saves "saved" on a post, so "saves" is accepted as well.
+SORT_KEYS = {"date": None, "views": "views", "likes": "likes", "comments": "comments",
+             "saves": "saved", "saved": "saved", "shares": "shares", "reach": "reach",
+             "interactions": "total_interactions", "watch": "ig_reels_avg_watch_time"}
+LEADER_KEYS = ("views", "likes", "comments", "saved", "shares", "reach")
+
+
+def hashtags(caption: str) -> List[str]:
+    """Every #tag in a caption, lower case, once each, in the order written."""
+    seen: List[str] = []
+    for tag in _TAG.findall(caption or ""):
+        tag = tag.lower()
+        if tag not in seen:
+            seen.append(tag)
+    return seen
+
+
+def _title(caption: str) -> str:
+    for line in (caption or "").splitlines():
+        if line.strip():
+            return line.strip()
+    return ""
+
+
+def hashtag_stats(posts_: List[dict]) -> List[dict]:
+    """Per hashtag: how many posts use it and the average views, likes and reach of those
+    posts, best average views first. For an AI reading what works; the dashboard doesn't rank tags."""
+    groups: Dict[str, List[dict]] = {}
+    for p in posts_:
+        for tag in p["hashtags"]:
+            groups.setdefault(tag, []).append(p)
+
+    def avg(group: List[dict], key: str) -> Optional[float]:
+        vals = [v for p in group if (v := _value(p, key)) is not None]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    rows = [{"tag": tag, "posts": len(g), "avgViews": avg(g, "views"), "avgLikes": avg(g, "likes"),
+             "avgReach": avg(g, "reach")} for tag, g in groups.items()]
+    rows.sort(key=lambda r: (r["avgViews"] is None, -(r["avgViews"] or 0)))
+    return rows
+
+
+def _value(post: dict, key: str) -> Optional[float]:
+    value = post["metrics"].get(key)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def posts(project_id: str, limit: int = 30, sort: str = "date") -> dict:
     conn = _db()
     try:
         rows = [dict(r) for r in conn.execute(
@@ -719,7 +769,9 @@ def posts(project_id: str, limit: int = 30) -> dict:
     out = []
     for r in rows:
         metrics = json.loads(r.get("metrics") or "{}")
-        out.append({"id": r["id"], "kind": r.get("kind"), "caption": r.get("caption") or "",
+        caption = r.get("caption") or ""
+        out.append({"id": r["id"], "kind": r.get("kind"), "caption": caption,
+                    "title": _title(caption), "hashtags": hashtags(caption),
                     "permalink": r.get("permalink"), "thumbnail": r.get("thumbnail"),
                     "postedAt": r.get("posted_at"), "sageKind": r.get("sage_kind"),
                     "sageId": r.get("sage_id"), "metrics": metrics})
@@ -728,7 +780,22 @@ def posts(project_id: str, limit: int = 30) -> dict:
     for p in out:
         reach = p["metrics"].get("reach")
         p["vsAverage"] = round(100 * (reach - average) / average) if average and isinstance(reach, (int, float)) else None
-    return {"projectId": project_id, "posts": out, "averageReach": round(average) if average else None}
+    # The best post for each number: what the dashboard shows as winners, and what an AI reads first.
+    top: Dict[str, dict] = {}
+    for key in LEADER_KEYS:
+        scored = [(v, p) for p in out if (v := _value(p, key)) is not None and v > 0]
+        if scored:
+            v, p = max(scored, key=lambda t: t[0])
+            top[key] = {"id": p["id"], "title": p["title"], "caption": p["caption"], "hashtags": p["hashtags"],
+                        "value": v, "kind": p["kind"], "permalink": p["permalink"], "postedAt": p["postedAt"],
+                        "sageKind": p["sageKind"], "sageId": p["sageId"], "metrics": p["metrics"]}
+    tags = hashtag_stats(out)
+    metric = SORT_KEYS.get(sort or "date")
+    if metric:
+        # Posts without that number sink to the bottom instead of reading as zero.
+        out.sort(key=lambda p: (_value(p, metric) is None, -(_value(p, metric) or 0)))
+    return {"projectId": project_id, "posts": out, "sort": sort if sort in SORT_KEYS else "date",
+            "averageReach": round(average) if average else None, "top": top, "hashtagStats": tags}
 
 
 def post(media_id: str) -> dict:
@@ -742,7 +809,8 @@ def post(media_id: str) -> dict:
     finally:
         conn.close()
     return {"id": row["id"], "projectId": row["project_id"], "kind": row["kind"],
-            "caption": row["caption"] or "", "permalink": row["permalink"],
+            "caption": row["caption"] or "", "title": _title(row["caption"]),
+            "hashtags": hashtags(row["caption"]), "permalink": row["permalink"],
             "thumbnail": row["thumbnail"], "postedAt": row["posted_at"],
             "sageKind": row["sage_kind"], "sageId": row["sage_id"],
             "metrics": json.loads(row["metrics"] or "{}"),
@@ -865,8 +933,8 @@ async def social_overview(project: str, days: int = 30):
 
 
 @router.get("/api/social/{project}/posts")
-def social_posts(project: str, limit: int = 30):
-    return {"success": True, **posts(project, limit)}
+def social_posts(project: str, limit: int = 30, sort: str = "date"):
+    return {"success": True, **posts(project, limit, sort)}
 
 
 @router.get("/api/social/media/{media_id}")
