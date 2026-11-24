@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { columnOf, countPieces, isApproved, moveToDay, weekStart, type Piece } from './contentPieces';
+import { NO_PROJECT, columnOf, countPieces, inScope, isApproved, moveToDay, scopeProjectId, weekStart, type Piece } from './contentPieces';
 
 const piece = (over: Partial<Piece>): Piece => ({
   kind: 'post', id: 'a', title: 't', status: 'done', scheduledFor: null, posted: false, wontPost: false, archived: false, review: 'approved', projectId: null, createdAt: '', ...over,
@@ -59,5 +59,17 @@ describe('countPieces', () => {
       piece({ scheduledFor: inWeek, archived: true }),
     ], now);
     expect(counts).toEqual({ drafting: 1, ready: 1, scheduled: 2, posted: 1, weekScheduled: 1 });
+  });
+});
+
+describe('content scope', () => {
+  it('asks the Pi for everything when the scope is No project, then narrows', () => {
+    expect(scopeProjectId('')).toBe('');
+    expect(scopeProjectId('p1')).toBe('p1');
+    expect(scopeProjectId(NO_PROJECT)).toBe('');
+    expect(inScope(null, NO_PROJECT)).toBe(true);
+    expect(inScope('p1', NO_PROJECT)).toBe(false);
+    expect(inScope('p1', '')).toBe(true);
+    expect(inScope(null, 'p1')).toBe(true); // the Pi already filtered a real project
   });
 });

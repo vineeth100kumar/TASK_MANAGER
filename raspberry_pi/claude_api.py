@@ -821,7 +821,7 @@ def _social_project(ref: Any) -> str:
             return linked[0]
         if not linked:
             raise ApiError(404, "No Instagram page is connected yet. Vineeth connects one in a content project's "
-                                "Stats tab (Settings > Social holds the app id and secret).")
+                                "Content dashboard (Settings > Social holds the app id and secret).")
         names = ", ".join(str((_find("projects", p) or {}).get("name") or p) for p in linked)
         raise ApiError(400, f"Say which page: {names}.")
     project = _post_project(ref)
@@ -1582,7 +1582,7 @@ interactions with the day-by-day history Sage keeps (Meta forgets account metric
 sage_social_posts gives every post and reel with its numbers, how it did against the page's own average reach, and
 which Sage script it came from: read both before suggesting what to post next, so advice comes from the page's real
 numbers. sage_social_post opens one post with its growth curve, and sage_social_refresh pulls from Instagram now
-instead of waiting for the morning pull. A page has to be connected in its project's Stats tab first.
+instead of waiting for the morning pull. A page has to be connected in the Content dashboard first (pick its project, Connect Instagram).
 Start with sage_overview; sage_health says whether the Pi itself is working, and sage_logs shows the server's own
 running record (errors, requests, sync, backup, notifier, workers) when you need to see what it has been doing or
 why something failed. sage_registry is the live event stream — structured, timestamped events for every action,

@@ -3,7 +3,7 @@ Social: Instagram numbers for a content project, pulled from Meta for free.
 
 One content project is one Instagram page. Connect that page's professional
 account once and the Pi pulls its numbers every morning and keeps them, so the
-Stats tab can show history Meta itself forgets (account metrics live about 90
+Content dashboard can show history Meta itself forgets (account metrics live about 90
 days at Meta, and this keeps a daily snapshot for good).
 
 Why this path: "Instagram API with Instagram Login" (host graph.instagram.com)

@@ -852,8 +852,8 @@ def _project(post: dict) -> Optional[dict]:
 def _stage_fields(post: dict, stage: str, status: str) -> dict:
     project = _project(post)
     if project and str(project.get("type") or "") == "content" and stage in item_shape.TYPE_STAGES["content"]:
-        return {"status": status, "stage": stage}
-    return {"status": status}
+        return {"status": status, "stage": stage, **_when_fields(post)}
+    return {"status": status, **_when_fields(post)}
 
 
 async def _ensure_task(post: dict) -> None:
@@ -865,7 +865,7 @@ async def _ensure_task(post: dict) -> None:
             "title": f"Post: {post['title']}", "projectId": post["projectId"], "entityType": "task",
             "labels": ["post"], "postId": post["id"],
             "description": "Made with Auto Content. Open the post from Sage > Posts.",
-            **_stage_fields(post, "scripting", "in_progress"),
+            **_stage_fields(post, *_task_stage(post)),
         })
         post["taskId"] = item.get("id")
         await save_async(post)
@@ -890,7 +890,23 @@ def _task_stage(item: dict) -> tuple:
         return "published", "done"
     if item.get("status") == "done":
         return "editing", "in_progress"
+    if item.get("status") == "waiting":
+        return "recording", "in_progress"   # a reel that needs your own voice
     return "scripting", "in_progress"
+
+
+def _when_fields(item: dict) -> dict:
+    """The task's date and time follow the slot the piece is scheduled for (in the app's time zone),
+    so the project's board, Calendar and Today show it. A piece with no slot clears them."""
+    at = item.get("scheduledFor")
+    if not at:
+        return {"dueDate": None, "dueTime": None}
+    try:
+        tz = notifier._tz(notifier.get_prefs())
+        local = datetime.datetime.fromisoformat(str(at).replace("Z", "+00:00")).astimezone(tz)
+    except Exception:
+        return {}
+    return {"dueDate": local.strftime("%Y-%m-%d"), "dueTime": local.strftime("%H:%M")}
 
 
 async def relink_project(item: dict, project_id: str, kind: str, save) -> dict:
@@ -1315,6 +1331,7 @@ async def posts_schedule(post_id: str, body: ScheduleBody):
     if post["scheduledFor"] and post.get("review") != "rejected":
         post["review"] = "approved"   # scheduling is your approval: it shows on the calendar
     await save_async(post)
+    await _move_task(post, *_task_stage(post))   # the task shows the new slot
     if post["status"] == "planned" and not post["scheduledFor"]:
         release(post)   # a planned post with no date is simply drawn now
     return {"success": True, "post": with_media(post)}

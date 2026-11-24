@@ -85,3 +85,13 @@ export function countPieces(pieces: Piece[], now: Date = new Date()): ContentCou
   }
   return out;
 }
+
+/** The Content section's project filter: '' is every project, a project id is that project, and this is "No project". */
+export const NO_PROJECT = '__none__';
+
+/** The project id to ask the Pi for: it has no "none", so that scope asks for everything and `inScope` narrows it. */
+export const scopeProjectId = (scope: string): string => (scope === NO_PROJECT ? '' : scope);
+
+/** True when a post or reel (by its project id) belongs in the scope. */
+export const inScope = (projectId: string | null | undefined, scope: string): boolean =>
+  scope !== NO_PROJECT || !projectId;

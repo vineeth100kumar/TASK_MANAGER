@@ -1,7 +1,7 @@
 # Connecting an Instagram page to Sage
 
 What you get: Sage pulls that page's numbers every morning and keeps them for
-good, shows them in the project's **Stats** tab, and lets Claude read them
+good, shows them in the Content dashboard, and lets Claude read them
 (`sage_social_*`) to plan what to post.
 
 **Cost: nothing.** No Facebook Page, no App Review, no business verification.
@@ -19,7 +19,7 @@ so if a button below is called something else, look for the nearest match.
 |---|---|
 | Time | About 20 minutes, once per Instagram page |
 | You need | The Instagram account switched to **Professional** (Creator or Business) |
-| Where | developers.facebook.com, then Sage's Stats tab |
+| Where | developers.facebook.com, then Sage's Content dashboard |
 
 Switch the account over in the Instagram app: **Settings › Account type and
 tools › Switch to professional account**. Creator is fine. This is free and you
@@ -59,7 +59,7 @@ send you, and you copy the code out of the address bar yourself.
 
 ## Step 4 — Give Sage the app id and secret
 
-In Sage, open the content project for this page, then the **Stats** tab, and
+In Sage, open **Content**, pick this page's project in the dropdown, press **Connect Instagram**, and
 paste both values. They are saved on the Pi only, never on your phone.
 
 ## Step 5 — Allow access

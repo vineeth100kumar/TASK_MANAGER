@@ -2,7 +2,7 @@
 // The list, the New reel screen and one reel's page, with the project filter when it is
 // opened from a project that uses Auto Content.
 import { useCallback, useEffect, useState } from 'react';
-import { Archive, CalendarClock, CheckCircle2, LoaderCircle, Mic, Plus, TriangleAlert } from 'lucide-react';
+import { Archive, CalendarClock, CheckCircle2, LoaderCircle, Mic, TriangleAlert } from 'lucide-react';
 import ClapperIcon from '../icons/ClapperIcon';
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
@@ -10,7 +10,8 @@ import { REEL_EVENT, Reel, ReelMakerStatus, formatSeconds, posterUrl, reelsApi, 
 import { NewReelScreen } from '../reels/NewReelScreen';
 import { ReelPage } from '../reels/ReelPage';
 import { timeAgo } from '../../services/radar';
-import { drawAtText } from '../../services/contentPieces';
+import { drawAtText, inScope, scopeProjectId, NO_PROJECT } from '../../services/contentPieces';
+import { openAddContent } from '../content/AddContent';
 
 type Screen = { name: 'list' } | { name: 'new' } | { name: 'reel'; id: string } | { name: 'edit'; reel: Reel };
 
@@ -23,8 +24,8 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
 
   const load = useCallback(async () => {
     try {
-      const data = await reelsApi.list(projectId, archived);
-      setReels(data.reels);
+      const data = await reelsApi.list(scopeProjectId(projectId), archived);
+      setReels(data.reels.filter(r => inScope(r.projectId, projectId)));
       setStatus(data.status);
       setError('');
     } catch (e: any) {
@@ -53,7 +54,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
     return <p className="max-w-xl mx-auto text-[14px] text-gray-500">Reels are made on your Raspberry Pi, and this copy of Sage isn't connected to one.</p>;
   }
   if (screen.name === 'new') {
-    return <NewReelScreen status={status} projectId={projectId} onCancel={back} onMade={r => setScreen({ name: 'reel', id: r.id })} />;
+    return <NewReelScreen status={status} projectId={scopeProjectId(projectId)} onCancel={back} onMade={r => setScreen({ name: 'reel', id: r.id })} />;
   }
   if (screen.name === 'edit') {
     const r = screen.reel;
@@ -68,7 +69,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
 
   const projects = api.sync.getState().projects.filter(Boolean) as Project[];
   const projectName = (id: string | null) => projects.find(p => p.id === id)?.name || '';
-  const filtered = projectId ? projectName(projectId) : '';
+  const filtered = projectId && projectId !== NO_PROJECT ? projectName(projectId) : projectId === NO_PROJECT ? 'No project' : '';
 
   const line = (r: Reel) => {
     if (r.archived) return 'Archived · script kept';
@@ -90,9 +91,6 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
         <div className="flex items-center gap-2 shrink-0">
           <button onClick={() => setArchived(a => !a)} className={`h-10 px-3.5 rounded-xl text-[13px] font-semibold flex items-center gap-1.5 ${archived ? 'bg-purple-100 text-purple-700 dark:bg-purple-500/20 dark:text-purple-200' : 'bg-black/[0.06] dark:bg-white/10 text-gray-600 dark:text-gray-300'}`}>
             <Archive size={15} /> {archived ? 'Archived' : 'Archive'}
-          </button>
-          <button onClick={() => setScreen({ name: 'new' })} className="flex items-center gap-1.5 h-10 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[14px] font-semibold active:scale-95 transition">
-            <Plus size={16} /> New reel
           </button>
         </div>
       </div>
@@ -117,7 +115,7 @@ export function ReelsView({ projectId = '', focus }: { projectId?: string; focus
           <ClapperIcon size={28} data-nav="reels" className="icon-play mx-auto text-purple-500" />
           <p className="text-[15px] font-semibold text-gray-900 dark:text-white">No reels yet</p>
           <p className="text-[13px] text-gray-500">Paste a script (or try the example) and get a vertical video with a voice-over and word-by-word captions.</p>
-          <button onClick={() => setScreen({ name: 'new' })} className="h-10 px-5 rounded-xl bg-purple-600 text-white text-[14px] font-semibold">Make the first one</button>
+          <button onClick={() => openAddContent(scopeProjectId(projectId))} className="h-10 px-5 rounded-xl bg-purple-600 text-white text-[14px] font-semibold">Add the first one</button>
         </div>
       )}
       <ul className="space-y-2">

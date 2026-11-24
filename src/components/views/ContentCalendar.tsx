@@ -1,5 +1,5 @@
-// ContentCalendar - a week of scheduled posts and reels. For one content project, or (no
-// projectId) for every project. Drag a card to another day to move it (the time of day is
+// ContentCalendar - a week of scheduled posts and reels. For one content project, for no
+// project (NO_PROJECT), or (no projectId) for every project. Drag a card to another day to move it (the time of day is
 // kept); drag one from "Ready, not scheduled" onto a day to schedule it at 9:00.
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CalendarClock, ChevronLeft, ChevronRight, Clapperboard, GalleryHorizontal } from 'lucide-react';
@@ -8,7 +8,7 @@ import { Reel, reelsApi, reelsAvailable, REEL_EVENT, openReels } from '../../ser
 import { api } from '../../services/api';
 import type { Project } from '../../services/types';
 import { useToast } from '../../context/ToastContext';
-import { Piece, columnOf, isApproved, moveToDay, toLocalInput, toPiece, weekStart, whenText } from '../../services/contentPieces';
+import { Piece, columnOf, inScope, isApproved, moveToDay, scopeProjectId, toLocalInput, toPiece, weekStart, whenText } from '../../services/contentPieces';
 
 const dayKey = (d: Date) => `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
 const timeText = (iso: string) => new Date(iso).toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
@@ -30,10 +30,10 @@ export function ContentCalendar({ projectId = '' }: { projectId?: string }) {
   const load = useCallback(async () => {
     try {
       const [p, r] = await Promise.all([
-        postsAvailable() ? postsApi.list(projectId, false).then(d => d.posts) : Promise.resolve([] as Post[]),
-        reelsAvailable() ? reelsApi.list(projectId, false).then(d => d.reels) : Promise.resolve([] as Reel[]),
+        postsAvailable() ? postsApi.list(scopeProjectId(projectId), false).then(d => d.posts) : Promise.resolve([] as Post[]),
+        reelsAvailable() ? reelsApi.list(scopeProjectId(projectId), false).then(d => d.reels) : Promise.resolve([] as Reel[]),
       ]);
-      setPieces([...p.map(x => toPiece('post', x)), ...r.map(x => toPiece('reel', x))].filter(x => !x.archived));
+      setPieces([...p.map(x => toPiece('post', x)), ...r.map(x => toPiece('reel', x))].filter(x => !x.archived && inScope(x.projectId, projectId)));
       setError('');
     } catch (e: any) {
       setError(e.message || "Can't reach the Pi");

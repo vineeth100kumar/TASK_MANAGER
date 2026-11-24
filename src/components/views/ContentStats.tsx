@@ -1,11 +1,14 @@
-// ProjectStats - the Stats tab of a content page: that page's Instagram numbers.
+// ContentStats - the numbers block of the Content dashboard: Instagram numbers for the
+// project picked in the dropdown (a content project is one Instagram page), or one line per
+// connected page when the dropdown says All.
 //
-// A content project is one Instagram page. Until it has an account connected,
-// this screen is the connect flow, one step at a time like the Add flow. After
-// that it is four tiles, the follower line Sage keeps itself, and the posts
-// table with each one measured against the page's own average.
+// Until a page has an account connected, it offers the connect flow, one step at a time like
+// the Add flow. After that it is four tiles; "Details" opens the follower line Sage keeps
+// itself and the posts table, each measured against the page's own average.
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { BarChart3, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert, Unlink } from 'lucide-react';
+import { BarChart3, ChevronDown, ExternalLink, LoaderCircle, RefreshCw, TriangleAlert, Unlink } from 'lucide-react';
+import { api } from '../../services/api';
+import type { Project } from '../../services/types';
 import {
   POST_KIND_LABELS, SocialOverview, SocialPosts, compact, metricLabel, metricValue,
   socialApi, socialAvailable,
@@ -159,13 +162,15 @@ function Connect({ projectId, onDone }: { projectId: string; onDone: () => void 
   );
 }
 
-export function ProjectStats({ projectId }: { projectId: string }) {
+export function ContentStats({ projectId }: { projectId: string }) {
   const { showToast } = useToast();
   const [data, setData] = useState<SocialOverview | null>(null);
   const [media, setMedia] = useState<SocialPosts | null>(null);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
   const [days, setDays] = useState(30);
+  const [details, setDetails] = useState(false);
+  const [connecting, setConnecting] = useState(false);
 
   const load = useCallback(async () => {
     try {
@@ -209,14 +214,23 @@ export function ProjectStats({ projectId }: { projectId: string }) {
       (p.metrics.reach || 0) > (top?.metrics.reach || 0) ? p : top, null);
   }, [media]);
 
-  if (!socialAvailable()) {
-    return <p className="max-w-xl mx-auto text-[14px] text-gray-500">Instagram numbers are kept on your Raspberry Pi, and this copy of Sage isn't connected to one.</p>;
-  }
-  if (error) return <p className="max-w-xl mx-auto text-[13px] text-red-600">{error}</p>;
+  // Without a Pi there is nothing to show, and the rest of the dashboard says why.
+  if (!socialAvailable()) return null;
+  if (error) return <p className="text-[13px] text-red-600">{error}</p>;
   if (!data) {
     return <p className="flex items-center gap-2 text-[13.5px] text-gray-400"><LoaderCircle size={15} className="animate-spin" /> Reading the numbers</p>;
   }
-  if (!data.connected) return <Connect projectId={projectId} onDone={load} />;
+  if (!data.connected) {
+    if (connecting) return <Connect projectId={projectId} onDone={() => { setConnecting(false); load(); }} />;
+    return (
+      <div className="surface rounded-3xl border border-black/5 dark:border-white/5 p-4 flex flex-wrap items-center gap-3">
+        <BarChart3 size={18} className="text-sky-500 shrink-0" />
+        <p className="flex-1 min-w-[12rem] text-[13.5px] text-gray-600 dark:text-gray-300">Connect this page's Instagram to see its numbers here. Free, and it stays on your Pi.</p>
+        <button type="button" onClick={() => setConnecting(true)}
+          className="h-9 px-4 rounded-xl bg-purple-600 hover:bg-purple-700 text-white text-[13px] font-semibold">Connect Instagram</button>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -278,6 +292,11 @@ export function ProjectStats({ projectId }: { projectId: string }) {
         ))}
       </div>
 
+      <button type="button" onClick={() => setDetails(d => !d)} aria-expanded={details}
+        className="flex items-center gap-1 text-[12.5px] font-semibold text-gray-500 hover:text-gray-900 dark:hover:text-white">
+        <ChevronDown size={14} className={`transition-transform ${details ? 'rotate-180' : ''}`} /> {details ? 'Hide details' : 'Details: followers and every post'}
+      </button>
+      {details && (<>
       <FollowerLine daily={data.daily} />
 
       {best && (
@@ -343,6 +362,45 @@ export function ProjectStats({ projectId }: { projectId: string }) {
           Instagram no longer gives these, so they are left out: {data.dropped.join(', ')}.
         </p>
       )}
+      </>)}
+    </div>
+  );
+}
+
+// All projects: one line per connected page; tap one to open that page's numbers.
+export function AllPagesStats({ onPick }: { onPick: (projectId: string) => void }) {
+  const [rows, setRows] = useState<SocialOverview[] | null>(null);
+
+  useEffect(() => {
+    if (!socialAvailable()) return;
+    let live = true;
+    socialApi.app().then(async a => {
+      const connected = a.pages.filter(p => p.connected);
+      const all = await Promise.all(connected.map(p => socialApi.overview(p.projectId, 30).catch(() => null)));
+      if (live) setRows(all.filter((o): o is SocialOverview => Boolean(o)));
+    }).catch(() => { if (live) setRows([]); });
+    return () => { live = false; };
+  }, []);
+
+  if (!rows || rows.length === 0) return null;
+  const nameOf = (id: string) => ((api.sync.getState().projects.filter(Boolean) as Project[]).find(p => p.id === id)?.name) || id;
+  return (
+    <div className="surface rounded-3xl border border-black/5 dark:border-white/5 divide-y divide-black/5 dark:divide-white/5">
+      {rows.map(o => (
+        <button key={o.projectId} type="button" onClick={() => onPick(o.projectId)}
+          className="w-full flex items-center gap-3 px-4 py-3 text-left hover:bg-black/[0.02] dark:hover:bg-white/[0.03] first:rounded-t-3xl last:rounded-b-3xl">
+          {o.picture ? <img src={o.picture} alt="" className="w-8 h-8 rounded-full shrink-0" /> : <div className="w-8 h-8 rounded-full bg-black/[0.05] dark:bg-white/10 shrink-0" />}
+          <span className="min-w-0 flex-1">
+            <span className="block text-[14px] font-semibold truncate">{nameOf(o.projectId)}</span>
+            <span className="block text-[12px] text-gray-400 truncate">@{o.username}</span>
+          </span>
+          <span className="text-right text-[12.5px] tabular-nums text-gray-500">
+            <b className="text-gray-900 dark:text-white">{compact(o.followers)}</b> followers
+            <span className={`ml-1 font-semibold ${o.followersChange >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{o.followersChange >= 0 ? '+' : ''}{o.followersChange}</span>
+            <span className="hidden sm:inline"> · reach <b className="text-gray-900 dark:text-white">{typeof o.totals.reach === 'number' ? compact(o.totals.reach) : '-'}</b></span>
+          </span>
+        </button>
+      ))}
     </div>
   );
 }

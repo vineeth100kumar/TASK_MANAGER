@@ -772,8 +772,8 @@ def _project(reel: dict) -> Optional[dict]:
 def _stage_fields(reel: dict, stage: str, status: str) -> dict:
     project = _project(reel)
     if project and str(project.get("type") or "") == "content" and stage in item_shape.TYPE_STAGES["content"]:
-        return {"status": status, "stage": stage}
-    return {"status": status}
+        return {"status": status, "stage": stage, **posts._when_fields(reel)}
+    return {"status": status, **posts._when_fields(reel)}
 
 
 async def _ensure_task(reel: dict) -> None:
@@ -784,7 +784,7 @@ async def _ensure_task(reel: dict) -> None:
             "title": f"Reel: {reel['title']}", "projectId": reel["projectId"], "entityType": "task",
             "labels": ["reel"], "reelId": reel["id"],
             "description": "Made with Auto Content. Open the reel from Sage > Reels.",
-            **_stage_fields(reel, "scripting", "in_progress"),
+            **_stage_fields(reel, *posts._task_stage(reel)),
         })
         reel["taskId"] = item.get("id")
         await save_async(reel)
@@ -1106,6 +1106,7 @@ async def reels_schedule(reel_id: str, body: ScheduleBody):
     if reel["scheduledFor"] and reel.get("review") != "rejected":
         reel["review"] = "approved"   # scheduling is your approval: it shows on the calendar
     await save_async(reel)
+    await _move_task(reel, *posts._task_stage(reel))   # the task shows the new slot
     if reel["status"] == "planned" and not reel["scheduledFor"]:
         release(reel)   # a planned reel with no date is simply made now
     return {"success": True, "reel": with_media(reel)}

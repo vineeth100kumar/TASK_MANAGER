@@ -1,6 +1,5 @@
 import { useEffect, useState } from 'react';
-import { BarChart3, CalendarClock, CheckCircle2, Workflow, Pencil, Plus, RotateCcw } from 'lucide-react';
-import { openAddContent } from '../content/AddContent';
+import { CheckCircle2, Pencil, RotateCcw } from 'lucide-react';
 import { api } from '../../services/api';
 import type { LifeContext, Project } from '../../services/types';
 import { selectItems } from '../../services/items';
@@ -9,16 +8,9 @@ import { useDataChanges } from '../../hooks/useDataChanges';
 import { useToast } from '../../context/ToastContext';
 import { ProjectTypeMenu } from '../common/ProjectTypePicker';
 
-export type ContentTab = 'pipeline' | 'plan' | 'stats';
-const CONTENT_TABS: { id: ContentTab; label: string; icon: typeof Workflow; title: string }[] = [
-  { id: 'pipeline', label: 'Make', icon: Workflow, title: 'Ideas, scripts, posts and reels through to posted' },
-  { id: 'plan', label: 'Plan', icon: CalendarClock, title: "This page's calendar" },
-  { id: 'stats', label: 'Stats', icon: BarChart3, title: "This page's Instagram numbers" },
-];
-
 // The strip at the top of a project's page: its type (tap to change) and one
 // chip per status that type uses, with a count; a chip shows only that status.
-export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, contentTab, onContentTab }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void; contentTab?: ContentTab | ''; onContentTab?: (tab: ContentTab) => void }) {
+export function ProjectTypeBar({ projectId, lifeContext, stage, onStage }: { projectId: string; lifeContext?: LifeContext; stage: string; onStage: (stage: string) => void }) {
   const { showToast } = useToast();
   const read = () => {
     // The same items the page below starts from (before its filters), so
@@ -76,20 +68,6 @@ export function ProjectTypeBar({ projectId, lifeContext, stage, onStage, content
           title={project.completedAt ? 'Reopen this project' : 'Mark this project complete'}>
           {project.completedAt ? <><RotateCcw size={12} /> Reopen</> : <><CheckCircle2 size={12} /> Mark complete</>}
         </button>
-        {project.autoContent && onContentTab && (
-          <>
-            {CONTENT_TABS.map(t => (
-              <button key={t.id} type="button" onClick={() => onContentTab(t.id)} aria-pressed={contentTab === t.id} title={t.title}
-                className={`flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold transition-colors ${contentTab === t.id ? 'bg-sky-600 text-white' : 'bg-sky-100 text-sky-700 dark:bg-sky-500/15 dark:text-sky-300 hover:opacity-80'}`}>
-                <t.icon size={12} /> {t.label}
-              </button>
-            ))}
-            <button type="button" onClick={() => openAddContent(project.id)}
-              className="flex items-center gap-1 h-7 px-2.5 rounded-full text-[12px] font-semibold bg-purple-600 text-white hover:bg-purple-700 transition-colors">
-              <Plus size={12} /> Add
-            </button>
-          </>
-        )}
       </div>
       <div className="flex items-center gap-1.5 overflow-x-auto no-scrollbar -mx-4 px-4 md:mx-0 md:px-0" role="group" aria-label="Statuses">
         {type.statuses.map((st, i) => {
