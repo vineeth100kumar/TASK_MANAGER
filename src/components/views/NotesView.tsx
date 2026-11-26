@@ -9,6 +9,7 @@ import { RichNoteEditor } from '../notes/RichNoteEditor';
 import { ThoughtMapView, StatusBar } from '../notes/ThoughtMapView';
 import { countStatuses } from '../notes/thoughtMap';
 import { ReportNoteView } from '../notes/ReportNoteView';
+import { PrintButton } from '../notes/PrintButton';
 
 type Kind = 'all' | 'notes' | 'maps';
 const KIND_KEY = 'sage.notesKind';
@@ -266,6 +267,9 @@ export function NotesView({ lifeContext, openNoteId }: NotesViewProps) {
               </button>
               <input ref={titleInput} type="text" value={activeTitle} onChange={e => handleTitleChange(e.target.value)} placeholder="Note Title"
                 className="text-2xl md:text-3xl font-bold tracking-tight bg-transparent outline-none text-gray-900 dark:text-white w-full tracking-tight" />
+              {selectedNote && (
+                <PrintButton note={selectedNote} body={activeContent} onOpenSettings={() => window.dispatchEvent(new CustomEvent('sage:open-settings', { detail: 'printers' }))} />
+              )}
             </div>
 
             {selectedNote && isMap(selectedNote)

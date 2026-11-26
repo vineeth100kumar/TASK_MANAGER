@@ -5,6 +5,7 @@ import { api } from '../../services/api';
 import { NotificationSettings } from './NotificationSettings';
 import { CaptureGuide } from './CaptureGuide';
 import { BluetoothSettings } from './BluetoothSettings';
+import { PrinterSettings } from './PrinterSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
 import { PostPictureKeys } from './PostPictureKeys';
@@ -20,6 +21,7 @@ const SETTINGS_TABS = [
   { id: 'capture', label: 'Shortcuts' },
   { id: 'security', label: 'Sign-in' },
   { id: 'bluetooth', label: 'Bluetooth' },
+  { id: 'printers', label: 'Printers' },
   { id: 'clock', label: 'Desk Clock' },
   { id: 'radar', label: 'Radar' },
   { id: 'data', label: 'Data & Migration' },
@@ -30,7 +32,7 @@ const SETTINGS_TABS = [
 const SETTINGS_GROUPS = [
   { label: 'Daily', tabs: ['attention', 'modes', 'holidays'] },
   { label: 'Capture', tabs: ['capture'] },
-  { label: 'Devices', tabs: ['security', 'clock', 'bluetooth'] },
+  { label: 'Devices', tabs: ['security', 'clock', 'bluetooth', 'printers'] },
   { label: 'Advanced', tabs: ['radar', 'data', 'system'] },
 ] as const;
 import { importCSVData } from '../../utils/dataImporter';
@@ -46,7 +48,7 @@ interface SettingsModalProps {
   initialTab?: string;
 }
 
-type SettingsTabId = 'attention' | 'modes' | 'holidays' | 'capture' | 'security' | 'bluetooth' | 'clock' | 'radar' | 'data' | 'system';
+type SettingsTabId = 'attention' | 'modes' | 'holidays' | 'capture' | 'security' | 'bluetooth' | 'printers' | 'clock' | 'radar' | 'data' | 'system';
 
 function fmtBytes(bytes: number): string {
   if (!bytes) return '0 B';
@@ -364,6 +366,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab 
 
         {/* Bluetooth: connect, disconnect and pair devices on the Pi */}
         {activeTab === 'bluetooth' && <BluetoothSettings />}
+        {activeTab === 'printers' && <PrinterSettings />}
 
         {/* LUMO desk clock: pick the clock face */}
         {activeTab === 'clock' && <DeskClockSettings />}

@@ -96,7 +96,8 @@ Script directly.
 | `canvas` | Canvas | `views/CanvasView.tsx` + `components/canvas/` |
 | `radar` | Radar (work only) | `views/RadarView.tsx` + `components/radar/` |
 | `lumo` | LUMO clock page | `views/LumoView.tsx` + `components/lumo/` |
-| `drop` | Drop share links | `views/DropView.tsx` |
+| `drop` | Printing (printers, Print button on notes/reports/maps) | `modals/PrinterSettings` (Settings > Devices > Printers), `notes/PrintButton`, `notes/printable.ts` (note/report/code/map as one clean A4 page), `services/printing.ts` | `printing.py`: CUPS (`lpstat`, `lpinfo`, `lpadmin`, `lp`), HTML to PDF with headless Chromium; `install_pi.sh --only packages` installs cups + avahi and adds the Sage user to `lpadmin`. No printer service: Print falls back to the browser dialog (also saves PDF) |
+| Drop share links | `views/DropView.tsx` |
 | `posts`, `reels` | Instagram carousels; vertical videos (work only) | `views/PostsView.tsx`, `ReelsView.tsx` + `components/posts/`, `components/reels/` |
 | `hidden` | Hidden tasks, password-locked | `views/HiddenView.tsx` |
 | `recordings` | Mic recordings, **parked** (nav entry commented out) | `views/RecordingsView.tsx` |
@@ -221,6 +222,7 @@ prompt, so the guide can't drift from the engine); `config/` holds brand and AI 
 | Modes | `GET/PUT /api/life-mode`, `POST .../welcomed`, `.../leave` |
 | Location | `GET/POST /api/presence/location`, `PUT/DELETE /api/presence/places/{name}` |
 | Phone | `GET /api/phone`, `POST /api/phone/notifications`, `DELETE .../{id}`, `POST /api/phone/media` |
+| Printers | `GET /api/printers`, `POST .../discover`, `POST /api/printers` (add), `POST .../{name}/default`, `.../{name}/test`, `DELETE .../{name}`, `POST /api/print` (html, printer, title, copies) |
 | Bluetooth | `GET /api/bluetooth`, `POST .../power`, `.../pairing`, `.../scan`, `.../name`, `.../confirm`, `.../devices/{address}/{action}` |
 | Herald, speaker | `GET /api/herald/presence`, `GET /api/speaker`, `POST .../settings`, `.../say`, `.../announce`, `.../wifi`, `.../{action}` |
 | Spotify | `GET /api/spotify`, `POST .../settings`, `.../volume`, `.../shuffle`, `.../call-over`, `.../arrival-test`, `.../{action}` |

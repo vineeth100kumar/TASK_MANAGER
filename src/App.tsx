@@ -220,6 +220,9 @@ function MainApp() {
       if (r === 'morning') setIsMorningOpen(true);
     };
     window.addEventListener('sage:ritual', onRitual);
+    // Notes' Print menu opens Settings on a tab (Printers).
+    const onOpenSettings = (e: Event) => openSettings((e as CustomEvent).detail);
+    window.addEventListener('sage:open-settings', onOpenSettings);
 
     // Another device deleted or more recently changed something edited here.
     const unsubOverruled = api.sync.onOverruled((e) => {
@@ -251,6 +254,7 @@ function MainApp() {
       unsubEntity();
       navigator.serviceWorker?.removeEventListener('message', onWorkerMessage);
       window.removeEventListener('sage:ritual', onRitual);
+      window.removeEventListener('sage:open-settings', onOpenSettings);
       window.removeEventListener('sage:open-posts', onOpenPosts);
       window.removeEventListener('sage:open-reels', onOpenReels);
     };

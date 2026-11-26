@@ -27,6 +27,7 @@ import logstore
 import event_registry
 import desk
 import drop
+import printing
 import social
 import industry
 import item_actions
@@ -2858,6 +2859,9 @@ claude_api.connect(DB_PATH, SYNC_TABLES, _claude_apply, _claude_quick_add, _clau
                    logs=logstore.read, drops=drop, posts=posts, diagnostics=diagnostics, reels=reels)
 app.include_router(claude_api.router)
 app.include_router(claude_api.mcp_router)
+
+# Printers and printing notes (printing.py): CUPS on the Pi.
+app.include_router(printing.router)
 
 # Radar's headlines and prices (radar.py): cache tables in the same database.
 radar.connect(DB_PATH)
