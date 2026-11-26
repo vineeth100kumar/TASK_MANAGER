@@ -2,6 +2,7 @@
 
 import json
 import shutil
+from dataclasses import replace
 import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -12,12 +13,12 @@ from ..progress import report
 from ..render.style_config import CANVAS_FORMATS
 from . import align as aligner
 from . import captions as caps
-from . import compose, timing, voice
+from . import cold, compose, timing, voice
 from . import layers as layers_mod
 from .layers import extract_scene
 from .diagram import DiagramError, parse_diagram, plan_steps
 from .objects import SceneObject, render_object_svg, get_default_anim, obj_position, OBJ_ANIMS
-from .script import ReelScript, parse_reel
+from .script import COLD_OPEN_SECONDS, ReelScript, cold_open_text, first_comment, parse_reel
 
 DIAGRAM_TYPE_SCALE = 1.05   # a slide with a diagram sets its text near feed size, not at the full reel size
 PosterAt = 1.2   # seconds into the reel for the poster picture: the cover once its headline is up
@@ -175,8 +176,18 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     else:
         per_scene, used = align_tts(track, reel.scenes, backend)
     progress(f"  word timing: {used}")
+    hero = cold_open_text(reel)
+    voice_path = track.path
+    if hero:
+        # the hero card runs first: the voice and every word time move back by its length
+        progress(f"Cold open: '{hero}'")
+        track = replace(track, path=cold.pad_audio(track.path, work / "voice_cold.wav", COLD_OPEN_SECONDS),
+                        seconds=track.seconds + COLD_OPEN_SECONDS)
+        per_scene = [[replace(w, start=w.start + COLD_OPEN_SECONDS, end=w.end + COLD_OPEN_SECONDS) for w in ws] for ws in per_scene]
     spans = [(w[0].start, w[-1].end) if w else None for w in per_scene]
     windows = timing.scene_windows(spans, [s.duration for s in reel.scenes], float(meta["end_hold"]), compose.EXIT)
+    if hero:
+        windows[0] = (COLD_OPEN_SECONDS, windows[0][1])
     total = max(windows[-1][1], track.seconds + 0.3)
     windows[-1] = (windows[-1][0], total)
 
@@ -204,6 +215,13 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     clips: List[compose.SceneClip] = []
     phrases: List[caps.Phrase] = []
     themes: Dict[int, str] = {}
+    if hero:
+        accent_hex = str(brand.get("accent_hex") or "#EE4425").lstrip("#")
+        try:
+            accent_rgb = tuple(int(accent_hex[k:k + 2], 16) for k in (0, 2, 4))
+        except ValueError:
+            accent_rgb = (238, 68, 37)
+        clips.append(compose.SceneClip(t0=0.0, t1=COLD_OPEN_SECONDS, base=cold.make_card(hero, accent_rgb), motion="fade"))
     with sync_playwright() as p:
         browser = p.chromium.launch(**browser_launch_options())
         page = browser.new_page(viewport={"width": compose.W, "height": compose.H},
@@ -233,7 +251,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                 at[k] = t
             # the first thing on a slide starts arriving while the slide before it is still wiping
             # away, so the viewer never sees an empty backdrop between two slides
-            if i and primary:
+            if (i or hero) and primary:
                 at[primary[0]] = min(at[primary[0]], t0 - compose.EXIT * 0.55)
             elif primary:
                 at[primary[0]] = t0             # the reel's very first frame already has something moving
@@ -329,7 +347,8 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             progress("Drawing the captions...")
             phrases = caps.make_phrases([(i + 1, w) for i, w in enumerate(per_scene) if w])
             cap_page = browser.new_page(viewport={"width": compose.W, "height": 400}, device_scale_factor=1)
-            caps.render_phrases(cap_page, phrases, themes, renderer.league_url, work / "captions", canvas_w=compose.W)
+            caps.render_phrases(cap_page, phrases, themes, renderer.league_url, work / "captions", canvas_w=compose.W,
+                                preset=meta.get("captions") if meta.get("captions") in caps.PRESETS else "bold")
             for ph in phrases:
                 for k, w in enumerate(ph.words):
                     end = ph.words[k + 1].start if k + 1 < len(ph.words) else ph.words[-1].end + 0.1
@@ -357,16 +376,16 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
 
     compose.encode(timeline, track.path, mp4, fps=fps, progress=encoding, preset=preset, quality=quality)
     poster_path = out_dir / "poster.jpg"
-    compose.poster(timeline, min(PosterAt, total - 0.1), poster_path)
+    compose.poster(timeline, min(PosterAt + (COLD_OPEN_SECONDS if hero else 0.0), total - 0.1), poster_path)
 
     # --- the files that go with it ---
     (out_dir / "caption.txt").write_text(data.get("caption", ""), encoding="utf-8")
     (out_dir / "script.md").write_text(script_text, encoding="utf-8")
-    shutil.copy2(track.path, out_dir / "voice.wav")
+    shutil.copy2(voice_path, out_dir / "voice.wav")
     summary = {
         "title": meta.get("title") or "Reel", "seconds": round(total, 1), "fps": fps, "quality": quality, "preset": preset or q_preset, "scenes": len(slides),
         "voice": "own recording" if track.kind == "recording" else meta["voice"], "wordTiming": used,
-        "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
+        "firstComment": first_comment(reel), "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
         "timeline": [{"n": i + 1, "type": slides[i].get("type"), "start": round(a, 2), "end": round(b, 2), "reveals": reveals[i]}
                      for i, (a, b) in enumerate(windows)],
         "warnings": [str(i) for i in reel.issues if i.severity == "WARN"] + picture_warnings,

@@ -1164,6 +1164,7 @@ def _reel_view(reel: dict, full: bool = True) -> dict:
     if full:
         out["caption"] = reel.get("caption") or ""
         out["hashtags"] = reel.get("hashtags") or []
+        out["firstComment"] = reel.get("firstComment") or ""      # a ready first comment to pin, so the thread isn't empty
         out["warnings"] = reel.get("warnings") or []
         out["log"] = [line.get("text") for line in (reel.get("log") or [])[-8:]]
     else:
@@ -1763,7 +1764,7 @@ def _tools() -> List[dict]:
              "days": {"type": "integer", "description": "How many days back (default 30, max 400)"}}}},
         {"name": "sage_social_posts", "description": "The page's Instagram posts and reels, each with its title (the "
          "caption's first line), full caption, hashtags, reach, views, likes, comments, shares, saves and (for reels) "
-         "average watch time, how it did against the page's average reach, and which Sage post or reel it was made "
+         "average watch time (`watchSeconds`, and `holdPct` of the reel when its Sage script is known), how it did against the page's average reach, and which Sage post or reel it was made "
          "from. `top` names the winner for views, likes, comments, saves, shares and reach, with its full caption, "
          "hashtags and topic. `source` is the Sage script behind a post (title = its topic). `hashtagStats` gives "
          "each hashtag's post count and average views, likes and reach. Sort it to answer which posts, captions "
@@ -1788,7 +1789,7 @@ def _tools() -> List[dict]:
          "Read it before writing a script for sage_reel_create.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_reel_check", "description": "Check a reel script without making it: every error and warning "
-         "with its line and slide, the scenes with their narration, about how long the video will run and which voice it asks for.",
+         "with its line and slide, the scenes with their narration, about how long the video will run, which voice it asks for and a hookScore 0-100 for the cover (question, number, named company).",
          "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
         {"name": "sage_reel_create", "description": "Send a script to Sage to be made into an Instagram reel. The Pi speaks "
          "the narration with a free voice (Kokoro; no cost), draws the slides like a post's, makes each piece appear in time "

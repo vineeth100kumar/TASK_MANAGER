@@ -39,7 +39,7 @@ Your goal is a reel that a viewer watches to the end, saves, and shares. It must
 ## 2. THE MUST RULES (the checker enforces these)
 
 1. The file starts with the header block (section 4). Its first line inside the `---` lines is `autocontent: reel`.
-2. Every slide starts with a line `## <type>`, where type is one of: cover, statement, point, list, stat, compare, quote, chart, table, image, cta.
+2. Every slide starts with a line `## <type>`, where type is one of: cover, statement, point, list, stat, compare, quote, chart, table, image, recap, cta.
 3. The first slide is a `cover`. The last slide is a `cta`.
 4. Every slide has exactly one `say:` line. Write the whole narration for that slide on that one line.
 5. One `field: value` per line. The field name starts the line. Bullets start with `- `. Numbered items start with `1. `, `2. `, `3. `.
@@ -101,7 +101,7 @@ Allowed header lines and values:
 | `title:` | any short text | |
 | `style:` | `grid_pill` (white grid, red pill) or `beige_grain` (warm paper) | grid_pill |
 | `voice:` | one Kokoro voice: `af_heart`, `af_bella`, `af_nicole`, `af_sarah`, `af_sky` (US women), `am_adam`, `am_michael`, `am_puck` (US men), `bf_emma`, `bf_isabella`, `bf_lily` (UK women), `bm_george`, `bm_lewis`, `bm_daniel` (UK men); or `mine` (the author records it) | af_heart |
-| `captions:` | `on` or `off` | on |
+| `captions:` | `on` or `off`, or a look: `bold` (red marker on the spoken word, same as `on`), `box` (dark card, accent word), `minimal` (dimmed words, the spoken one underlined) | on |
 | `tag:` | `"#word"` in quotes, 30 characters or fewer | |
 | `speed:` | 0.6 to 1.4 (1.0 is normal) | 1.0 |
 | `accent:` | a hex colour like `#1E6FE8`, or red, orange, blue, green, purple, pink, teal, yellow, navy | the style's own |
@@ -143,7 +143,7 @@ Each type lists its fields, its limits, and its PIECES. A piece is one thing tha
 kicker: BUSINESS BASICS
 headline: Profit is not the same as cash
 pill: as cash
-say: You made a profit. So why can't you pay for the next order?
+say: You made ₹50,000 profit. So why can't you pay?
 show: why can't you
 ```
 - `headline:` 4 to 9 words. No `**bold**`.
@@ -204,6 +204,21 @@ show: made | A college paid
 - `body:` what it means, under 15 words.
 - Always write all three fields.
 - PIECES: 1 headline, 2 number, 3 body.
+
+### recap (the save card, optional, just before the cta)
+```
+## recap
+headline: 3 numbers to keep
+- ₹4,000 | first-order profit
+- 65% | from regulars
+- 2 days | catalogue build
+say: Keep these three numbers. The first order made four thousand rupees. Regulars bring sixty five percent of sales. And the catalogue takes two days.
+show: first order | Regulars | catalogue
+```
+- Rows are `- number | label`, 3 rows, number 12 characters or fewer, label under 4 words (the card also carries a SAVE THIS label: keep the slide to 26 words). They are the reel's own numbers, never new ones.
+- It draws a dark card marked SAVE THIS: the one people screenshot and save. Use it once, as the second-to-last slide.
+- Optional `headline:` (default "3 numbers to keep"), under 6 words.
+- PIECES: 1 headline, then one per row. Write 3 cues.
 
 ### compare (two columns)
 ```
@@ -295,7 +310,8 @@ show: Save this | Tell me
 ```
 - `headline:` a question people can answer in one word, under 8 words. You may bold its last word.
 - `pill:` 1 or 2 words. `subtext:` 2 to 5 words. It sits beside the pill.
-- beige_grain shows the headline only: leave `pill:` and `subtext:` out.
+- Optional `choice: Debt | Growth`: two one-word answers. It becomes the subtext (COMMENT DEBT OR GROWTH) and Sage hands back a first comment to pin. Use it when the question has two clear sides. Do not also write `subtext:`.
+- beige_grain shows the headline only: leave `pill:`, `subtext:` and `choice:` out.
 - PIECES (grid_pill): 1 headline, 2 pill, 3 subtext. (beige_grain: 1 headline.)
 
 ## 7. SYNCING PIECES TO THE VOICE (`show:`)
@@ -455,7 +471,7 @@ tag: "#BusinessBasics"
 kicker: BUSINESS BASICS
 headline: Profit is not the same as cash
 pill: as cash
-say: You made a profit. So why can't you pay for the next order?
+say: You made ₹50,000 profit. So why can't you pay?
 show: why can't you
 tone: hook
 
@@ -550,6 +566,7 @@ themes and pictures) plus these lines. Most lines have other spellings; the chec
 | `fps:` | header | Frames per second, 24 to 60, default 30. `fps: 60` makes a true 60 fps video (motion is drawn for every frame; it takes about twice as long). | |
 | `quality:` | header | `standard` (default; fast), `high` (x264 slow, CRF 17) or `max` (x264 slower, CRF 16). Better quality means a longer render, hours on a Pi for a long `max` reel at 60 fps. An unknown value warns and uses `standard`. | |
 | `end_hold:` | header | Seconds the last slide stays after the last word; 0 to 6, default 1.2. | |
+| `cold_open:` | header | `on` opens with a 0.8 s dark card of the first `stat` number (else the cover's pill); or write the text itself, e.g. `cold_open: ₹30,188 crore` (24 characters at most). `off` by default. The voice starts after the card. | `cold_open: on` |
 | `transition:` | header | Accepted; every slide change is the same wipe today. | |
 | `music:` | header | **Ignored, with a warning.** Add audio in Instagram. | |
 | `aspect:` / `format:` | header | **Ignored, with a warning.** A reel is always 9:16, 1080x1920. | `ratio:`, `size:` |

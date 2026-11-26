@@ -336,8 +336,12 @@ def check(script: str) -> dict:
             "say": sc.say[:600],
         })
     errors = sum(1 for i in issues if i["severity"] == "ERROR")
+    from autocontent.reel.script import first_comment, hook_score
+    cover = next((sc for sc in reel.scenes if sc.slide.get("type") == "cover" and sc.say), None)
     return {
         "ok": errors == 0 and bool(reel.scenes),
+        "hookScore": hook_score(cover.say)[0] if cover else None,
+        "firstComment": first_comment(reel) if reel.scenes else "",
         "errors": errors,
         "warnings": sum(1 for i in issues if i["severity"] != "ERROR"),
         "issues": issues,
@@ -753,6 +757,7 @@ def _finish(reel: dict, folder: Path, code: Optional[int]) -> None:
         reel.update(status="done", seconds=info.get("seconds"), size=mp4.stat().st_size,
                     timeline=info.get("timeline") or [], warnings=info.get("warnings") or [],
                     wordTiming=info.get("wordTiming") or "", scenes=info.get("scenes") or reel.get("scenes"),
+                    firstComment=info.get("firstComment") or "",
                     progress={"percent": 100, "stage": "Done"})
         caption = out / "caption.txt"
         if caption.exists():

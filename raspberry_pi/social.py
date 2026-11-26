@@ -758,6 +758,31 @@ def _value(post: dict, key: str) -> Optional[float]:
     return float(value) if isinstance(value, (int, float)) else None
 
 
+def _add_watch(posts_: List[dict]) -> None:
+    """For a reel: `watchSeconds` (the average a viewer stayed) and, when the Sage reel it came from is
+    known, `reelSeconds` and `holdPct` (how much of it the average viewer watched). Instagram reports
+    watch time in milliseconds."""
+    conn = _db()
+    try:
+        for p in posts_:
+            ms = _value(p, "ig_reels_avg_watch_time")
+            if ms is None:
+                continue
+            p["watchSeconds"] = round(ms / 1000, 1)
+            if p.get("sageKind") != "reel" or not p.get("sageId"):
+                continue
+            try:
+                row = conn.execute("SELECT payload FROM reels WHERE id = ?", (p["sageId"],)).fetchone()
+                length = float(json.loads(row["payload"] or "{}").get("seconds") or 0) if row else 0
+            except (sqlite3.Error, ValueError, TypeError):
+                length = 0
+            if length > 0:
+                p["reelSeconds"] = round(length, 1)
+                p["holdPct"] = round(100 * min(1.0, ms / 1000 / length))
+    finally:
+        conn.close()
+
+
 def posts(project_id: str, limit: int = 30, sort: str = "date") -> dict:
     conn = _db()
     try:
@@ -777,6 +802,7 @@ def posts(project_id: str, limit: int = 30, sort: str = "date") -> dict:
                     "sageId": r.get("sage_id"), "metrics": metrics})
     reaches = [p["metrics"].get("reach") for p in out if isinstance(p["metrics"].get("reach"), (int, float))]
     average = sum(reaches) / len(reaches) if reaches else None
+    _add_watch(out)
     for p in out:
         reach = p["metrics"].get("reach")
         p["vsAverage"] = round(100 * (reach - average) / average) if average and isinstance(reach, (int, float)) else None

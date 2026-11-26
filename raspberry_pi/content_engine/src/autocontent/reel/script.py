@@ -22,6 +22,7 @@ HEADER_KEYS = {
     "speed": "speed", "captions": "captions", "caption_style": "captions", "subtitles": "captions",
     "music": "music", "transition": "transition", "end_hold": "end_hold",
     "format": "format", "size": "format",
+    "cold_open": "cold_open", "coldopen": "cold_open", "hero_open": "cold_open",
     "pace": "pace", "pauses": "pauses", "breaths": "pauses", "polish": "polish", "sound": "polish",
     "loudness": "loudness", "lufs": "loudness", "pronounce": "pronounce", "say_as": "pronounce",
     "pronunciation": "pronounce",
@@ -175,6 +176,7 @@ class ReelScript:
     issues: List[SpecIssue] = field(default_factory=list)
     spec: Optional[ParsedSpec] = None
     post_text: str = ""                 # the script as a plain post spec (what the slide renderer reads)
+    choice: Optional[Tuple[str, str]] = None   # the closing slide's `choice: A | B`, for the pinned first comment
 
     @property
     def errors(self) -> List[SpecIssue]:
@@ -198,7 +200,8 @@ class ReelScript:
         for s in self.scenes:
             n = len(s.words)
             total += (n / (WORDS_PER_SECOND * speed * (s.speed or 1.0)) if n else (s.duration or 2.5)) + 0.45 + s.pause
-        return round(total + float(self.meta.get("end_hold") or 1.2), 1)
+        total += float(self.meta.get("end_hold") or 1.2) + (COLD_OPEN_SECONDS if cold_open_text(self) else 0.0)
+        return round(total, 1)
 
 
 def is_reel_text(text: str) -> bool:
@@ -296,9 +299,87 @@ def _number(value: str, lo: float, hi: float, name: str, line: int, issues: List
     return min(max(n, lo), hi)
 
 
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_RECAP_HEAD = re.compile(r"^(\s{0,3}#{1,6}\s+)recap\s*$", re.I)
+_CTA_HEAD = re.compile(r"^\s{0,3}#{1,6}\s+cta\s*$", re.I)
+_BULLET = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
+_FIELD = re.compile(r"^\s*([A-Za-z_]+)\s*:\s*(.*)$")
+
+
+def expand_sugar(text: str) -> Tuple[str, List[int], List[Tuple[str, str]]]:
+    """Two reel-only shortcuts, turned into plain post slides before the spec is read.
+
+    `## recap` (rows of `- number | label`) becomes a dark `list` slide with a SAVE THIS label: the card people screenshot.
+    `choice: Debt | Growth` on the `cta` becomes its `subtext:` (COMMENT DEBT OR GROWTH).
+    Returns (text, the new-text line numbers of lines it inserted, the choices found). Line numbers in issues are
+    mapped back with `back_line`."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: List[str] = []
+    inserted: List[int] = []
+    choices: List[Tuple[str, str]] = []
+    i = 0
+    fence = False
+    while i < len(lines):
+        raw = lines[i]
+        if re.match(r"^\s*(```|~~~)", raw):
+            fence = not fence
+        end = next((j for j in range(i + 1, len(lines)) if _HEADING.match(lines[j])), len(lines))
+        if not fence and _RECAP_HEAD.match(raw):
+            body = lines[i + 1:end]
+            have = {m.group(1).lower() for l in body for m in [_FIELD.match(l)] if m}
+            out.append(_RECAP_HEAD.sub(r"\1list", raw))
+            for key, val in (("headline", "3 numbers to keep"), ("kicker", "SAVE THIS"), ("theme", "dark")):
+                if key not in have:
+                    out.append(f"{key}: {val}")
+                    inserted.append(len(out))
+            n = 0
+            for l in body:
+                m = _BULLET.match(l)
+                if m:
+                    n += 1
+                    out.append(f"{n}. " + re.sub(r"\s*\|\s*", " — ", m.group(1), count=1))
+                else:
+                    out.append(l)
+            i = end
+            continue
+        if not fence and _CTA_HEAD.match(raw):
+            body = lines[i + 1:end]
+            have = {m.group(1).lower() for l in body for m in [_FIELD.match(l)] if m}
+            out.append(raw)
+            for l in body:
+                m = _FIELD.match(l)
+                if m and m.group(1).lower() in ("choice", "choices"):
+                    parts = [w.strip() for w in re.split(r"\s*(?:\||/|\bor\b)\s*", m.group(2)) if w.strip()]
+                    if len(parts) == 2:
+                        choices.append((parts[0], parts[1]))
+                        out.append("" if "subtext" in have else f"subtext: COMMENT {parts[0].upper()} OR {parts[1].upper()}")
+                    else:
+                        out.append(l)      # left alone; the checker says what is wrong
+                else:
+                    out.append(l)
+            i = end
+            continue
+        out.append(raw)
+        i += 1
+    return "\n".join(out), inserted, choices
+
+
+def first_comment(reel: "ReelScript") -> str:
+    """A ready first comment for the creator to pin, so the thread is never empty. Built only from the script:
+    the choice on the closing slide, else a plain invitation."""
+    if reel.choice:
+        a, b = reel.choice
+        return f"My pick: {a}. What's yours, {a} or {b}? 👇"
+    return "What's your take? Tell me below 👇 And save this one for later."
+
+
 def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     """Parse a reel script. Never raises for bad content: problems come back as issues with line numbers."""
     reel = ReelScript()
+    inserted: List[int] = []
+    if is_reel_text(text):
+        text, inserted, choices = expand_sugar(text)
+        reel.choice = choices[-1] if choices else None
     header, sections, post_text = _split(text)
     if not is_reel_text(text):
         reel.issues.append(SpecIssue(
@@ -326,8 +407,13 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         elif key == "end_hold":
             meta[key] = _number(value, 0.0, 6.0, "end_hold", line, reel.issues, 1.2)
         elif key == "captions":
-            v = value.lower()
-            meta[key] = "off" if v in ("off", "no", "none", "false", "0") else "on"
+            v = value.lower().strip()
+            if v in ("off", "no", "none", "false", "0"):
+                meta[key] = "off"
+            elif v in ("bold", "box", "minimal"):
+                meta[key] = v
+            else:
+                meta[key] = "on"
         elif key == "aspect":
             if value.replace(" ", "").lower() not in ("9:16", "9x16", "1080x1920", "reel", "vertical", ""):
                 reel.issues.append(SpecIssue("WARN", "ASPECT_FIXED", f"A reel is always 9:16 (1080x1920); '{value}' is ignored.", line=header[key][1]))
@@ -359,6 +445,10 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             meta[key] = parse_pronounce(value)
         elif key == "transition":
             meta[key] = value.lower() or "fade"
+        elif key == "cold_open":
+            v = value.strip().strip("\"'")
+            meta[key] = "off" if v.lower() in ("", "off", "no", "none", "false", "0") else \
+                ("auto" if v.lower() in ("on", "yes", "true", "auto", "1") else v[:24])
         else:
             meta[key] = value
     meta.setdefault("fps", 30)
@@ -367,6 +457,7 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     meta.setdefault("voice", DEFAULT_VOICE)
     meta.setdefault("speed", 1.0)
     meta.setdefault("end_hold", 1.2)
+    meta.setdefault("cold_open", "off")
     meta.setdefault("pace", "auto")
     meta.setdefault("pauses", 1.0)
     meta.setdefault("polish", "natural")
@@ -427,7 +518,65 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         reel.scenes.append(scene)
     reel.post_text = post_text
     reel.issues += check_reel(reel)
+    if inserted:
+        back = lambda n: n - sum(1 for k in inserted if k < n)
+        for issue in reel.issues:
+            if issue.line:
+                issue.line = back(issue.line)
+        for sc in reel.scenes:
+            if sc.line:
+                sc.line = back(sc.line)
     return reel
+
+HOOK_WORDS_MAX = 12          # a spoken hook longer than this loses the scroll
+HOOK_WEAK_BELOW = 50         # under this score the cover's narration gets a warning
+_CAPS = re.compile(r"\b[A-Z][a-zA-Z]+\b")
+_OPENERS = {"a", "an", "the", "this", "that", "these", "those", "it", "its", "i", "we", "you", "your", "my", "our", "their",
+            "he", "she", "they", "why", "what", "how", "when", "where", "who", "which", "can", "could", "would", "should",
+            "will", "do", "does", "did", "is", "are", "was", "were", "have", "has", "had", "if", "so", "but", "and", "or",
+            "nine", "ten", "one", "two", "three", "four", "five", "six", "seven", "eight", "every", "most", "many", "some",
+            "no", "not", "just", "here", "there", "now", "then", "once", "still", "same", "more", "less", "last", "next"}
+_SAVE_ASK = re.compile(r"\b(save|bookmark|share|send (this|it)|tag (a|someone)|screenshot|keep this|follow)\b", re.I)
+
+
+def hook_score(say: str) -> Tuple[int, Dict[str, bool]]:
+    """0 to 100 for a cover's narration: a question, a number, a named company or person, a short line.
+    These are the traits behind the best reach on the page (named company + a rupee figure + a question)."""
+    text = (say or "").strip()
+    words = text.split()
+    parts = {
+        "question": "?" in text,
+        "number": bool(re.search(r"\d|₹|%|\$", text)),
+        "entity": any(w.lower() not in _OPENERS for w in _CAPS.findall(text)) or bool(re.search(r"\b[A-Z]{2,}\b", text)),
+        "short": 0 < len(words) <= HOOK_WORDS_MAX,
+    }
+    score = (35 if parts["question"] else 0) + (25 if parts["number"] else 0) + \
+            (25 if parts["entity"] else 0) + (15 if parts["short"] else 0)
+    return score, parts
+
+
+CHOICE_MAX_CHARS = 26       # COMMENT A OR B must fit beside the pill
+COLD_OPEN_SECONDS = 0.8      # the hero card before the cover; the whole reel is pushed back by this much
+
+
+def cold_open_text(reel: "ReelScript") -> str:
+    """What the cold-open card says: the header's own text (`cold_open: ₹30,188 crore`), else the first big
+    number in the reel, else the cover's pill. Empty when the reel has none or the cold open is off."""
+    mode = str(reel.meta.get("cold_open") or "off")
+    if mode == "off":
+        return ""
+    if mode != "auto":
+        return mode
+    strip = lambda t: re.sub(r"\*\*|==", "", str(t or "")).strip()
+    for sc in reel.scenes:
+        if sc.slide.get("type") == "stat" and strip(sc.slide.get("number")):
+            return strip(sc.slide.get("number"))[:24]
+    for sc in reel.scenes:
+        if sc.slide.get("type") == "cover":
+            pill = strip(sc.slide.get("pill"))
+            if pill and pill.lower() not in ("none", "no", "off", "-"):
+                return pill[:24]
+    return ""
 
 
 def check_reel(reel: ReelScript) -> List[SpecIssue]:
@@ -515,6 +664,40 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                 issues.append(SpecIssue("WARN", "DIAGRAM_CROWDED",
                                         f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
                                         slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
+
+    if reel.choice and len(f"COMMENT {reel.choice[0]} OR {reel.choice[1]}") > CHOICE_MAX_CHARS:
+        cta = next((s for s in reversed(reel.scenes) if s.slide.get("type") == "cta"), None)
+        issues.append(SpecIssue("ERROR", "CHOICE_TOO_LONG",
+                                f"`choice: {reel.choice[0]} | {reel.choice[1]}` is too long to sit beside the pill (COMMENT A OR B is {CHOICE_MAX_CHARS} characters at most).",
+                                slide=cta.n if cta else None, line=cta.line if cta else None,
+                                hint="Use two short words, such as `choice: Debt | Growth`."))
+    if reel.meta.get("cold_open", "off") != "off" and not cold_open_text(reel):
+        issues.append(SpecIssue("WARN", "COLD_OPEN_NONE", "`cold_open:` is on but the reel has no big number or cover pill to open on, so it is skipped.",
+                                hint="Add a `stat` slide, or write the text: `cold_open: ₹30,188 crore`."))
+    covers = [s for s in reel.scenes if s.slide.get("type") == "cover" and s.say]
+    if covers:
+        c = covers[0]
+        score, parts = hook_score(c.say)
+        if len(c.words) > HOOK_WORDS_MAX:
+            issues.append(SpecIssue("WARN", "HOOK_LONG", f"The hook is {len(c.words)} words; over {HOOK_WORDS_MAX} loses the scroll.",
+                                    slide=c.n, line=c.line, hint=f"Say the hook in {HOOK_WORDS_MAX} words or fewer, then explain on the next slide."))
+        if score < HOOK_WEAK_BELOW:
+            missing = [label for key, label in (("question", "a question"), ("number", "a number or rupee figure"),
+                                                ("entity", "a named company or person")) if not parts[key]]
+            issues.append(SpecIssue("WARN", "HOOK_WEAK", f"Hook score {score}/100. It is missing {', '.join(missing)}.",
+                                    slide=c.n, line=c.line,
+                                    hint="Hooks with a named company, a concrete number and a question reach 2 to 3 times further."))
+    ctas = [s for s in reel.scenes if s.slide.get("type") == "cta"]
+    if ctas:
+        c = ctas[-1]
+        spoken = c.say or ""
+        shown = " ".join(str(c.slide.get(k) or "") for k in ("headline", "body", "subtext", "share_line"))
+        if "?" not in spoken:
+            issues.append(SpecIssue("WARN", "CTA_NO_QUESTION", "The closing narration asks no question, so nobody has a reason to comment.",
+                                    slide=c.n, line=c.line, hint="End on a one-word question, such as 'Debt or growth?'."))
+        if not _SAVE_ASK.search(spoken + " " + shown):
+            issues.append(SpecIssue("WARN", "CTA_NO_SAVE", "The closing asks for no save or share.",
+                                    slide=c.n, line=c.line, hint="Add a reason to save, such as 'Save this for your next pitch'."))
     seconds = reel.estimate_seconds()
     if seconds > MAX_SECONDS:
         issues.append(SpecIssue("WARN", "REEL_LONG", f"About {seconds:.0f} seconds; reels over {MAX_SECONDS:.0f} seconds lose most viewers.",

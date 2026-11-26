@@ -11,7 +11,7 @@ tag: "#smallbusiness"
 kicker: THE QUIET TRUTH
 headline: 9 in 10 shops still sell **offline**
 pill: offline
-say: Nine in ten corner shops still sell offline only.
+say: Why do nine in ten Indian corner shops still sell offline only?
 
 ## stat
 headline: Repeat customers bring in
@@ -53,7 +53,7 @@ headline: Which step comes **first?**
 subtext: COMMENT 1, 2 OR 3
 pill: SAVE THIS
 theme: dark
-say: Tell me which step you will do first.
+say: Save this for Monday. Which step will you do first?
 
 ## caption
 Most corner shops never go online, and it is not the tech that stops them.
