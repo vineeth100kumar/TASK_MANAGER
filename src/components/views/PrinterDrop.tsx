@@ -140,6 +140,7 @@ export function PrinterDrop() {
               <p className="text-xs text-gray-500">No printer ready. Add one in Settings → Devices → Printers.</p>
             ) : (
               <>
+                <QualityPicker value={opts} onChange={setOpts} />
                 <div className="flex flex-wrap items-center gap-2">
                   <select value={printer} onChange={e => setPrinter(e.target.value)} className={selectCls} aria-label="Printer">
                     {printers.map(p => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -147,7 +148,6 @@ export function PrinterDrop() {
                   <button className={chip(mode === 'single')} onClick={() => setMode('single')}><Square size={13} />One side</button>
                   <button className={chip(mode === 'duplex')} onClick={() => setMode('duplex')}><Layers size={13} />Back to back</button>
                 </div>
-                <QualityPicker value={opts} onChange={setOpts} />
                 {mode === 'single' ? (
                   <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">Copies
                     <input type="number" min={1} max={20} value={copies} onChange={e => setCopies(Math.max(1, Math.min(20, Number(e.target.value) || 1)))} className={`${selectCls} w-16`} />

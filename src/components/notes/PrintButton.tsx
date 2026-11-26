@@ -3,12 +3,12 @@
 // also save a PDF). One button covers all three kinds of note.
 
 import { useEffect, useRef, useState } from 'react';
-import { Printer, Loader2, Monitor, Settings2, Layers } from 'lucide-react';
+import { Printer, Loader2, Monitor, Settings2 } from 'lucide-react';
 import { Note, Thought } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { duplexApi, printInBrowser, printOnPi, usePrinters, type DuplexJob } from '../../services/printing';
-import { QualityPicker, usePrintOptions } from '../print/QualityPicker';
+import { duplexApi, printInBrowser, printOnPi, usePrinters, type DuplexJob, type PrintOptions } from '../../services/printing';
+import { PrintOptionsDialog } from '../print/PrintOptionsDialog';
 import { DuplexDialog } from '../print/DuplexDialog';
 import { codePage, mapPage, notePage, reportPage } from './printable';
 
@@ -25,7 +25,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
   const [open, setOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [duplexJob, setDuplexJob] = useState<DuplexJob | null>(null);
-  const [opts, setOpts] = usePrintOptions();
+  const [asking, setAsking] = useState<string | null>(null);   // the printer whose options are showing
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -45,30 +45,27 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
     return notePage(note, body);
   };
 
-  const go = async (printer: string | null) => {
+  const printHere = async () => {
     setOpen(false);
     setWorking(true);
-    try {
-      const html = await page();
-      if (printer === null) { printInBrowser(html); return; }
-      await printOnPi(printer, note.title || 'Sage', html, 1, opts);
-      showToast(`Sent to ${printer}`, 'success', { label: 'Print again', onAction: () => { go(printer); }, durationMs: 15000 });
-    } catch (e: any) {
-      showToast(e?.message || "Couldn't print that", 'error');
-    } finally {
-      setWorking(false);
-    }
+    try { printInBrowser(await page()); }
+    catch (e: any) { showToast(e?.message || "Couldn't print that", 'error'); }
+    finally { setWorking(false); }
   };
 
-  const goDuplex = async (printer: string) => {
-    setOpen(false);
-    setWorking(true);
+  // Runs after the options step, so quality is chosen before anything is sent.
+  const send = async (printer: string, mode: 'single' | 'duplex', copies: number, opts: PrintOptions) => {
     try {
-      setDuplexJob(await duplexApi.fromHtml(printer, note.title || 'Sage', await page(), false, opts));
+      const html = await page();
+      setAsking(null);
+      if (mode === 'duplex') {
+        setDuplexJob(await duplexApi.fromHtml(printer, note.title || 'Sage', html, false, opts));
+        return;
+      }
+      await printOnPi(printer, note.title || 'Sage', html, copies, opts);
+      showToast(`Sent to ${printer}`, 'success', { label: 'Print again', onAction: () => setAsking(printer), durationMs: 15000 });
     } catch (e: any) {
-      showToast(e?.message || "Couldn't start back to back", 'error');
-    } finally {
-      setWorking(false);
+      showToast(e?.message || "Couldn't print that", 'error');
     }
   };
 
@@ -85,20 +82,13 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
         <div role="menu" className="absolute right-0 top-11 z-30 w-60 p-1.5 rounded-2xl bg-white dark:bg-[#2c2c2e] shadow-xl ring-1 ring-black/10 dark:ring-white/10">
           <div className="px-2.5 pt-1 pb-1.5 text-[11.5px] font-semibold text-gray-500">Print {note.kind === 'map' ? 'thought map' : note.kind === 'html' ? 'report' : note.kind === 'code' ? 'code' : 'note'}</div>
           {printers.map(p => (
-            <button key={p.name} role="menuitem" disabled={p.state === 'disabled'} onClick={() => go(p.name)} className={`${item} disabled:opacity-40`}>
+            <button key={p.name} role="menuitem" disabled={p.state === 'disabled'} onClick={() => { setOpen(false); setAsking(p.name); }} className={`${item} disabled:opacity-40`}>
               <Printer size={14} className="shrink-0 text-blue-500" />
               <span className="truncate">{p.name}</span>
               {p.default && <span className="ml-auto text-[10px] text-gray-400">default</span>}
             </button>
           ))}
-          {printers.filter(p => p.state !== 'disabled').map(p => (
-            <button key={`b2b-${p.name}`} role="menuitem" onClick={() => goDuplex(p.name)} className={item}>
-              <Layers size={14} className="shrink-0 text-blue-500" />
-              <span className="truncate">Back to back · {p.name}</span>
-            </button>
-          ))}
-          {printers.length > 0 && <div className="my-1 border-t border-black/5 dark:border-white/10"><QualityPicker value={opts} onChange={setOpts} compact /></div>}
-          <button role="menuitem" onClick={() => go(null)} className={item}>
+          <button role="menuitem" onClick={printHere} className={item}>
             <Monitor size={14} className="shrink-0 text-gray-400" />This device / save as PDF
           </button>
           {onOpenSettings && (
@@ -108,6 +98,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
           )}
         </div>
       )}
+      {asking && <PrintOptionsDialog printer={asking} title={note.title || 'Untitled'} onPrint={(mode, copies, o) => send(asking, mode, copies, o)} onClose={() => setAsking(null)} />}
       {duplexJob && <DuplexDialog job={duplexJob} autoStart onClose={() => setDuplexJob(null)} />}
     </div>
   );
