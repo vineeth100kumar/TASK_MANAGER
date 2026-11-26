@@ -101,7 +101,7 @@ Allowed header lines and values:
 | `title:` | any short text | |
 | `style:` | `grid_pill` (white grid, red pill) or `beige_grain` (warm paper) | grid_pill |
 | `voice:` | one Kokoro voice: `af_heart`, `af_bella`, `af_nicole`, `af_sarah`, `af_sky` (US women), `am_adam`, `am_michael`, `am_puck` (US men), `bf_emma`, `bf_isabella`, `bf_lily` (UK women), `bm_george`, `bm_lewis`, `bm_daniel` (UK men); or `mine` (the author records it) | af_heart |
-| `captions:` | `on` or `off` | on |
+| `captions:` | `on` or `off`, or a look: `bold` (red marker on the spoken word, same as `on`), `box` (dark card, accent word), `minimal` (dimmed words, the spoken one underlined) | on |
 | `tag:` | `"#word"` in quotes, 30 characters or fewer | |
 | `speed:` | 0.6 to 1.4 (1.0 is normal) | 1.0 |
 | `accent:` | a hex colour like `#1E6FE8`, or red, orange, blue, green, purple, pink, teal, yellow, navy | the style's own |

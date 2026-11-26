@@ -347,7 +347,8 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             progress("Drawing the captions...")
             phrases = caps.make_phrases([(i + 1, w) for i, w in enumerate(per_scene) if w])
             cap_page = browser.new_page(viewport={"width": compose.W, "height": 400}, device_scale_factor=1)
-            caps.render_phrases(cap_page, phrases, themes, renderer.league_url, work / "captions", canvas_w=compose.W)
+            caps.render_phrases(cap_page, phrases, themes, renderer.league_url, work / "captions", canvas_w=compose.W,
+                                preset=meta.get("captions") if meta.get("captions") in caps.PRESETS else "bold")
             for ph in phrases:
                 for k, w in enumerate(ph.words):
                     end = ph.words[k + 1].start if k + 1 < len(ph.words) else ph.words[-1].end + 0.1

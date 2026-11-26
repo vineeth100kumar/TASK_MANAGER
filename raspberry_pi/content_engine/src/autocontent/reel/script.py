@@ -407,8 +407,13 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         elif key == "end_hold":
             meta[key] = _number(value, 0.0, 6.0, "end_hold", line, reel.issues, 1.2)
         elif key == "captions":
-            v = value.lower()
-            meta[key] = "off" if v in ("off", "no", "none", "false", "0") else "on"
+            v = value.lower().strip()
+            if v in ("off", "no", "none", "false", "0"):
+                meta[key] = "off"
+            elif v in ("bold", "box", "minimal"):
+                meta[key] = v
+            else:
+                meta[key] = "on"
         elif key == "aspect":
             if value.replace(" ", "").lower() not in ("9:16", "9x16", "1080x1920", "reel", "vertical", ""):
                 reel.issues.append(SpecIssue("WARN", "ASPECT_FIXED", f"A reel is always 9:16 (1080x1920); '{value}' is ignored.", line=header[key][1]))

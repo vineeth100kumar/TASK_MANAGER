@@ -414,6 +414,23 @@ class PostsForAiTest(unittest.TestCase):
         self.assertIn("Body", top["views"]["caption"])
         self.assertEqual(top["views"]["hashtags"], ["india", "markets"])
 
+    def test_reels_get_watch_seconds_and_hold_when_the_sage_reel_is_known(self):
+        conn = social._db()
+        conn.execute("CREATE TABLE IF NOT EXISTS reels (id TEXT PRIMARY KEY, created_at TEXT, status TEXT, payload TEXT)")
+        conn.execute("INSERT INTO reels VALUES ('r1', '', 'done', ?)", (json.dumps({"seconds": 30}),))
+        conn.execute("UPDATE social_media SET sage_kind='reel', sage_id='r1', metrics=? WHERE id='a'",
+                     (json.dumps({"views": 268, "reach": 200, "ig_reels_avg_watch_time": 6000}),))
+        conn.execute("UPDATE social_media SET metrics=? WHERE id='b'", (json.dumps({"views": 5, "ig_reels_avg_watch_time": 2500}),))
+        conn.commit()
+        conn.close()
+        out = {p["id"]: p for p in social.posts("p1")["posts"]}
+        self.assertEqual(out["a"]["watchSeconds"], 6.0)
+        self.assertEqual(out["a"]["reelSeconds"], 30.0)
+        self.assertEqual(out["a"]["holdPct"], 20)
+        self.assertEqual(out["b"]["watchSeconds"], 2.5)
+        self.assertNotIn("holdPct", out["b"])
+        self.assertNotIn("watchSeconds", out["c"])
+
     def test_sort_puts_best_first_and_missing_numbers_last(self):
         ids = [p["id"] for p in social.posts("p1", sort="views")["posts"]]
         self.assertEqual(ids, ["a", "b", "c"])

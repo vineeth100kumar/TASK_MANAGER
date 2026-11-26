@@ -1764,7 +1764,7 @@ def _tools() -> List[dict]:
              "days": {"type": "integer", "description": "How many days back (default 30, max 400)"}}}},
         {"name": "sage_social_posts", "description": "The page's Instagram posts and reels, each with its title (the "
          "caption's first line), full caption, hashtags, reach, views, likes, comments, shares, saves and (for reels) "
-         "average watch time, how it did against the page's average reach, and which Sage post or reel it was made "
+         "average watch time (`watchSeconds`, and `holdPct` of the reel when its Sage script is known), how it did against the page's average reach, and which Sage post or reel it was made "
          "from. `top` names the winner for views, likes, comments, saves, shares and reach, with its full caption, "
          "hashtags and topic. `source` is the Sage script behind a post (title = its topic). `hashtagStats` gives "
          "each hashtag's post count and average views, likes and reach. Sort it to answer which posts, captions "

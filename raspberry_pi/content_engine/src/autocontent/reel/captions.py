@@ -26,6 +26,23 @@ THEMES = {
 }
 
 
+PRESETS = ("bold", "box", "minimal")     # `captions: on` is `bold`, the look every reel had before presets
+
+
+def _preset_css(preset: str, size: int, ink: str, active_ink: str, marker: str) -> str:
+    """How the phrase and its spoken word are drawn. bold = a red marker on the word (the default);
+    box = the whole phrase on a dark card, the word in the accent colour; minimal = no box: the rest dimmed, the
+    spoken word full strength with an accent underline (reads on light and dark slides)."""
+    if preset == "box":
+        return (f"#cap {{ background: rgba(17,17,17,0.82); border-radius: {int(size * 0.3)}px; }} "
+                f".w {{ color: #FFFFFF; }} .a {{ color: {marker}; background: transparent; transform: none; }}")
+    if preset == "minimal":
+        return (f".w {{ color: {ink}; opacity: 0.45; }} "
+                f".a {{ color: {ink}; opacity: 1; background: transparent; transform: none; "
+                f"box-shadow: inset 0 -{max(6, int(size * 0.12))}px 0 {marker}; border-radius: 0; }}")
+    return ""
+
+
 @dataclass
 class Phrase:
     scene: int
@@ -100,7 +117,7 @@ def make_phrases(scene_words: Sequence[Tuple[int, List[Timed]]]) -> List[Phrase]
     return phrases
 
 
-def _html(font_url: str, words: List[str], active: int, colors: Tuple[str, str, str], size: int) -> str:
+def _html(font_url: str, words: List[str], active: int, colors: Tuple[str, str, str], size: int, preset: str = "bold") -> str:
     ink, active_ink, marker = colors
     spans = []
     for i, w in enumerate(words):
@@ -118,11 +135,12 @@ html, body {{ margin: 0; background: transparent; }}
 .w {{ color: {ink}; padding: {int(size * 0.14)}px {int(size * 0.2)}px {int(size * 0.1)}px; border-radius: {int(size * 0.2)}px;
       text-shadow: none; }}
 .a {{ color: {active_ink}; background: {marker}; transform: skewX(-6deg); }}
+{_preset_css(preset, size, ink, active_ink, marker)}
 </style></head><body><div id="cap">{''.join(spans)}</div></body></html>"""
 
 
 def render_phrases(page, phrases: List[Phrase], themes: Dict[int, str], font_url: str, out_dir: Path,
-                   canvas_w: int = 1080, max_w: int = 980, base_size: int = 72) -> None:
+                   canvas_w: int = 1080, max_w: int = 980, base_size: int = 72, preset: str = "bold") -> None:
     """Draw every phrase's pictures (RGBA PNGs) into out_dir and set their positions."""
     out_dir.mkdir(parents=True, exist_ok=True)
     for pi, ph in enumerate(phrases):
@@ -130,7 +148,7 @@ def render_phrases(page, phrases: List[Phrase], themes: Dict[int, str], font_url
         colors = THEMES.get(themes.get(ph.scene, "light"), THEMES["light"])
         size = base_size
         while True:
-            page.set_content(_html(font_url, texts, 0, colors, size), wait_until="load")
+            page.set_content(_html(font_url, texts, 0, colors, size, preset), wait_until="load")
             page.evaluate("document.fonts.ready")
             w = page.evaluate("document.getElementById('cap').getBoundingClientRect().width")
             if w <= max_w or size <= 40:
@@ -140,7 +158,7 @@ def render_phrases(page, phrases: List[Phrase], themes: Dict[int, str], font_url
         rect = page.evaluate("(() => { const r = document.getElementById('cap').getBoundingClientRect(); return [r.width, r.height]; })()")
         width, height = int(rect[0]) + 8, int(rect[1]) + 8
         for k in range(len(texts)):
-            page.set_content(_html(font_url, texts, k, colors, size), wait_until="load")
+            page.set_content(_html(font_url, texts, k, colors, size, preset), wait_until="load")
             page.evaluate("document.fonts.ready")
             path = out_dir / f"cap_{pi:03d}_{k}.png"
             page.screenshot(path=str(path), clip={"x": 0, "y": 0, "width": width, "height": height}, omit_background=True)
