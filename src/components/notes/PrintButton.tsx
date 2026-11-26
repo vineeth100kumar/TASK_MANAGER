@@ -3,11 +3,12 @@
 // also save a PDF). One button covers all three kinds of note.
 
 import { useEffect, useRef, useState } from 'react';
-import { Printer, Loader2, Monitor, Settings2 } from 'lucide-react';
+import { Printer, Loader2, Monitor, Settings2, Layers } from 'lucide-react';
 import { Note, Thought } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
-import { printInBrowser, printOnPi, usePrinters } from '../../services/printing';
+import { duplexApi, printInBrowser, printOnPi, usePrinters, type DuplexJob } from '../../services/printing';
+import { DuplexDialog } from '../print/DuplexDialog';
 import { codePage, mapPage, notePage, reportPage } from './printable';
 
 interface Props {
@@ -22,6 +23,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
   const { showToast } = useToast();
   const [open, setOpen] = useState(false);
   const [working, setWorking] = useState(false);
+  const [duplexJob, setDuplexJob] = useState<DuplexJob | null>(null);
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -56,6 +58,18 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
     }
   };
 
+  const goDuplex = async (printer: string) => {
+    setOpen(false);
+    setWorking(true);
+    try {
+      setDuplexJob(await duplexApi.fromHtml(printer, note.title || 'Sage', await page(), false));
+    } catch (e: any) {
+      showToast(e?.message || "Couldn't start back to back", 'error');
+    } finally {
+      setWorking(false);
+    }
+  };
+
   const printers = pr.state?.available && pr.state.pdf !== false ? pr.state.printers : [];
   const item = 'w-full text-left px-2.5 py-2 rounded-xl text-[13px] font-medium text-gray-800 dark:text-gray-100 hover:bg-black/5 dark:hover:bg-white/10 flex items-center gap-2';
 
@@ -75,6 +89,12 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
               {p.default && <span className="ml-auto text-[10px] text-gray-400">default</span>}
             </button>
           ))}
+          {printers.filter(p => p.state !== 'disabled').map(p => (
+            <button key={`b2b-${p.name}`} role="menuitem" onClick={() => goDuplex(p.name)} className={item}>
+              <Layers size={14} className="shrink-0 text-blue-500" />
+              <span className="truncate">Back to back · {p.name}</span>
+            </button>
+          ))}
           <button role="menuitem" onClick={() => go(null)} className={item}>
             <Monitor size={14} className="shrink-0 text-gray-400" />This device / save as PDF
           </button>
@@ -85,6 +105,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
           )}
         </div>
       )}
+      {duplexJob && <DuplexDialog job={duplexJob} autoStart onClose={() => setDuplexJob(null)} />}
     </div>
   );
 }

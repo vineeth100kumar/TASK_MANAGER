@@ -16,9 +16,12 @@ import asyncio
 import logging
 import os
 import re
+import secrets
 import shutil
 import subprocess
 import tempfile
+import threading
+import time
 from pathlib import Path
 from typing import List, Optional
 
@@ -326,3 +329,175 @@ async def print_job(req: PrintJob):
             html_to_pdf(req.html, pdf)
             return _lp(req.printer, pdf, _clean_title(req.title), req.copies)
     return {"success": True, "job": await _guard(go)}
+
+
+# --- Back to back, one sheet at a time ---
+#
+# For printers with no duplex unit. The job prints one side, then waits while you
+# flip the sheet and put it back, and prints the other side only when you say OK.
+# After the back it waits again for a fresh sheet. Only the sheet being printed is
+# ever cut out of the PDF, so a long document never sits in memory.
+
+MAX_JOBS = 3
+JOB_KEEP_SECONDS = 4 * 3600
+JOBS: dict = {}
+_jobs_lock = threading.Lock()
+
+
+def pdf_pages(path: Path) -> int:
+    try:
+        from pypdf import PdfReader
+    except ImportError:
+        raise RuntimeError("pypdf isn't installed. Run: sudo deploy/install_pi.sh --only server")
+    with open(path, "rb") as f:
+        return len(PdfReader(f).pages)
+
+
+def sheet_steps(pages: int) -> List[tuple]:
+    """(page number, side) for every printing step: sheet 1 front, sheet 1 back, sheet 2 front..."""
+    steps = []
+    for p in range(1, pages + 1):
+        steps.append((p, "front" if p % 2 else "back"))
+    return steps
+
+
+def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str) -> str:
+    from pypdf import PdfReader, PdfWriter
+    with tempfile.TemporaryDirectory(prefix="sage-sheet-") as tmp:
+        one = Path(tmp) / "sheet.pdf"
+        with open(pdf, "rb") as f:
+            writer = PdfWriter()
+            pg = PdfReader(f).pages[page - 1]
+            if rotate:
+                pg.rotate(180)
+            writer.add_page(pg)
+            with open(one, "wb") as out:
+                writer.write(out)
+        return _lp(printer, one, title, 1)
+
+
+def job_view(job: dict) -> dict:
+    steps = job["steps"]
+    done = job["done"]
+    total_sheets = (job["pages"] + 1) // 2
+    out = {"id": job["id"], "title": job["title"], "printer": job["printer"], "pages": job["pages"],
+           "sheets": total_sheets, "flip": job["flip"], "error": job.get("error", ""), "finished": done >= len(steps)}
+    if done >= len(steps):
+        out.update(sheet=total_sheets, stage="done", message=f"All {total_sheets} sheet{'s' if total_sheets != 1 else ''} sent.")
+        return out
+    if done == 0:
+        out.update(sheet=1, stage="start", message="Ready. Press Print to send the front of sheet 1.")
+        return out
+    page, side = steps[done - 1]
+    sheet = (page + 1) // 2
+    nxt_page, nxt_side = steps[done]
+    if nxt_side == "back":
+        out.update(sheet=sheet, stage="flip", next="Print back side",
+                   message=f"Sheet {sheet} front is printing. When it is out, flip it over and put it back in the printer, then press the button.")
+    else:
+        out.update(sheet=sheet + 1, stage="reload", next=f"Print sheet {sheet + 1}",
+                   message=f"Sheet {sheet} is done. Put a fresh sheet in the printer, then press the button.")
+    return out
+
+
+def _forget_old(now: float) -> None:
+    for jid in [j for j, v in JOBS.items() if now - v["touched"] > JOB_KEEP_SECONDS or (v["done"] >= len(v["steps"]) and now - v["touched"] > 600)]:
+        _drop_job(jid)
+
+
+def _drop_job(jid: str) -> None:
+    job = JOBS.pop(jid, None)
+    if job and job.get("own") and job["pdf"].exists():
+        shutil.rmtree(job["pdf"].parent, ignore_errors=True)
+
+
+def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge: bool) -> dict:
+    _known(printer)
+    pages = pdf_pages(pdf)
+    if pages < 1:
+        raise RuntimeError("That PDF has no pages.")
+    with _jobs_lock:
+        _forget_old(time.time())
+        if len(JOBS) >= MAX_JOBS:
+            raise HTTPException(status_code=409, detail="Finish or stop a back to back job first.")
+        jid = secrets.token_hex(6)
+        JOBS[jid] = {"id": jid, "printer": printer, "title": _clean_title(title), "pdf": pdf, "own": own, "pages": pages,
+                     "steps": sheet_steps(pages), "done": 0, "flip": bool(flip_short_edge), "touched": time.time()}
+        return job_view(JOBS[jid])
+
+
+def advance_duplex(jid: str, again: bool = False) -> dict:
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        if again:
+            job["done"] = max(0, job["done"] - 1)
+        if job["done"] >= len(job["steps"]):
+            return job_view(job)
+        page, side = job["steps"][job["done"]]
+        try:
+            _known(job["printer"])
+            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}")
+        except Exception as e:
+            job["error"] = friendly(e)
+            raise HTTPException(status_code=502, detail=friendly(e))
+        job["error"] = ""
+        job["done"] += 1
+        job["touched"] = time.time()
+        view = job_view(job)
+        if view["finished"] and job.get("own"):
+            shutil.rmtree(job["pdf"].parent, ignore_errors=True)
+        return view
+
+
+class DuplexJob(BaseModel):
+    printer: str
+    title: str = "Sage"
+    html: str
+    flip: bool = False
+
+
+@router.post("/api/print/duplex")
+async def duplex_from_html(req: DuplexJob):
+    if len(req.html) > MAX_HTML:
+        raise HTTPException(status_code=413, detail="That's too big to print in one go.")
+    if not req.html.strip():
+        raise HTTPException(status_code=400, detail="Nothing to print.")
+
+    def go():
+        _known(req.printer)
+        folder = Path(tempfile.mkdtemp(prefix="sage-duplex-"))
+        pdf = folder / "job.pdf"
+        try:
+            html_to_pdf(req.html, pdf)
+            job = start_duplex(req.printer, req.title, pdf, True, req.flip)
+        except BaseException:
+            shutil.rmtree(folder, ignore_errors=True)
+            raise
+        return job
+    return {"success": True, "job": await _guard(go)}
+
+
+@router.get("/api/print/jobs")
+async def list_jobs():
+    with _jobs_lock:
+        _forget_old(time.time())
+        return {"success": True, "jobs": [job_view(j) for j in JOBS.values()]}
+
+
+@router.post("/api/print/jobs/{jid}/continue")
+async def continue_job(jid: str):
+    return {"success": True, "job": await _guard(advance_duplex, jid)}
+
+
+@router.post("/api/print/jobs/{jid}/again")
+async def again_job(jid: str):
+    return {"success": True, "job": await _guard(advance_duplex, jid, True)}
+
+
+@router.delete("/api/print/jobs/{jid}")
+async def stop_job(jid: str):
+    with _jobs_lock:
+        _drop_job(jid)
+    return {"success": True}

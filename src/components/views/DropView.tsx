@@ -15,7 +15,7 @@ import {
   DEFAULT_HOURS, Drop, DropFile, EXPIRY_CHOICES, dropApi, dropAvailable, dropLink,
   filesFromDataTransfer, filesFromInput, imageFileName, isImage, makeThumb, sizeText, timeLeft,
 } from '../../services/drop';
-
+import { PrinterDrop } from './PrinterDrop';
 const HOURS_KEY = 'sage-drop-hours';
 // Thumbnails bigger than this aren't worth sending (the Pi refuses past 512 KB).
 const MAX_THUMB = 500 * 1024;
@@ -567,6 +567,7 @@ export function DropView() {
           Anyone with a link can open it until it switches off, or you turn it off or delete it. Permanent links stay until you remove them. Nothing else in Sage is shared, and pages run in a sandbox, so their scripts can't reach Sage.
         </p>
       </section>
+      <PrinterDrop />
       {confirmDelete && (
         <div className="fixed inset-0 z-50 grid place-items-center p-4 bg-black/40" onClick={() => !deleting && setConfirmDelete(null)}>
           <div role="alertdialog" aria-modal="true" aria-labelledby="drop-del-title" onClick={e => e.stopPropagation()}

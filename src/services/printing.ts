@@ -91,3 +91,58 @@ export function printInBrowser(html: string): void {
   frame.srcdoc = html;
   document.body.appendChild(frame);
 }
+
+// --- Back to back, one sheet at a time ---
+
+export interface DuplexJob {
+  id: string;
+  title: string;
+  printer: string;
+  pages: number;
+  sheets: number;
+  sheet: number;
+  stage: 'start' | 'flip' | 'reload' | 'done';
+  message: string;
+  next?: string;
+  finished: boolean;
+  flip: boolean;
+  error: string;
+}
+
+export const duplexApi = {
+  /** Starts a job from a page of HTML (a note). Nothing prints until `next` is called. */
+  fromHtml: (printer: string, title: string, html: string, flip: boolean) =>
+    call<{ job: DuplexJob }>('/api/print/duplex', 'POST', { printer, title, html, flip }).then(r => r.job),
+  list: () => call<{ jobs: DuplexJob[] }>('/api/print/jobs').then(r => r.jobs),
+  next: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/continue`, 'POST').then(r => r.job),
+  again: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/again`, 'POST').then(r => r.job),
+  stop: (id: string) => call(`/api/print/jobs/${encodeURIComponent(id)}`, 'DELETE'),
+};
+
+// --- Printer drop: PDFs kept on the Pi ---
+
+export interface PrintFile { id: string; name: string; pages: number; bytes: number; createdAt: number }
+export interface PrintDropList { files: PrintFile[]; maxMb: number; maxFiles: number }
+
+export const printDropApi = {
+  list: () => call<PrintDropList>('/api/printdrop'),
+  remove: (id: string) => call(`/api/printdrop/${encodeURIComponent(id)}`, 'DELETE'),
+  print: (id: string, printer: string, mode: 'single' | 'duplex', copies: number, flip: boolean) =>
+    call<{ job?: DuplexJob; message?: string }>(`/api/printdrop/${encodeURIComponent(id)}/print`, 'POST', { printer, mode, copies, flip }),
+  /** One raw PDF per request, streamed to the Pi's disk. */
+  upload: (file: File, onProgress?: (sent: number, total: number) => void) => new Promise<PrintFile>((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `${piBackendUrl()}/api/printdrop?name=${encodeURIComponent(file.name)}`);
+    for (const [k, v] of Object.entries(piHeaders())) xhr.setRequestHeader(k, v);
+    xhr.setRequestHeader('Content-Type', 'application/pdf');
+    if (onProgress) xhr.upload.onprogress = e => e.lengthComputable && onProgress(e.loaded, e.total);
+    xhr.onerror = () => reject(new Error("Can't reach the Pi"));
+    xhr.onload = () => {
+      let data: any = {};
+      try { data = JSON.parse(xhr.responseText); } catch { /* not JSON */ }
+      if (xhr.status >= 200 && xhr.status < 300 && data.success !== false) resolve(data.file);
+      else reject(new Error(data.detail || data.error || `The Pi answered ${xhr.status}`));
+    };
+    xhr.send(file);
+  }),
+};

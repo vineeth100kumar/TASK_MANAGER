@@ -20,6 +20,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from fastapi.testclient import TestClient  # noqa: E402
 
 import db_server  # noqa: E402
+import printdrop  # noqa: E402
 import printing  # noqa: E402
 
 client = TestClient(db_server.app, follow_redirects=False)
@@ -109,6 +110,110 @@ class Routes(unittest.TestCase):
 
     def test_print_empty(self):
         self.assertEqual(client.post("/api/print", json={"printer": "Office_Laser", "html": "  "}).status_code, 400)
+
+
+def make_pdf(pages: int) -> bytes:
+    import io
+    from pypdf import PdfWriter
+    w = PdfWriter()
+    for _ in range(pages):
+        w.add_blank_page(width=595, height=842)
+    buf = io.BytesIO()
+    w.write(buf)
+    return buf.getvalue()
+
+
+class BackToBack(unittest.TestCase):
+    def setUp(self):
+        self.calls = []
+        self.sent_pages = []
+        printdrop.connect(str(Path(TMP) / "print.db"))
+        for f in printdrop.list_files():
+            printdrop._pdf_path(f["id"]).unlink()
+            printdrop._meta_path(f["id"]).unlink()
+        printing.JOBS.clear()
+        self.real_send = printing._send_page
+
+        def send(printer, pdf, page, rotate, title):
+            self.sent_pages.append((page, rotate))
+            return "ok"
+        for p in (mock.patch.object(printing, "available", return_value=True),
+                  mock.patch.object(printing, "_run", fake_run(self.calls)),
+                  mock.patch.object(printing, "_send_page", send)):
+            p.start()
+            self.addCleanup(p.stop)
+
+    def upload(self, pages=3, name="Plan.pdf"):
+        body = make_pdf(pages)
+        r = client.post(f"/api/printdrop?name={name}", content=body, headers={"content-type": "application/pdf"})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["file"]
+
+    def test_upload_list_delete(self):
+        f = self.upload(3)
+        self.assertEqual((f["pages"], f["name"]), (3, "Plan.pdf"))
+        self.assertEqual(len(client.get("/api/printdrop").json()["files"]), 1)
+        self.assertEqual(client.delete(f"/api/printdrop/{f['id']}").status_code, 200)
+        self.assertEqual(client.get("/api/printdrop").json()["files"], [])
+
+    def test_refuses_non_pdf_and_too_many(self):
+        r = client.post("/api/printdrop?name=x.pdf", content=b"hello world", headers={"content-type": "application/pdf"})
+        self.assertEqual(r.status_code, 400)
+        with mock.patch.object(printdrop, "MAX_FILES", 1):
+            self.upload(1)
+            r = client.post("/api/printdrop?name=b.pdf", content=make_pdf(1), headers={"content-type": "application/pdf"})
+            self.assertEqual(r.status_code, 409)
+
+    def test_single_side_prints_whole_file(self):
+        f = self.upload(3)
+        r = client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "single", "copies": 2})
+        self.assertEqual(r.status_code, 200)
+        lp = [c for c in self.calls if c[0] == "lp"][0]
+        self.assertEqual(lp[:6], ["lp", "-d", "Office_Laser", "-n", "2", "-t"])
+
+    def test_back_to_back_waits_between_sides(self):
+        f = self.upload(3)
+        job = client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex", "flip": True}).json()["job"]
+        self.assertEqual((job["stage"], job["sheets"]), ("start", 2))
+        self.assertEqual(self.sent_pages, [])
+        steps = []
+        for _ in range(3):
+            job = client.post(f"/api/print/jobs/{job['id']}/continue").json()["job"]
+            steps.append(job["stage"])
+        self.assertEqual(steps, ["flip", "reload", "done"])
+        # page 1 front, page 2 back (turned 180 with flip), page 3 front of sheet 2
+        self.assertEqual(self.sent_pages, [(1, False), (2, True), (3, False)])
+        self.assertTrue(job["finished"])
+
+    def test_again_resends_the_last_side(self):
+        f = self.upload(2)
+        job = client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex"}).json()["job"]
+        client.post(f"/api/print/jobs/{job['id']}/continue")
+        client.post(f"/api/print/jobs/{job['id']}/again")
+        self.assertEqual([p for p, _ in self.sent_pages], [1, 1])
+
+    def test_stop_and_limit(self):
+        f = self.upload(2)
+        ids = [client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex"}).json()["job"]["id"] for _ in range(3)]
+        self.assertEqual(client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex"}).status_code, 409)
+        client.delete(f"/api/print/jobs/{ids[0]}")
+        self.assertEqual(len(client.get("/api/print/jobs").json()["jobs"]), 2)
+        self.assertTrue(printdrop._pdf_path(f["id"]).is_file())   # a stored PDF outlives its job
+
+    def test_a_sheet_is_cut_out_as_one_page(self):
+        from pypdf import PdfReader
+        f = self.upload(3)
+        seen = []
+
+        def grab(printer, pdf, title, copies):
+            r = PdfReader(str(pdf))
+            seen.append((len(r.pages), r.pages[0].get("/Rotate", 0)))
+            return "ok"
+        job = client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex", "flip": True}).json()["job"]
+        with mock.patch.object(printing, "_lp", grab), mock.patch.object(printing, "_send_page", self.real_send):
+            client.post(f"/api/print/jobs/{job['id']}/continue")
+            client.post(f"/api/print/jobs/{job['id']}/continue")
+        self.assertEqual(seen, [(1, 0), (1, 180)])
 
 
 if __name__ == "__main__":

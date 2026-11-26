@@ -28,6 +28,7 @@ import event_registry
 import desk
 import drop
 import printing
+import printdrop
 import social
 import industry
 import item_actions
@@ -2927,6 +2928,8 @@ app.include_router(social.router)
 
 # Drop (drop.py): temporary public links for HTML reports and small sites.
 drop.connect(DB_PATH)
+printdrop.connect(DB_PATH)
+app.include_router(printdrop.router)
 
 # Trusted devices (passkeys.py): credential ids and public keys, Pi-only and
 # never in SYNC_TABLES, so they don't sync to LUMO or any other device.
