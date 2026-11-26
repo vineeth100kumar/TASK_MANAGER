@@ -35,6 +35,15 @@ def put_media(sage_id="abc", kind="post", link="https://instagram.com/p/XYZ/"):
 
 
 class Find(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.old_db = social.DB_PATH   # other test files point social at their own databases
+        social.connect(str(Path(TMP) / "ig_social.db"))
+
+    @classmethod
+    def tearDownClass(cls):
+        social.DB_PATH = cls.old_db
+
     def test_found_after_a_pull(self):
         item = {"id": "abc", "projectId": "p1", "posted": True}
 
