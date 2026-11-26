@@ -214,29 +214,71 @@ class Restart(unittest.TestCase):
         self.assertTrue(any(j["event"] == "bluez" for j in link.journal))
 
 
-if __name__ == "__main__":
-    unittest.main()
-
-
 class StuckWatcher(Rig):
-    def test_hung_bluez_call_flips_to_away(self):
-        """2026-11-25: a D-Bus call hung, the last pass said home, and Sage said home for 15 hours."""
+    """2026-11-25: one call in a pass never returned. The loop froze on its last
+    answer (home) and Sage said home for 15 hours after Vineeth left."""
+
+    def setUp(self):
+        super().setUp()
         self.link.pinned = PHONE
         self.objects = {"/dev": device()}
         self.kernel = {PHONE}
-        self.tick()
-        self.assertTrue(self.link.home)
+        self.good = self.link._objects
+        for target in (mock.patch.object(phone_link, "TICK_TIMEOUT", 0.05),
+                       mock.patch.object(phone_link.system_health, "beat", lambda *a, **k: None)):
+            target.start()
+            self.addCleanup(target.stop)
 
-        async def hang():
+    def hang(self):
+        async def forever():
             await asyncio.sleep(3600)
-        self.link._objects = hang
+        self.link._objects = forever
 
-        async def one_pass():
-            try:
-                await asyncio.wait_for(self.link._tick(), 0.05)
-            except asyncio.TimeoutError:
-                await self.link.set_presence(False, "", force_away=True)
-        asyncio.run(one_pass())
-        self.assertFalse(self.link.home)
+    def one_pass(self, seconds=5):
+        self.now += seconds
+        asyncio.run(self.link._one_pass())
+
+    def test_a_hung_pass_is_cancelled_and_the_phone_counts_as_not_seen(self):
+        self.one_pass()
+        self.assertTrue(self.link.home)
+        self.hang()
+        self.one_pass()
         self.assertFalse(self.link.connected)
+        self.assertFalse(self.link.home)  # away_after is 0 in this rig
+        self.assertIn("reading BlueZ's device list", self.link.presence_reason)
+
+    def test_one_hung_pass_is_not_a_goodbye_but_a_stuck_watcher_is(self):
+        with mock.patch.object(phone_link, "away_after", lambda: 300):
+            self.one_pass()
+            self.hang()
+            self.one_pass(seconds=60)
+            self.assertTrue(self.link.home, "one slow pass inside the away grace keeps you home")
+            self.one_pass(seconds=300)
+            self.assertFalse(self.link.home, "still hanging past the grace: away")
+
+    def test_home_again_once_a_pass_finishes(self):
+        self.one_pass()
+        self.hang()
+        self.one_pass()
+        self.assertFalse(self.link.home)
+        self.link._objects = self.good
+        self.one_pass()
+        self.assertTrue(self.link.home)
+        self.assertEqual(self.link.presence_reason, "Bluetooth link")
+
+    def test_watchdog_decides_when_no_pass_finishes(self):
+        """Belt and braces: a hang the timeout can't cancel still ends 'home'."""
+        self.one_pass()
+        self.assertTrue(self.link.home)
+        self.now += phone_link.WATCHDOG_AFTER - 1
+        asyncio.run(self.link._watchdog_check())
+        self.assertTrue(self.link.home, "watchdog waits for WATCHDOG_AFTER")
+        self.now += 2
+        asyncio.run(self.link._watchdog_check())
+        self.assertFalse(self.link.home)
+        self.assertIn("watcher stuck", self.link.presence_reason)
+
+
+if __name__ == "__main__":
+    unittest.main()
 

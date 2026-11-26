@@ -29,6 +29,7 @@ from pathlib import Path
 from typing import Any, Awaitable, Callable, Deque, Dict, List, Optional
 
 import presence
+import system_health
 
 log = logging.getLogger("phone_link")
 
@@ -86,10 +87,16 @@ PROFILE_MAX_GAP = int(os.getenv("SAGE_PHONE_PROFILE_MAX_GAP", "600"))
 # Where the iPhone's address is remembered, so it is found on any kind of link.
 PINNED_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "phone_pinned.json"
 JOURNAL_KEEP = 200
-# One pass of the Bluetooth watcher must finish in this long. A D-Bus call that
-# never returns froze the whole loop on 2026-11-25 (the last pass said "home",
-# so Sage kept saying home for 15 hours after Vineeth left).
-TICK_TIMEOUT = int(os.getenv("SAGE_PHONE_TICK_TIMEOUT", "40"))
+# One pass of the Bluetooth watcher must finish in this long, or it is cancelled.
+# On 2026-11-25 one call in a pass never returned: the loop froze on its last
+# answer (home) and Sage said home for 15 hours after Vineeth had left. The
+# calls in a pass that can be slow each have their own 5-20 s limit, and even if
+# several of those run out in one pass it stays under this.
+TICK_TIMEOUT = int(os.getenv("SAGE_PHONE_TICK_TIMEOUT", "60"))
+# A second guard that runs outside the pass: if no pass has finished in this
+# long (the cancel above didn't take), presence is decided without it.
+WATCHDOG_AFTER = int(os.getenv("SAGE_PHONE_WATCHDOG_AFTER", str(TICK_TIMEOUT * 2 + 30)))
+WATCHDOG_EVERY = 10
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -335,7 +342,8 @@ class PhoneLink:
         # trusts this over BlueZ's Connected flag, which stays true on a dead
         # link after the phone has left (see PRESENCE_LIVENESS).
         self._alive_at = 0.0
-        self._tick_ok_at = 0.0       # when the watcher last finished a pass
+        self._pass_at = 0.0          # when the watcher last finished a pass (any outcome)
+        self._step = ""              # what the current pass is doing, named when one hangs
         self._ble_dead_since = 0.0   # when the BLE link first looked dead (no life)
         self._probe_at = 0.0         # last active liveness probe
         self._probe_fails = 0        # consecutive failed liveness probes
@@ -406,7 +414,7 @@ class PhoneLink:
         self.notifications.clear()
         await self._emit({"type": "PHONE_NOTIFICATION_REMOVED", "id": "*"})
 
-    async def set_presence(self, connected: bool, name: str = "", force_away: bool = False) -> None:
+    async def set_presence(self, connected: bool, name: str = "") -> None:
         now = time.time()
         changed = connected != self.connected
         self.connected = connected
@@ -414,8 +422,6 @@ class PhoneLink:
             self.last_seen = now
             self.device_name = name or self.device_name
         home = connected or (self.last_seen and now - self.last_seen < away_after())
-        if force_away:
-            home = False
         if changed or bool(home) != self.home:
             if bool(home) != self.home:
                 log.info("Presence: you are now %s (phone %s)", "home" if home else "away", "connected" if connected else "not connected")
@@ -562,30 +568,82 @@ class PhoneLink:
         from bluetooth_control import BluetoothControl
         self.control = BluetoothControl(self._bus, self._emit, {ANCS_SERVICE, AMS_SERVICE})
         try:
-            await self.control.register_agent()
+            await asyncio.wait_for(self.control.register_agent(), TICK_TIMEOUT)
         except Exception as e:
             log.warning("Could not register the pairing agent (pairing from Sage may not work): %s", e)
+        self._pass_at = time.time()
+        watchdog = asyncio.ensure_future(self._watchdog())
+        try:
+            while True:
+                await self._one_pass()
+                system_health.beat(TICK_TIMEOUT)  # sage_health flags the watcher if this stops
+                await asyncio.sleep(self._pause())
+        finally:
+            watchdog.cancel()
+
+    async def _one_pass(self) -> None:
+        """One look at BlueZ, never longer than TICK_TIMEOUT. A pass that hangs
+        is cancelled and counts as "the phone was not seen": the usual away
+        grace (away_after) still applies, so one slow pass is not a goodbye,
+        but a watcher that keeps hanging can never hold "home" for good."""
+        self._step = "starting"
+        try:
+            await asyncio.wait_for(self._tick(), TICK_TIMEOUT)
+        except asyncio.TimeoutError:
+            self._chars.clear()  # the link it was talking to is suspect: subscribe afresh
+            self._unwatch()
+            self._set_link(classic=False, ble=False, subscribed=[], nowPlaying="Bluetooth check stuck")
+            await self._not_seen(f"stuck {self._step}", f"the Bluetooth check hung while {self._step}; "
+                                 f"cancelled after {TICK_TIMEOUT} s. The phone counts as not seen until a check finishes.")
+        except Exception as e:
+            self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
+            self._chars.clear()  # subscribe again on the next tick
+        self._pass_at = time.time()
+
+    async def _not_seen(self, reason: str, message: str) -> None:
+        """No pass could look at the phone: decide presence on what is known,
+        which is that it hasn't been seen since last_seen."""
+        self.say("tick", message)
+        if reason != self.presence_reason:
+            self.note("presence", f"not seen: {reason}")
+        self.presence_reason = reason
+        # set_presence flips self.home before it tells anyone, so even if
+        # telling the web app stalls, home is already right; the limit just
+        # keeps a stalled broadcast from freezing this path too.
+        try:
+            await asyncio.wait_for(self.set_presence(False, self.device_name), TICK_TIMEOUT)
+        except asyncio.TimeoutError:
+            log.error("Phone link: telling Sage you are not seen took over %s s (the live event stream is stuck)", TICK_TIMEOUT)
+
+    async def _watchdog(self) -> None:
+        """Runs beside the passes. If no pass has finished for WATCHDOG_AFTER
+        (a hang the timeout could not cancel), keep presence honest anyway."""
         while True:
+            await asyncio.sleep(WATCHDOG_EVERY)
             try:
-                await asyncio.wait_for(self._tick(), TICK_TIMEOUT)
-                self._tick_ok_at = time.time()
-            except asyncio.TimeoutError:
-                self.say("tick", f"the Bluetooth check hung for {TICK_TIMEOUT} s and was cancelled; "
-                                 "counting the phone as away until it answers again.")
-                self.presence_reason = "Bluetooth watcher stuck"
-                self._chars.clear()
-                self._unwatch()
-                await self.set_presence(False, self.device_name, force_away=True)
+                await self._watchdog_check()
             except Exception as e:
-                self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
-                self._chars.clear()  # subscribe again on the next tick
-            # Poll faster while scanning, pairing or connecting so the page keeps up.
-            # Also fast while waiting for the phone's BLE link, which can be up
-            # for only a few seconds before the phone drops it again.
-            # Only for the first few tries: after that the phone is refusing, and
-            # polling BlueZ every 1.5 s just keeps the radio busy.
-            waiting_for_ble = self.link["classic"] and not self.link["ble"] and self._ble_tries < 6
-            await asyncio.sleep(1.5 if self.control.busy or self.control.latest.get("scanning") or waiting_for_ble else 5)
+                log.warning("Phone link watchdog failed: %s", e)
+
+    async def _watchdog_check(self) -> None:
+        quiet = time.time() - self._pass_at if self._pass_at else 0
+        if quiet > WATCHDOG_AFTER:
+            # A pass that ignores even being cancelled; sage_health also shows
+            # this worker as stale (no beat), which points at restarting Sage.
+            log.error("Phone link: no Bluetooth check has finished for %d s (stuck %s)", int(quiet), self._step)
+            await self._not_seen(f"watcher stuck {self._step}",
+                                 f"no Bluetooth check has finished for {int(quiet)} s (stuck {self._step}); "
+                                 "the phone counts as not seen.")
+
+    def _pause(self) -> float:
+        # Poll faster while scanning, pairing or connecting so the page keeps up.
+        # Also fast while waiting for the phone's BLE link, which can be up
+        # for only a few seconds before the phone drops it again.
+        # Only for the first few tries: after that the phone is refusing, and
+        # polling BlueZ every 1.5 s just keeps the radio busy.
+        waiting_for_ble = self.link["classic"] and not self.link["ble"] and self._ble_tries < 6
+        busy = bool(self.control and (self.control.busy or self.control.latest.get("scanning")))
+        return 1.5 if busy or waiting_for_ble else 5
 
     async def _objects(self) -> dict:
         intro = await self._bus.introspect(BLUEZ, "/")
@@ -594,10 +652,14 @@ class PhoneLink:
 
     async def _tick(self) -> None:
         if not self._advertising and time.time() - self._adv_last_try >= 30:
+            self._step = "advertising to the iPhone"
             await self._advertise()
+        self._step = "reading BlueZ's device list"
         objects = await self._objects()
         if self.control:
+            self._step = "refreshing the Bluetooth page"
             await self.control.refresh(objects)
+        self._step = "checking bluetoothd"
         await self._watch_bluez()
         phone_path, phone_name, dev = None, "", None
         for path, ifaces in objects.items():
@@ -621,6 +683,7 @@ class PhoneLink:
         # it shows the phone (an iPhone's BLE address can change), never to say
         # the phone is gone.
         now_t = time.time()
+        self._step = "reading the kernel's link list"
         links = await self._kernel_links()
         radio = True if (links is not None and self.pinned and self.pinned in links) else None
         data_age = now_t - self._alive_at if self._alive_at else None
@@ -628,6 +691,7 @@ class PhoneLink:
         if verdict.reason != self.presence_reason:
             self.note("presence", f"{'home' if verdict.present else 'away'}: {verdict.reason}")
         self.presence_reason = verdict.reason
+        self._step = "telling Sage who is home"
         await self.set_presence(verdict.present, phone_name or self.device_name)
         if phone_path is None:
             self._set_link(phone=None, address=None, classic=False, ble=False, subscribed=[])
@@ -654,8 +718,10 @@ class PhoneLink:
             if now - self._profile_last_try >= min(PROFILE_MAX_GAP, PROFILE_RETRY * 2 ** self._profile_tries):
                 self._profile_last_try = now
                 self._profile_tries += 1
+                self._step = "asking the iPhone for its ANCS profile"
                 await self._connect_profile(phone_path, phone_name, address)
             if stuck_for >= STUCK_DROP_AFTER and self._may_force(now):
+                self._step = "dropping the phone for a fresh link"
                 await self._force_fresh_link(phone_path,
                     f"{phone_name} ({address}) has been connected without BLE for "
                     f"{int(stuck_for)} s; disconnecting as a last resort.")
@@ -672,10 +738,14 @@ class PhoneLink:
             self._set_link(nowPlaying="resubscribing")
             self._chars.clear()
         if not self._chars:
+            self._step = "subscribing to notifications and now playing"
             await self._subscribe(objects, phone_path)
         if self._chars:
+            self._step = "reading the song title"
             await self._check_title()
+        self._step = "reading the phone's battery"
         await self._check_battery(objects, phone_path)
+        self._step = "checking the BLE link is alive"
         await self._heal_if_dead(objects, phone_path, phone_name, address)
 
     async def _check_battery(self, objects: dict, device_path: str, probe: bool = False) -> Optional[bool]:
@@ -1162,6 +1232,12 @@ class PhoneLink:
             self.say("advertise", f"advertising as {fields['LocalName']}{slots}, so the iPhone can find and "
                                   f"reconnect to the Pi over BLE")
         except Exception as e:
+            if "AlreadyExists" in f"{getattr(e, 'type', None)}{e}":
+                # BlueZ took it last time, but that pass was cancelled before
+                # it heard back: the advert is up.
+                self._advertising = True
+                self.say("advertise", f"advertising as {fields['LocalName']} (BlueZ already had the advert)")
+                return
             self.say("advertise", f"could not advertise as {fields['LocalName']}{slots}, so the iPhone can't "
                                   f"reconnect to the Pi over BLE: {getattr(e, 'type', None) or type(e).__name__}: "
                                   f"{e}. Trying again every 30 s. If it keeps failing, run "

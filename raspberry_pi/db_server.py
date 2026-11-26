@@ -512,17 +512,39 @@ class EventHub:
 
     async def broadcast(self, event: dict) -> None:
         message = json.dumps(event)
-        for socket in list(self.sockets):
-            try:
-                await socket.send_text(message)
-            except Exception:
+        sockets = list(self.sockets)
+        # All at once, each with a limit: a browser that vanished (phone left
+        # Wi-Fi) can leave a socket whose send never finishes, and one such
+        # socket used to hold up every worker that broadcasts.
+        results = await asyncio.gather(
+            *(asyncio.wait_for(socket.send_text(message), SOCKET_SEND_TIMEOUT) for socket in sockets),
+            return_exceptions=True)
+        for socket, result in zip(sockets, results):
+            if isinstance(result, BaseException):
                 self.sockets.discard(socket)
+                _keep(asyncio.ensure_future(_close_quietly(socket)))  # the page reconnects on close
         for listener in list(self.listeners):
             try:
                 listener(event)
             except Exception as e:
                 print(f"Event listener failed: {e}")
                 logstore.error("sync", f"Event listener failed: {e}")
+
+
+SOCKET_SEND_TIMEOUT = float(os.getenv("SAGE_SOCKET_SEND_TIMEOUT", "5"))
+_closing: set = set()  # asyncio only holds tasks weakly
+
+
+def _keep(task) -> None:
+    _closing.add(task)
+    task.add_done_callback(_closing.discard)
+
+
+async def _close_quietly(socket) -> None:
+    try:
+        await asyncio.wait_for(socket.close(), SOCKET_SEND_TIMEOUT)
+    except Exception:
+        pass
 
 
 events = EventHub()
