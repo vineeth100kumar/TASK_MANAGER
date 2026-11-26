@@ -68,6 +68,14 @@ part_packages() {
   step "System packages"
   apt-get update -qq
   apt-get install -y -qq python3-venv python3-pip sqlite3 git ffmpeg >/dev/null
+  # Printing (printing.py): CUPS finds and drives printers, avahi finds network ones.
+  # The Sage user needs lpadmin to add a printer from Settings > Printers.
+  if apt-get install -y -qq cups cups-client cups-filters avahi-daemon libnss-mdns >/dev/null 2>&1; then
+    usermod -aG lpadmin "$RUN_AS" 2>/dev/null || true
+    systemctl enable --now cups avahi-daemon >/dev/null 2>&1 || true
+  else
+    echo "CUPS didn't install, so Printers stays off. Try: sudo apt-get install cups cups-client cups-filters avahi-daemon"
+  fi
 }
 
 part_settings() {
