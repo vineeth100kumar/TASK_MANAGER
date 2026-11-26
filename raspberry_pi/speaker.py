@@ -2381,11 +2381,11 @@ class Speaker:
 
     def on_reminder(self, item: dict, message: dict) -> None:
         """notifier calls this (from its worker thread) as a reminder goes out.
-        Only reminders switched to "Read aloud" are spoken (default off, so a
-        private one stays silent), and only while you're home."""
+        Every reminder is read aloud by default (Read aloud can be switched off per
+        task), except hidden tasks, which always stay silent. Only while you're home."""
         settings = get_settings()
         home = bool(self.phone and self.phone.available and self.phone.home)
-        wanted = bool((item.get("customFields") or {}).get("readAloud"))
+        wanted = (item.get("customFields") or {}).get("readAloud") is not False and not item.get("isHidden")
         if has_output(settings) and settings["reminders"] and home and wanted:
             self.say_soon(reminder_line(message), "reminder", meta={"kind": "reminder", "title": str(message.get("title") or "").strip()})
 

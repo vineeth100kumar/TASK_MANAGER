@@ -125,7 +125,7 @@ class WakeAndReadAloudTests(unittest.TestCase):
         self.assertIn("Gym, Report", line)
         self.assertIn("overdue", line)
 
-    def test_reminders_are_silent_unless_read_aloud(self):
+    def test_reminders_read_aloud_by_default_unless_off_or_hidden(self):
         sp = speaker.Speaker()
         spoken = []
         sp.say_soon = lambda text, kind="line", **kw: spoken.append(text)
@@ -133,8 +133,9 @@ class WakeAndReadAloudTests(unittest.TestCase):
         orig = speaker.has_output
         speaker.has_output = lambda s: True
         try:
-            sp.on_reminder({"customFields": {}}, {"title": "Secret"})
-            sp.on_reminder({"customFields": {"readAloud": True}}, {"title": "Pills"})
+            sp.on_reminder({"customFields": {"readAloud": False}}, {"title": "Quiet"})
+            sp.on_reminder({"customFields": {}, "isHidden": True}, {"title": "Secret"})
+            sp.on_reminder({"customFields": {}}, {"title": "Pills"})
         finally:
             speaker.has_output = orig
         self.assertEqual(len(spoken), 1)

@@ -367,7 +367,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       }
 
                                             <PropertyRow icon={Volume2} label="Read aloud">
-                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud === false ? '' : 'on'}
                           onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
                           <option value="">Off (silent)</option>
                           <option value="on">On, when I'm home</option>
@@ -426,7 +426,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                       }
 
                                             <PropertyRow icon={Volume2} label="Read aloud">
-                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud === false ? '' : 'on'}
                           onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
                           <option value="">Off (silent)</option>
                           <option value="on">On, when I'm home</option>
@@ -463,7 +463,7 @@ export function TaskInspector({ taskId, onClose, onTransition, onUpdateDetails, 
                           }} />
                       </PropertyRow>
                                             <PropertyRow icon={Volume2} label="Read aloud">
-                        <Select align="end" className="prop-control" value={task.customFields?.readAloud ? 'on' : ''}
+                        <Select align="end" className="prop-control" value={task.customFields?.readAloud === false ? '' : 'on'}
                           onChange={async v => { await onUpdateDetails(task, { customFields: { ...(task.customFields || {}), readAloud: v === 'on' } }); loadData(); }}>
                           <option value="">Off (silent)</option>
                           <option value="on">On, when I'm home</option>
