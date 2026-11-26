@@ -86,7 +86,7 @@ class GuideNamesExist(unittest.TestCase):
     def test_slide_types(self):
         line = re.search(r"type is one of: ([a-z, ]+)\.", PROMPT).group(1)
         for t in [x.strip() for x in line.split(",")]:
-            self.assertIn(t, SLIDE_TYPES)
+            self.assertIn(t, SLIDE_TYPES + (("recap",)))
 
     def test_voices(self):
         for v in re.findall(r"`([ab][fm]_[a-z]+)`", PROMPT):

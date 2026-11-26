@@ -39,7 +39,7 @@ Your goal is a reel that a viewer watches to the end, saves, and shares. It must
 ## 2. THE MUST RULES (the checker enforces these)
 
 1. The file starts with the header block (section 4). Its first line inside the `---` lines is `autocontent: reel`.
-2. Every slide starts with a line `## <type>`, where type is one of: cover, statement, point, list, stat, compare, quote, chart, table, image, cta.
+2. Every slide starts with a line `## <type>`, where type is one of: cover, statement, point, list, stat, compare, quote, chart, table, image, recap, cta.
 3. The first slide is a `cover`. The last slide is a `cta`.
 4. Every slide has exactly one `say:` line. Write the whole narration for that slide on that one line.
 5. One `field: value` per line. The field name starts the line. Bullets start with `- `. Numbered items start with `1. `, `2. `, `3. `.
@@ -205,6 +205,21 @@ show: made | A college paid
 - Always write all three fields.
 - PIECES: 1 headline, 2 number, 3 body.
 
+### recap (the save card, optional, just before the cta)
+```
+## recap
+headline: 3 numbers to keep
+- ₹4,000 | first-order profit
+- 65% | from regulars
+- 2 days | catalogue build
+say: Keep these three numbers. The first order made four thousand rupees. Regulars bring sixty five percent of sales. And the catalogue takes two days.
+show: first order | Regulars | catalogue
+```
+- Rows are `- number | label`, 3 rows, number 12 characters or fewer, label under 4 words (the card also carries a SAVE THIS label: keep the slide to 26 words). They are the reel's own numbers, never new ones.
+- It draws a dark card marked SAVE THIS: the one people screenshot and save. Use it once, as the second-to-last slide.
+- Optional `headline:` (default "3 numbers to keep"), under 6 words.
+- PIECES: 1 headline, then one per row. Write 3 cues.
+
 ### compare (two columns)
 ```
 ## compare
@@ -295,7 +310,8 @@ show: Save this | Tell me
 ```
 - `headline:` a question people can answer in one word, under 8 words. You may bold its last word.
 - `pill:` 1 or 2 words. `subtext:` 2 to 5 words. It sits beside the pill.
-- beige_grain shows the headline only: leave `pill:` and `subtext:` out.
+- Optional `choice: Debt | Growth`: two one-word answers. It becomes the subtext (COMMENT DEBT OR GROWTH) and Sage hands back a first comment to pin. Use it when the question has two clear sides. Do not also write `subtext:`.
+- beige_grain shows the headline only: leave `pill:`, `subtext:` and `choice:` out.
 - PIECES (grid_pill): 1 headline, 2 pill, 3 subtext. (beige_grain: 1 headline.)
 
 ## 7. SYNCING PIECES TO THE VOICE (`show:`)

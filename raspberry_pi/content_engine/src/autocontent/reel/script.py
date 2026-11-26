@@ -176,6 +176,7 @@ class ReelScript:
     issues: List[SpecIssue] = field(default_factory=list)
     spec: Optional[ParsedSpec] = None
     post_text: str = ""                 # the script as a plain post spec (what the slide renderer reads)
+    choice: Optional[Tuple[str, str]] = None   # the closing slide's `choice: A | B`, for the pinned first comment
 
     @property
     def errors(self) -> List[SpecIssue]:
@@ -298,9 +299,87 @@ def _number(value: str, lo: float, hi: float, name: str, line: int, issues: List
     return min(max(n, lo), hi)
 
 
+_HEADING = re.compile(r"^\s{0,3}#{1,6}\s+\S")
+_RECAP_HEAD = re.compile(r"^(\s{0,3}#{1,6}\s+)recap\s*$", re.I)
+_CTA_HEAD = re.compile(r"^\s{0,3}#{1,6}\s+cta\s*$", re.I)
+_BULLET = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.*\S)\s*$")
+_FIELD = re.compile(r"^\s*([A-Za-z_]+)\s*:\s*(.*)$")
+
+
+def expand_sugar(text: str) -> Tuple[str, List[int], List[Tuple[str, str]]]:
+    """Two reel-only shortcuts, turned into plain post slides before the spec is read.
+
+    `## recap` (rows of `- number | label`) becomes a dark `list` slide with a SAVE THIS label: the card people screenshot.
+    `choice: Debt | Growth` on the `cta` becomes its `subtext:` (COMMENT DEBT OR GROWTH).
+    Returns (text, the new-text line numbers of lines it inserted, the choices found). Line numbers in issues are
+    mapped back with `back_line`."""
+    lines = text.replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    out: List[str] = []
+    inserted: List[int] = []
+    choices: List[Tuple[str, str]] = []
+    i = 0
+    fence = False
+    while i < len(lines):
+        raw = lines[i]
+        if re.match(r"^\s*(```|~~~)", raw):
+            fence = not fence
+        end = next((j for j in range(i + 1, len(lines)) if _HEADING.match(lines[j])), len(lines))
+        if not fence and _RECAP_HEAD.match(raw):
+            body = lines[i + 1:end]
+            have = {m.group(1).lower() for l in body for m in [_FIELD.match(l)] if m}
+            out.append(_RECAP_HEAD.sub(r"\1list", raw))
+            for key, val in (("headline", "3 numbers to keep"), ("kicker", "SAVE THIS"), ("theme", "dark")):
+                if key not in have:
+                    out.append(f"{key}: {val}")
+                    inserted.append(len(out))
+            n = 0
+            for l in body:
+                m = _BULLET.match(l)
+                if m:
+                    n += 1
+                    out.append(f"{n}. " + re.sub(r"\s*\|\s*", " — ", m.group(1), count=1))
+                else:
+                    out.append(l)
+            i = end
+            continue
+        if not fence and _CTA_HEAD.match(raw):
+            body = lines[i + 1:end]
+            have = {m.group(1).lower() for l in body for m in [_FIELD.match(l)] if m}
+            out.append(raw)
+            for l in body:
+                m = _FIELD.match(l)
+                if m and m.group(1).lower() in ("choice", "choices"):
+                    parts = [w.strip() for w in re.split(r"\s*(?:\||/|\bor\b)\s*", m.group(2)) if w.strip()]
+                    if len(parts) == 2:
+                        choices.append((parts[0], parts[1]))
+                        out.append("" if "subtext" in have else f"subtext: COMMENT {parts[0].upper()} OR {parts[1].upper()}")
+                    else:
+                        out.append(l)      # left alone; the checker says what is wrong
+                else:
+                    out.append(l)
+            i = end
+            continue
+        out.append(raw)
+        i += 1
+    return "\n".join(out), inserted, choices
+
+
+def first_comment(reel: "ReelScript") -> str:
+    """A ready first comment for the creator to pin, so the thread is never empty. Built only from the script:
+    the choice on the closing slide, else a plain invitation."""
+    if reel.choice:
+        a, b = reel.choice
+        return f"My pick: {a}. What's yours, {a} or {b}? 👇"
+    return "What's your take? Tell me below 👇 And save this one for later."
+
+
 def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     """Parse a reel script. Never raises for bad content: problems come back as issues with line numbers."""
     reel = ReelScript()
+    inserted: List[int] = []
+    if is_reel_text(text):
+        text, inserted, choices = expand_sugar(text)
+        reel.choice = choices[-1] if choices else None
     header, sections, post_text = _split(text)
     if not is_reel_text(text):
         reel.issues.append(SpecIssue(
@@ -434,6 +513,14 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
         reel.scenes.append(scene)
     reel.post_text = post_text
     reel.issues += check_reel(reel)
+    if inserted:
+        back = lambda n: n - sum(1 for k in inserted if k < n)
+        for issue in reel.issues:
+            if issue.line:
+                issue.line = back(issue.line)
+        for sc in reel.scenes:
+            if sc.line:
+                sc.line = back(sc.line)
     return reel
 
 HOOK_WORDS_MAX = 12          # a spoken hook longer than this loses the scroll
@@ -463,6 +550,7 @@ def hook_score(say: str) -> Tuple[int, Dict[str, bool]]:
     return score, parts
 
 
+CHOICE_MAX_CHARS = 26       # COMMENT A OR B must fit beside the pill
 COLD_OPEN_SECONDS = 0.8      # the hero card before the cover; the whole reel is pushed back by this much
 
 
@@ -572,6 +660,12 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                                         f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
                                         slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
 
+    if reel.choice and len(f"COMMENT {reel.choice[0]} OR {reel.choice[1]}") > CHOICE_MAX_CHARS:
+        cta = next((s for s in reversed(reel.scenes) if s.slide.get("type") == "cta"), None)
+        issues.append(SpecIssue("ERROR", "CHOICE_TOO_LONG",
+                                f"`choice: {reel.choice[0]} | {reel.choice[1]}` is too long to sit beside the pill (COMMENT A OR B is {CHOICE_MAX_CHARS} characters at most).",
+                                slide=cta.n if cta else None, line=cta.line if cta else None,
+                                hint="Use two short words, such as `choice: Debt | Growth`."))
     if reel.meta.get("cold_open", "off") != "off" and not cold_open_text(reel):
         issues.append(SpecIssue("WARN", "COLD_OPEN_NONE", "`cold_open:` is on but the reel has no big number or cover pill to open on, so it is skipped.",
                                 hint="Add a `stat` slide, or write the text: `cold_open: ₹30,188 crore`."))

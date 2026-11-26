@@ -18,7 +18,7 @@ from . import layers as layers_mod
 from .layers import extract_scene
 from .diagram import DiagramError, parse_diagram, plan_steps
 from .objects import SceneObject, render_object_svg, get_default_anim, obj_position, OBJ_ANIMS
-from .script import COLD_OPEN_SECONDS, ReelScript, cold_open_text, parse_reel
+from .script import COLD_OPEN_SECONDS, ReelScript, cold_open_text, first_comment, parse_reel
 
 DIAGRAM_TYPE_SCALE = 1.05   # a slide with a diagram sets its text near feed size, not at the full reel size
 PosterAt = 1.2   # seconds into the reel for the poster picture: the cover once its headline is up
@@ -384,7 +384,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     summary = {
         "title": meta.get("title") or "Reel", "seconds": round(total, 1), "fps": fps, "quality": quality, "preset": preset or q_preset, "scenes": len(slides),
         "voice": "own recording" if track.kind == "recording" else meta["voice"], "wordTiming": used,
-        "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
+        "firstComment": first_comment(reel), "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
         "timeline": [{"n": i + 1, "type": slides[i].get("type"), "start": round(a, 2), "end": round(b, 2), "reveals": reveals[i]}
                      for i, (a, b) in enumerate(windows)],
         "warnings": [str(i) for i in reel.issues if i.severity == "WARN"] + picture_warnings,

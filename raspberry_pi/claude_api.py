@@ -1164,6 +1164,7 @@ def _reel_view(reel: dict, full: bool = True) -> dict:
     if full:
         out["caption"] = reel.get("caption") or ""
         out["hashtags"] = reel.get("hashtags") or []
+        out["firstComment"] = reel.get("firstComment") or ""      # a ready first comment to pin, so the thread isn't empty
         out["warnings"] = reel.get("warnings") or []
         out["log"] = [line.get("text") for line in (reel.get("log") or [])[-8:]]
     else:
