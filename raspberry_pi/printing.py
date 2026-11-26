@@ -146,32 +146,65 @@ def pdf_possible() -> bool:
     return root.is_dir() and any(root.glob("chromium*"))
 
 
-def html_to_pdf(html: str, out: Path) -> None:
-    """Headless Chromium prints the page to PDF. Scripts are off and nothing loads from the network."""
+def _playwright_pdf(html: str, out: Path) -> None:
+    """The way the slide maker drives Chromium, which is known to work on the Pi."""
+    from playwright.sync_api import sync_playwright
+    options: dict = {"args": ["--no-sandbox", "--disable-dev-shm-usage"]}
+    explicit = _chromium()
+    if explicit:
+        options["executable_path"] = explicit
+    with sync_playwright() as p:
+        browser = p.chromium.launch(timeout=30_000, **options)
+        try:
+            page = browser.new_context(java_script_enabled=False).new_page()
+            # Nothing is fetched from the network: a print job must never wait on a slow image.
+            page.route("**/*", lambda route: route.abort() if route.request.url.startswith(("http:", "https:")) else route.continue_())
+            page.set_content(html, wait_until="load", timeout=20_000)
+            page.pdf(path=str(out), prefer_css_page_size=True, print_background=True)
+        finally:
+            browser.close()
+
+
+def _cli_pdf(html: str, out: Path) -> None:
+    """Fallback: the Chromium command line, killed if it hangs."""
+    binary = _chromium()
+    if not binary:
+        raise RuntimeError("No Chromium found to make the PDF. Run: sudo apt install chromium")
     with tempfile.TemporaryDirectory(prefix="sage-print-") as tmp:
         src = Path(tmp) / "page.html"
         src.write_text(html, encoding="utf-8")
-        binary = _chromium()
-        if binary:
-            args = [binary, "--headless", "--no-sandbox", "--disable-gpu", "--disable-javascript",
-                    "--no-pdf-header-footer", f"--print-to-pdf={out}", src.as_uri()]
-            proc = subprocess.run(args, capture_output=True, text=True, timeout=PDF_TIMEOUT)
-            if proc.returncode == 0 and out.exists() and out.stat().st_size > 0:
-                return
+        args = [binary, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage",
+                "--no-first-run", f"--user-data-dir={tmp}/profile", "--no-pdf-header-footer",
+                f"--print-to-pdf={out}", src.as_uri()]
+        proc = subprocess.Popen(args, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True, start_new_session=True)
         try:
-            from playwright.sync_api import sync_playwright
-        except ImportError:
-            raise RuntimeError("No Chromium found to make the PDF. Run: playwright install chromium")
-        with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=binary) if binary else p.chromium.launch()
-            try:
-                page = browser.new_context(java_script_enabled=False).new_page()
-                page.goto(src.as_uri())
-                page.pdf(path=str(out), prefer_css_page_size=True, print_background=True)
-            finally:
-                browser.close()
-    if not out.exists() or out.stat().st_size == 0:
-        raise RuntimeError("Couldn't make the PDF.")
+            proc.communicate(timeout=30)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, 9)   # chromium leaves helper processes behind
+            proc.communicate()
+            if not (out.exists() and out.stat().st_size > 0):
+                raise RuntimeError("Chromium took too long to make the PDF.")
+
+
+def html_to_pdf(html: str, out: Path) -> None:
+    """Headless Chromium prints the page to PDF. Scripts are off and nothing loads from the network."""
+    errors = []
+    try:
+        from playwright.sync_api import sync_playwright  # noqa: F401
+    except ImportError:
+        errors.append("playwright isn't installed")
+    else:
+        try:
+            _playwright_pdf(html, out)
+        except Exception as e:
+            errors.append(str(e).splitlines()[0] if str(e) else "playwright failed")
+    if not (out.exists() and out.stat().st_size > 0):
+        try:
+            _cli_pdf(html, out)
+        except Exception as e:
+            errors.append(str(e))
+    if not (out.exists() and out.stat().st_size > 0):
+        raise RuntimeError("Couldn't make the PDF: " + "; ".join(errors))
 
 
 TEST_PAGE = """<!doctype html><meta charset="utf-8"><style>@page{size:A4;margin:20mm}
