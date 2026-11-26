@@ -550,6 +550,7 @@ themes and pictures) plus these lines. Most lines have other spellings; the chec
 | `fps:` | header | Frames per second, 24 to 60, default 30. `fps: 60` makes a true 60 fps video (motion is drawn for every frame; it takes about twice as long). | |
 | `quality:` | header | `standard` (default; fast), `high` (x264 slow, CRF 17) or `max` (x264 slower, CRF 16). Better quality means a longer render, hours on a Pi for a long `max` reel at 60 fps. An unknown value warns and uses `standard`. | |
 | `end_hold:` | header | Seconds the last slide stays after the last word; 0 to 6, default 1.2. | |
+| `cold_open:` | header | `on` opens with a 0.8 s dark card of the first `stat` number (else the cover's pill); or write the text itself, e.g. `cold_open: ₹30,188 crore` (24 characters at most). `off` by default. The voice starts after the card. | `cold_open: on` |
 | `transition:` | header | Accepted; every slide change is the same wipe today. | |
 | `music:` | header | **Ignored, with a warning.** Add audio in Instagram. | |
 | `aspect:` / `format:` | header | **Ignored, with a warning.** A reel is always 9:16, 1080x1920. | `ratio:`, `size:` |

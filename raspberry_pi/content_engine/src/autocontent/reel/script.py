@@ -22,6 +22,7 @@ HEADER_KEYS = {
     "speed": "speed", "captions": "captions", "caption_style": "captions", "subtitles": "captions",
     "music": "music", "transition": "transition", "end_hold": "end_hold",
     "format": "format", "size": "format",
+    "cold_open": "cold_open", "coldopen": "cold_open", "hero_open": "cold_open",
     "pace": "pace", "pauses": "pauses", "breaths": "pauses", "polish": "polish", "sound": "polish",
     "loudness": "loudness", "lufs": "loudness", "pronounce": "pronounce", "say_as": "pronounce",
     "pronunciation": "pronounce",
@@ -198,7 +199,8 @@ class ReelScript:
         for s in self.scenes:
             n = len(s.words)
             total += (n / (WORDS_PER_SECOND * speed * (s.speed or 1.0)) if n else (s.duration or 2.5)) + 0.45 + s.pause
-        return round(total + float(self.meta.get("end_hold") or 1.2), 1)
+        total += float(self.meta.get("end_hold") or 1.2) + (COLD_OPEN_SECONDS if cold_open_text(self) else 0.0)
+        return round(total, 1)
 
 
 def is_reel_text(text: str) -> bool:
@@ -359,6 +361,10 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             meta[key] = parse_pronounce(value)
         elif key == "transition":
             meta[key] = value.lower() or "fade"
+        elif key == "cold_open":
+            v = value.strip().strip("\"'")
+            meta[key] = "off" if v.lower() in ("", "off", "no", "none", "false", "0") else \
+                ("auto" if v.lower() in ("on", "yes", "true", "auto", "1") else v[:24])
         else:
             meta[key] = value
     meta.setdefault("fps", 30)
@@ -367,6 +373,7 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     meta.setdefault("voice", DEFAULT_VOICE)
     meta.setdefault("speed", 1.0)
     meta.setdefault("end_hold", 1.2)
+    meta.setdefault("cold_open", "off")
     meta.setdefault("pace", "auto")
     meta.setdefault("pauses", 1.0)
     meta.setdefault("polish", "natural")
@@ -456,6 +463,29 @@ def hook_score(say: str) -> Tuple[int, Dict[str, bool]]:
     return score, parts
 
 
+COLD_OPEN_SECONDS = 0.8      # the hero card before the cover; the whole reel is pushed back by this much
+
+
+def cold_open_text(reel: "ReelScript") -> str:
+    """What the cold-open card says: the header's own text (`cold_open: ₹30,188 crore`), else the first big
+    number in the reel, else the cover's pill. Empty when the reel has none or the cold open is off."""
+    mode = str(reel.meta.get("cold_open") or "off")
+    if mode == "off":
+        return ""
+    if mode != "auto":
+        return mode
+    strip = lambda t: re.sub(r"\*\*|==", "", str(t or "")).strip()
+    for sc in reel.scenes:
+        if sc.slide.get("type") == "stat" and strip(sc.slide.get("number")):
+            return strip(sc.slide.get("number"))[:24]
+    for sc in reel.scenes:
+        if sc.slide.get("type") == "cover":
+            pill = strip(sc.slide.get("pill"))
+            if pill and pill.lower() not in ("none", "no", "off", "-"):
+                return pill[:24]
+    return ""
+
+
 def check_reel(reel: ReelScript) -> List[SpecIssue]:
     """Checks that only matter for video: is there something to say, is it too long, can the cues be found."""
     issues: List[SpecIssue] = []
@@ -542,6 +572,9 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                                         f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
                                         slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
 
+    if reel.meta.get("cold_open", "off") != "off" and not cold_open_text(reel):
+        issues.append(SpecIssue("WARN", "COLD_OPEN_NONE", "`cold_open:` is on but the reel has no big number or cover pill to open on, so it is skipped.",
+                                hint="Add a `stat` slide, or write the text: `cold_open: ₹30,188 crore`."))
     covers = [s for s in reel.scenes if s.slide.get("type") == "cover" and s.say]
     if covers:
         c = covers[0]
