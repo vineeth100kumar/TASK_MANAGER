@@ -131,7 +131,7 @@ Radar, Data and Migration, Server and Reset).
 | Radar: industry search | `radar/IndustrySearch`, `IndustryPage` | `industry.py` |
 | LUMO page | `components/lumo/*Tab.tsx`, `DepthFacePanel`, `ScreenFitPanel`, `alarmSounds.ts`, `modals/DeskClockSettings` | `desk/` (below) |
 | Where you are (Home/Work/out via iPhone Shortcuts) | `modals/LocationGuide` (inside `CaptureGuide`), `services/location.ts` | `location.py`, `notifier.place_nudge` (tasks labelled `@Place`), `/api/presence/location`, `/api/presence/places/{name}`, `/ws` WHERE |
-| Bluetooth, phone link | `modals/BluetoothSettings`, `common/PhoneCorner`, `PresenceCard` | `bluetooth_control.py`, `phone_link.py`, `presence.py` (tests: `test_phone_robust.py`) |
+| Bluetooth, phone link | `modals/BluetoothSettings`, `common/PhoneCorner`, `PresenceCard` | `bluetooth_control.py`, `phone_link.py`, `presence.py` (tests: `test_phone_robust.py`). Each watcher pass has a limit (`SAGE_PHONE_TICK_TIMEOUT`, 60 s) and a watchdog outside it (`SAGE_PHONE_WATCHDOG_AFTER`, 150 s): a hung pass counts as "phone not seen" and names the stuck step; the watcher beats `system_health`. `/ws` sends have a limit too (`SAGE_SOCKET_SEND_TIMEOUT`, 5 s; tests: `test_event_hub.py`) |
 | Herald (voice on the soundbar) | `modals/SpeakerCard` | `speaker.py`, `herald_extras.py`, `herald_journal.py`, `speak_worker.py`, `/api/speaker/*`, `/api/herald/presence` |
 | Spotify and arrival music | `modals/SpotifyCard` | `spotify.py` (Soloist, PipeWire bridge), `room_music.py`, `audio_probe.py`, `/api/spotify/*` |
 | Drop share links | `views/DropView`, `services/drop.ts`, Notes share menu | `drop.py` |
