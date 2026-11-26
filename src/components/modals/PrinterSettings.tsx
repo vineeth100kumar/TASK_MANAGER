@@ -6,6 +6,7 @@ import { useState } from 'react';
 import { Printer as PrinterIcon, Loader2, Search, Plus, Trash2, Star, FileCheck2, Usb, Wifi } from 'lucide-react';
 import { usePrinters, type FoundPrinter } from '../../services/printing';
 import { useToast } from '../../context/ToastContext';
+import { QualityPicker, usePrintOptions } from '../print/QualityPicker';
 
 const card = 'p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-4';
 const smallButton = 'px-3 py-1.5 rounded-xl text-xs font-semibold bg-white dark:bg-white/10 border border-black/10 dark:border-white/10 text-gray-700 dark:text-gray-200 hover:bg-gray-100 dark:hover:bg-white/15 disabled:opacity-50 flex items-center gap-1.5 whitespace-nowrap';
@@ -21,6 +22,7 @@ export function PrinterSettings() {
   const [found, setFound] = useState<FoundPrinter[] | null>(null);
   const [looking, setLooking] = useState(false);
   const [manual, setManual] = useState('');
+  const [opts, setOpts] = usePrintOptions();
   const [names, setNames] = useState<Record<string, string>>({});
 
   const attempt = async (key: string, job: () => Promise<string | null>, done?: string) => {
@@ -85,6 +87,7 @@ export function PrinterSettings() {
             <div className="text-xs text-gray-400">Notes, reports and thought maps print to these from the Print button in Notes.</div>
           </div>
         </div>
+        {state.printers.length > 0 && <QualityPicker value={opts} onChange={setOpts} />}
         {state.printers.length === 0 ? (
           <p className="text-xs text-gray-500">No printer yet. Look for one below.</p>
         ) : (
@@ -97,7 +100,7 @@ export function PrinterSettings() {
                   </div>
                   <div className="text-[11px] text-gray-400 truncate">{p.state === 'disabled' ? 'Paused or offline' : p.state === 'printing' ? 'Printing…' : 'Ready'} · {p.uri}</div>
                 </div>
-                <button className={smallButton} disabled={!!busy} onClick={() => attempt(`test:${p.name}`, () => pr.testPage(p.name), 'Test page sent')}>
+                <button className={smallButton} disabled={!!busy} onClick={() => attempt(`test:${p.name}`, () => pr.testPage(p.name, opts), 'Test page sent')}>
                   {busy === `test:${p.name}` ? <Loader2 size={13} className="animate-spin" /> : <FileCheck2 size={13} />}Test page
                 </button>
                 {!p.default && <button className={smallButton} disabled={!!busy} onClick={() => attempt(`def:${p.name}`, () => pr.makeDefault(p.name))}><Star size={13} />Make default</button>}

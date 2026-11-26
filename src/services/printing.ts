@@ -66,7 +66,7 @@ export function usePrinters() {
     add: (uri: string, name: string) => run(() => call('/api/printers', 'POST', { uri, name })),
     makeDefault: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}/default`, 'POST')),
     remove: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}`, 'DELETE')),
-    testPage: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}/test`, 'POST')),
+    testPage: (name: string, opts: PrintOptions = loadPrintOptions()) => run(() => call(`/api/printers/${encodeURIComponent(name)}/test`, 'POST', opts)),
   };
 }
 
@@ -122,6 +122,9 @@ export interface DuplexJob {
   finished: boolean;
   flip: boolean;
   error: string;
+  note: string;
+  quality: Quality;
+  mono: boolean;
 }
 
 export const duplexApi = {
@@ -131,6 +134,11 @@ export const duplexApi = {
   list: () => call<{ jobs: DuplexJob[] }>('/api/print/jobs').then(r => r.jobs),
   next: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/continue`, 'POST').then(r => r.job),
   again: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/again`, 'POST').then(r => r.job),
+  /** Jam or smudge: go back to the front of a sheet. Nothing prints until `next`. */
+  restart: (id: string, sheet: number) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/restart`, 'POST', { sheet }).then(r => r.job),
+  /** Prints one page again right now; the job keeps its place. */
+  reprint: (id: string, page: number) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/reprint`, 'POST', { page }).then(r => r.job),
+  options: (id: string, opts: PrintOptions) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/options`, 'POST', opts).then(r => r.job),
   stop: (id: string) => call(`/api/print/jobs/${encodeURIComponent(id)}`, 'DELETE'),
 };
 

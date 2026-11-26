@@ -5,9 +5,10 @@
 // the job on the Pi, so Printer drop can bring it back.
 
 import { useEffect, useState } from 'react';
-import { Printer, Loader2, RotateCw, X, Check, FlipVertical2 } from 'lucide-react';
+import { Printer, Loader2, RotateCw, X, Check, FlipVertical2, Wrench } from 'lucide-react';
 import { duplexApi, type DuplexJob } from '../../services/printing';
 import { useToast } from '../../context/ToastContext';
+import { QualityPicker } from './QualityPicker';
 
 interface Props {
   job: DuplexJob;
@@ -20,6 +21,9 @@ export function DuplexDialog({ job: first, autoStart, onClose }: Props) {
   const { showToast } = useToast();
   const [job, setJob] = useState<DuplexJob>(first);
   const [busy, setBusy] = useState(false);
+  const [fixing, setFixing] = useState(false);
+  const [sheet, setSheet] = useState(1);
+  const [page, setPage] = useState(1);
 
   const act = async (fn: () => Promise<DuplexJob>) => {
     setBusy(true);
@@ -44,6 +48,9 @@ export function DuplexDialog({ job: first, autoStart, onClose }: Props) {
   };
 
   const finished = job.finished;
+  const fixBox = 'h-8 w-16 px-2 rounded-lg bg-white dark:bg-white/5 border border-black/10 dark:border-white/10 text-xs text-gray-900 dark:text-white outline-none focus:ring-2 focus:ring-blue-500';
+  const fixBtn = 'h-8 px-3 rounded-lg text-xs font-semibold bg-black/5 dark:bg-white/10 text-gray-800 dark:text-gray-100 hover:bg-black/10 disabled:opacity-50 whitespace-nowrap';
+  const clamp = (n: number, max: number) => Math.max(1, Math.min(max, Math.floor(n) || 1));
   const label = job.stage === 'start' ? 'Print sheet 1' : job.next || 'Continue';
   const primary = 'h-11 px-5 rounded-xl text-sm font-semibold text-white bg-blue-600 hover:bg-blue-700 active:scale-95 transition disabled:opacity-60 flex items-center justify-center gap-2';
   const quiet = 'h-9 px-3 rounded-xl text-xs font-semibold text-gray-600 dark:text-gray-300 hover:bg-black/5 dark:hover:bg-white/10 transition disabled:opacity-50 flex items-center gap-1.5';
@@ -71,6 +78,7 @@ export function DuplexDialog({ job: first, autoStart, onClose }: Props) {
           {finished ? <Check size={18} className="text-green-500 shrink-0 mt-0.5" /> : job.stage === 'flip' ? <FlipVertical2 size={18} className="text-amber-500 shrink-0 mt-0.5" /> : <Printer size={18} className="text-blue-500 shrink-0 mt-0.5" />}
           <p>{job.message}{!finished && job.sheets > 1 ? <span className="block text-xs text-gray-500 mt-1">Sheet {job.sheet} of {job.sheets}</span> : null}</p>
         </div>
+        {job.note && <p className="text-xs text-blue-700 dark:text-blue-300">{job.note}</p>}
         {job.error && <p className="text-xs text-red-600 dark:text-red-400">{job.error}</p>}
 
         {finished ? (
@@ -86,6 +94,28 @@ export function DuplexDialog({ job: first, autoStart, onClose }: Props) {
             </div>
           </>
         )}
+
+        <div className="border-t border-black/5 dark:border-white/10 pt-3">
+          <button className="flex items-center gap-1.5 text-xs font-semibold text-gray-500 hover:text-gray-800 dark:hover:text-gray-200" aria-expanded={fixing} onClick={() => setFixing(f => !f)}>
+            <Wrench size={13} />Jam, smudge or less ink?
+          </button>
+          {fixing && (
+            <div className="mt-3 space-y-3">
+              <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                <span className="flex-1">Start again from sheet</span>
+                <input type="number" min={1} max={job.sheets} value={sheet} onChange={e => setSheet(clamp(Number(e.target.value), job.sheets))} className={fixBox} aria-label="Sheet number" />
+                <button className={fixBtn} disabled={busy} onClick={() => act(() => duplexApi.restart(job.id, sheet))}>Go back</button>
+              </div>
+              <div className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                <span className="flex-1">Reprint just page</span>
+                <input type="number" min={1} max={job.pages} value={page} onChange={e => setPage(clamp(Number(e.target.value), job.pages))} className={fixBox} aria-label="Page number" />
+                <button className={fixBtn} disabled={busy} onClick={() => act(() => duplexApi.reprint(job.id, page))}>Reprint</button>
+              </div>
+              <p className="text-[11px] text-gray-400">Going back keeps your place until you press the button. A single page prints right away and does not change where you are.</p>
+              <QualityPicker value={{ quality: job.quality, mono: job.mono }} onChange={o => act(() => duplexApi.options(job.id, o))} />
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

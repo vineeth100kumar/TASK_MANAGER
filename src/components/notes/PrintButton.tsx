@@ -52,7 +52,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
       const html = await page();
       if (printer === null) { printInBrowser(html); return; }
       await printOnPi(printer, note.title || 'Sage', html, 1, opts);
-      showToast(`Sent to ${printer}`);
+      showToast(`Sent to ${printer}`, 'success', { label: 'Print again', onAction: () => { go(printer); }, durationMs: 15000 });
     } catch (e: any) {
       showToast(e?.message || "Couldn't print that", 'error');
     } finally {

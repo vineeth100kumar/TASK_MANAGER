@@ -323,14 +323,21 @@ async def remove_printer(name: str):
     return {"success": True, **await _guard(go)}
 
 
+class TestOptions(BaseModel):
+    quality: Quality = "normal"
+    mono: bool = False
+
+
 @router.post("/api/printers/{name}/test")
-async def test_page(name: str):
+async def test_page(name: str, req: Optional[TestOptions] = None):
+    req = req or TestOptions()
+
     def go():
         _known(name)
         with tempfile.TemporaryDirectory(prefix="sage-print-") as tmp:
             pdf = Path(tmp) / "test.pdf"
             html_to_pdf(TEST_PAGE % name, pdf)
-            return _lp(name, pdf, "Sage test page", 1)
+            return _lp(name, pdf, "Sage test page", 1, req.quality, req.mono)
     return {"success": True, "job": await _guard(go)}
 
 
@@ -400,7 +407,8 @@ def job_view(job: dict) -> dict:
     done = job["done"]
     total_sheets = (job["pages"] + 1) // 2
     out = {"id": job["id"], "title": job["title"], "printer": job["printer"], "pages": job["pages"],
-           "sheets": total_sheets, "flip": job["flip"], "error": job.get("error", ""), "finished": done >= len(steps)}
+           "sheets": total_sheets, "flip": job["flip"], "error": job.get("error", ""), "note": job.get("note", ""),
+           "quality": job["quality"], "mono": job["mono"], "finished": done >= len(steps)}
     if done >= len(steps):
         out.update(sheet=total_sheets, stage="done", message=f"All {total_sheets} sheet{'s' if total_sheets != 1 else ''} sent.")
         return out
@@ -420,7 +428,7 @@ def job_view(job: dict) -> dict:
 
 
 def _forget_old(now: float) -> None:
-    for jid in [j for j, v in JOBS.items() if now - v["touched"] > JOB_KEEP_SECONDS or (v["done"] >= len(v["steps"]) and now - v["touched"] > 600)]:
+    for jid in [j for j, v in JOBS.items() if now - v["touched"] > JOB_KEEP_SECONDS or (v["done"] >= len(v["steps"]) and now - v["touched"] > 1800)]:
         _drop_job(jid)
 
 
@@ -464,10 +472,56 @@ def advance_duplex(jid: str, again: bool = False) -> dict:
         job["error"] = ""
         job["done"] += 1
         job["touched"] = time.time()
+        job.pop("note", None)
+        return job_view(job)
+
+
+def goto_sheet(jid: str, sheet: int) -> dict:
+    """Jam or smudge: go back (or forward) to the front of a sheet. Nothing prints until you press the button."""
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        sheets = (job["pages"] + 1) // 2
+        if not 1 <= sheet <= sheets:
+            raise HTTPException(status_code=400, detail=f"This has {sheets} sheet{'s' if sheets != 1 else ''}.")
+        job["done"] = 2 * (sheet - 1)
+        job["touched"] = time.time()
+        job["note"] = f"Starting again from sheet {sheet}."
         view = job_view(job)
-        if view["finished"] and job.get("own"):
-            shutil.rmtree(job["pdf"].parent, ignore_errors=True)
+        if sheet == 1:
+            view["next"] = "Print sheet 1"
         return view
+
+
+def reprint_page(jid: str, page: int) -> dict:
+    """Prints one page again right now. The job stays where it was."""
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        if not 1 <= page <= job["pages"]:
+            raise HTTPException(status_code=400, detail=f"This has {job['pages']} page{'s' if job['pages'] != 1 else ''}.")
+        side = "front" if page % 2 else "back"
+        try:
+            _known(job["printer"])
+            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}", job["quality"], job["mono"])
+        except Exception as e:
+            job["error"] = friendly(e)
+            raise HTTPException(status_code=502, detail=friendly(e))
+        job["error"] = ""
+        job["touched"] = time.time()
+        job["note"] = f"Page {page} sent again ({'front' if side == 'front' else 'back'} of sheet {(page + 1) // 2})."
+        return job_view(job)
+
+
+def set_job_options(jid: str, quality: str, mono: bool) -> dict:
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        job["quality"], job["mono"] = quality, bool(mono)
+        return job_view(job)
 
 
 class DuplexJob(BaseModel):
@@ -515,6 +569,34 @@ async def continue_job(jid: str):
 @router.post("/api/print/jobs/{jid}/again")
 async def again_job(jid: str):
     return {"success": True, "job": await _guard(advance_duplex, jid, True)}
+
+
+class SheetPick(BaseModel):
+    sheet: int
+
+
+class PagePick(BaseModel):
+    page: int
+
+
+class JobOptions(BaseModel):
+    quality: Quality = "normal"
+    mono: bool = False
+
+
+@router.post("/api/print/jobs/{jid}/restart")
+async def restart_job(jid: str, req: SheetPick):
+    return {"success": True, "job": await _guard(goto_sheet, jid, req.sheet)}
+
+
+@router.post("/api/print/jobs/{jid}/reprint")
+async def reprint_job(jid: str, req: PagePick):
+    return {"success": True, "job": await _guard(reprint_page, jid, req.page)}
+
+
+@router.post("/api/print/jobs/{jid}/options")
+async def job_options(jid: str, req: JobOptions):
+    return {"success": True, "job": await _guard(set_job_options, jid, req.quality, req.mono)}
 
 
 @router.delete("/api/print/jobs/{jid}")
