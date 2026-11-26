@@ -143,7 +143,7 @@ Each type lists its fields, its limits, and its PIECES. A piece is one thing tha
 kicker: BUSINESS BASICS
 headline: Profit is not the same as cash
 pill: as cash
-say: You made a profit. So why can't you pay for the next order?
+say: You made ₹50,000 profit. So why can't you pay?
 show: why can't you
 ```
 - `headline:` 4 to 9 words. No `**bold**`.
@@ -455,7 +455,7 @@ tag: "#BusinessBasics"
 kicker: BUSINESS BASICS
 headline: Profit is not the same as cash
 pill: as cash
-say: You made a profit. So why can't you pay for the next order?
+say: You made ₹50,000 profit. So why can't you pay?
 show: why can't you
 tone: hook
 

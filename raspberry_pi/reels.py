@@ -336,8 +336,11 @@ def check(script: str) -> dict:
             "say": sc.say[:600],
         })
     errors = sum(1 for i in issues if i["severity"] == "ERROR")
+    from autocontent.reel.script import hook_score
+    cover = next((sc for sc in reel.scenes if sc.slide.get("type") == "cover" and sc.say), None)
     return {
         "ok": errors == 0 and bool(reel.scenes),
+        "hookScore": hook_score(cover.say)[0] if cover else None,
         "errors": errors,
         "warnings": sum(1 for i in issues if i["severity"] != "ERROR"),
         "issues": issues,

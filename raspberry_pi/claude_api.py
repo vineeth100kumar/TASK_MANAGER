@@ -1788,7 +1788,7 @@ def _tools() -> List[dict]:
          "Read it before writing a script for sage_reel_create.",
          "inputSchema": {"type": "object", "properties": {}}},
         {"name": "sage_reel_check", "description": "Check a reel script without making it: every error and warning "
-         "with its line and slide, the scenes with their narration, about how long the video will run and which voice it asks for.",
+         "with its line and slide, the scenes with their narration, about how long the video will run, which voice it asks for and a hookScore 0-100 for the cover (question, number, named company).",
          "inputSchema": {"type": "object", "required": ["script"], "properties": {"script": {"type": "string"}}}},
         {"name": "sage_reel_create", "description": "Send a script to Sage to be made into an Instagram reel. The Pi speaks "
          "the narration with a free voice (Kokoro; no cost), draws the slides like a post's, makes each piece appear in time "

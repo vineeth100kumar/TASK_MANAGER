@@ -429,6 +429,32 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     reel.issues += check_reel(reel)
     return reel
 
+HOOK_WORDS_MAX = 12          # a spoken hook longer than this loses the scroll
+HOOK_WEAK_BELOW = 50         # under this score the cover's narration gets a warning
+_CAPS = re.compile(r"\b[A-Z][a-zA-Z]+\b")
+_OPENERS = {"a", "an", "the", "this", "that", "these", "those", "it", "its", "i", "we", "you", "your", "my", "our", "their",
+            "he", "she", "they", "why", "what", "how", "when", "where", "who", "which", "can", "could", "would", "should",
+            "will", "do", "does", "did", "is", "are", "was", "were", "have", "has", "had", "if", "so", "but", "and", "or",
+            "nine", "ten", "one", "two", "three", "four", "five", "six", "seven", "eight", "every", "most", "many", "some",
+            "no", "not", "just", "here", "there", "now", "then", "once", "still", "same", "more", "less", "last", "next"}
+_SAVE_ASK = re.compile(r"\b(save|bookmark|share|send (this|it)|tag (a|someone)|screenshot|keep this|follow)\b", re.I)
+
+
+def hook_score(say: str) -> Tuple[int, Dict[str, bool]]:
+    """0 to 100 for a cover's narration: a question, a number, a named company or person, a short line.
+    These are the traits behind the best reach on the page (named company + a rupee figure + a question)."""
+    text = (say or "").strip()
+    words = text.split()
+    parts = {
+        "question": "?" in text,
+        "number": bool(re.search(r"\d|₹|%|\$", text)),
+        "entity": any(w.lower() not in _OPENERS for w in _CAPS.findall(text)) or bool(re.search(r"\b[A-Z]{2,}\b", text)),
+        "short": 0 < len(words) <= HOOK_WORDS_MAX,
+    }
+    score = (35 if parts["question"] else 0) + (25 if parts["number"] else 0) + \
+            (25 if parts["entity"] else 0) + (15 if parts["short"] else 0)
+    return score, parts
+
 
 def check_reel(reel: ReelScript) -> List[SpecIssue]:
     """Checks that only matter for video: is there something to say, is it too long, can the cues be found."""
@@ -515,6 +541,31 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                 issues.append(SpecIssue("WARN", "DIAGRAM_CROWDED",
                                         f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
                                         slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
+
+    covers = [s for s in reel.scenes if s.slide.get("type") == "cover" and s.say]
+    if covers:
+        c = covers[0]
+        score, parts = hook_score(c.say)
+        if len(c.words) > HOOK_WORDS_MAX:
+            issues.append(SpecIssue("WARN", "HOOK_LONG", f"The hook is {len(c.words)} words; over {HOOK_WORDS_MAX} loses the scroll.",
+                                    slide=c.n, line=c.line, hint=f"Say the hook in {HOOK_WORDS_MAX} words or fewer, then explain on the next slide."))
+        if score < HOOK_WEAK_BELOW:
+            missing = [label for key, label in (("question", "a question"), ("number", "a number or rupee figure"),
+                                                ("entity", "a named company or person")) if not parts[key]]
+            issues.append(SpecIssue("WARN", "HOOK_WEAK", f"Hook score {score}/100. It is missing {', '.join(missing)}.",
+                                    slide=c.n, line=c.line,
+                                    hint="Hooks with a named company, a concrete number and a question reach 2 to 3 times further."))
+    ctas = [s for s in reel.scenes if s.slide.get("type") == "cta"]
+    if ctas:
+        c = ctas[-1]
+        spoken = c.say or ""
+        shown = " ".join(str(c.slide.get(k) or "") for k in ("headline", "body", "subtext", "share_line"))
+        if "?" not in spoken:
+            issues.append(SpecIssue("WARN", "CTA_NO_QUESTION", "The closing narration asks no question, so nobody has a reason to comment.",
+                                    slide=c.n, line=c.line, hint="End on a one-word question, such as 'Debt or growth?'."))
+        if not _SAVE_ASK.search(spoken + " " + shown):
+            issues.append(SpecIssue("WARN", "CTA_NO_SAVE", "The closing asks for no save or share.",
+                                    slide=c.n, line=c.line, hint="Add a reason to save, such as 'Save this for your next pitch'."))
     seconds = reel.estimate_seconds()
     if seconds > MAX_SECONDS:
         issues.append(SpecIssue("WARN", "REEL_LONG", f"About {seconds:.0f} seconds; reels over {MAX_SECONDS:.0f} seconds lose most viewers.",
