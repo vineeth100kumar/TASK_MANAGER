@@ -54,6 +54,9 @@ export interface Reel {
   queuePosition?: number;        // 1 = being made or next in line; 0 = not waiting
   posted: boolean;
   postedAt: string | null;
+  /** Where it went live on Instagram (found after Mark posted). */
+  instagramUrl?: string;
+  instagramCheck?: 'looking' | 'found' | 'missed' | 'offline';
   emailed: boolean;
   emailError: string;
   media?: ReelMedia | null;
@@ -141,6 +144,8 @@ export const reelsApi = {
   get: (id: string) => call<{ reel: Reel; status: ReelMakerStatus }>(`/api/reels/${enc(id)}`),
   remake: (id: string, body: { script?: string; style?: string }) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/remake`, { method: 'POST', body: JSON.stringify(body) }).then(d => d.reel),
+  findOnInstagram: (id: string) =>
+    call<{ reel: Reel; found: boolean }>(`/api/reels/${enc(id)}/instagram`, { method: 'POST' }).then(d => d),
   setPosted: (id: string, posted: boolean) =>
     call<{ reel: Reel }>(`/api/reels/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.reel),
   review: (id: string, action: ReviewAction) =>

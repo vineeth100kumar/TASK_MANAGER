@@ -17,6 +17,7 @@ import { drawAtText, whenText } from '../../services/contentPieces';
 import {
   MakerStatus, POST_EVENT, Post, ReviewAction, canShareFiles, copyText, fetchBlob, fileName, mediaUrl, postLink, postsApi, qrPath, zipUrl,
 } from '../../services/posts';
+import { InstagramLink } from '../common/InstagramLink';
 import { useToast } from '../../context/ToastContext';
 import { ProjectLink } from '../common/ProjectLink';
 
@@ -339,6 +340,7 @@ export function PostPage({ postId, onBack, onEdit, onDeleted }: Props) {
                   <Check size={14} /> {post.posted ? 'Posted' : 'Mark posted'}
                 </button>
               </div>
+              <InstagramLink item={post} find={() => postsApi.findOnInstagram(post.id)} onChange={setPost} />
             </div>
           </div>
 

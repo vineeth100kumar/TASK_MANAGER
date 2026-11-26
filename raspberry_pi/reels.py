@@ -45,6 +45,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+import instagram_link
 import item_shape
 import logstore
 import lowprio
@@ -1054,10 +1055,31 @@ async def reels_posted(reel_id: str, undo: bool = False):
         reel["wontPost"] = False
     await save_async(reel)
     if undo:
+        instagram_link.clear("reel", reel)
+        await save_async(reel)
         await _move_task(reel, "editing", "in_progress")
     else:
         await _move_task(reel, "published", "done")
+        await instagram_link.start("reel", reel, get, save_async)
     return {"success": True, "reel": with_media(reel)}
+
+
+@router.post("/api/reels/{reel_id}/instagram")
+async def reels_find_on_instagram(reel_id: str):
+    """Look for this reel on Instagram now (the "Find on Instagram" button)."""
+    reel = get(reel_id)
+    if not reel:
+        return _missing()
+    if not reel.get("posted"):
+        return _bad("Mark it as posted first.", 409)
+    try:
+        found = await instagram_link.try_once("reel", reel)
+    except Exception as e:
+        return _bad(f"Instagram would not answer: {e}", 502)
+    if not found and reel.get("instagramCheck") != "offline":
+        reel["instagramCheck"] = "missed"
+    await save_async(reel)
+    return {"success": True, "found": found, "reel": with_media(reel)}
 
 
 class SkipBody(BaseModel):

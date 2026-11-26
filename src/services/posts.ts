@@ -46,6 +46,9 @@ export interface Post {
   archivedAt?: string | null;
   posted: boolean;
   postedAt: string | null;
+  /** Where it went live on Instagram (found after Mark posted). */
+  instagramUrl?: string;
+  instagramCheck?: 'looking' | 'found' | 'missed' | 'offline';
   emailed: boolean;
   emailError: string;
   /** Where the finished files are; null until the post is done. */
@@ -111,6 +114,8 @@ export const postsApi = {
   get: (id: string) => call<{ post: Post; status: MakerStatus }>(`/api/posts/${enc(id)}`),
   rerender: (id: string, body: { script?: string; style?: string; format?: string }) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/rerender`, { method: 'POST', body: JSON.stringify(body) }).then(d => d.post),
+  findOnInstagram: (id: string) =>
+    call<{ post: Post; found: boolean }>(`/api/posts/${enc(id)}/instagram`, { method: 'POST' }).then(d => d),
   setPosted: (id: string, posted: boolean) =>
     call<{ post: Post }>(`/api/posts/${enc(id)}/posted${posted ? '' : '?undo=true'}`, { method: 'POST' }).then(d => d.post),
   review: (id: string, action: ReviewAction) =>
