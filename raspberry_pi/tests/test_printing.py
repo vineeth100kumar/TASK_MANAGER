@@ -108,6 +108,23 @@ class Routes(unittest.TestCase):
         self.assertEqual(lp[:6], ["lp", "-d", "Office_Laser", "-n", "2", "-t"])
         self.assertEqual(lp[6], "Plan b")
 
+    def test_quality_and_black_and_white_flags(self):
+        self.assertEqual(printing.quality_options("normal", False), [])
+        self.assertEqual(printing.quality_options("draft", False), ["-o", "print-quality=3"])
+        self.assertEqual(printing.quality_options("high", True), ["-o", "print-quality=5", "-o", "print-color-mode=monochrome"])
+
+    def test_print_passes_quality_to_lp(self):
+        def pdf(html, out):
+            out.write_bytes(b"%PDF-1.4")
+        with mock.patch.object(printing, "html_to_pdf", pdf):
+            r = client.post("/api/print", json={"printer": "Office_Laser", "html": "<p>x</p>", "quality": "draft", "mono": True})
+            self.assertEqual(r.status_code, 200)
+            bad = client.post("/api/print", json={"printer": "Office_Laser", "html": "<p>x</p>", "quality": "ultra"})
+            self.assertEqual(bad.status_code, 422)
+        lp = [c for c in self.calls if c[0] == "lp"][-1]
+        self.assertIn("print-quality=3", lp)
+        self.assertIn("print-color-mode=monochrome", lp)
+
     def test_print_empty(self):
         self.assertEqual(client.post("/api/print", json={"printer": "Office_Laser", "html": "  "}).status_code, 400)
 
@@ -134,7 +151,7 @@ class BackToBack(unittest.TestCase):
         printing.JOBS.clear()
         self.real_send = printing._send_page
 
-        def send(printer, pdf, page, rotate, title):
+        def send(printer, pdf, page, rotate, title, quality="normal", mono=False):
             self.sent_pages.append((page, rotate))
             return "ok"
         for p in (mock.patch.object(printing, "available", return_value=True),
@@ -205,7 +222,7 @@ class BackToBack(unittest.TestCase):
         f = self.upload(3)
         seen = []
 
-        def grab(printer, pdf, title, copies):
+        def grab(printer, pdf, title, copies, quality="normal", mono=False):
             r = PdfReader(str(pdf))
             seen.append((len(r.pages), r.pages[0].get("/Rotate", 0)))
             return "ok"

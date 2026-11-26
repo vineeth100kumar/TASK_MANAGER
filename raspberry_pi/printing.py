@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -217,8 +217,22 @@ body{font:14pt -apple-system,Helvetica,Arial,sans-serif;color:#111}h1{font-size:
 <div class="box">Printer: <b>%s</b></div>"""
 
 
-def _lp(printer: str, pdf: Path, title: str, copies: int) -> str:
-    out = _run(["lp", "-d", printer, "-n", str(max(1, min(copies, 20))), "-t", title[:80] or "Sage", str(pdf)])
+QUALITY = {"draft": "3", "normal": "4", "high": "5"}   # IPP print-quality values
+
+
+def quality_options(quality: str = "normal", mono: bool = False) -> List[str]:
+    """lp -o flags: Draft saves ink, High uses the most; black and white skips colour ink."""
+    flags: List[str] = []
+    if quality in ("draft", "high"):
+        flags += ["-o", f"print-quality={QUALITY[quality]}"]
+    if mono:
+        flags += ["-o", "print-color-mode=monochrome"]
+    return flags
+
+
+def _lp(printer: str, pdf: Path, title: str, copies: int, quality: str = "normal", mono: bool = False) -> str:
+    out = _run(["lp", "-d", printer, "-n", str(max(1, min(copies, 20))), "-t", title[:80] or "Sage",
+                *quality_options(quality, mono), str(pdf)])
     return out.strip()
 
 
@@ -231,8 +245,13 @@ class AddPrinter(BaseModel):
     name: str
 
 
+Quality = Literal["draft", "normal", "high"]
+
+
 class PrintJob(BaseModel):
     printer: str
+    quality: Quality = "normal"
+    mono: bool = False
     title: str = "Sage"
     html: str
     copies: int = 1
@@ -327,7 +346,7 @@ async def print_job(req: PrintJob):
         with tempfile.TemporaryDirectory(prefix="sage-print-") as tmp:
             pdf = Path(tmp) / "job.pdf"
             html_to_pdf(req.html, pdf)
-            return _lp(req.printer, pdf, _clean_title(req.title), req.copies)
+            return _lp(req.printer, pdf, _clean_title(req.title), req.copies, req.quality, req.mono)
     return {"success": True, "job": await _guard(go)}
 
 
@@ -361,7 +380,7 @@ def sheet_steps(pages: int) -> List[tuple]:
     return steps
 
 
-def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str) -> str:
+def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str, quality: str = "normal", mono: bool = False) -> str:
     from pypdf import PdfReader, PdfWriter
     with tempfile.TemporaryDirectory(prefix="sage-sheet-") as tmp:
         one = Path(tmp) / "sheet.pdf"
@@ -373,7 +392,7 @@ def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str) -> 
             writer.add_page(pg)
             with open(one, "wb") as out:
                 writer.write(out)
-        return _lp(printer, one, title, 1)
+        return _lp(printer, one, title, 1, quality, mono)
 
 
 def job_view(job: dict) -> dict:
@@ -411,7 +430,7 @@ def _drop_job(jid: str) -> None:
         shutil.rmtree(job["pdf"].parent, ignore_errors=True)
 
 
-def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge: bool) -> dict:
+def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge: bool, quality: str = "normal", mono: bool = False) -> dict:
     _known(printer)
     pages = pdf_pages(pdf)
     if pages < 1:
@@ -422,7 +441,7 @@ def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge
             raise HTTPException(status_code=409, detail="Finish or stop a back to back job first.")
         jid = secrets.token_hex(6)
         JOBS[jid] = {"id": jid, "printer": printer, "title": _clean_title(title), "pdf": pdf, "own": own, "pages": pages,
-                     "steps": sheet_steps(pages), "done": 0, "flip": bool(flip_short_edge), "touched": time.time()}
+                     "steps": sheet_steps(pages), "done": 0, "flip": bool(flip_short_edge), "quality": quality, "mono": bool(mono), "touched": time.time()}
         return job_view(JOBS[jid])
 
 
@@ -438,7 +457,7 @@ def advance_duplex(jid: str, again: bool = False) -> dict:
         page, side = job["steps"][job["done"]]
         try:
             _known(job["printer"])
-            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}")
+            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}", job["quality"], job["mono"])
         except Exception as e:
             job["error"] = friendly(e)
             raise HTTPException(status_code=502, detail=friendly(e))
@@ -453,6 +472,8 @@ def advance_duplex(jid: str, again: bool = False) -> dict:
 
 class DuplexJob(BaseModel):
     printer: str
+    quality: Quality = "normal"
+    mono: bool = False
     title: str = "Sage"
     html: str
     flip: bool = False
@@ -471,7 +492,7 @@ async def duplex_from_html(req: DuplexJob):
         pdf = folder / "job.pdf"
         try:
             html_to_pdf(req.html, pdf)
-            job = start_duplex(req.printer, req.title, pdf, True, req.flip)
+            job = start_duplex(req.printer, req.title, pdf, True, req.flip, req.quality, req.mono)
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)
             raise

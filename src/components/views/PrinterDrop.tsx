@@ -6,6 +6,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { FileText, Upload, Printer, Trash2, Loader2, Layers, Square } from 'lucide-react';
 import { printDropApi, usePrinters, duplexApi, type DuplexJob, type PrintDropList, type PrintFile } from '../../services/printing';
 import { DuplexDialog } from '../print/DuplexDialog';
+import { QualityPicker, usePrintOptions } from '../print/QualityPicker';
 import { useToast } from '../../context/ToastContext';
 
 const PRINTER_KEY = 'sage-printdrop-printer';
@@ -27,6 +28,7 @@ export function PrinterDrop() {
   const [busy, setBusy] = useState(false);
   const [job, setJob] = useState<DuplexJob | null>(null);
   const [jobs, setJobs] = useState<DuplexJob[]>([]);
+  const [opts, setOpts] = usePrintOptions();
   const input = useRef<HTMLInputElement>(null);
 
   const load = useCallback(async () => {
@@ -72,7 +74,7 @@ export function PrinterDrop() {
     try { localStorage.setItem(PRINTER_KEY, printer); } catch { /* private window */ }
     setBusy(true);
     try {
-      const res = await printDropApi.print(picked.id, printer, mode, copies, flip);
+      const res = await printDropApi.print(picked.id, printer, mode, copies, flip, opts);
       if (res.job) setJob(res.job);
       else showToast(`Sent ${picked.name} to ${printer}`);
     } catch (e: any) {
@@ -145,6 +147,7 @@ export function PrinterDrop() {
                   <button className={chip(mode === 'single')} onClick={() => setMode('single')}><Square size={13} />One side</button>
                   <button className={chip(mode === 'duplex')} onClick={() => setMode('duplex')}><Layers size={13} />Back to back</button>
                 </div>
+                <QualityPicker value={opts} onChange={setOpts} />
                 {mode === 'single' ? (
                   <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">Copies
                     <input type="number" min={1} max={20} value={copies} onChange={e => setCopies(Math.max(1, Math.min(20, Number(e.target.value) || 1)))} className={`${selectCls} w-16`} />
