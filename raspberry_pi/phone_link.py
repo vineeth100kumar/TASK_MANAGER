@@ -86,6 +86,10 @@ PROFILE_MAX_GAP = int(os.getenv("SAGE_PHONE_PROFILE_MAX_GAP", "600"))
 # Where the iPhone's address is remembered, so it is found on any kind of link.
 PINNED_FILE = Path(os.getenv("SAGE_DB_PATH", "sage_sync.db")).resolve().parent / "phone_pinned.json"
 JOURNAL_KEEP = 200
+# One pass of the Bluetooth watcher must finish in this long. A D-Bus call that
+# never returns froze the whole loop on 2026-11-25 (the last pass said "home",
+# so Sage kept saying home for 15 hours after Vineeth left).
+TICK_TIMEOUT = int(os.getenv("SAGE_PHONE_TICK_TIMEOUT", "40"))
 
 ALLOWED_APPS = {a.strip() for a in os.getenv("SAGE_PHONE_APPS", "").split(",") if a.strip()}
 KEEP = 20
@@ -331,6 +335,7 @@ class PhoneLink:
         # trusts this over BlueZ's Connected flag, which stays true on a dead
         # link after the phone has left (see PRESENCE_LIVENESS).
         self._alive_at = 0.0
+        self._tick_ok_at = 0.0       # when the watcher last finished a pass
         self._ble_dead_since = 0.0   # when the BLE link first looked dead (no life)
         self._probe_at = 0.0         # last active liveness probe
         self._probe_fails = 0        # consecutive failed liveness probes
@@ -401,7 +406,7 @@ class PhoneLink:
         self.notifications.clear()
         await self._emit({"type": "PHONE_NOTIFICATION_REMOVED", "id": "*"})
 
-    async def set_presence(self, connected: bool, name: str = "") -> None:
+    async def set_presence(self, connected: bool, name: str = "", force_away: bool = False) -> None:
         now = time.time()
         changed = connected != self.connected
         self.connected = connected
@@ -409,6 +414,8 @@ class PhoneLink:
             self.last_seen = now
             self.device_name = name or self.device_name
         home = connected or (self.last_seen and now - self.last_seen < away_after())
+        if force_away:
+            home = False
         if changed or bool(home) != self.home:
             if bool(home) != self.home:
                 log.info("Presence: you are now %s (phone %s)", "home" if home else "away", "connected" if connected else "not connected")
@@ -560,7 +567,15 @@ class PhoneLink:
             log.warning("Could not register the pairing agent (pairing from Sage may not work): %s", e)
         while True:
             try:
-                await self._tick()
+                await asyncio.wait_for(self._tick(), TICK_TIMEOUT)
+                self._tick_ok_at = time.time()
+            except asyncio.TimeoutError:
+                self.say("tick", f"the Bluetooth check hung for {TICK_TIMEOUT} s and was cancelled; "
+                                 "counting the phone as away until it answers again.")
+                self.presence_reason = "Bluetooth watcher stuck"
+                self._chars.clear()
+                self._unwatch()
+                await self.set_presence(False, self.device_name, force_away=True)
             except Exception as e:
                 self.say("tick", f"unexpected error ({type(e).__name__}): {e}. Trying again in 5 s.")
                 self._chars.clear()  # subscribe again on the next tick

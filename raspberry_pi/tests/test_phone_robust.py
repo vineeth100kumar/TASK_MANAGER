@@ -216,3 +216,27 @@ class Restart(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StuckWatcher(Rig):
+    def test_hung_bluez_call_flips_to_away(self):
+        """2026-11-25: a D-Bus call hung, the last pass said home, and Sage said home for 15 hours."""
+        self.link.pinned = PHONE
+        self.objects = {"/dev": device()}
+        self.kernel = {PHONE}
+        self.tick()
+        self.assertTrue(self.link.home)
+
+        async def hang():
+            await asyncio.sleep(3600)
+        self.link._objects = hang
+
+        async def one_pass():
+            try:
+                await asyncio.wait_for(self.link._tick(), 0.05)
+            except asyncio.TimeoutError:
+                await self.link.set_presence(False, "", force_away=True)
+        asyncio.run(one_pass())
+        self.assertFalse(self.link.home)
+        self.assertFalse(self.link.connected)
+
