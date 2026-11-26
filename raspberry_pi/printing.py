@@ -23,7 +23,7 @@ import tempfile
 import threading
 import time
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -217,8 +217,22 @@ body{font:14pt -apple-system,Helvetica,Arial,sans-serif;color:#111}h1{font-size:
 <div class="box">Printer: <b>%s</b></div>"""
 
 
-def _lp(printer: str, pdf: Path, title: str, copies: int) -> str:
-    out = _run(["lp", "-d", printer, "-n", str(max(1, min(copies, 20))), "-t", title[:80] or "Sage", str(pdf)])
+QUALITY = {"draft": "3", "normal": "4", "high": "5"}   # IPP print-quality values
+
+
+def quality_options(quality: str = "normal", mono: bool = False) -> List[str]:
+    """lp -o flags: Draft saves ink, High uses the most; black and white skips colour ink."""
+    flags: List[str] = []
+    if quality in ("draft", "high"):
+        flags += ["-o", f"print-quality={QUALITY[quality]}"]
+    if mono:
+        flags += ["-o", "print-color-mode=monochrome"]
+    return flags
+
+
+def _lp(printer: str, pdf: Path, title: str, copies: int, quality: str = "normal", mono: bool = False) -> str:
+    out = _run(["lp", "-d", printer, "-n", str(max(1, min(copies, 20))), "-t", title[:80] or "Sage",
+                *quality_options(quality, mono), str(pdf)])
     return out.strip()
 
 
@@ -231,8 +245,13 @@ class AddPrinter(BaseModel):
     name: str
 
 
+Quality = Literal["draft", "normal", "high"]
+
+
 class PrintJob(BaseModel):
     printer: str
+    quality: Quality = "normal"
+    mono: bool = False
     title: str = "Sage"
     html: str
     copies: int = 1
@@ -304,14 +323,21 @@ async def remove_printer(name: str):
     return {"success": True, **await _guard(go)}
 
 
+class TestOptions(BaseModel):
+    quality: Quality = "normal"
+    mono: bool = False
+
+
 @router.post("/api/printers/{name}/test")
-async def test_page(name: str):
+async def test_page(name: str, req: Optional[TestOptions] = None):
+    req = req or TestOptions()
+
     def go():
         _known(name)
         with tempfile.TemporaryDirectory(prefix="sage-print-") as tmp:
             pdf = Path(tmp) / "test.pdf"
             html_to_pdf(TEST_PAGE % name, pdf)
-            return _lp(name, pdf, "Sage test page", 1)
+            return _lp(name, pdf, "Sage test page", 1, req.quality, req.mono)
     return {"success": True, "job": await _guard(go)}
 
 
@@ -327,7 +353,7 @@ async def print_job(req: PrintJob):
         with tempfile.TemporaryDirectory(prefix="sage-print-") as tmp:
             pdf = Path(tmp) / "job.pdf"
             html_to_pdf(req.html, pdf)
-            return _lp(req.printer, pdf, _clean_title(req.title), req.copies)
+            return _lp(req.printer, pdf, _clean_title(req.title), req.copies, req.quality, req.mono)
     return {"success": True, "job": await _guard(go)}
 
 
@@ -361,7 +387,7 @@ def sheet_steps(pages: int) -> List[tuple]:
     return steps
 
 
-def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str) -> str:
+def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str, quality: str = "normal", mono: bool = False) -> str:
     from pypdf import PdfReader, PdfWriter
     with tempfile.TemporaryDirectory(prefix="sage-sheet-") as tmp:
         one = Path(tmp) / "sheet.pdf"
@@ -373,7 +399,7 @@ def _send_page(printer: str, pdf: Path, page: int, rotate: bool, title: str) -> 
             writer.add_page(pg)
             with open(one, "wb") as out:
                 writer.write(out)
-        return _lp(printer, one, title, 1)
+        return _lp(printer, one, title, 1, quality, mono)
 
 
 def job_view(job: dict) -> dict:
@@ -381,7 +407,8 @@ def job_view(job: dict) -> dict:
     done = job["done"]
     total_sheets = (job["pages"] + 1) // 2
     out = {"id": job["id"], "title": job["title"], "printer": job["printer"], "pages": job["pages"],
-           "sheets": total_sheets, "flip": job["flip"], "error": job.get("error", ""), "finished": done >= len(steps)}
+           "sheets": total_sheets, "flip": job["flip"], "error": job.get("error", ""), "note": job.get("note", ""),
+           "quality": job["quality"], "mono": job["mono"], "finished": done >= len(steps)}
     if done >= len(steps):
         out.update(sheet=total_sheets, stage="done", message=f"All {total_sheets} sheet{'s' if total_sheets != 1 else ''} sent.")
         return out
@@ -401,7 +428,7 @@ def job_view(job: dict) -> dict:
 
 
 def _forget_old(now: float) -> None:
-    for jid in [j for j, v in JOBS.items() if now - v["touched"] > JOB_KEEP_SECONDS or (v["done"] >= len(v["steps"]) and now - v["touched"] > 600)]:
+    for jid in [j for j, v in JOBS.items() if now - v["touched"] > JOB_KEEP_SECONDS or (v["done"] >= len(v["steps"]) and now - v["touched"] > 1800)]:
         _drop_job(jid)
 
 
@@ -411,7 +438,7 @@ def _drop_job(jid: str) -> None:
         shutil.rmtree(job["pdf"].parent, ignore_errors=True)
 
 
-def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge: bool) -> dict:
+def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge: bool, quality: str = "normal", mono: bool = False) -> dict:
     _known(printer)
     pages = pdf_pages(pdf)
     if pages < 1:
@@ -422,7 +449,7 @@ def start_duplex(printer: str, title: str, pdf: Path, own: bool, flip_short_edge
             raise HTTPException(status_code=409, detail="Finish or stop a back to back job first.")
         jid = secrets.token_hex(6)
         JOBS[jid] = {"id": jid, "printer": printer, "title": _clean_title(title), "pdf": pdf, "own": own, "pages": pages,
-                     "steps": sheet_steps(pages), "done": 0, "flip": bool(flip_short_edge), "touched": time.time()}
+                     "steps": sheet_steps(pages), "done": 0, "flip": bool(flip_short_edge), "quality": quality, "mono": bool(mono), "touched": time.time()}
         return job_view(JOBS[jid])
 
 
@@ -438,21 +465,69 @@ def advance_duplex(jid: str, again: bool = False) -> dict:
         page, side = job["steps"][job["done"]]
         try:
             _known(job["printer"])
-            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}")
+            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}", job["quality"], job["mono"])
         except Exception as e:
             job["error"] = friendly(e)
             raise HTTPException(status_code=502, detail=friendly(e))
         job["error"] = ""
         job["done"] += 1
         job["touched"] = time.time()
+        job.pop("note", None)
+        return job_view(job)
+
+
+def goto_sheet(jid: str, sheet: int) -> dict:
+    """Jam or smudge: go back (or forward) to the front of a sheet. Nothing prints until you press the button."""
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        sheets = (job["pages"] + 1) // 2
+        if not 1 <= sheet <= sheets:
+            raise HTTPException(status_code=400, detail=f"This has {sheets} sheet{'s' if sheets != 1 else ''}.")
+        job["done"] = 2 * (sheet - 1)
+        job["touched"] = time.time()
+        job["note"] = f"Starting again from sheet {sheet}."
         view = job_view(job)
-        if view["finished"] and job.get("own"):
-            shutil.rmtree(job["pdf"].parent, ignore_errors=True)
+        if sheet == 1:
+            view["next"] = "Print sheet 1"
         return view
+
+
+def reprint_page(jid: str, page: int) -> dict:
+    """Prints one page again right now. The job stays where it was."""
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        if not 1 <= page <= job["pages"]:
+            raise HTTPException(status_code=400, detail=f"This has {job['pages']} page{'s' if job['pages'] != 1 else ''}.")
+        side = "front" if page % 2 else "back"
+        try:
+            _known(job["printer"])
+            _send_page(job["printer"], job["pdf"], page, job["flip"] and side == "back", f"{job['title']} p{page}", job["quality"], job["mono"])
+        except Exception as e:
+            job["error"] = friendly(e)
+            raise HTTPException(status_code=502, detail=friendly(e))
+        job["error"] = ""
+        job["touched"] = time.time()
+        job["note"] = f"Page {page} sent again ({'front' if side == 'front' else 'back'} of sheet {(page + 1) // 2})."
+        return job_view(job)
+
+
+def set_job_options(jid: str, quality: str, mono: bool) -> dict:
+    with _jobs_lock:
+        job = JOBS.get(jid)
+        if not job:
+            raise HTTPException(status_code=404, detail="That job is gone. Start it again.")
+        job["quality"], job["mono"] = quality, bool(mono)
+        return job_view(job)
 
 
 class DuplexJob(BaseModel):
     printer: str
+    quality: Quality = "normal"
+    mono: bool = False
     title: str = "Sage"
     html: str
     flip: bool = False
@@ -471,7 +546,7 @@ async def duplex_from_html(req: DuplexJob):
         pdf = folder / "job.pdf"
         try:
             html_to_pdf(req.html, pdf)
-            job = start_duplex(req.printer, req.title, pdf, True, req.flip)
+            job = start_duplex(req.printer, req.title, pdf, True, req.flip, req.quality, req.mono)
         except BaseException:
             shutil.rmtree(folder, ignore_errors=True)
             raise
@@ -494,6 +569,34 @@ async def continue_job(jid: str):
 @router.post("/api/print/jobs/{jid}/again")
 async def again_job(jid: str):
     return {"success": True, "job": await _guard(advance_duplex, jid, True)}
+
+
+class SheetPick(BaseModel):
+    sheet: int
+
+
+class PagePick(BaseModel):
+    page: int
+
+
+class JobOptions(BaseModel):
+    quality: Quality = "normal"
+    mono: bool = False
+
+
+@router.post("/api/print/jobs/{jid}/restart")
+async def restart_job(jid: str, req: SheetPick):
+    return {"success": True, "job": await _guard(goto_sheet, jid, req.sheet)}
+
+
+@router.post("/api/print/jobs/{jid}/reprint")
+async def reprint_job(jid: str, req: PagePick):
+    return {"success": True, "job": await _guard(reprint_page, jid, req.page)}
+
+
+@router.post("/api/print/jobs/{jid}/options")
+async def job_options(jid: str, req: JobOptions):
+    return {"success": True, "job": await _guard(set_job_options, jid, req.quality, req.mono)}
 
 
 @router.delete("/api/print/jobs/{jid}")

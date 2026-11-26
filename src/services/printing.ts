@@ -66,13 +66,28 @@ export function usePrinters() {
     add: (uri: string, name: string) => run(() => call('/api/printers', 'POST', { uri, name })),
     makeDefault: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}/default`, 'POST')),
     remove: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}`, 'DELETE')),
-    testPage: (name: string) => run(() => call(`/api/printers/${encodeURIComponent(name)}/test`, 'POST')),
+    testPage: (name: string, opts: PrintOptions = loadPrintOptions()) => run(() => call(`/api/printers/${encodeURIComponent(name)}/test`, 'POST', opts)),
   };
 }
 
+/** How much ink a job may use: Draft saves the most, High the least. Black and white skips colour ink. */
+export type Quality = 'draft' | 'normal' | 'high';
+export interface PrintOptions { quality: Quality; mono: boolean }
+
+const OPTIONS_KEY = 'sage-print-options';
+export const loadPrintOptions = (): PrintOptions => {
+  try {
+    const o = JSON.parse(localStorage.getItem(OPTIONS_KEY) || '{}');
+    return { quality: ['draft', 'normal', 'high'].includes(o.quality) ? o.quality : 'normal', mono: !!o.mono };
+  } catch { return { quality: 'normal', mono: false }; }
+};
+export const savePrintOptions = (o: PrintOptions): void => {
+  try { localStorage.setItem(OPTIONS_KEY, JSON.stringify(o)); } catch { /* private window */ }
+};
+
 /** Sends a finished page to a printer the Pi knows. */
-export const printOnPi = (printer: string, title: string, html: string, copies = 1) =>
-  call('/api/print', 'POST', { printer, title, html, copies });
+export const printOnPi = (printer: string, title: string, html: string, copies = 1, opts: PrintOptions = loadPrintOptions()) =>
+  call('/api/print', 'POST', { printer, title, html, copies, ...opts });
 
 /** Opens the browser's Print dialog for a page of HTML (choose "Save as PDF" there to keep a file). */
 export function printInBrowser(html: string): void {
@@ -107,15 +122,23 @@ export interface DuplexJob {
   finished: boolean;
   flip: boolean;
   error: string;
+  note: string;
+  quality: Quality;
+  mono: boolean;
 }
 
 export const duplexApi = {
   /** Starts a job from a page of HTML (a note). Nothing prints until `next` is called. */
-  fromHtml: (printer: string, title: string, html: string, flip: boolean) =>
-    call<{ job: DuplexJob }>('/api/print/duplex', 'POST', { printer, title, html, flip }).then(r => r.job),
+  fromHtml: (printer: string, title: string, html: string, flip: boolean, opts: PrintOptions = loadPrintOptions()) =>
+    call<{ job: DuplexJob }>('/api/print/duplex', 'POST', { printer, title, html, flip, ...opts }).then(r => r.job),
   list: () => call<{ jobs: DuplexJob[] }>('/api/print/jobs').then(r => r.jobs),
   next: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/continue`, 'POST').then(r => r.job),
   again: (id: string) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/again`, 'POST').then(r => r.job),
+  /** Jam or smudge: go back to the front of a sheet. Nothing prints until `next`. */
+  restart: (id: string, sheet: number) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/restart`, 'POST', { sheet }).then(r => r.job),
+  /** Prints one page again right now; the job keeps its place. */
+  reprint: (id: string, page: number) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/reprint`, 'POST', { page }).then(r => r.job),
+  options: (id: string, opts: PrintOptions) => call<{ job: DuplexJob }>(`/api/print/jobs/${encodeURIComponent(id)}/options`, 'POST', opts).then(r => r.job),
   stop: (id: string) => call(`/api/print/jobs/${encodeURIComponent(id)}`, 'DELETE'),
 };
 
@@ -127,8 +150,8 @@ export interface PrintDropList { files: PrintFile[]; maxMb: number; maxFiles: nu
 export const printDropApi = {
   list: () => call<PrintDropList>('/api/printdrop'),
   remove: (id: string) => call(`/api/printdrop/${encodeURIComponent(id)}`, 'DELETE'),
-  print: (id: string, printer: string, mode: 'single' | 'duplex', copies: number, flip: boolean) =>
-    call<{ job?: DuplexJob; message?: string }>(`/api/printdrop/${encodeURIComponent(id)}/print`, 'POST', { printer, mode, copies, flip }),
+  print: (id: string, printer: string, mode: 'single' | 'duplex', copies: number, flip: boolean, opts: PrintOptions = loadPrintOptions()) =>
+    call<{ job?: DuplexJob; message?: string }>(`/api/printdrop/${encodeURIComponent(id)}/print`, 'POST', { printer, mode, copies, flip, ...opts }),
   /** One raw PDF per request, streamed to the Pi's disk. */
   upload: (file: File, onProgress?: (sent: number, total: number) => void) => new Promise<PrintFile>((resolve, reject) => {
     const xhr = new XMLHttpRequest();

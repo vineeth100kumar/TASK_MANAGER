@@ -126,6 +126,8 @@ async def save_pdf(name: str, length: int, chunks) -> dict:
 
 class PrintFile(BaseModel):
     printer: str
+    quality: printing.Quality = "normal"
+    mono: bool = False
     mode: str = "single"      # single | duplex
     copies: int = 1
     flip: bool = False        # turn the back side 180 degrees (short-edge flip)
@@ -159,10 +161,10 @@ async def printdrop_print(fid: str, req: PrintFile):
     meta = _get(fid)
     pdf = _pdf_path(fid)
     if req.mode == "duplex":
-        job = await printing._guard(printing.start_duplex, req.printer, meta["name"], pdf, False, req.flip)
+        job = await printing._guard(printing.start_duplex, req.printer, meta["name"], pdf, False, req.flip, req.quality, req.mono)
         return {"success": True, "job": job}
 
     def go():
         printing._known(req.printer)
-        return printing._lp(req.printer, pdf, printing._clean_title(meta["name"]), req.copies)
+        return printing._lp(req.printer, pdf, printing._clean_title(meta["name"]), req.copies, req.quality, req.mono)
     return {"success": True, "message": await printing._guard(go)}

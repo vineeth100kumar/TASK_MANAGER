@@ -108,6 +108,23 @@ class Routes(unittest.TestCase):
         self.assertEqual(lp[:6], ["lp", "-d", "Office_Laser", "-n", "2", "-t"])
         self.assertEqual(lp[6], "Plan b")
 
+    def test_quality_and_black_and_white_flags(self):
+        self.assertEqual(printing.quality_options("normal", False), [])
+        self.assertEqual(printing.quality_options("draft", False), ["-o", "print-quality=3"])
+        self.assertEqual(printing.quality_options("high", True), ["-o", "print-quality=5", "-o", "print-color-mode=monochrome"])
+
+    def test_print_passes_quality_to_lp(self):
+        def pdf(html, out):
+            out.write_bytes(b"%PDF-1.4")
+        with mock.patch.object(printing, "html_to_pdf", pdf):
+            r = client.post("/api/print", json={"printer": "Office_Laser", "html": "<p>x</p>", "quality": "draft", "mono": True})
+            self.assertEqual(r.status_code, 200)
+            bad = client.post("/api/print", json={"printer": "Office_Laser", "html": "<p>x</p>", "quality": "ultra"})
+            self.assertEqual(bad.status_code, 422)
+        lp = [c for c in self.calls if c[0] == "lp"][-1]
+        self.assertIn("print-quality=3", lp)
+        self.assertIn("print-color-mode=monochrome", lp)
+
     def test_print_empty(self):
         self.assertEqual(client.post("/api/print", json={"printer": "Office_Laser", "html": "  "}).status_code, 400)
 
@@ -134,7 +151,7 @@ class BackToBack(unittest.TestCase):
         printing.JOBS.clear()
         self.real_send = printing._send_page
 
-        def send(printer, pdf, page, rotate, title):
+        def send(printer, pdf, page, rotate, title, quality="normal", mono=False):
             self.sent_pages.append((page, rotate))
             return "ok"
         for p in (mock.patch.object(printing, "available", return_value=True),
@@ -192,6 +209,63 @@ class BackToBack(unittest.TestCase):
         client.post(f"/api/print/jobs/{job['id']}/again")
         self.assertEqual([p for p, _ in self.sent_pages], [1, 1])
 
+    def start_job(self, pages=5, flip=False):
+        f = self.upload(pages)
+        return client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex", "flip": flip}).json()["job"]
+
+    def test_restart_from_an_earlier_sheet_after_a_jam(self):
+        job = self.start_job(5)
+        for _ in range(4):
+            job = client.post(f"/api/print/jobs/{job['id']}/continue").json()["job"]
+        self.assertEqual((job["stage"], job["sheet"]), ("reload", 3))
+        job = client.post(f"/api/print/jobs/{job['id']}/restart", json={"sheet": 2}).json()["job"]
+        self.assertEqual((job["stage"], job["sheet"], job["next"]), ("reload", 2, "Print sheet 2"))
+        self.assertIn("sheet 2", job["note"])
+        client.post(f"/api/print/jobs/{job['id']}/continue")
+        self.assertEqual(self.sent_pages[-1], (3, False))     # sheet 2 front is page 3
+        self.assertEqual(client.post(f"/api/print/jobs/{job['id']}/restart", json={"sheet": 9}).status_code, 400)
+
+    def test_a_finished_job_can_be_redone(self):
+        job = self.start_job(2)
+        for _ in range(2):
+            job = client.post(f"/api/print/jobs/{job['id']}/continue").json()["job"]
+        self.assertTrue(job["finished"])
+        job = client.post(f"/api/print/jobs/{job['id']}/restart", json={"sheet": 1}).json()["job"]
+        self.assertFalse(job["finished"])
+
+    def test_reprint_one_page_keeps_the_place(self):
+        job = self.start_job(4, flip=True)
+        job = client.post(f"/api/print/jobs/{job['id']}/continue").json()["job"]
+        self.assertEqual(job["stage"], "flip")
+        job = client.post(f"/api/print/jobs/{job['id']}/reprint", json={"page": 2}).json()["job"]
+        self.assertEqual(self.sent_pages[-1], (2, True))      # a back page keeps the turn-around
+        self.assertEqual(job["stage"], "flip")
+        self.assertIn("Page 2", job["note"])
+        self.assertEqual(client.post(f"/api/print/jobs/{job['id']}/reprint", json={"page": 0}).status_code, 400)
+
+    def test_change_quality_mid_job(self):
+        job = self.start_job(2)
+        client.post(f"/api/print/jobs/{job['id']}/options", json={"quality": "draft", "mono": True})
+        seen = {}
+
+        def grab(printer, pdf, title, copies, quality="normal", mono=False):
+            seen.update(quality=quality, mono=mono)
+            return "ok"
+        with mock.patch.object(printing, "_lp", grab), mock.patch.object(printing, "_send_page", self.real_send):
+            client.post(f"/api/print/jobs/{job['id']}/continue")
+        self.assertEqual(seen, {"quality": "draft", "mono": True})
+
+    def test_test_page_takes_quality(self):
+        def pdf(html, out):
+            out.write_bytes(b"%PDF-1.4")
+        with mock.patch.object(printing, "html_to_pdf", pdf):
+            r = client.post("/api/printers/Office_Laser/test", json={"quality": "draft", "mono": True})
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(client.post("/api/printers/Office_Laser/test").status_code, 200)
+        lps = [c for c in self.calls if c[0] == "lp"]
+        self.assertIn("print-quality=3", lps[-2])
+        self.assertNotIn("print-quality=3", lps[-1])
+
     def test_stop_and_limit(self):
         f = self.upload(2)
         ids = [client.post(f"/api/printdrop/{f['id']}/print", json={"printer": "Office_Laser", "mode": "duplex"}).json()["job"]["id"] for _ in range(3)]
@@ -205,7 +279,7 @@ class BackToBack(unittest.TestCase):
         f = self.upload(3)
         seen = []
 
-        def grab(printer, pdf, title, copies):
+        def grab(printer, pdf, title, copies, quality="normal", mono=False):
             r = PdfReader(str(pdf))
             seen.append((len(r.pages), r.pages[0].get("/Rotate", 0)))
             return "ok"

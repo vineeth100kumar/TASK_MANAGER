@@ -8,6 +8,7 @@ import { Note, Thought } from '../../services/types';
 import { api } from '../../services/api';
 import { useToast } from '../../context/ToastContext';
 import { duplexApi, printInBrowser, printOnPi, usePrinters, type DuplexJob } from '../../services/printing';
+import { QualityPicker, usePrintOptions } from '../print/QualityPicker';
 import { DuplexDialog } from '../print/DuplexDialog';
 import { codePage, mapPage, notePage, reportPage } from './printable';
 
@@ -24,6 +25,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
   const [open, setOpen] = useState(false);
   const [working, setWorking] = useState(false);
   const [duplexJob, setDuplexJob] = useState<DuplexJob | null>(null);
+  const [opts, setOpts] = usePrintOptions();
   const box = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -49,8 +51,8 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
     try {
       const html = await page();
       if (printer === null) { printInBrowser(html); return; }
-      await printOnPi(printer, note.title || 'Sage', html);
-      showToast(`Sent to ${printer}`);
+      await printOnPi(printer, note.title || 'Sage', html, 1, opts);
+      showToast(`Sent to ${printer}`, 'success', { label: 'Print again', onAction: () => { go(printer); }, durationMs: 15000 });
     } catch (e: any) {
       showToast(e?.message || "Couldn't print that", 'error');
     } finally {
@@ -62,7 +64,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
     setOpen(false);
     setWorking(true);
     try {
-      setDuplexJob(await duplexApi.fromHtml(printer, note.title || 'Sage', await page(), false));
+      setDuplexJob(await duplexApi.fromHtml(printer, note.title || 'Sage', await page(), false, opts));
     } catch (e: any) {
       showToast(e?.message || "Couldn't start back to back", 'error');
     } finally {
@@ -95,6 +97,7 @@ export function PrintButton({ note, body, onOpenSettings }: Props) {
               <span className="truncate">Back to back · {p.name}</span>
             </button>
           ))}
+          {printers.length > 0 && <div className="my-1 border-t border-black/5 dark:border-white/10"><QualityPicker value={opts} onChange={setOpts} compact /></div>}
           <button role="menuitem" onClick={() => go(null)} className={item}>
             <Monitor size={14} className="shrink-0 text-gray-400" />This device / save as PDF
           </button>
