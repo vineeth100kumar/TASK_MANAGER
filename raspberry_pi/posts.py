@@ -49,6 +49,7 @@ from fastapi import APIRouter, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel
 
+import instagram_link
 import item_shape
 import logstore
 import lowprio
@@ -1248,10 +1249,31 @@ async def posts_posted(post_id: str, undo: bool = False):
         post["wontPost"] = False
     await save_async(post)
     if undo:
+        instagram_link.clear("post", post)
+        await save_async(post)
         await _move_task(post, "editing", "in_progress")
     else:
         await _move_task(post, "published", "done")
+        await instagram_link.start("post", post, get, save_async)
     return {"success": True, "post": with_media(post)}
+
+
+@router.post("/api/posts/{post_id}/instagram")
+async def posts_find_on_instagram(post_id: str):
+    """Look for this post on Instagram now (the "Find on Instagram" button)."""
+    post = get(post_id)
+    if not post:
+        return _missing()
+    if not post.get("posted"):
+        return _bad("Mark it as posted first.", 409)
+    try:
+        found = await instagram_link.try_once("post", post)
+    except Exception as e:
+        return _bad(f"Instagram would not answer: {e}", 502)
+    if not found and post.get("instagramCheck") != "offline":
+        post["instagramCheck"] = "missed"
+    await save_async(post)
+    return {"success": True, "found": found, "post": with_media(post)}
 
 
 async def set_wont_post(item: dict, wont: bool, save) -> dict:

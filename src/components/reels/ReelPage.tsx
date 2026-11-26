@@ -14,6 +14,7 @@ import {
   REEL_EVENT, Reel, ReelMakerStatus, ReviewAction, canShareVideo, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
 } from '../../services/reels';
 import { copyText, fetchBlob } from '../../services/posts';
+import { InstagramLink } from '../common/InstagramLink';
 import { useToast } from '../../context/ToastContext';
 import { ProjectLink } from '../common/ProjectLink';
 
@@ -317,6 +318,7 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
                   <Check size={14} /> {reel.posted ? 'Posted' : 'Mark posted'}
                 </button>
               </div>
+              <InstagramLink item={reel} find={() => reelsApi.findOnInstagram(reel.id)} onChange={setReel} />
             </div>
           </div>
 
