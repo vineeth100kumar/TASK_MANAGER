@@ -16,6 +16,8 @@ GENERATED_DIR = ASSETS_DIR / "generated"
 STYLES_DIR = PROJECT_ROOT / "styles"
 # Shared pictures for post specs: a spec can name any file here by its bare name (farm.jpg)
 IMAGES_DIR = PROJECT_ROOT / "images"
+# Stock footage for reel scenes (`clip:`): downloaded once, remembered, reused (reel/broll.py)
+VIDEOS_DIR = IMAGES_DIR / "videos"
 
 
 class CanvasConfig(BaseModel):
