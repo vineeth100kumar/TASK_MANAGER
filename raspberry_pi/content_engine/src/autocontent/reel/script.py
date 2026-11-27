@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from ..spec import parse_spec, SpecIssue, ParsedSpec
+from ..spec.stock import keywords_from
 from .objects import parse_objects, object_problems, SceneObject
 from .diagram import Diagram, DiagramError, KEYS as DIAGRAM_KEYS, parse_diagram
 
@@ -26,6 +27,7 @@ HEADER_KEYS = {
     "pace": "pace", "pauses": "pauses", "breaths": "pauses", "polish": "polish", "sound": "polish",
     "loudness": "loudness", "lufs": "loudness", "pronounce": "pronounce", "say_as": "pronounce",
     "pronunciation": "pronounce",
+    "broll": "broll",
 }
 SCENE_KEYS = {
     "say": "say", "vo": "say", "voiceover": "say", "narration": "say", "speak": "say",
@@ -35,6 +37,7 @@ SCENE_KEYS = {
     "speed": "speed", "tone": "tone", "delivery": "tone", "voice": "voice",
     "objects": "objects", "overlay": "objects", "overlays": "objects", "obj": "objects",
     "diagram": "diagram", "figure": "diagram",
+    "clip": "clip", "broll": "clip", "footage": "clip", "bvideo": "clip",
 }
 # How a slide is delivered: a speed multiplier on top of the reel's own speed.
 TONES = {"hook": 1.08, "fast": 1.1, "excited": 1.1, "energetic": 1.08, "normal": 1.0, "neutral": 1.0,
@@ -161,6 +164,8 @@ class Scene:
     pause: float = 0.0                  # extra silence after the narration, seconds
     objects: List[SceneObject] = field(default_factory=list)   # overlay objects on this slide
     diagram: Optional[Diagram] = None   # the explainer diagram drawn on this slide (see diagram.py)
+    clip: str = ""                      # `clip:` search phrase for stock footage behind this slide ("" = a normal designed slide)
+    clip_line: int = 0                  # the line it was written on (0 when there is none, or it is off)
 
     @property
     def words(self) -> List[str]:
@@ -443,6 +448,8 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
             meta[key] = -abs(_number(value, 9, 23, "loudness", line, reel.issues, 14) or 14)
         elif key == "pronounce":
             meta[key] = parse_pronounce(value)
+        elif key == "broll":
+            meta[key] = "off" if value.strip().lower() in ("off", "no", "none", "false", "0") else "on"
         elif key == "transition":
             meta[key] = value.lower() or "fade"
         elif key == "cold_open":
@@ -463,6 +470,7 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
     meta.setdefault("polish", "natural")
     meta.setdefault("loudness", -14.0)
     meta.setdefault("pronounce", {})
+    meta.setdefault("broll", "on")
     meta["voice"] = str(meta["voice"]).strip() or DEFAULT_VOICE
     reel.meta = meta
 
@@ -507,6 +515,10 @@ def parse_reel(text: str, base_dir: Optional[Path] = None) -> ReelScript:
                 reel.issues.append(SpecIssue("WARN", "OBJECT_IGNORED", f"Slide {i + 1}'s objects: {problem}.",
                                              slide=i + 1, line=sec["objects"][1],
                                              hint="Write each as `name @ x,y size colour animation`, with a built-in shape name."))
+        if "clip" in sec and meta["broll"] != "off":
+            phrase = _clean(sec["clip"][0])
+            if phrase.lower() not in ("off", "none", "no", "-", "false"):
+                scene.clip, scene.clip_line = phrase, sec["clip"][1]
         if "diagram" in sec:
             try:
                 scene.diagram = parse_diagram(sec["diagram"][0])
@@ -665,6 +677,7 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                                         f"Slide {s.n} has {n_words} words of text next to a diagram; the diagram needs the room.",
                                         slide=s.n, line=s.line, hint="Keep a diagram slide to a short headline."))
 
+    issues += _check_clips(reel)
     if reel.choice and len(f"COMMENT {reel.choice[0]} OR {reel.choice[1]}") > CHOICE_MAX_CHARS:
         cta = next((s for s in reversed(reel.scenes) if s.slide.get("type") == "cta"), None)
         issues.append(SpecIssue("ERROR", "CHOICE_TOO_LONG",
@@ -704,6 +717,33 @@ def check_reel(reel: ReelScript) -> List[SpecIssue]:
                                 hint="Cut a slide or tighten the narration."))
     elif seconds < 8:
         issues.append(SpecIssue("WARN", "REEL_SHORT", f"About {seconds:.0f} seconds; very short for a reel.", hint="Add a slide or a sentence."))
+    return issues
+
+
+def _is_recap(slide: Dict[str, Any]) -> bool:
+    """The `## recap` save card: a dark list slide labelled SAVE THIS."""
+    return slide.get("type") == "list" and str(slide.get("kicker") or "").strip().upper() == "SAVE THIS"
+
+
+def _check_clips(reel: "ReelScript") -> List[SpecIssue]:
+    """Stock footage is for a few context slides; it fights diagrams, tables, charts, pictures and the recap card,
+    and a reel that is footage from start to end stops being designed."""
+    issues: List[SpecIssue] = []
+    clipped = [s for s in reel.scenes if s.clip_line]
+    for s in clipped:
+        t = s.slide.get("type", "slide")
+        if not keywords_from(s.clip):
+            issues.append(SpecIssue("WARN", "CLIP_EMPTY", f"Slide {s.n}'s `clip:` has no searchable words, so no footage is fetched.",
+                                    slide=s.n, line=s.clip_line, hint="Name two to four concrete things to film, such as `clip: city skyline at night`."))
+        if s.diagram is not None or t in ("table", "chart", "image") or _is_recap(s.slide):
+            what = "a diagram" if s.diagram is not None else ("the recap card" if _is_recap(s.slide) else f"a {t} slide")
+            issues.append(SpecIssue("WARN", "CLIP_CONFLICT", f"Slide {s.n} has `clip:` and is {what}; footage behind it fights what it shows.",
+                                    slide=s.n, line=s.clip_line, hint="Drop the `clip:` line (or the diagram), and keep this slide clean."))
+    narrated = [s for s in reel.scenes if s.say and s.slide.get("type") != "cover"]
+    if len(clipped) >= 2 and narrated and all(s.clip_line for s in narrated):
+        issues.append(SpecIssue("WARN", "BROLL_TOO_MUCH", "Every slide has `clip:`, so the reel is all stock footage.",
+                                slide=clipped[-1].n, line=clipped[-1].clip_line,
+                                hint="Reels work best as a mix: keep footage on a few context slides, and design the stat and recap slides clean."))
     return issues
 
 
