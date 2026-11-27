@@ -69,6 +69,7 @@ Length: 5 to 8 slides, 20 to 45 seconds. Never over 90 seconds. Speech runs abou
 Make the slides visual:
 - Vary the slide types. Never put three text slides (statement, point) in a row.
 - Show at least one number big (`stat`) and one visual (`compare`, `chart`, `table`, `image` or a `diagram:`).
+- Optionally give the cover and one or two context slides moving stock footage with `clip:` (section 9b). Never every slide: a reel is designed slides first, with footage as the occasional backdrop.
 - When the idea is "how many of a set", "steps in order", "where it breaks", "what is left after each stage" or "how big vs how big", draw it with a `diagram:` (section 9). One or two diagram slides per reel.
 - Put `theme: dark` or `theme: accent` on the 1 or 2 slides you most want screenshotted. Never on two slides in a row.
 
@@ -106,6 +107,7 @@ Allowed header lines and values:
 | `speed:` | 0.6 to 1.4 (1.0 is normal) | 1.0 |
 | `accent:` | a hex colour like `#1E6FE8`, or red, orange, blue, green, purple, pink, teal, yellow, navy | the style's own |
 | `source:` | one credit for every fact slide, or `none` | none |
+| `broll:` | `off` to switch every `clip:` off | on |
 
 Only use another header line if the user asks for it (see the reference after this block). Never write `music:`, `format:` or `aspect:`.
 
@@ -118,7 +120,8 @@ Write a slide's lines in this order:
 3. `say:` (required)
 4. `show:` (optional, see section 7)
 5. optional voice lines: `tone:`, `pause:`
-6. `diagram:` block LAST, if the slide has one (section 9)
+6. optional footage line: `clip:` (section 9b)
+7. `diagram:` block LAST, if the slide has one (section 9)
 
 | Line | Allowed values | Notes |
 |---|---|---|
@@ -130,6 +133,7 @@ Write a slide's lines in this order:
 | `source:` | short credit, under 10 words | Shows small at the bottom. Works on every type except cover and cta. |
 | `tone:` | `hook`, `excited`, `normal`, `calm`, `warm`, `serious`, `emphasis`, `slow`, `dramatic` | How this slide is spoken. Leave it out and the cover is spoken as a hook, stat and cta with emphasis, quote calm. |
 | `pause:` | 0.2 to 1.5 (seconds) | Extra silence after this slide's narration. Use after a big number. |
+| `clip:` | 2 to 4 concrete things to film | Optional. Free stock video plays behind this slide (section 9b). Few slides only. |
 
 Pause marks inside `say:` (never spoken, never captioned): `[pause]` (0.5 s), `[beat]` (0.7 s), `[breath]` (0.28 s), `[pause 0.8]` (any length). Use 0 to 2 per slide, right before a reveal.
 
@@ -393,6 +397,25 @@ Pick one preset:
 States (one per line, any of these keys): `on:` lights parts in the accent colour (the thing you are talking about), `warn:` marks the problem part in red, `ghost:` shows a part as missing or not there yet, `base:` the quiet default, `appear:` hides parts until the cue, `mark:` draws a dashed outline with a label.
 Pick parts by item name (`Fab`), by number (`3`, `1-32`), by `rows 1-3`, `cols 2`, `all`, or `rest`. A quoted label after the parts (`on: 1-32 "sold"`) becomes a legend entry with a live count.
 
+## 9b. STOCK FOOTAGE (`clip:`, optional, a few slides only)
+
+`clip:` puts free stock video behind a slide: the text stays on top, on a darkened backdrop, and the brand handle stays visible. The machine searches for it and falls back to the normal designed slide if none is found, so it is always safe to add.
+
+- Write `clip: <2 to 4 concrete things the camera would show>`, as nouns: `clip: city skyline at night`, `clip: stock market ticker`, `clip: hands counting money`, `clip: factory assembly line`, `clip: laptop typing office`. The footage must SHOW the thing the slide is about. Never abstract words (`growth`, `success`, `strategy`).
+- Put the `clip:` line after `say:`, `show:` and `tone:`, and before a `diagram:` block.
+- Use it on the cover and on at most one or two context slides (`statement`, `point`, `list`, `quote`). In a reel of 5 to 7 slides, 1 to 3 slides have `clip:`.
+- NEVER on every slide: a reel needs a mix of footage slides and clean designed slides. Keep `stat`, `compare`, `recap`, `cta` and any slide with a diagram, `table`, `chart` or `image` clean, with no `clip:`.
+- Do not name people, brands or logos in a `clip:`. Never write a file name or a link.
+
+Example:
+
+```
+## statement
+headline: Ports move the world
+say: Nearly everything you own once sat on a ship.
+clip: container ship at sea
+```
+
 ## 10. OBJECTS (optional, use rarely)
 
 `objects:` places up to 2 small shapes on a slide, for emphasis. They arrive as the slide opens (not on a cue) and sit on top of everything, so put them only where the slide is empty. Prefer a diagram when you want to explain.
@@ -442,6 +465,8 @@ Example: `objects: arrow-down @ 80,30 120 accent fly | check @ 20,62 100 success
 | Diagram block with a blank or `#` line, or before `say:` | Lines are lost or read as slide text | Indented lines, block last on the slide |
 | `## Slide 3: The twist` | Type guessed, often wrongly | `## statement` |
 | Several narration lines or `say:` twice | Only the last `say:` is used | One `say:` line per slide |
+| `clip:` on every slide, or on a `stat`, `recap`, `table`, `chart`, `image` or diagram slide | Warning: the reel is all stock, or footage fights what the slide shows | `clip:` on the cover and one or two context slides; keep the rest clean |
+| `clip: growth and success` | Footage that shows nothing relevant | Concrete things to film: `clip: busy market street` |
 
 ## 13. CHECK BEFORE YOU OUTPUT
 
@@ -452,6 +477,7 @@ Go through every slide once more:
 - [ ] Every `show:` cue is in that slide's `say:`, in order, and there is one cue per piece after the first.
 - [ ] Every diagram `@ "word"` is in that slide's `say:`.
 - [ ] Chart values share one unit, written on each value.
+- [ ] `clip:` only on the cover and one or two context slides, never on every slide, never on a stat, recap, diagram, table, chart or image slide.
 - [ ] No invented facts, links, files, voices, fields, presets or shapes.
 - [ ] The story has a hook, a turn in the middle, something visual, and a clear payoff.
 - [ ] Total spoken words about 50 to 110.
@@ -474,6 +500,7 @@ pill: as cash
 say: You made ₹50,000 profit. So why can't you pay?
 show: why can't you
 tone: hook
+clip: coins and banknotes on a desk
 
 ## stat
 headline: Your first order earns
@@ -579,6 +606,8 @@ themes and pictures) plus these lines. Most lines have other spellings; the chec
 | `duration:` | slide | Hold a slide that has no narration; 1 to 30 seconds. | `hold:` |
 | `objects:` | slide | Overlay shapes. See Objects. | `overlay:`, `overlays:`, `obj:` |
 | `diagram:` | slide | An explainer diagram. See Diagrams. | `figure:` |
+| `clip:` | slide | Stock footage behind this slide: a few concrete nouns to search for (`clip: container ship at sea`). `off` / `none` turns it off for the slide. See Stock footage. | `broll:`, `footage:`, `bvideo:` |
+| `broll:` | header | `off` switches every `clip:` off (the slides are drawn as normal). | |
 | `motion:` | slide | Only used for a piece the reel doesn't recognise; every known piece always gets its own entrance. `rise`, `pop`, `stagger`, `wipe`, `kenburns`, `fade`. Best left out. | `animation:`, `animate:` |
 | `[pause]` marks | in `say:` | `[pause]` 0.5 s, `[breath]` 0.28 s, `[beat]` 0.7 s, `[pause 0.8]` any length. Never spoken or captioned. | |
 
@@ -791,7 +820,22 @@ reel; warnings don't. Every check runs before anything is drawn, so checking is 
 | Warning — long slide | Over 55 spoken words on one screen. |
 | Warning — link, handle or symbols in the narration | A voice reads them aloud or skips them. |
 | Warning — too long / too short | Over 90 seconds, or under 8. |
+| Warning — clip conflict | A slide has `clip:` and is a diagram, table, chart, image or the recap card; footage fights it. |
+| Warning — too much footage | Every slide after the cover has `clip:`: the reel is all stock. |
+| Warning — clip empty | `clip:` has no searchable words. |
 | Warning — ignored line | `music:`, `aspect:`, `format:`, or an unknown `motion:`, `tone:` or voice. |
+
+## Stock footage (`clip:`)
+
+A scene can play free stock video behind its text, mixed with ordinary designed slides. Only scenes with a
+`clip:` line change; every other slide is drawn exactly as before, and the checker warns when footage is
+on every slide, on a diagram, table, chart, image or recap slide.
+
+- **Search.** The phrase is cleaned like a picture search (`search:`) and looked up on Pexels Videos, then Pixabay Videos, with the same free keys as pictures (`PEXELS_API_KEY`, `PIXABAY_API_KEY` in Settings). Portrait footage is preferred, footage of people or logos is hidden unless the phrase asks for it, and a phrase that finds nothing is retried with fewer words.
+- **File.** The smallest clip that is at least 1080 tall is taken (never 4k), saved in `images/videos/`, and the choice is remembered in `_vpicks.json` so a rebuild uses the same clip. Credits are kept in `_vcredits.json`, added to `reel.json` as `videoCredits`, and to the end of `caption.txt` as a "Footage credits" line. Check the licence on the clip's own page before you post.
+- **Look.** The slide is set in its dark colours (light type) over the footage, which is cropped to fill the screen and loops if it is shorter than the slide. A dark gradient sits under the handle at the top and the captions at the bottom, and the brand handle, tag and the progress bar stay on top.
+- **When it fails.** No key, no internet, nothing found or an unreadable file: the reel is still made and that slide is drawn as a normal designed slide. The reason is a `FOOTAGE PROBLEM` line in the progress and in `reel.json` warnings. `fetch_images` off (offline tests) skips the search but still uses a remembered clip.
+- **Cost.** Each footage slide is decoded once into numbered JPEGs in the work folder (one ffmpeg call) and read one frame at a time while the reel is composed; a footage slide is never cached, so it renders more slowly than a still slide. Keep footage to a few slides on a Pi.
 
 ## How the video is made (for the curious)
 

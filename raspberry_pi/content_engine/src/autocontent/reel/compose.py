@@ -410,6 +410,72 @@ def _obj_state(op: ObjectPiece, t: float, clip_t1: float) -> Optional[Tuple[np.n
     return arr, x, y, e * opacity
 
 
+SCRIM_RGB = (8, 10, 14)
+# (y, darkness): dark enough over the top for the brand handle and over the bottom for the captions,
+# light in the middle where the footage is meant to be seen. Linear between the points.
+SCRIM_STOPS = ((0, 0.55), (340, 0.22), (1360, 0.22), (H, 0.62))
+
+
+def scrim_tables() -> Tuple[np.ndarray, np.ndarray]:
+    """(keep, add) for footage under a scrim: frame = footage * keep + add. Built once."""
+    global _SCRIM
+    if _SCRIM is None:
+        ys = np.arange(H, dtype=np.float32)
+        a = np.interp(ys, [p[0] for p in SCRIM_STOPS], [p[1] for p in SCRIM_STOPS]).astype(np.float32)
+        keep = (1.0 - a)[:, None, None]
+        add = a[:, None, None] * np.array(SCRIM_RGB, dtype=np.float32)[None, None, :]
+        _SCRIM = (keep, add)
+    return _SCRIM
+
+
+_SCRIM: Optional[Tuple[np.ndarray, np.ndarray]] = None
+
+
+class VideoBackdrop:
+    """Stock footage behind a slide: numbered JPEGs on disk (already cover-cropped to the reel's size and
+    at its frame rate, see extract_frames), each loaded only when its frame is wanted, so a long clip
+    never sits in RAM. Past its end the footage loops."""
+
+    def __init__(self, folder: Path, fps: int, count: Optional[int] = None):
+        self.folder = Path(folder)
+        self.fps = max(1, int(fps))
+        self.count = count if count is not None else len(list(self.folder.glob("f*.jpg")))
+        self._last: Tuple[int, Optional[np.ndarray]] = (-1, None)
+
+    def index_at(self, local_t: float) -> int:
+        return int(max(0.0, local_t) * self.fps) % max(1, self.count)
+
+    def frame_at(self, local_t: float) -> np.ndarray:
+        """The footage at `local_t` seconds into the slide, as an (H, W, 3) uint8 array (do not modify it)."""
+        i = self.index_at(local_t)
+        if self._last[0] == i and self._last[1] is not None:
+            return self._last[1]
+        with Image.open(self.folder / f"f{i:05d}.jpg") as im:
+            arr = np.asarray(im.convert("RGB"), dtype=np.uint8)
+        if arr.shape[:2] != (H, W):
+            arr = np.asarray(Image.fromarray(arr).resize((W, H), Image.BILINEAR), dtype=np.uint8)
+        self._last = (i, arr)
+        return arr
+
+
+def extract_frames(src: Path, folder: Path, seconds: float, fps: int) -> VideoBackdrop:
+    """Decode footage once into `folder` as JPEGs: the reel's frame rate, scaled to cover W x H and
+    centre-cropped, looped to run `seconds`. One ffmpeg call. Raises RuntimeError when it can't."""
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    cmd = ["ffmpeg", "-y", "-hide_banner", "-loglevel", "error", "-stream_loop", "-1", "-i", str(src), "-an", "-t", f"{seconds:.3f}",
+           "-vf", f"fps={fps},scale={W}:{H}:force_original_aspect_ratio=increase,crop={W}:{H}",
+           "-q:v", "3", "-start_number", "0", str(folder / "f%05d.jpg")]
+    try:
+        done = subprocess.run(cmd, capture_output=True, timeout=600)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise RuntimeError(f"ffmpeg couldn't read the footage: {e}")
+    frames = list(folder.glob("f*.jpg"))
+    if done.returncode != 0 or not frames:
+        raise RuntimeError("ffmpeg couldn't read the footage: " + done.stderr.decode("utf-8", errors="replace").strip()[-300:])
+    return VideoBackdrop(folder, fps, len(frames))
+
+
 @dataclass
 class SceneClip:
     t0: float
@@ -418,6 +484,8 @@ class SceneClip:
     pieces: List[Piece] = field(default_factory=list)
     motion: str = "rise"
     objects: List[ObjectPiece] = field(default_factory=list)
+    video: Optional[VideoBackdrop] = None     # footage behind the slide (a `clip:` scene): drawn under a scrim instead of the base
+    chrome: List[Tuple[np.ndarray, int, int]] = field(default_factory=list)   # brand handle / footer (rgba, x, y) kept on top of footage
     _base_arr: Optional[np.ndarray] = None
 
     @property
@@ -438,7 +506,7 @@ class SceneClip:
 
     @property
     def moving(self) -> bool:
-        return any(p.zoom for p in self.pieces)
+        return self.video is not None or any(p.zoom for p in self.pieces)
 
 
 @dataclass
@@ -698,7 +766,13 @@ class Timeline:
     def _content(clip: SceneClip, t: float) -> np.ndarray:
         """A slide's own picture at time t: its backdrop with every piece that has arrived on it.
         The step the voice is on stays at full strength; the ones before it fade back."""
-        frame = clip.base_array.copy()
+        if clip.video is not None:
+            keep, add = scrim_tables()
+            frame = (clip.video.frame_at(t - clip.t0).astype(np.float32) * keep + add).astype(np.uint8)
+            for arr, x, y in clip.chrome:
+                _blend(frame, arr, x, y)
+        else:
+            frame = clip.base_array.copy()
         live = max((p.at for p in clip.pieces if p.seq and p.at <= t), default=None)
         for p in clip.pieces:
             back = 1.0

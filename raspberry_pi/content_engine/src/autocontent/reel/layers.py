@@ -277,6 +277,9 @@ class SceneLayers:
     base: Path
     layers: List[Layer] = field(default_factory=list)
     theme: str = "light"
+    chrome: List[Tuple[Path, Tuple[int, int]]] = field(default_factory=list)
+    """The brand furniture (handle, tag, footer) on its own on a transparent background, as (picture, x, y)
+    crops: what a footage scene lays over the video, in place of the slide's opaque backdrop."""
 
 
 MARGIN = 28   # px kept around a group so soft edges and shadows aren't clipped
@@ -310,8 +313,40 @@ def _accent_words(colours: List[str]) -> Tuple[List[int], Tuple[int, int, int]]:
     return odd, rgb  # type: ignore[return-value]
 
 
+CHROME_ISO = """
+html.__chrome, html.__chrome body { background: transparent !important; }
+html.__chrome * { visibility: hidden !important; }
+html.__chrome .header-row, html.__chrome .header-row *, html.__chrome .footer-row, html.__chrome .footer-row * { visibility: visible !important; }
+html.__chrome .header-row, html.__chrome .footer-row { text-shadow: 0 2px 10px rgba(0,0,0,.55); }
+"""
+
+
+def _chrome_layers(page, n: int, out_dir: Path, width: int, height: int) -> List[Tuple[Path, Tuple[int, int]]]:
+    """Photograph the header and footer rows alone on transparent, cropped to their ink (top and bottom half apart)."""
+    page.add_style_tag(content=CHROME_ISO)
+    page.evaluate("document.documentElement.classList.add('__chrome')")
+    shot = out_dir / f"s{n:02d}_chrome_full.png"
+    page.screenshot(path=str(shot), full_page=False, omit_background=True)
+    page.evaluate("document.documentElement.classList.remove('__chrome')")
+    out: List[Tuple[Path, Tuple[int, int]]] = []
+    with Image.open(shot) as im:
+        rgba = im.convert("RGBA")
+    for k, (y0, y1) in enumerate(((0, rgba.height // 2), (rgba.height // 2, rgba.height))):
+        part = rgba.crop((0, y0, rgba.width, y1))
+        box = part.getchannel("A").point(lambda v: 255 if v > 8 else 0).getbbox()
+        if not box:
+            continue
+        x0, yy0 = max(0, box[0] - 12), max(0, box[1] - 12)
+        x1, yy1 = min(part.width, box[2] + 12), min(part.height, box[3] + 12)
+        path = out_dir / f"s{n:02d}_chrome{k}.png"
+        part.crop((x0, yy0, x1, yy1)).save(path)
+        out.append((path, (x0, y0 + yy0)))
+    shot.unlink(missing_ok=True)
+    return out
+
+
 def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], total: int, seed: int,
-                  out_dir: Path, scale: float = 1.0, fps: int = 30) -> SceneLayers:
+                  out_dir: Path, scale: float = 1.0, fps: int = 30, chrome: bool = False) -> SceneLayers:
     """Draw one slide and write its base picture and layer pictures into out_dir.
     Returns the layers in the order they are listed for the slide type."""
     n = int(slide.get("n", 1))
@@ -330,6 +365,9 @@ def extract_scene(renderer, page, slide: Dict[str, Any], brand: Dict[str, Any], 
     page.add_style_tag(content=ISOLATE_CSS.replace("__K__", "-1"))
     page.screenshot(path=str(scene.base), full_page=False)
     page.evaluate("document.documentElement.classList.remove('__hide')")
+
+    if chrome:
+        scene.chrome = _chrome_layers(page, n, out_dir, width, height)
 
     # Each group alone, on a transparent background
     for k, box in enumerate(boxes):
