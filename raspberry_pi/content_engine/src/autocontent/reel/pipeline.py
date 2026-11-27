@@ -440,6 +440,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     }
     if video_credits:
         summary["videoCredits"] = video_credits
+        summary["clips"] = [footage[n]["name"] for n in used_footage if footage[n].get("name")]
     (out_dir / "reel.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     if not keep_work:
         shutil.rmtree(work, ignore_errors=True)

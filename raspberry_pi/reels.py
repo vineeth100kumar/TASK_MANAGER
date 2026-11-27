@@ -50,6 +50,7 @@ import item_shape
 import logstore
 import lowprio
 import notifier
+import posted_cleanup
 import posts
 
 DB_PATH = "sage_sync.db"
@@ -155,6 +156,16 @@ def _write(row: tuple) -> None:
         conn.commit()
     finally:
         conn.close()
+
+
+def cleanup_posted(reel: dict) -> int:
+    """A posted reel keeps its video; the working files and unshared footage go (posted_cleanup.py)."""
+    conn = _db()
+    try:
+        others = [json.loads(r["payload"]) for r in conn.execute("SELECT payload FROM reels WHERE id != ?", (reel["id"],))]
+    finally:
+        conn.close()
+    return posted_cleanup.clean_reel(reel, REELS_DIR / reel["id"], others, ENGINE_DIR / "images" / "videos")
 
 
 def get(reel_id: str) -> Optional[dict]:
@@ -757,7 +768,7 @@ def _finish(reel: dict, folder: Path, code: Optional[int]) -> None:
         reel.update(status="done", seconds=info.get("seconds"), size=mp4.stat().st_size,
                     timeline=info.get("timeline") or [], warnings=info.get("warnings") or [],
                     wordTiming=info.get("wordTiming") or "", scenes=info.get("scenes") or reel.get("scenes"),
-                    firstComment=info.get("firstComment") or "",
+                    firstComment=info.get("firstComment") or "", clips=info.get("clips") or [],
                     progress={"percent": 100, "stage": "Done"})
         caption = out / "caption.txt"
         if caption.exists():
@@ -1066,6 +1077,7 @@ async def reels_posted(reel_id: str, undo: bool = False):
     else:
         await _move_task(reel, "published", "done")
         await instagram_link.start("reel", reel, get, save_async)
+        await asyncio.to_thread(cleanup_posted, reel)
     return {"success": True, "reel": with_media(reel)}
 
 

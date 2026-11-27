@@ -1827,6 +1827,7 @@ def public_url():
 import notifier
 import uptime
 import content_schedule
+import posted_cleanup
 import posts
 import reels
 import content_link
@@ -2835,7 +2836,7 @@ def _reel_maker_status() -> dict:
     state = reels.status()
     return {"ready": state["ready"], "problems": state["problems"], "voiceReady": state["voiceReady"],
             "voiceProblem": state["voiceProblem"], "timing": state["timing"], "waiting": state["queued"],
-            "emailReady": state["emailReady"]}
+            "emailReady": state["emailReady"], "postedCleanup": posted_cleanup.totals()}
 
 
 def _claude_health() -> dict:

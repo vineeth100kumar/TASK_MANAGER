@@ -54,6 +54,7 @@ import item_shape
 import logstore
 import lowprio
 import notifier
+import posted_cleanup
 import posts_copies
 
 DB_PATH = "sage_sync.db"
@@ -1255,6 +1256,7 @@ async def posts_posted(post_id: str, undo: bool = False):
     else:
         await _move_task(post, "published", "done")
         await instagram_link.start("post", post, get, save_async)
+        posted_cleanup.clean_post(post, POSTS_DIR / post["id"])
     return {"success": True, "post": with_media(post)}
 
 
