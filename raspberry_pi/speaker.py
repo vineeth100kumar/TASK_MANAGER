@@ -660,13 +660,19 @@ never say "now", "just now" or an hour. 12 to 28 words, one or two sentences. ""
 
 DAILY_PROMPTS = {
     "welcome": HONEST_PERSONA + """Write the short line spoken aloud when the person comes back home: \
-a plain welcome, then, if the standing warrants it, the honest word about it. """ + _STANDING_RULES + _SPOKEN_RULES + """
+a plain welcome for the part of day, nothing more. NEVER give a progress report: no counts of tasks \
+closed, due or overdue, no habits, no verdict on how the day went (the full briefing does that, not you). \
+At most a few dry words of character, and "memory" may be alluded to once, lightly, in words. Never state \
+a clock time or a date. Every line must sound new: never reuse the wording, opening or joke of any line \
+listed under "avoid". 6 to 16 words, one sentence. """ + _SPOKEN_RULES + """
 
 Facts (JSON):
 """,
-    "goodbye": HONEST_PERSONA + """Write the short line spoken aloud as the person heads out of the house: \
-a plain send-off, then, if the standing warrants it, the honest word about it (a pending list can wait \
-for their return; say so if it is bad). """ + _STANDING_RULES + _SPOKEN_RULES + """
+    "goodbye": HONEST_PERSONA + """Write the very short line spoken aloud as the person heads out of the house: \
+a brief send-off only, at most 8 words. NEVER mention progress, tasks, habits, counts, overdue items, \
+the day's results or anything pending: they are leaving, not reporting. Never state a clock time or a \
+date. Every line must sound new: never reuse the wording or opening of any line listed under "avoid". \
+""" + _SPOKEN_RULES + """
 
 Facts (JSON):
 """,
@@ -686,6 +692,8 @@ WEATHER_STEP_C = 1.0          # the weather counts as changed from this many deg
 HOLD_KINDS = ("notice", "reminder", "event")   # lines that wait while a call is on
 CALL_HOLD_S = 5 * 60                            # default; the "callHoldMinutes" setting wins. An answered call holds lines at most this long (the phone never says it ended)
 RECAP_WAIT_S = 25                               # after you're back, how long the phone gets to hand over what you missed
+FLAP_S = 120.0                # a goodbye right after a welcome (or the reverse) is a flapping link, not you
+WIND_QUIET_S = 2 * 3600       # no evening wind-down this soon after a welcome, briefing or recap: it would repeat the progress report
 HERALD_GAP_S = float(os.getenv("SAGE_HERALD_GAP", "45"))   # a welcome or a goodbye is not repeated sooner than this
 
 # One short line spoken when Sage comes back after being down. Reasons come
@@ -1732,9 +1740,8 @@ class Speaker:
         if settings["witty"]:
             now = self.now()
             memory = await asyncio.to_thread(self._memory, call_me)
-            standing = await asyncio.to_thread(self._standing)
             text = await self._ai_line({"partOfDay": part_of_day(now.hour), "weekday": now.strftime("%A"), "name": call_me, "avoid": recent,
-                                        "memory": memory, "standing": standing}, DAILY_PROMPTS[kind])
+                                        "memory": memory}, DAILY_PROMPTS[kind])
             if text in recent:
                 text = ""
         text = text or fresh_fallback(kind, call_me, recent)
@@ -1799,6 +1806,8 @@ class Speaker:
             asyncio.run_coroutine_threadsafe(self._deliver_recap(now - away_s), self.loop)
         if now - self._last_welcome_at < HERALD_GAP_S:
             return self._note(event, "silent", f"a greeting was said under {int(HERALD_GAP_S)} s ago")
+        if now - self._last_goodbye_at < FLAP_S:
+            return self._note(event, "silent", "you left under two minutes ago: the phone link flapped")
         if brief_due(away_s, float(settings.get("lastGreetAt") or 0), now, float(settings["briefAfterHours"])):
             self._last_welcome_at = now
             self._note(event, "briefing")
@@ -2044,6 +2053,8 @@ class Speaker:
         now = time.time()
         if now - self._last_goodbye_at < HERALD_GAP_S:
             return self._note(event, "silent", f"another goodbye was said under {int(HERALD_GAP_S)} s ago")
+        if now - self._last_welcome_at < FLAP_S:
+            return self._note(event, "silent", "you were welcomed under two minutes ago: the phone link flapped")
         self._last_goodbye_at = now
         self._note(event, "goodbye")
         asyncio.run_coroutine_threadsafe(self._say_daily("goodbye"), self.loop)
@@ -2332,6 +2343,8 @@ class Speaker:
         if self.speaking or self.holding() or in_quiet(now, settings["quietStart"], settings["quietEnd"]):
             return
         await asyncio.to_thread(_store_setting, "lastWindDown", today)
+        if time.time() - max(self._last_welcome_at, self._last_recap_at) < WIND_QUIET_S:
+            return self._note("wind-down", "silent", "a welcome or briefing already gave the progress under two hours ago")
         facts = await asyncio.to_thread(self._wind_facts)
         line = herald_extras.wind_down_line(facts["closed"], facts["first"], settings.get("callMe", ""), self._wind_idx, facts.get("memory", ""))
         self._wind_idx += 1

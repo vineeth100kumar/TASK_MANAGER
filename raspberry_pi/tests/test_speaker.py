@@ -161,6 +161,12 @@ class HonestHeraldTests(unittest.TestCase):
             self.assertIn("do not flatter", prompt.replace("You do not flatter", "do not flatter"))
         self.assertIn("never guess", speaker.NOTICE_PROMPT)
 
+    def test_goodbye_short_and_no_progress(self):
+        bye = speaker.DAILY_PROMPTS["goodbye"]
+        self.assertIn("at most 8 words", bye)
+        self.assertIn("NEVER mention progress", bye)
+        self.assertIn("NEVER give a progress report", speaker.DAILY_PROMPTS["welcome"])
+
 if __name__ == "__main__":
     unittest.main()
 
