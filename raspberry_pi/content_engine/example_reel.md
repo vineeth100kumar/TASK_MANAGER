@@ -12,6 +12,7 @@ kicker: THE QUIET TRUTH
 headline: 9 in 10 shops still sell **offline**
 pill: offline
 say: Why do nine in ten Indian corner shops still sell offline only?
+clip: busy street market stalls
 
 ## stat
 headline: Repeat customers bring in
