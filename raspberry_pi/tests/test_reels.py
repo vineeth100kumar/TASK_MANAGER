@@ -302,7 +302,7 @@ class Readiness(unittest.TestCase):
     def test_health_has_a_reel_maker_part(self):
         health = client.get("/api/health").json() if client.get("/api/health").status_code == 200 else {}
         part = db_server._reel_maker_status()
-        self.assertEqual(set(part), {"ready", "problems", "voiceReady", "voiceProblem", "timing", "waiting", "emailReady"})
+        self.assertEqual(set(part), {"ready", "problems", "voiceReady", "voiceProblem", "timing", "waiting", "emailReady", "postedCleanup"})
         self.assertIsInstance(health, dict)
 
 

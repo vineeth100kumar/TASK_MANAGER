@@ -14,10 +14,12 @@ nothing to change for those.
 Every move is idempotent, because the post's own change moves the task again and that arrives
 here a second time. A second pass finds nothing left to do and stops.
 """
+import asyncio
 import datetime
 from typing import Optional, Tuple
 
 import logstore
+import posted_cleanup
 import posts
 import reels
 
@@ -56,6 +58,10 @@ async def follow_task(task: dict) -> Optional[str]:
         item["posted"], item["postedAt"], item["wontPost"] = True, _utc(), False
         await mod.save_async(item)
         await mod._move_task(item, "published", "done")
+        if mod is reels:
+            await asyncio.to_thread(reels.cleanup_posted, item)
+        else:
+            posted_cleanup.clean_post(item, posts.POSTS_DIR / item["id"])
         return "posted"
 
     if stage == "incomplete":
