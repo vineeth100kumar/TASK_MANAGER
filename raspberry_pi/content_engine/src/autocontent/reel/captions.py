@@ -29,13 +29,48 @@ THEMES = {
 PRESETS = ("bold", "box", "minimal")     # `captions: on` is `bold`, the look every reel had before presets
 
 
+BOX_CARD = "#111111"       # the card colour under the `box` look (drawn at 82% opacity)
+
+
+def _lum(hex_color: str) -> float:
+    c = hex_color.lstrip("#")
+    if len(c) == 3:
+        c = "".join(ch * 2 for ch in c)
+    chans = [int(c[i:i + 2], 16) / 255 for i in (0, 2, 4)]
+    chans = [v / 12.92 if v <= 0.03928 else ((v + 0.055) / 1.055) ** 2.4 for v in chans]
+    return 0.2126 * chans[0] + 0.7152 * chans[1] + 0.0722 * chans[2]
+
+
+def contrast(a: str, b: str) -> float:
+    la, lb = sorted((_lum(a), _lum(b)), reverse=True)
+    return (la + 0.05) / (lb + 0.05)
+
+
+def readable_on(color: str, bg: str = BOX_CARD, minimum: float = 4.5, fallback: str = "#EE4425") -> str:
+    """`color`, or the nearest lighter shade that reads on `bg`. A near-black or grey colour (the accent
+    theme's #111 marker) cannot be lightened into an accent, so it becomes the brand red."""
+    c = color.lstrip("#")
+    c = "".join(ch * 2 for ch in c) if len(c) == 3 else c
+    rgb = [int(c[i:i + 2], 16) for i in (0, 2, 4)]
+    if contrast(color, bg) >= minimum:
+        return "#" + c.upper()
+    if max(rgb) - min(rgb) < 40:
+        return fallback
+    for step in range(1, 11):
+        t = step / 10
+        mixed = "#%02X%02X%02X" % tuple(round(v + (255 - v) * t) for v in rgb)
+        if contrast(mixed, bg) >= minimum:
+            return mixed
+    return "#FFFFFF"
+
+
 def _preset_css(preset: str, size: int, ink: str, active_ink: str, marker: str) -> str:
     """How the phrase and its spoken word are drawn. bold = a red marker on the word (the default);
     box = the whole phrase on a dark card, the word in the accent colour; minimal = no box: the rest dimmed, the
     spoken word full strength with an accent underline (reads on light and dark slides)."""
     if preset == "box":
         return (f"#cap {{ background: rgba(17,17,17,0.82); border-radius: {int(size * 0.3)}px; }} "
-                f".w {{ color: #FFFFFF; }} .a {{ color: {marker}; background: transparent; transform: none; }}")
+                f".w {{ color: #FFFFFF; }} .a {{ color: {readable_on(marker)}; background: transparent; transform: none; }}")
     if preset == "minimal":
         return (f".w {{ color: {ink}; opacity: 0.45; }} "
                 f".a {{ color: {ink}; opacity: 1; background: transparent; transform: none; "
