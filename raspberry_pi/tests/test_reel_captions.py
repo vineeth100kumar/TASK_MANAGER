@@ -36,6 +36,15 @@ class CaptionPresetTests(unittest.TestCase):
         self.assertIn("rgba(17,17,17", pages["box"])
         self.assertIn("opacity: 0.45", pages["minimal"])
 
+    def test_box_spoken_word_reads_on_the_card_for_every_theme_and_accent(self):
+        for name, colors in caps.THEMES.items():
+            html = caps._html("f", ["A", "B"], 0, colors, 72, "box")
+            active = html.split(".a { color: ")[1][:7] if ".a { color: " in html else html.split(".a {")[1].split("color: ")[1][:7]
+            self.assertGreaterEqual(caps.contrast(active, caps.BOX_CARD), 4.5, name)
+        for accent in ("#111111", "#000", "#7952B3", "#EE4425", "#444444", "#1E3A8A"):
+            self.assertGreaterEqual(caps.contrast(caps.readable_on(accent), caps.BOX_CARD), 4.5, accent)
+        self.assertEqual(caps.readable_on("#111111"), "#EE4425")
+
 
 if __name__ == "__main__":
     unittest.main()
