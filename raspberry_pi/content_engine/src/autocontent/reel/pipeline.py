@@ -7,13 +7,14 @@ import time
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
+import numpy as np
 from PIL import Image
 
 from ..progress import report
 from ..render.style_config import CANVAS_FORMATS
 from . import align as aligner
 from . import captions as caps
-from . import cold, compose, timing, voice
+from . import broll, cold, compose, timing, voice
 from . import layers as layers_mod
 from .layers import extract_scene
 from .diagram import DiagramError, parse_diagram, plan_steps
@@ -70,6 +71,32 @@ def _ink_bottom(layers) -> int:
         if ink:
             low = max(low, ly.box[1] + ink[3])
     return low
+
+
+def fetch_footage(scenes, fetch: bool, progress: Callable[[str], None]) -> Tuple[Dict[int, Dict[str, Any]], List[str]]:
+    """Stock footage for every scene with a `clip:` line: {scene number: {"path", "credit", ...}}, and the problems.
+    A scene whose footage can't be had is left out (and drawn as a normal slide): this never fails the reel."""
+    found: Dict[int, Dict[str, Any]] = {}
+    problems: List[str] = []
+    for sc in scenes:
+        if not sc.clip:
+            continue
+        try:
+            if fetch or broll.pick_for(sc.clip):
+                progress(f"Finding footage for '{sc.clip}'...")
+                info, why = broll.resolve_clip(sc.clip)
+            else:
+                info, why = None, "automatic footage search is switched off"
+            if info and not Path(info["path"]).is_file():
+                info, why = None, "the footage file is missing"
+        except Exception as e:      # footage is a bonus: whatever goes wrong, the slide is drawn without it
+            info, why = None, f"{type(e).__name__}: {e}"
+        if info:
+            found[sc.n] = info
+        else:
+            problems.append(f"Slide {sc.n}: no footage for '{sc.clip}' ({why}). The slide is drawn as a normal slide.")
+            progress(f"  FOOTAGE PROBLEM: {problems[-1]}")
+    return found, problems
 
 
 class ReelError(Exception):
@@ -191,6 +218,8 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     total = max(windows[-1][1], track.seconds + 0.3)
     windows[-1] = (windows[-1][0], total)
 
+    footage, footage_warnings = fetch_footage(reel.scenes, fetch_images, progress)
+
     # --- the slides, drawn like a post's ---
     progress("Drawing the slides...")
     deck_dir = work / "deck"
@@ -211,6 +240,7 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     renderer.fit_report = []
     slides = data["slides"]
     brand, seed = data.get("brand", {}), data.get("seed", 20261017)
+    used_footage: List[int] = []
     scenes_layers = []
     clips: List[compose.SceneClip] = []
     phrases: List[caps.Phrase] = []
@@ -230,8 +260,10 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
             if reel.scenes[i].diagram is not None and not reel.scenes[i].diagram.placed:
                 slide["reel_type_scale"] = DIAGRAM_TYPE_SCALE      # text smaller, so the diagram has the room
             progress(f"Cutting slide {i + 1} of {len(slides)} into pieces ({slide.get('type')})...")
+            if i + 1 in footage:
+                slide["theme"] = "dark"             # light type and brand furniture, to read over footage
             sl = extract_scene(renderer, page, slide, brand, len(slides), seed, work / "layers",
-                               scale=layers_mod.OVERSAMPLE, fps=fps)
+                               scale=layers_mod.OVERSAMPLE, fps=fps, chrome=(i + 1 in footage))
             scenes_layers.append(sl)
             themes[i + 1] = sl.theme
         bad = [r for r in renderer.fit_report if not r["ok"]]
@@ -338,6 +370,16 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
                     piece.array                     # take the pixels once and let go of the picture (RAM is short on a Pi)
                     piece.image = None
                     clip.objects.append(piece)
+            if i + 1 in footage:
+                try:
+                    progress(f"Preparing footage for slide {i + 1}...")
+                    clip.video = compose.extract_frames(Path(footage[i + 1]["path"]), work / "broll" / f"s{i + 1:02d}",
+                                                        (t1 - t0) + compose.EXIT + 0.5, fps)
+                    clip.chrome = [(np.asarray(Image.open(cp).convert("RGBA"), dtype=np.uint8), cx, cy) for cp, (cx, cy) in sl.chrome]
+                    used_footage.append(i + 1)
+                except Exception as e:
+                    footage_warnings.append(f"Slide {i + 1}: the footage could not be prepared ({e}). The slide is drawn without it.")
+                    progress(f"  FOOTAGE PROBLEM: {footage_warnings[-1]}")
             clips.append(clip)
             reveals.append([round(at[k], 2) for k in range(len(sl.layers))])
 
@@ -379,7 +421,13 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
     compose.poster(timeline, min(PosterAt + (COLD_OPEN_SECONDS if hero else 0.0), total - 0.1), poster_path)
 
     # --- the files that go with it ---
-    (out_dir / "caption.txt").write_text(data.get("caption", ""), encoding="utf-8")
+    video_credits = [{"slide": n, "credit": footage[n].get("credit", ""), "pageUrl": footage[n].get("page_url", "")}
+                     for n in used_footage]
+    caption_text = data.get("caption", "")
+    names = [c["credit"] for c in video_credits if c["credit"]]
+    if names:
+        caption_text = caption_text.rstrip("\n") + "\n\nFootage credits: " + "; ".join(dict.fromkeys(names)) + "\n"
+    (out_dir / "caption.txt").write_text(caption_text, encoding="utf-8")
     (out_dir / "script.md").write_text(script_text, encoding="utf-8")
     shutil.copy2(voice_path, out_dir / "voice.wav")
     summary = {
@@ -388,8 +436,10 @@ def make_reel(script_text: str, out_dir: Path, *, base_dir: Optional[Path] = Non
         "firstComment": first_comment(reel), "captions": bool(caption_clips), "size": mp4.stat().st_size, "built": round(time.time() - started, 1),
         "timeline": [{"n": i + 1, "type": slides[i].get("type"), "start": round(a, 2), "end": round(b, 2), "reveals": reveals[i]}
                      for i, (a, b) in enumerate(windows)],
-        "warnings": [str(i) for i in reel.issues if i.severity == "WARN"] + picture_warnings,
+        "warnings": [str(i) for i in reel.issues if i.severity == "WARN"] + picture_warnings + footage_warnings,
     }
+    if video_credits:
+        summary["videoCredits"] = video_credits
     (out_dir / "reel.json").write_text(json.dumps(summary, indent=2, ensure_ascii=False), encoding="utf-8")
     if not keep_work:
         shutil.rmtree(work, ignore_errors=True)
