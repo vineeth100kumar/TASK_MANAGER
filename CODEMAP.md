@@ -214,6 +214,7 @@ prompt, so the guide can't drift from the engine); `config/` holds brand and AI 
 | Live | `WS /ws` (auth frame, then `SYNC_APPLIED` / `SYNC_CLEARED`) |
 | Sync | `GET /api/health`, `/api/health/services`, `/api/sync/all`, `/api/sync/changes`, `POST /api/sync/operations`, `POST /api/sync/clear` |
 | Backup, storage | `GET /api/backup/status`, `POST /api/backup/run`, `GET /api/storage` |
+| Live Pi stats (CPU, GPU, temps, RAM, swap, uptime, both drives) | `GET /api/pi-stats` (`raspberry_pi/pi_stats.py`, card `src/components/modals/PiStats.tsx` in Settings > Advanced > System) |
 | Items | `POST /api/quick-add`, `/api/items/{id}/done`, `/snooze`, `/tomorrow`, `POST /api/parse-task` |
 | Voice | `GET/POST /api/voice`, `POST /api/voice/transcribe`, `/api/voice/command` |
 | AI and keys | `GET/POST /api/canvas/think`, `/api/chat-capture`, `/api/settings/groq-key`, `/api/settings/prices-key`, `/api/settings/logs` |

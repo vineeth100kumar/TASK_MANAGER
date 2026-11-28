@@ -8,6 +8,7 @@ import { BluetoothSettings } from './BluetoothSettings';
 import { PrinterSettings } from './PrinterSettings';
 import { DeskClockSettings } from './DeskClockSettings';
 import { RadarSettings } from './RadarSettings';
+import { PiStats } from './PiStats';
 import { PostPictureKeys } from './PostPictureKeys';
 import { ModeSettings } from './ModeSettings';
 import { HolidaySettings } from './HolidaySettings';
@@ -431,6 +432,7 @@ export function SettingsModal({ onClose, lifeContext, onDataChanged, initialTab 
         {/* Tab 4: Google Sheets Backend Specs & Clear Database */}
         {activeTab === 'system' && (
           <div className="space-y-6">
+            <PiStats />
             <div className="p-5 rounded-2xl bg-gray-50 dark:bg-white/5 border border-black/5 dark:border-white/5 space-y-2">
               <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-semibold text-xs uppercase tracking-wider">
                 <Info size={16} />

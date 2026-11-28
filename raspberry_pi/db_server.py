@@ -20,6 +20,7 @@ from urllib.parse import parse_qs, quote
 
 import access_gate
 import backup
+import pi_stats
 import db_writer
 import claude_api
 import placement
@@ -1159,6 +1160,12 @@ def _dir_bytes(folder) -> int:
             except OSError:
                 pass
     return total
+
+
+@app.get("/api/pi-stats")
+def pi_live_stats():
+    """Live CPU, GPU, temperatures, memory, swap, uptime and free space on both drives."""
+    return {"success": True, **pi_stats.snapshot()}
 
 
 @app.get("/api/storage")
