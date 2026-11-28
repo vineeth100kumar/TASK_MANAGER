@@ -11,7 +11,7 @@ import {
 } from 'lucide-react';
 import { drawAtText, whenText } from '../../services/contentPieces';
 import {
-  REEL_EVENT, Reel, ReelMakerStatus, ReviewAction, canShareVideo, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
+  REEL_EVENT, Reel, ReelMakerStatus, ReviewAction, canShareVideo, fetchVideoChunked, fileName, formatSeconds, posterUrl, qrPath, reelLink, reelsApi, uploadVoice, videoUrl,
 } from '../../services/reels';
 import { copyText, fetchBlob } from '../../services/posts';
 import { InstagramLink } from '../common/InstagramLink';
@@ -84,16 +84,17 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
   const stamp = reel?.media ? `${reel.id}:${reel.media.v}` : '';
   const [prep, setPrep] = useState<'idle' | 'loading' | 'ready' | 'failed'>('idle');
   const [tries, setTries] = useState(0);
+  const [pct, setPct] = useState(0);
   useEffect(() => {
     setFile(null);
     if (!reel?.media || reel.status !== 'done' || !phoneCanShare()) { setPrep('idle'); return; }
     let alive = true;
     setPrep('loading');
+    setPct(0);
     (async () => {
       try {
-        const res = await fetch(videoUrl(reel));
-        if (!res.ok) throw new Error(String(res.status));
-        const f = new File([await res.blob()], fileName(reel), { type: 'video/mp4' });
+        const blob = await fetchVideoChunked(videoUrl(reel), (d, t) => { if (alive) setPct(Math.round((d / t) * 100)); }, () => alive);
+        const f = new File([blob], fileName(reel), { type: 'video/mp4' });
         if (!alive) return;
         if (canShareVideo(f)) { setFile(f); setPrep('ready'); } else setPrep('failed');
       } catch { if (alive) setPrep('failed'); }
@@ -305,12 +306,15 @@ export function ReelPage({ reelId, onBack, onEdit, onDeleted }: Props) {
                 </button>
               ) : phoneCanShare() ? (
                 <button onClick={() => prep === 'failed' && setTries(t => t + 1)} disabled={prep !== 'failed'} className="w-full h-12 rounded-2xl bg-purple-600 disabled:opacity-70 text-white font-semibold text-[15px] flex items-center justify-center gap-2">
-                  {prep === 'failed' ? <><RefreshCw size={18} /> Video did not load. Retry</> : <><LoaderCircle size={18} className="animate-spin" /> Getting the video ready...</>}
+                  {prep === 'failed' ? <><RefreshCw size={18} /> Video did not load. Retry</> : <><LoaderCircle size={18} className="animate-spin" /> Getting the video ready{pct ? ` ${pct}%` : '...'}</>}
                 </button>
               ) : (
                 <a href={videoUrl(reel, fileName(reel))} download={fileName(reel)} className="w-full h-12 rounded-2xl bg-purple-600 hover:bg-purple-700 text-white font-semibold text-[15px] flex items-center justify-center gap-2 active:scale-[0.98] transition">
                   <Download size={18} /> Download reel (.mp4)
                 </a>
+              )}
+              {!file && phoneCanShare() && (
+                <a href={videoUrl(reel, fileName(reel))} download={fileName(reel)} className="w-full h-10 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center justify-center gap-1.5"><Download size={14} /> Download reel (.mp4)</a>
               )}
               <div className="grid grid-cols-2 gap-2">
                 <button onClick={copyCaption} className="h-10 rounded-xl bg-black/[0.06] dark:bg-white/10 text-[13px] font-semibold flex items-center justify-center gap-1.5"><Copy size={14} /> Copy caption</button>
