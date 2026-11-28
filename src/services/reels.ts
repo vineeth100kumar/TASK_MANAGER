@@ -186,6 +186,33 @@ export function videoUrl(reel: Reel, download = ''): string {
   if (!m) return '';
   return `${piBackendUrl()}${m.base}/${m.video}?v=${enc(m.v)}&t=${enc(m.t)}${download ? `&download=${enc(download)}` : ''}`;
 }
+/** Fetch the video in 2 MB Range slices, each retried, so a flaky relay costs a slice, not the whole file. */
+export async function fetchVideoChunked(url: string, onProgress?: (done: number, total: number) => void, isAlive: () => boolean = () => true): Promise<Blob> {
+  const SLICE = 2 * 1024 * 1024;
+  const parts: BlobPart[] = [];
+  let pos = 0, total = 0, fails = 0;
+  while (isAlive() && (!total || pos < total)) {
+    const ctl = new AbortController();
+    const timer = setTimeout(() => ctl.abort(), 20000);
+    try {
+      const res = await fetch(url, { headers: { Range: `bytes=${pos}-${pos + SLICE - 1}` }, signal: ctl.signal });
+      if (res.status !== 206 && !res.ok) throw new Error(String(res.status));
+      const buf = await res.arrayBuffer();
+      if (res.status === 200) { onProgress?.(buf.byteLength, buf.byteLength); return new Blob([buf], { type: 'video/mp4' }); }
+      total = Number(/\/(\d+)$/.exec(res.headers.get('content-range') || '')?.[1]) || 0;
+      if (!total || !buf.byteLength) throw new Error('bad range');
+      parts.push(buf);
+      pos += buf.byteLength;
+      fails = 0;
+      onProgress?.(pos, total);
+    } catch (e) {
+      if (++fails >= 4) throw e;
+      await new Promise(r => setTimeout(r, 800 * fails));
+    } finally { clearTimeout(timer); }
+  }
+  if (!isAlive()) throw new Error('cancelled');
+  return new Blob(parts, { type: 'video/mp4' });
+}
 export function posterUrl(reel: Reel): string {
   const m = reel.media;
   return m ? `${piBackendUrl()}${m.base}/${m.poster}?v=${enc(m.v)}&t=${enc(m.t)}` : '';
